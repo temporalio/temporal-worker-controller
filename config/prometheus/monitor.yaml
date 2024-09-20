@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/part-of: worker-controller
     app.kubernetes.io/managed-by: kustomize
   name: controller-manager-metrics-monitor
-  namespace: system
+  namespace: temporal-system
 spec:
   endpoints:
     - path: /metrics

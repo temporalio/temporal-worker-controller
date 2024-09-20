@@ -12,6 +12,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
@@ -29,15 +30,13 @@ var (
 	}
 )
 
-func newTestWorkerSpec(replicas int32) temporaliov1alpha1.TemporalWorker {
-	return temporaliov1alpha1.TemporalWorker{
-		Spec: temporaliov1alpha1.TemporalWorkerSpec{
-			Replicas: &replicas,
-			Template: testPodTemplate,
-			WorkerOptions: temporaliov1alpha1.WorkerOptions{
-				TemporalNamespace: "baz",
-				TaskQueue:         "qux",
-			},
+func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerSpec {
+	return &temporaliov1alpha1.TemporalWorkerSpec{
+		Replicas: &replicas,
+		Template: testPodTemplate,
+		WorkerOptions: temporaliov1alpha1.WorkerOptions{
+			TemporalNamespace: "baz",
+			TaskQueue:         "qux",
 		},
 	}
 }
@@ -59,20 +58,24 @@ func newTestDeployment(podSpec v1.PodTemplateSpec, desiredReplicas int32) *appsv
 	}
 }
 
-func newTestVersionSet(reachabilityStatus temporaliov1alpha1.ReachabilityStatus, deploymentName string) *temporaliov1alpha1.CompatibleVersionSet {
-	result := temporaliov1alpha1.CompatibleVersionSet{
-		ReachabilityStatus: reachabilityStatus,
-		InactiveBuildIDs:   nil,
-		DefaultBuildID:     "test-id",
-		DeployedBuildID:    "test-id",
+func newTestVersionedDeployment(reachabilityStatus temporaliov1alpha1.ReachabilityStatus, deploymentName string) *temporaliov1alpha1.VersionedDeployment {
+	result := temporaliov1alpha1.VersionedDeployment{
+		HealthySince:       nil,
+		BuildID:            "test-id",
+		CompatibleBuildIDs: nil,
+		Reachability:       reachabilityStatus,
+		RampPercentage:     nil,
+		Statistics:         nil,
+		Deployment:         nil,
 	}
 
 	if deploymentName != "" {
-		panic("todo")
-		//result.Deployment = &v1.ObjectReference{
-		//	Namespace: "foo",
-		//	Name:      deploymentName,
-		//}
+		result.Deployment = &v1.ObjectReference{
+			Namespace: "foo",
+			Name:      deploymentName,
+		}
+	} else {
+		panic("deploymentName required")
 	}
 
 	return &result
@@ -80,46 +83,42 @@ func newTestVersionSet(reachabilityStatus temporaliov1alpha1.ReachabilityStatus,
 
 func TestGeneratePlan(t *testing.T) {
 	type testCase struct {
-		observedState temporaliov1alpha1.TemporalWorkerStatus
-		desiredState  temporaliov1alpha1.TemporalWorker
+		observedState *temporaliov1alpha1.TemporalWorkerStatus
+		desiredState  *temporaliov1alpha1.TemporalWorkerSpec
 		expectedPlan  plan
 	}
 
 	testCases := map[string]testCase{
 		"no action needed": {
-			observedState: temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersionSet: newTestVersionSet(temporaliov1alpha1.ReachabilityStatusActive, "foo-a"),
+			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+				DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
 			},
 			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				DeleteDeployments:      nil,
-				CreateDeployment:       nil,
-				RegisterDefaultVersion: "",
-			},
+			expectedPlan: plan{},
 		},
 		"create deployment": {
-			observedState: temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersionSet: &temporaliov1alpha1.CompatibleVersionSet{
-					ReachabilityStatus: temporaliov1alpha1.ReachabilityStatusActive,
-					InactiveBuildIDs:   nil,
-					DefaultBuildID:     "a",
+			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+				DefaultVersion: &temporaliov1alpha1.VersionedDeployment{
+					Reachability:       temporaliov1alpha1.ReachabilityStatusReachable,
+					CompatibleBuildIDs: nil,
+					BuildID:            "a",
 				},
-				DeprecatedVersionSets: nil,
+				DeprecatedVersions: nil,
 			},
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
-				DeleteDeployments:      nil,
-				CreateDeployment:       newTestDeployment(testPodTemplate, 3),
-				RegisterDefaultVersion: "",
+				DeleteDeployments:   nil,
+				CreateDeployment:    newTestDeployment(testPodTemplate, 3),
+				UpdateVersionConfig: nil,
 			},
 		},
 		"delete unreachable deployments": {
-			observedState: temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersionSet: newTestVersionSet(temporaliov1alpha1.ReachabilityStatusActive, "foo-a"),
-				DeprecatedVersionSets: []*temporaliov1alpha1.CompatibleVersionSet{
-					newTestVersionSet(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-b"),
-					newTestVersionSet(temporaliov1alpha1.ReachabilityStatusActive, "foo-c"),
-					newTestVersionSet(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-d"),
+			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+				DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
+				DeprecatedVersions: []*temporaliov1alpha1.VersionedDeployment{
+					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-b"),
+					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-c"),
+					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-d"),
 				},
 			},
 			desiredState: newTestWorkerSpec(3),
@@ -138,19 +137,46 @@ func TestGeneratePlan(t *testing.T) {
 						},
 					},
 				},
-				CreateDeployment:       nil,
-				RegisterDefaultVersion: "",
+				CreateDeployment:    nil,
+				UpdateVersionConfig: nil,
 			},
 		},
 	}
 
-	r := &TemporalWorkerReconciler{}
+	//env := envtest.Environment{}
+
+	c := fake.NewFakeClient()
+
+	//c, err := client.New(nil, client.Options{
+	//	HTTPClient:     env.Config,
+	//	Scheme:         nil,
+	//	Mapper:         nil,
+	//	Cache:          nil,
+	//	WarningHandler: client.WarningHandlerOptions{},
+	//	DryRun:         nil,
+	//})
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+
+	r := &TemporalWorkerReconciler{
+		Client: c,
+	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			actualPlan, err := r.generatePlan(context.Background(), tc.observedState, tc.desiredState)
+			actualPlan, err := r.generatePlan(context.Background(), &temporaliov1alpha1.TemporalWorker{
+				TypeMeta:   metav1.TypeMeta{},
+				ObjectMeta: metav1.ObjectMeta{},
+				Spec:       *tc.desiredState,
+				Status:     *tc.observedState,
+			}, nil, temporaliov1alpha1.TemporalConnectionSpec{})
 			assert.NoError(t, err)
 			assert.Equal(t, &tc.expectedPlan, actualPlan)
 		})
 	}
+}
+
+func TestConvertFloatToUint(t *testing.T) {
+	assert.Equal(t, uint8(1), convertFloatToUint(1.1))
 }

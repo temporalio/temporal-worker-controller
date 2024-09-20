@@ -9,13 +9,13 @@ metadata:
     app.kubernetes.io/created-by: worker-controller
     app.kubernetes.io/part-of: worker-controller
     app.kubernetes.io/managed-by: kustomize
-  name: system
+  name: temporal-system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: controller-manager
-  namespace: system
+  namespace: temporal-system
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: deployment
@@ -24,6 +24,7 @@ metadata:
     app.kubernetes.io/created-by: worker-controller
     app.kubernetes.io/part-of: worker-controller
     app.kubernetes.io/managed-by: kustomize
+    tags.datadoghq.com/service: "temporal-worker-controller"
 spec:
   selector:
     matchLabels:
@@ -33,8 +34,22 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        ad.datadoghq.com/manager.checks: |
+          {
+            "openmetrics": {
+              "init_config": {},
+              "instances": [
+                {
+                  "openmetrics_endpoint": "http://%%host%%:%%port%% ",
+                  "namespace": "temporal_worker_controller",
+                  "metrics": [".*"]
+                }
+              ]
+            }
+          }
       labels:
         control-plane: controller-manager
+        tags.datadoghq.com/service: "temporal-worker-controller"
     spec:
       # TODO(user): Uncomment the following code to configure the nodeAffinity expression
       # according to the platforms which are supported by your solution.
@@ -66,12 +81,14 @@ spec:
         # seccompProfile:
         #   type: RuntimeDefault
       containers:
-      - command:
+      - name: manager
+        image: controller:latest
+        command:
         - /manager
         args:
         - --leader-elect
-        image: controller:latest
-        name: manager
+        - --metrics-bind-address
+        - ":8080"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

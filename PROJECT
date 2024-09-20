@@ -5,7 +5,7 @@
 domain: temporal.io
 layout:
 - go.kubebuilder.io/v4
-projectName: worker-controller
+projectName: temporal-worker-controller
 repo: github.com/temporalio/worker-controller
 resources:
 - api:
@@ -15,6 +15,14 @@ resources:
   domain: temporal.io
   group: temporal.io
   kind: TemporalWorker
+  path: github.com/temporalio/worker-controller/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: temporal.io
+  group: temporal.io
+  kind: TemporalConnection
   path: github.com/temporalio/worker-controller/api/v1alpha1
   version: v1alpha1
 version: "3"

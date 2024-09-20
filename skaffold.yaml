@@ -1,0 +1,47 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: worker-controller
+build:
+  tagPolicy:
+    gitCommit:
+      variant: CommitSha
+      ignoreChanges: true
+profiles:
+  - name: crds
+    manifests:
+      kustomize:
+        paths:
+          - config/crd
+  - name: manager
+    build:
+      artifacts:
+        - image: controller
+          docker:
+            dockerfile: Dockerfile
+    manifests:
+      kustomize:
+        paths:
+          - config/default
+          - config/rbac
+          - config/manager
+  - name: demo
+    build:
+      artifacts:
+        - image: worker
+          context: internal/demo
+          docker:
+            dockerfile: Dockerfile
+            buildArgs:
+              DD_GIT_COMMIT_SHA: "{{ .IMAGE_TAG }}"
+              DD_GIT_REPOSITORY_URL: "github.com/DataDog/temporal-worker-controller"
+    manifests:
+      rawYaml:
+        - internal/demo/temporal_worker.yaml
+deploy:
+  kubeContext: minikube
+  kubectl: {}
+resourceSelector:
+  allow:
+    - groupKind: "TemporalWorker.temporal.io"
+      image: [".*"]

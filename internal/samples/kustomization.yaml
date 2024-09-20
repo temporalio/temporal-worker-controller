@@ -1,4 +1,0 @@
-## Append samples of your project ##
-resources:
-- temporal.io_v1alpha1_temporalworker.yaml
-#+kubebuilder:scaffold:manifestskustomizesamples

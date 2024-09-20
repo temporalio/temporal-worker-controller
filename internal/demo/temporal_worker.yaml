@@ -1,0 +1,49 @@
+apiVersion: temporal.io/v1alpha1
+kind: TemporalWorker
+metadata:
+  name: demo
+  labels:
+    app.kubernetes.io/name: hello-world-worker
+    app.kubernetes.io/instance: demo
+spec:
+  # Configuration for connecting to Temporal
+  workerOptions:
+    connection: dev-server
+    temporalNamespace: "default"
+    taskQueue: "hello_world"
+  # How to cut over new workflow executions to the latest worker version
+  cutover:
+    strategy: AllAtOnce
+  # Desired number of worker replicas
+  replicas: 1
+  # Desired specification for worker pods
+  template:
+    metadata:
+      annotations:
+        force-new-version: "2"
+        ad.datadoghq.com/main.checks: |
+          {
+            "openmetrics": {
+              "init_config": {},
+              "instances": [
+                {
+                  "openmetrics_endpoint": "http://%%host%%:9090/metrics",
+                  "metrics": [".*"]
+                }
+              ]
+            }
+          }
+    spec:
+      containers:
+        - name: main
+          image: worker
+          readinessProbe:
+            httpGet:
+              port: 8080
+---
+apiVersion: temporal.io/v1alpha1
+kind: TemporalConnection
+metadata:
+  name: dev-server
+spec:
+  hostPort: "host.minikube.internal:7233"

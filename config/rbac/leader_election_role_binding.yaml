@@ -9,6 +9,7 @@ metadata:
     app.kubernetes.io/part-of: worker-controller
     app.kubernetes.io/managed-by: kustomize
   name: leader-election-rolebinding
+  namespace: temporal-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -16,4 +17,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: controller-manager
-  namespace: system
+  namespace: temporal-system

@@ -21,25 +21,28 @@ to omit version checks in code and instead run multiple versions of their worker
 keep workflow executions pinned to workers running compatible code.
 
 This project aims to provide automation which simplifies the bookkeeping around tracking which worker versions still
-have active workflows, managing the lifecycle of versioned worker deployments, and calling Temporal APIs to update task
-queue version sets when workers are updated.
+have active workflows, managing the lifecycle of versioned worker deployments, and calling Temporal APIs to update the
+default version after a deployment.
 
 ## Features
 
-- [x] Registration of new task queue version sets
+- [x] Registration of new worker versions
 - [x] Creation of versioned worker deployment resources
 - [x] Deletion of unreachable worker deployments
+- [x] Manual, Blue/Green, and Progressive rollouts of new worker versions
 - [ ] Autoscaling of worker deployments
-- [ ] Automated merging of compatible version sets
-- [ ] Optional cancellation after timeout for workflows on old version sets
-- [ ] Passing `ContinueAsNew` signal to workflows on old version sets
+- [ ] Automated rollover to compatible worker versions
+- [ ] Canary analysis of new worker versions
+- [ ] Optional cancellation after timeout for workflows on old versions
+- [ ] Passing `ContinueAsNew` signal to workflows on old versions
 
 ## Usage
 
 In order to be compatible with this controller, workers need to be configured using these standard environment
 variables:
 
-- `WORKER_BINARY_CHECKSUM`
+- `WORKER_BUILD_ID`
+- `TEMPORAL_HOST_PORT`
 - `TEMPORAL_TASK_QUEUE`
 - `TEMPORAL_NAMESPACE`
 
@@ -49,7 +52,7 @@ Each of these will be automatically set in the pod template's env, and do not ne
 ## How It Works
 
 Every `TemporalWorker` resource manages one or more standard `Deployment` resources. Each deployment manages pods
-which in turn poll Temporal for tasks in their respective version sets.
+which in turn poll Temporal for tasks pinned to their respective versions.
 
 ```mermaid
 flowchart TD
@@ -95,8 +98,8 @@ flowchart TD
 
 ### Worker Lifecycle
 
-When a new worker version is deployed, the worker controller automates the registration of a new default task queue
-version set in Temporal.
+When a new worker version is deployed, the worker controller automates the registration of a new default worker
+version in Temporal.
 
 As older workflows finish executing and deprecated worker versions are no longer needed, the worker controller also
 frees up resources by deleting old deployments.
@@ -112,14 +115,14 @@ sequenceDiagram
     Dev->>K8s: Create TemporalWorker "foo" (v1)
     K8s-->>Ctl: Notify TemporalWorker "foo" created
     Ctl->>K8s: Create Deployment "foo-v1"
-    Ctl->>T: Register v1 as new default set
+    Ctl->>T: Register v1 as new default
     Dev->>K8s: Update TemporalWorker "foo" (v2)
     K8s-->>Ctl: Notify TemporalWorker "foo" updated
     Ctl->>K8s: Create Deployment "foo-v2"
-    Ctl->>T: Register v2 as new default set
+    Ctl->>T: Register v2 as new default
     
     Ctl->>Ctl: Run breaking change detection between v1 and v2
-    Ctl->>T: If versions compatible, merge v1 and v2 version sets.
+    Ctl->>T: If versions compatible, merge v1 and v2.
     
     loop Poll Temporal API
         Ctl-->>T: Wait for v1 workflow executions to close

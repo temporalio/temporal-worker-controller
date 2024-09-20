@@ -44,9 +44,10 @@ help: ## Display this help.
 
 ##@ Development
 
+# crd:maxDescLen=0 is to avoid error described in https://github.com/kubernetes-sigs/kubebuilder/issues/2556#issuecomment-1074844483
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -58,7 +59,7 @@ start-sample-workflow: ## Start a sample workflow.
 
 .PHONY: apply-load-sample-workflow
 apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
-	watch --interval 15 -- $(TEMPORAL) workflow start --type "hello_world" --task-queue "hello_world"
+	watch --interval 0.1 -- $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world"
 
 .PHONY: list-workflow-build-ids
 list-workflow-build-ids: ## List workflow executions and their build IDs.
@@ -69,21 +70,23 @@ list-workflow-build-ids: ## List workflow executions and their build IDs.
 
 .PHONY: build-sample-worker
 build-sample-worker: ## Build the sample worker container image.
-	eval $(minikube docker-env) && $(CONTAINER_TOOL) build --load -t worker-controller/sample-worker:latest -f sample-worker.dockerfile .
+	minikube image build -t worker-controller/sample-worker:latest -f sample-worker.dockerfile . && minikube image load --overwrite=true --daemon=true worker-controller/sample-worker:latest
 
 .PHONY: deploy-sample-worker
 deploy-sample-worker: build-sample-worker ## Deploy the sample worker to the cluster.
-	$(KUBECTL) apply -f internal/samples/temporal_worker.yaml
+	$(KUBECTL) apply -f internal/demo/temporal_worker.yaml
 
 .PHONY: start-temporal-server
 start-temporal-server: ## Start an ephemeral Temporal server with versioning APIs enabled.
-	$(TEMPORAL) server start-dev \
-		--dynamic-config-value frontend.workerVersioningDataAPIs=true \
+	$(TEMPORAL) server start-dev --ip 0.0.0.0 \
+		--dynamic-config-value frontend.workerVersioningRuleAPIs=true \
 		--dynamic-config-value frontend.workerVersioningWorkflowAPIs=true \
-		--dynamic-config-value worker.buildIdScavengerEnabled=true \
-		--dynamic-config-value worker.removableBuildIdDurationSinceDefault=0.001 \
-		--dynamic-config-value frontend.reachabilityQuerySetDurationSinceDefault=0.001 \
-		--ip 0.0.0.0
+		--dynamic-config-value frontend.workerVersioningDataAPIs=true
+#		--dynamic-config-value worker.buildIdScavengerEnabled=true \
+#		--dynamic-config-value worker.removableBuildIdDurationSinceDefault=0.001 \
+#		--dynamic-config-value frontend.reachabilityQuerySetDurationSinceDefault=0.001 \
+
+# Check for reachabilityCacheClosedTTL
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -175,7 +178,7 @@ TEMPORAL ?= temporal
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.0.1
-CONTROLLER_TOOLS_VERSION ?= v0.12.0
+CONTROLLER_TOOLS_VERSION ?= v0.16.2
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary. If wrong version is installed, it will be removed before downloading.
@@ -196,6 +199,24 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+
+DD_SITE ?= datadoghq.com
+
+# Add an entry in secret.env and then run this target via the following command:
+#  source secret.env && make install-datadog-agent DD_API_KEY=$DD_API_KEY
+#
+# A DD_API_KEY can be found in the Datadog setup commands or on the API Keys page https://us1.datadoghq.com/organization-settings/api-keys
+.PHONY: install-datadog-agent
+install-datadog-agent:
+	helm repo add datadog https://helm.datadoghq.com
+	helm repo update
+	kubectl delete secret datadog-api-key --namespace datadog-agent || true
+	@helm upgrade --install --create-namespace datadog-agent datadog/datadog \
+		--kube-context minikube \
+		--namespace datadog-agent \
+		-f hack/datadog-values.yaml \
+		--set datadog.site='$(DD_SITE)'
+	@kubectl create secret generic datadog-api-key --from-literal api-key=$(DD_API_KEY) --namespace datadog-agent
 
 # View workflows filtered by Build ID
 # http://0.0.0.0:8233/namespaces/default/workflows?query=BuildIds+IN+%28%22versioned%3A5578f87d9c%22%29

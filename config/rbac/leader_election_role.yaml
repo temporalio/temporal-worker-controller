@@ -10,6 +10,7 @@ metadata:
     app.kubernetes.io/part-of: worker-controller
     app.kubernetes.io/managed-by: kustomize
   name: leader-election-role
+  namespace: temporal-system
 rules:
 - apiGroups:
   - ""

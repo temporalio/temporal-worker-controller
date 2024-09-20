@@ -1,0 +1,36 @@
+clusterAgent:
+  admissionController:
+    enabled: true
+    mutateUnlabelled: true
+  env:
+    - name: DD_KUBELET_TLS_VERIFY
+      value: "false"
+datadog:
+  apiKeyExistingSecret: datadog-api-key
+  clusterName: minikube.jlegrone
+  logs:
+    enabled: true
+    containerCollectAll: true
+  processAgent:
+    enabled: true
+    processCollection: true
+  apm:
+    socketEnabled: true
+  prometheusScrape:
+    enabled: true
+  profiling:
+    enabled: true
+  kubeStateMetricsCore:
+    labelsAsTags:
+      pod:
+        "temporal.io/build-id": "version"
+  podLabelsAsTags:
+    "temporal.io/build-id": "version"
+  tags:
+    - "demo:worker-versioning"
+    - "env:staging"
+  kubelet:
+    tlsVerify: false
+  orchestratorExplorer:
+    customResources:
+      - temporal.io/v1alpha1/temporalworkers

@@ -1,0 +1,13 @@
+diff --git a/internal/demo/worker/workflow.go b/internal/demo/worker/workflow.go
+index 7371ba7..abd5824 100644
+--- a/internal/demo/worker/workflow.go
++++ b/internal/demo/worker/workflow.go
+@@ -19,7 +19,7 @@ func HelloWorld(ctx workflow.Context) (string, error) {
+ 	}
+ 
+ 	// Sleep for a while
+-	if err := workflow.ExecuteActivity(ctx, Sleep, 60).Get(ctx, nil); err != nil {
++	if err := workflow.Sleep(ctx, time.Minute); err != nil {
+ 		return "", err
+ 	}
+ 

@@ -6,22 +6,12 @@ package controller
 
 import (
 	"golang.org/x/exp/slices"
+	appsv1 "k8s.io/api/apps/v1"
+	v1 "k8s.io/api/core/v1"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
 )
-
-// groupIntoBatches splits a slice of items into batches of the given size.
-func groupIntoBatches[T any](items []T, batchSize uint) [][]T {
-	var batches [][]T
-	for i := 0; i < len(items); i += int(batchSize) {
-		end := i + int(batchSize)
-		if end > len(items) {
-			end = len(items)
-		}
-		batches = append(batches, items[i:end])
-	}
-	return batches
-}
 
 func findHighestPriorityStatus(statuses []temporaliov1alpha1.ReachabilityStatus) temporaliov1alpha1.ReachabilityStatus {
 	if len(statuses) == 0 {
@@ -35,9 +25,9 @@ func findHighestPriorityStatus(statuses []temporaliov1alpha1.ReachabilityStatus)
 
 func getStatusPriority(s temporaliov1alpha1.ReachabilityStatus) int {
 	switch s {
-	case temporaliov1alpha1.ReachabilityStatusActive:
+	case temporaliov1alpha1.ReachabilityStatusReachable:
 		return 4
-	case temporaliov1alpha1.ReachabilityStatusQueryable:
+	case temporaliov1alpha1.ReachabilityStatusClosedOnly:
 		return 3
 	case temporaliov1alpha1.ReachabilityStatusUnreachable:
 		return 2
@@ -45,4 +35,22 @@ func getStatusPriority(s temporaliov1alpha1.ReachabilityStatus) int {
 		return 1
 	}
 	return 0
+}
+
+func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerSpec) string {
+	return utils.ComputeHash(&spec.Template, nil)
+}
+
+func newObjectRef(d *appsv1.Deployment) *v1.ObjectReference {
+	if d == nil {
+		return nil
+	}
+	return &v1.ObjectReference{
+		Kind:            d.Kind,
+		Namespace:       d.Namespace,
+		Name:            d.Name,
+		UID:             d.UID,
+		APIVersion:      d.APIVersion,
+		ResourceVersion: d.ResourceVersion,
+	}
 }
