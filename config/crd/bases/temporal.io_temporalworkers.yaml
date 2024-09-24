@@ -3780,18 +3780,6 @@ spec:
                     type: integer
                   reachability:
                     type: string
-                  statistics:
-                    properties:
-                      approximateBacklogAge:
-                        type: string
-                      approximateBacklogCount:
-                        format: int64
-                        type: integer
-                      tasksAddRate:
-                        type: number
-                      tasksDispatchRate:
-                        type: number
-                    type: object
                 required:
                 - buildID
                 - reachability
@@ -3830,18 +3818,6 @@ spec:
                       type: integer
                     reachability:
                       type: string
-                    statistics:
-                      properties:
-                        approximateBacklogAge:
-                          type: string
-                        approximateBacklogCount:
-                          format: int64
-                          type: integer
-                        tasksAddRate:
-                          type: number
-                        tasksDispatchRate:
-                          type: number
-                      type: object
                   required:
                   - buildID
                   - reachability
@@ -3880,18 +3856,6 @@ spec:
                     type: integer
                   reachability:
                     type: string
-                  statistics:
-                    properties:
-                      approximateBacklogAge:
-                        type: string
-                      approximateBacklogCount:
-                        format: int64
-                        type: integer
-                      tasksAddRate:
-                        type: number
-                      tasksDispatchRate:
-                        type: number
-                    type: object
                 required:
                 - buildID
                 - reachability

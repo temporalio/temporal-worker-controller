@@ -335,11 +335,6 @@ func (in *VersionedDeployment) DeepCopyInto(out *VersionedDeployment) {
 		*out = new(uint8)
 		**out = **in
 	}
-	if in.Statistics != nil {
-		in, out := &in.Statistics, &out.Statistics
-		*out = new(QueueStatistics)
-		**out = **in
-	}
 	if in.Deployment != nil {
 		in, out := &in.Deployment, &out.Deployment
 		*out = new(corev1.ObjectReference)

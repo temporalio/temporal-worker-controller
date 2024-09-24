@@ -129,10 +129,6 @@ type VersionedDeployment struct {
 	// Acceptable range is [0,100].
 	RampPercentage *uint8 `json:"rampPercentage,omitempty"`
 
-	// Statistics tracks information reported by the Temporal service about
-	// tasks being dispatched to this worker version.
-	Statistics *QueueStatistics `json:"statistics,omitempty"`
-
 	// A pointer to the version set's managed deployment.
 	// +optional
 	Deployment *v1.ObjectReference `json:"deployment"`
@@ -200,10 +196,6 @@ type QueueStatistics struct {
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="BuildID of the current worker template"
 //+kubebuilder:printcolumn:name="Target-Ramp",type="integer",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target BuildID"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-//kubebuilder:printcolumn:name="Backlog-Age",type="string",JSONPath=".status.defaultVersion.statistics.approximateBacklogAge",priority=1
-//kubebuilder:printcolumn:name="Backlog-Count",type="string",JSONPath=".status.defaultVersion.statistics.approximateBacklogCount",priority=1
-//kubebuilder:printcolumn:name="Task-Add-Rate",type="string",JSONPath=".status.defaultVersion.statistics.tasksAddRate",priority=1
-//kubebuilder:printcolumn:name="Task-Dispatch-Rate",type="string",JSONPath=".status.defaultVersion.statistics.tasksDispatchRate",priority=1
 
 // TemporalWorker is the Schema for the temporalworkers API
 //

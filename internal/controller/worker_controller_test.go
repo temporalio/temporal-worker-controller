@@ -65,7 +65,6 @@ func newTestVersionedDeployment(reachabilityStatus temporaliov1alpha1.Reachabili
 		CompatibleBuildIDs: nil,
 		Reachability:       reachabilityStatus,
 		RampPercentage:     nil,
-		Statistics:         nil,
 		Deployment:         nil,
 	}
 

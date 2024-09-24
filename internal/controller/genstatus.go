@@ -43,7 +43,7 @@ func (c *versionedDeploymentCollection) getDeployment(buildID string) (*appsv1.D
 	return d, ok
 }
 
-func (c *versionedDeploymentCollection) getVersionedDeployment(buildID string) *temporaliov1alpha1.VersionedDeployment {
+func (c *versionedDeploymentCollection) getVersionedDeployment(buildID string) (*temporaliov1alpha1.VersionedDeployment, *temporaliov1alpha1.QueueStatistics) {
 	result := temporaliov1alpha1.VersionedDeployment{
 		HealthySince:       nil,
 		BuildID:            buildID,
@@ -78,12 +78,12 @@ func (c *versionedDeploymentCollection) getVersionedDeployment(buildID string) *
 		result.Reachability = status
 	}
 
-	// Set stats
-	if stats, ok := c.stats[buildID]; ok {
-		result.Statistics = &stats
+	var stats temporaliov1alpha1.QueueStatistics
+	if s, ok := c.stats[buildID]; ok {
+		stats = s
 	}
 
-	return &result
+	return &result, &stats
 }
 
 func (c *versionedDeploymentCollection) addBuildIDRedirect(from, to string) {
@@ -257,12 +257,13 @@ func (r *TemporalWorkerReconciler) generateStatus(ctx context.Context, l logr.Lo
 		case desiredBuildID, defaultBuildID:
 			continue
 		}
-		deprecatedVersions = append(deprecatedVersions, versions.getVersionedDeployment(buildID))
+		d, _ := versions.getVersionedDeployment(buildID)
+		deprecatedVersions = append(deprecatedVersions, d)
 	}
 
 	var (
-		defaultVersion = versions.getVersionedDeployment(defaultBuildID)
-		targetVersion  = versions.getVersionedDeployment(desiredBuildID)
+		defaultVersion, _ = versions.getVersionedDeployment(defaultBuildID)
+		targetVersion, _  = versions.getVersionedDeployment(desiredBuildID)
 	)
 
 	// Ugly hack to clear ramp percentages (not quite correctly) for now
