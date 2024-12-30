@@ -12,7 +12,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
@@ -81,9 +80,6 @@ func newTestVersionedDeployment(reachabilityStatus temporaliov1alpha1.Reachabili
 }
 
 func TestGeneratePlan(t *testing.T) {
-	// TODO(jlegrone): Re-enable generate plan tests
-	t.Skip()
-
 	type testCase struct {
 		observedState *temporaliov1alpha1.TemporalWorkerStatus
 		desiredState  *temporaliov1alpha1.TemporalWorkerSpec
@@ -91,16 +87,21 @@ func TestGeneratePlan(t *testing.T) {
 	}
 
 	testCases := map[string]testCase{
-		"no action needed": {
-			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: &plan{},
-		},
+		//"no action needed": {
+		//	observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+		//		DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
+		//	},
+		//	desiredState: newTestWorkerSpec(3),
+		//	expectedPlan: &plan{},
+		//},
 		"create deployment": {
 			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
 				DefaultVersion: &temporaliov1alpha1.VersionedDeployment{
+					Reachability:       temporaliov1alpha1.ReachabilityStatusReachable,
+					CompatibleBuildIDs: nil,
+					BuildID:            "a",
+				},
+				TargetVersion: &temporaliov1alpha1.VersionedDeployment{
 					Reachability:       temporaliov1alpha1.ReachabilityStatusReachable,
 					CompatibleBuildIDs: nil,
 					BuildID:            "a",
@@ -114,40 +115,51 @@ func TestGeneratePlan(t *testing.T) {
 				UpdateVersionConfig: nil,
 			},
 		},
-		"delete unreachable deployments": {
-			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
-				DeprecatedVersions: []*temporaliov1alpha1.VersionedDeployment{
-					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-b"),
-					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-c"),
-					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-d"),
-				},
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: &plan{
-				DeleteDeployments: []*appsv1.Deployment{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Namespace: "foo",
-							Name:      "foo-b",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Namespace: "foo",
-							Name:      "foo-d",
-						},
-					},
-				},
-				CreateDeployment:    nil,
-				UpdateVersionConfig: nil,
-			},
-		},
+		//"delete unreachable deployments": {
+		//	observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+		//		DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
+		//		DeprecatedVersions: []*temporaliov1alpha1.VersionedDeployment{
+		//			newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-b"),
+		//			newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-c"),
+		//			newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-d"),
+		//		},
+		//	},
+		//	desiredState: newTestWorkerSpec(3),
+		//	expectedPlan: &plan{
+		//		DeleteDeployments: []*appsv1.Deployment{
+		//			{
+		//				ObjectMeta: metav1.ObjectMeta{
+		//					Namespace: "foo",
+		//					Name:      "foo-b",
+		//				},
+		//			},
+		//			{
+		//				ObjectMeta: metav1.ObjectMeta{
+		//					Namespace: "foo",
+		//					Name:      "foo-d",
+		//				},
+		//			},
+		//		},
+		//		CreateDeployment:    nil,
+		//		UpdateVersionConfig: nil,
+		//	},
+		//},
 	}
 
-	//env := envtest.Environment{}
+	fooADeploy := newTestDeployment(newTestWorkerSpec(3).Template, 3)
+	fooADeploy.Name = "foo-a"
+	//c := fake.NewFakeClient(
+	//	fooADeploy,
+	//)
+	//r := &TemporalWorkerReconciler{
+	//	Client: c,
+	//	Scheme: c.Scheme(),
+	//}
 
-	c := fake.NewFakeClient()
+	//restConfig, err := env.Start()
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
 
 	//c, err := client.New(nil, client.Options{
 	//	HTTPClient:     env.Config,
@@ -161,8 +173,10 @@ func TestGeneratePlan(t *testing.T) {
 	//	t.Fatal(err)
 	//}
 
+	c, e := newTestEnv(t)
 	r := &TemporalWorkerReconciler{
 		Client: c,
+		Scheme: e.Scheme,
 	}
 
 	for name, tc := range testCases {
@@ -173,8 +187,19 @@ func TestGeneratePlan(t *testing.T) {
 				Spec:       *tc.desiredState,
 				Status:     *tc.observedState,
 			}, nil, temporaliov1alpha1.TemporalConnectionSpec{})
+
+			if tc.expectedPlan.TemporalNamespace == "" {
+				tc.expectedPlan.TemporalNamespace = "baz"
+			}
+			if tc.expectedPlan.TaskQueue == "" {
+				tc.expectedPlan.TaskQueue = "qux"
+			}
+			if tc.expectedPlan.ScaleDeployments == nil {
+				tc.expectedPlan.ScaleDeployments = make(map[*v1.ObjectReference]uint32)
+			}
+
 			assert.NoError(t, err)
-			assert.Equal(t, &tc.expectedPlan, actualPlan)
+			assert.Equal(t, tc.expectedPlan, actualPlan)
 		})
 	}
 }
