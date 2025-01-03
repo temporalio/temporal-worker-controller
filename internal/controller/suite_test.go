@@ -65,10 +65,22 @@ func newTestEnv(t *testing.T) (client.Client, *envtest.Environment) {
 	e := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		// TODO(jlegrone): Avoid hardcoding this path, and document pre-test dependency installation steps.
+		BinaryAssetsDirectory: filepath.Join("..", "..", "bin", "k8s", "1.27.1-darwin-arm64"),
+		//CRDInstallOptions: envtest.CRDInstallOptions{
+		//	Scheme:             nil,
+		//	Paths:              nil,
+		//	CRDs:               nil,
+		//	ErrorIfPathMissing: false,
+		//	MaxTime:            0,
+		//	PollInterval:       0,
+		//	CleanUpAfterUse:    false,
+		//	WebhookOptions:     envtest.WebhookInstallOptions{},
+		//},
 	}
-	//t.Cleanup(func() {
-	//	_ = e.Stop()
-	//})
+	t.Cleanup(func() {
+		_ = e.Stop()
+	})
 
 	config, err := e.Start()
 	if err != nil {
