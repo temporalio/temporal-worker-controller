@@ -220,3 +220,14 @@ install-datadog-agent:
 
 # View workflows filtered by Build ID
 # http://0.0.0.0:8233/namespaces/default/workflows?query=BuildIds+IN+%28%22versioned%3A5578f87d9c%22%29
+
+.PHONY: run-tamagotchi-api
+run-tamagotchi-api: ## Run the Tamagotchi API server with Temporal Cloud connection
+	@cd internal/demo && \
+	HOSTNAME=$(shell hostname) \
+	TEMPORAL_HOST_PORT=replay-2025.ktasd.tmprl.cloud:7233 \
+	TEMPORAL_NAMESPACE=replay-2025.ktasd \
+	TEMPORAL_TASK_QUEUE=tamagotchi \
+	TEMPORAL_TLS_CERT_PATH=../../certs/ca.pem \
+	TEMPORAL_TLS_KEY_PATH=../../certs/ca.key \
+	go run ./tamagotchi/cmd/api/main.go

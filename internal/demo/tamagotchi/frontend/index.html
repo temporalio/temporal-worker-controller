@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tamaflow</title>
+    <link rel="stylesheet" href="styles.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <div class="container">
+        <form id="egg-form">
+            <img id="egg-img" class="egg-image" src="/images/egg.webp" alt="Tamagotchi Egg">
+            <input type="text" name="name" placeholder="Name your Tamagotchi" required>
+            <button type="submit">Hatch</button>
+        </form>
+
+        <div id="tamagotchi-display">
+            <img id="tamagotchi-img" class="tamagotchi-image" src="/images/egg.webp" alt="Tamagotchi">
+            <div id="memorial" class="memorial" style="display: none">
+                <p id="life-dates"></p>
+                <p id="epitaph"></p>
+                <p id="death-cause"></p>
+            </div>
+            <div class="stats">
+                <h2 id="pet-name"></h2>
+                <div class="stat-row">
+                    <label>Happiness:</label>
+                    <div class="stat-bar-container">
+                        <div id="happiness" class="stat-bar happiness-bar" style="width: 0%">0</div>
+                    </div>
+                </div>
+                <div class="stat-row">
+                    <label>Fullness:</label>
+                    <div class="stat-bar-container">
+                        <div id="hunger" class="stat-bar hunger-bar" style="width: 0%">0</div>
+                    </div>
+                </div>
+                <div class="stat-row">
+                    <label>Cleanliness:</label>
+                    <div class="stat-bar-container">
+                        <div id="clean" class="stat-bar clean-bar" style="width: 0%">0</div>
+                    </div>
+                </div>
+                <div class="stat-row">
+                    <label>Energy:</label>
+                    <div class="stat-bar-container">
+                        <div id="energy" class="stat-bar energy-bar" style="width: 0%">0</div>
+                    </div>
+                </div>
+                <p>Age: <span id="age">0</span></p>
+            </div>
+
+            <div class="actions">
+                <button onclick="feedPet(window.location.hash)">Feed</button>
+                <button onclick="playWithPet(window.location.hash)">Play</button>
+                <button onclick="putToSleep(window.location.hash)">Sleep</button>
+                <button onclick="bathePet(window.location.hash)">Bathe</button>
+                <!-- <button onclick="chatWithPet(window.location.hash)">Chat</button> -->
+            </div>
+        </div>
+
+        <dialog id="food-dialog">
+            <form method="dialog">
+                <h3>Choose Food</h3>
+                <div class="food-buttons">
+                    <button type="submit" value="apple">Apple</button>
+                    <button type="submit" value="banana">Banana</button>
+                    <button type="submit" value="carrot">Carrot</button>
+                    <button type="submit" value="peanut">Peanut</button>
+                    <button type="submit" value="pizza">Pizza</button>
+                    <button type="submit" value="ice cream">Ice Cream</button>
+                </div>
+                <div class="dialog-buttons">
+                    <button type="button" class="cancel-button" onclick="this.closest('dialog').close()">Cancel</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="play-dialog">
+            <form method="dialog">
+                <h3>Choose Activity</h3>
+                <div class="play-buttons">
+                    <button type="submit" value="walk">Walk</button>
+                    <button type="submit" value="fetch">Fetch</button>
+                    <button type="submit" value="frisbee">Frisbee</button>
+                    <button type="submit" value="chachacha">Cha Cha Cha</button>
+                </div>
+                <div class="dialog-buttons">
+                    <button type="button" class="cancel-button" onclick="this.closest('dialog').close()">Cancel</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="chat-dialog">
+            <form method="dialog">
+                <h3>Chat with your Tamagotchi</h3>
+                <input type="text" name="message" placeholder="Message" required>
+                <button type="submit">Send</button>
+            </form>
+            <div id="chat-history"></div>
+            <div id="chat-response"></div>
+        </dialog>
+
+        <div id="error-message" class="error-message"></div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

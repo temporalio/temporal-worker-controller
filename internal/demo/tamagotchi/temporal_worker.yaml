@@ -1,0 +1,61 @@
+apiVersion: temporal.io/v1alpha1
+kind: TemporalWorker
+metadata:
+  name: tamagotchi
+  labels:
+    app.kubernetes.io/name: tamagotchi-worker
+    app.kubernetes.io/instance: demo
+spec:
+  # Configuration for connecting to Temporal
+  workerOptions:
+    connection: dev-server
+    temporalNamespace: "replay-2025.ktasd"
+  # How to cut over new workflow executions to the latest worker version
+  cutover:
+    strategy: AllAtOnce
+    # gate:
+    #   workflowType: "DeploymentGate"
+  # Desired number of worker replicas
+  replicas: 1
+  # Desired specification for worker pods
+  template:
+    metadata:
+      annotations:
+        force-new-version: "7"
+        ad.datadoghq.com/main.checks: |
+          {
+            "openmetrics": {
+              "init_config": {},
+              "instances": [
+                {
+                  "openmetrics_endpoint": "http://%%host%%:9090/metrics",
+                  "metrics": [".*"]
+                }
+              ]
+            }
+          }
+    spec:
+      containers:
+        - name: main
+          image: tamagotchi
+          readinessProbe:
+            httpGet:
+              port: 8080
+          env:
+          - name: TEMPORAL_TASK_QUEUE
+            value: "tamagotchi"
+          - name: OLLAMA_ENDPOINT
+            value: "http://localhost:11434"
+        - name: ollama
+          image: ollama
+          ports:
+            - name: ollama
+              containerPort: 11434
+---
+apiVersion: temporal.io/v1alpha1
+kind: TemporalConnection
+metadata:
+  name: dev-server
+spec:
+  hostPort: "replay-2025.ktasd.tmprl.cloud:7233"
+  mutualTLSSecret: temporal-cloud-mtls

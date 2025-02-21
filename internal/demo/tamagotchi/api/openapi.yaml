@@ -1,0 +1,129 @@
+openapi: 3.0.0
+info:
+  title: Tamagotchi API
+  description: API for managing virtual Tamagotchi pets
+  version: 1.0.0
+
+paths:
+  /api/hatch:
+    post:
+      summary: Create a new Tamagotchi
+      description: Hatches a new Tamagotchi with the given name
+      operationId: hatchTamagotchi
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Name of the Tamagotchi to create
+      responses:
+        '201':
+          description: Tamagotchi created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    description: Workflow ID of the created Tamagotchi
+        '400':
+          description: Bad request - name parameter is missing
+        '500':
+          description: Internal server error
+
+  /api/{id}/stats:
+    get:
+      summary: Get Tamagotchi stats
+      description: Retrieves the current state of a Tamagotchi
+      operationId: getTamagotchiStats
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workflow ID of the Tamagotchi
+      responses:
+        '200':
+          description: Tamagotchi stats retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TamagotchiState'
+        '500':
+          description: Internal server error
+
+  /api/{id}/feed:
+    post:
+      summary: Feed a Tamagotchi
+      description: Feed the Tamagotchi with specified food
+      operationId: feedTamagotchi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workflow ID of the Tamagotchi
+        - name: food
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [apple, banana, carrot, peanut, pizza, "ice cream"]
+            description: Type of food to feed the Tamagotchi
+      responses:
+        '200':
+          description: Tamagotchi fed successfully
+        '400':
+          description: Bad request - food parameter is missing
+        '500':
+          description: Internal server error
+
+  /api/{id}/play:
+    post:
+      summary: Play with a Tamagotchi
+      description: Play with the Tamagotchi using specified activity
+      operationId: playWithTamagotchi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workflow ID of the Tamagotchi
+        - name: activity
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [walk, fetch, frisbee, chachacha]
+            description: Type of activity to do with the Tamagotchi
+      responses:
+        '200':
+          description: Successfully played with Tamagotchi
+        '400':
+          description: Bad request - activity parameter is missing
+        '500':
+          description: Internal server error
+
+components:
+  schemas:
+    TamagotchiState:
+      type: object
+      description: Current state of a Tamagotchi
+      properties:
+        name:
+          type: string
+          description: Name of the Tamagotchi
+        hunger:
+          type: integer
+          description: Hunger level
+        happiness:
+          type: integer
+          description: Happiness level
+        age:
+          type: integer
+          description: Age of the Tamagotchi 
