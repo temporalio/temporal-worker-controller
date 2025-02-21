@@ -1,7 +1,7 @@
-diff --git a/internal/demo/worker/workflow.go b/internal/demo/worker/workflow.go
+diff --git a/internal/demo/helloworld/worker.go b/internal/demo/helloworld/worker.go
 index 7371ba7..abd5824 100644
---- a/internal/demo/worker/workflow.go
-+++ b/internal/demo/worker/workflow.go
+--- a/internal/demo/helloworld/worker.go
++++ b/internal/demo/helloworld/worker.go
 @@ -19,7 +19,7 @@ func HelloWorld(ctx workflow.Context) (string, error) {
  	}
  

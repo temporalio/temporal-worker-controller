@@ -25,19 +25,20 @@ profiles:
           - config/default
           - config/rbac
           - config/manager
-  - name: demo
+  - name: helloworld
     build:
       artifacts:
-        - image: worker
+        - image: helloworld
           context: internal/demo
           docker:
             dockerfile: Dockerfile
             buildArgs:
               DD_GIT_COMMIT_SHA: "{{ .IMAGE_TAG }}"
               DD_GIT_REPOSITORY_URL: "github.com/DataDog/temporal-worker-controller"
+              WORKER: "helloworld"
     manifests:
       rawYaml:
-        - internal/demo/temporal_worker.yaml
+        - internal/demo/helloworld/temporal_worker.yaml
 deploy:
   kubeContext: minikube
   kubectl: {}

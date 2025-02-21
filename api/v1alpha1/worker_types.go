@@ -14,8 +14,16 @@ import (
 type WorkerOptions struct {
 	// The name of a TemporalConnection in the same namespace as the TemporalWorker.
 	TemporalConnection string `json:"connection"`
-	TemporalNamespace  string `json:"temporalNamespace"`
-	TaskQueue          string `json:"taskQueue"`
+	// The Temporal namespace for the worker to connect to.
+	TemporalNamespace string `json:"temporalNamespace"`
+	// Assign a deployment series name to this worker. Different versions of the same worker
+	// service/application are linked together by sharing a series name.
+	//
+	// If not set, then the deployment series will default to the worker's name and Kubernetes
+	// namespace.
+	//
+	// +optional
+	DeploymentSeries string `json:"series"`
 }
 
 // TemporalWorkerSpec defines the desired state of TemporalWorker
@@ -108,6 +116,37 @@ type TemporalWorkerStatus struct {
 	VersionConflictToken []byte `json:"versionConflictToken"`
 }
 
+// WorkflowExecutionStatus describes the current state of a workflow.
+// +enum
+type WorkflowExecutionStatus string
+
+const (
+	// WorkflowExecutionStatusRunning indicates that the workflow is currently running.
+	WorkflowExecutionStatusRunning WorkflowExecutionStatus = "Running"
+	// WorkflowExecutionStatusCompleted indicates that the workflow has completed successfully.
+	WorkflowExecutionStatusCompleted WorkflowExecutionStatus = "Completed"
+	// WorkflowExecutionStatusFailed indicates that the workflow has failed.
+	WorkflowExecutionStatusFailed WorkflowExecutionStatus = "Failed"
+	// WorkflowExecutionStatusCanceled indicates that the workflow has been canceled.
+	WorkflowExecutionStatusCanceled WorkflowExecutionStatus = "Canceled"
+	// WorkflowExecutionStatusTerminated indicates that the workflow has been terminated.
+	WorkflowExecutionStatusTerminated WorkflowExecutionStatus = "Terminated"
+	// WorkflowExecutionStatusTimedOut indicates that the workflow has timed out.
+	WorkflowExecutionStatusTimedOut WorkflowExecutionStatus = "TimedOut"
+)
+
+type WorkflowExecution struct {
+	WorkflowID string                  `json:"workflowID"`
+	RunID      string                  `json:"runID"`
+	Status     WorkflowExecutionStatus `json:"status"`
+	TaskQueue  string                  `json:"taskQueue"`
+}
+
+type TaskQueue struct {
+	// Name is the name of the task queue.
+	Name string `json:"name"`
+}
+
 type VersionedDeployment struct {
 	// Healthy indicates whether the deployment is healthy.
 	// +optional
@@ -132,6 +171,17 @@ type VersionedDeployment struct {
 	// A pointer to the version set's managed deployment.
 	// +optional
 	Deployment *v1.ObjectReference `json:"deployment"`
+
+	// TaskQueues is a list of task queues that are associated with this version.
+	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
+
+	// A TestWorkflow is used to validate the deployment before making it the default.
+	// +optional
+	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
+
+	// ManagedBy is the identity of the client that is managing the rollout of this version.
+	// +optional
+	ManagedBy string `json:"managedBy,omitempty"`
 }
 
 // DefaultVersionUpdateStrategy describes how to cut over new workflow executions
@@ -147,6 +197,10 @@ const (
 	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
 )
 
+type GateWorkflowConfig struct {
+	WorkflowType string `json:"workflowType"`
+}
+
 // RolloutStrategy defines strategy to apply during next rollout
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
@@ -155,6 +209,10 @@ type RolloutStrategy struct {
 	// - "AllAtOnce": start 100% of new workflow executions on the new worker version as soon as it's healthy;
 	// - "Progressive": ramp up the percentage of new workflow executions targeting the new worker version over time.
 	Strategy DefaultVersionUpdateStrategy `json:"strategy"`
+
+	// Gate specifies a workflow type that must run once to completion on the new worker version before
+	// any traffic is directed to the new version.
+	Gate *GateWorkflowConfig `json:"gate,omitempty"`
 
 	// Steps to execute progressive rollouts. Only required when strategy is "Progressive".
 	// +optional

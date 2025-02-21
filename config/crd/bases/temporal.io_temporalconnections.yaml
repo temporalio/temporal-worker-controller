@@ -28,6 +28,8 @@ spec:
             properties:
               hostPort:
                 type: string
+              mutualTLSSecret:
+                type: string
             required:
             - hostPort
             type: object

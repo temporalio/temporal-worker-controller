@@ -5,6 +5,8 @@
 package controller
 
 import (
+	"fmt"
+
 	"golang.org/x/exp/slices"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -39,6 +41,10 @@ func getStatusPriority(s temporaliov1alpha1.ReachabilityStatus) int {
 
 func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerSpec) string {
 	return utils.ComputeHash(&spec.Template, nil)
+}
+
+func getTestWorkflowID(series, taskQueue, buildID string) string {
+	return fmt.Sprintf("test-deploy:%s:%s:%s", series, taskQueue, buildID)
 }
 
 func newObjectRef(d *appsv1.Deployment) *v1.ObjectReference {

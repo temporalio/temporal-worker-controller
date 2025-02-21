@@ -43,6 +43,7 @@ type TemporalWorkerReconciler struct {
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkers/finalizers,verbs=update
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
+//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
 
@@ -64,9 +65,19 @@ func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// on deleted requests.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	// TODO(jlegrone): Set defaults via webhook rather than manually
+	workerDeploy.Default()
+
 	// Verify that a connection is configured
 	if workerDeploy.Spec.WorkerOptions.TemporalConnection == "" {
 		err := fmt.Errorf("TemporalConnection must be set")
+		l.Error(err, "")
+		return ctrl.Result{}, err
+	}
+	// Set a default deployment series name
+	if workerDeploy.Spec.WorkerOptions.DeploymentSeries == "" {
+		err := fmt.Errorf("DeploymentSeries must be set")
 		l.Error(err, "")
 		return ctrl.Result{}, err
 	}
@@ -84,7 +95,11 @@ func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Get or update temporal client for connection
 	temporalClient, ok := r.TemporalClientPool.GetWorkflowServiceClient(temporalConnection.Spec.HostPort)
 	if !ok {
-		c, err := r.TemporalClientPool.UpsertClient(temporalConnection.Spec.HostPort)
+		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
+			K8sNamespace:      workerDeploy.Namespace,
+			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+			Spec:              temporalConnection.Spec,
+		})
 		if err != nil {
 			l.Error(err, "unable to create TemporalClient")
 			return ctrl.Result{}, err
@@ -93,7 +108,7 @@ func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Compute a new status from k8s and temporal state
-	status, rules, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy)
+	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -111,8 +126,12 @@ func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	// TODO(jlegrone): Set defaults via webhook rather than manually
+	//                 (defaults were already set above, but have to be set again after status update)
+	workerDeploy.Default()
+
 	// Generate a plan to get to desired spec from current status
-	plan, err := r.generatePlan(ctx, &workerDeploy, rules, temporalConnection.Spec)
+	plan, err := r.generatePlan(ctx, &workerDeploy, temporalConnection.Spec)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

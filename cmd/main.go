@@ -86,15 +86,23 @@ func main() {
 	if err = (&controller.TemporalWorkerReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-		TemporalClientPool: clientpool.New(log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			AddSource:   false,
-			Level:       nil,
-			ReplaceAttr: nil,
-		})))),
+		TemporalClientPool: clientpool.New(
+			log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+				AddSource:   false,
+				Level:       nil,
+				ReplaceAttr: nil,
+			}))),
+			mgr.GetClient(),
+		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TemporalWorker")
 		os.Exit(1)
 	}
+	// TODO(jlegrone): Enable the webhook after fixing TLS
+	//if err = (&temporaliov1alpha1.TemporalWorker{}).SetupWebhookWithManager(mgr); err != nil {
+	//	setupLog.Error(err, "unable to create webhook", "webhook", "TemporalWorker")
+	//	os.Exit(1)
+	//}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
