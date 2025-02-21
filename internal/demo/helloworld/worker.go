@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package main
+package helloworld
 
 import (
 	"context"
@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/DataDog/temporal-worker-controller/internal/demo/util"
 )
 
 func HelloWorld(ctx workflow.Context) (string, error) {
 	workflow.GetLogger(ctx).Info("HelloWorld workflow started")
-	ctx = setActivityTimeout(ctx, 5*time.Minute)
+	ctx = util.SetActivityTimeout(ctx, 5*time.Minute)
 
 	// Compute a subject
 	var subject string
@@ -38,4 +40,5 @@ func GetSubject(ctx context.Context) (string, error) {
 func Sleep(ctx context.Context, seconds uint) error {
 	time.Sleep(time.Duration(seconds) * time.Second)
 	return nil
+	//return temporal.NewNonRetryableApplicationError("oops", "", nil)
 }

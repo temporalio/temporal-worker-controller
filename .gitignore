@@ -3,3 +3,6 @@
 bin
 
 secret.env
+certs
+
+.DS_Store

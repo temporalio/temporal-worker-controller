@@ -36,7 +36,7 @@ func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerSpec {
 		Template: testPodTemplate,
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace: "baz",
-			TaskQueue:         "qux",
+			DeploymentSeries:  "qux",
 		},
 	}
 }
@@ -169,7 +169,7 @@ func TestGeneratePlan(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{},
 				Spec:       *tc.desiredState,
 				Status:     *tc.observedState,
-			}, nil, temporaliov1alpha1.TemporalConnectionSpec{})
+			}, temporaliov1alpha1.TemporalConnectionSpec{})
 			assert.NoError(t, err)
 			assert.Equal(t, &tc.expectedPlan, actualPlan)
 		})

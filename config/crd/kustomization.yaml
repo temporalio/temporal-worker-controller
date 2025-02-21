@@ -6,7 +6,6 @@ resources:
 - bases/temporal.io_temporalconnections.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
-patches: []
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
 #- patches/webhook_in_temporalworkers.yaml
@@ -22,3 +21,5 @@ patches: []
 # the following config is for teaching kustomize how to do kustomization for CRDs.
 configurations:
 - kustomizeconfig.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization

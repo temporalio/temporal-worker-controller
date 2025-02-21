@@ -1,4 +1,3 @@
-
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
@@ -53,9 +52,14 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
+# source secret.env && make start-sample-workflow TEMPORAL_CLOUD_API_KEY=$TEMPORAL_CLOUD_API_KEY
 .PHONY: start-sample-workflow
 start-sample-workflow: ## Start a sample workflow.
-	$(TEMPORAL) workflow start --type "hello_world" --task-queue "hello_world"
+	@$(TEMPORAL) workflow start --type "hello_world" --task-queue "hello_world" \
+      --tls-cert-path certs/ca.pem \
+      --tls-key-path certs/ca.key \
+      --address replay-2025.ktasd.tmprl.cloud:7233 \
+      --api-key $(TEMPORAL_CLOUD_API_KEY)
 
 .PHONY: apply-load-sample-workflow
 apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
@@ -217,6 +221,13 @@ install-datadog-agent:
 		-f hack/datadog-values.yaml \
 		--set datadog.site='$(DD_SITE)'
 	@kubectl create secret generic datadog-api-key --from-literal api-key=$(DD_API_KEY) --namespace datadog-agent
+
+# Create an mTLS secret in k8s
+.PHONY: create-cloud-mtls-secret
+create-cloud-mtls-secret:
+	kubectl create secret tls temporal-cloud-mtls --namespace default \
+      --cert=certs/ca.pem \
+      --key=certs/ca.key
 
 # View workflows filtered by Build ID
 # http://0.0.0.0:8233/namespaces/default/workflows?query=BuildIds+IN+%28%22versioned%3A5578f87d9c%22%29
