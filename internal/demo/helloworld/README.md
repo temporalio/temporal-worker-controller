@@ -24,12 +24,12 @@ Kubernetes cluster should work if you're able to push the demo worker image.
 1. Inspect versioning rules: http://localhost:8233/namespaces/default/task-queues/hello_world
 1. Deploy worker v1:
     ```bash
-    skaffold run --profile demo
+    skaffold run --profile helloworld
     ```
 1. Make a non-replay-safe change and redeploy:
     ```bash
-    git apply internal/demo/changes/no-version-gate.patch
-    skaffold run --profile demo
+    git apply internal/demo/helloworld/changes/no-version-gate.patch
+    skaffold run --profile helloworld
     ```
    1. Observe multiple worker versions making progress in parallel
    1. Observe that v1 eventually scales down after ~1 minute
@@ -37,10 +37,10 @@ Kubernetes cluster should work if you're able to push the demo worker image.
       eg. with the `temporal` CLI
 1. Update to a progressive rollout strategy:
     ```bash
-    git apply internal/demo/changes/progressive-rollout.patch
+    git apply internal/demo/helloworld/changes/progressive-rollout.patch
     ```
 1. Make another change to the worker and redeploy:
     ```bash
-    skaffold run --profile demo
+    skaffold run --profile helloworld
     ```
 1. Observe that new workflows are being started on both the new and previous worker versions until the rollout completes

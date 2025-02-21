@@ -5,23 +5,34 @@
 package clientpool
 
 import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"os"
 	"sync"
 
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
 
 type ClientPool struct {
-	mux     sync.RWMutex
-	logger  log.Logger
-	clients map[string]client.Client
+	mux       sync.RWMutex
+	logger    log.Logger
+	clients   map[string]client.Client
+	k8sClient runtimeclient.Client
 }
 
-func New(l log.Logger) *ClientPool {
+func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	return &ClientPool{
-		logger:  l,
-		clients: make(map[string]client.Client),
+		logger:    l,
+		clients:   make(map[string]client.Client),
+		k8sClient: c,
 	}
 }
 
@@ -36,19 +47,73 @@ func (cp *ClientPool) GetWorkflowServiceClient(hostPort string) (workflowservice
 	return nil, false
 }
 
-func (cp *ClientPool) UpsertClient(hostPort string) (workflowservice.WorkflowServiceClient, error) {
-	c, err := client.Dial(client.Options{
-		Logger:   cp.logger,
-		HostPort: hostPort,
-	})
+type NewClientOptions struct {
+	TemporalNamespace string
+	K8sNamespace      string
+	Spec              v1alpha1.TemporalConnectionSpec
+}
+
+func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (workflowservice.WorkflowServiceClient, error) {
+	clientOpts := client.Options{
+		Logger:    cp.logger,
+		HostPort:  opts.Spec.HostPort,
+		Namespace: opts.TemporalNamespace,
+		// TODO(jlegrone): fix this
+		Credentials: client.NewAPIKeyStaticCredentials(os.Getenv("TEMPORAL_CLOUD_API_KEY")),
+		//Credentials: client.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
+		//	token, ok := os.LookupEnv("TEMPORAL_CLOUD_API_KEY")
+		//	if ok {
+		//		if token == "" {
+		//			return "", fmt.Errorf("empty token")
+		//		}
+		//		return token, nil
+		//	}
+		//	return "", fmt.Errorf("token not found")
+		//}),
+		//Credentials: client.NewMTLSCredentials(tls.Certificate{
+		//	Certificate:                  cert.Certificate,
+		//	PrivateKey:                   cert.PrivateKey,
+		//	SupportedSignatureAlgorithms: nil,
+		//	OCSPStaple:                   nil,
+		//	SignedCertificateTimestamps:  nil,
+		//	Leaf:                         nil,
+		//}),
+	}
+	// Get the connection secret if it exists
+	if opts.Spec.MutualTLSSecret != "" {
+		var secret corev1.Secret
+		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
+			Name:      opts.Spec.MutualTLSSecret,
+			Namespace: opts.K8sNamespace,
+		}, &secret); err != nil {
+			return nil, err
+		}
+		if secret.Type != corev1.SecretTypeTLS {
+			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls", secret.Name)
+			return nil, err
+		}
+		cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])
+		if err != nil {
+			return nil, err
+		}
+		clientOpts.ConnectionOptions.TLS = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+	}
+
+	c, err := client.Dial(clientOpts)
 	if err != nil {
 		return nil, err
+	}
+
+	if _, err := c.CheckHealth(context.Background(), &client.CheckHealthRequest{}); err != nil {
+		panic(err)
 	}
 
 	cp.mux.Lock()
 	defer cp.mux.Unlock()
 
-	cp.clients[hostPort] = c
+	cp.clients[opts.Spec.HostPort] = c
 
 	return c.WorkflowService(), nil
 }

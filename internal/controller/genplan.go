@@ -25,7 +25,7 @@ type plan struct {
 	// Where to take actions
 
 	TemporalNamespace string
-	TaskQueue         string
+	DeploymentSeries  string
 
 	// Which actions to take
 
@@ -34,6 +34,9 @@ type plan struct {
 	ScaleDeployments  map[*v1.ObjectReference]uint32
 	// Register a new build ID as the default or with ramp
 	UpdateVersionConfig *versionConfig
+
+	// Start a workflow
+	startTestWorkflows []startWorkflowConfig
 }
 
 type versionConfig struct {
@@ -50,15 +53,21 @@ type versionConfig struct {
 	rampPercentage uint8
 }
 
+type startWorkflowConfig struct {
+	workflowType string
+	workflowID   string
+	buildID      string
+	taskQueue    string
+}
+
 func (r *TemporalWorkerReconciler) generatePlan(
 	ctx context.Context,
 	w *temporaliov1alpha1.TemporalWorker,
-	rules *workflowservice.GetWorkerVersioningRulesResponse,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*plan, error) {
 	plan := plan{
 		TemporalNamespace: w.Spec.WorkerOptions.TemporalNamespace,
-		TaskQueue:         w.Spec.WorkerOptions.TaskQueue,
+		DeploymentSeries:  w.Spec.WorkerOptions.DeploymentSeries,
 		ScaleDeployments:  make(map[*v1.ObjectReference]uint32),
 	}
 
@@ -146,9 +155,26 @@ func (r *TemporalWorkerReconciler) generatePlan(
 					plan.ScaleDeployments[newObjectRef(d)] = uint32(*w.Spec.Replicas)
 				}
 
+				// Start a test workflow if the target version is not yet the default version and no test workflow is already running
+				if w.Status.DefaultVersion.BuildID != targetVersion.BuildID && w.Spec.RolloutStrategy.Gate != nil {
+					taskQueuesWithWorkflows := map[string]struct{}{}
+					for _, wf := range targetVersion.TestWorkflows {
+						taskQueuesWithWorkflows[wf.TaskQueue] = struct{}{}
+					}
+					for _, tq := range targetVersion.TaskQueues {
+						if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
+							plan.startTestWorkflows = append(plan.startTestWorkflows, startWorkflowConfig{
+								workflowType: w.Spec.RolloutStrategy.Gate.WorkflowType,
+								workflowID:   getTestWorkflowID(plan.DeploymentSeries, tq.Name, targetVersion.BuildID),
+								buildID:      targetVersion.BuildID,
+								taskQueue:    tq.Name,
+							})
+						}
+					}
+				}
+
 				// Update version configuration
-				// TODO(jlegrone): What to do about ramp values for existing versions? Right now they are not removed.
-				plan.UpdateVersionConfig = getVersionConfigDiff(rules, w.Spec.RolloutStrategy, &w.Status)
+				plan.UpdateVersionConfig = getVersionConfigDiffV2(w.Spec.RolloutStrategy, &w.Status)
 				if plan.UpdateVersionConfig != nil {
 					plan.UpdateVersionConfig.conflictToken = w.Status.VersionConflictToken
 				}
@@ -202,10 +228,48 @@ func getVersionConfigDiff(rules *workflowservice.GetWorkerVersioningRulesRespons
 	return vcfg
 }
 
+func getVersionConfigDiffV2(strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus) *versionConfig {
+	vcfg := getVersionConfig(strategy, status, nil)
+	if vcfg == nil {
+		return nil
+	}
+	vcfg.buildID = status.TargetVersion.BuildID
+
+	// Set default version if there isn't one yet
+	if status.DefaultVersion == nil {
+		vcfg.setDefault = true
+		vcfg.rampPercentage = 0
+		return vcfg
+	}
+
+	// Don't make updates if build id already the default or has correct ramp.
+	// TODO(jlegrone): Get ramp values from status instead of rules
+	if status.DefaultVersion.BuildID == vcfg.buildID {
+		return nil
+	}
+
+	return vcfg
+}
+
 func getVersionConfig(strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus, rampCreateTime *timestamppb.Timestamp) *versionConfig {
 	// Do nothing if target version's deployment is not healthy yet
 	if status == nil || status.TargetVersion.HealthySince == nil {
 		return nil
+	}
+
+	// Do nothing if the test workflows have not completed successfully
+	if strategy.Gate != nil {
+		if len(status.TargetVersion.TaskQueues) == 0 {
+			return nil
+		}
+		if len(status.TargetVersion.TestWorkflows) < len(status.TargetVersion.TaskQueues) {
+			return nil
+		}
+		for _, wf := range status.TargetVersion.TestWorkflows {
+			if wf.Status != temporaliov1alpha1.WorkflowExecutionStatusCompleted {
+				return nil
+			}
+		}
 	}
 
 	switch strategy.Strategy {
@@ -309,8 +373,8 @@ func newDeploymentWithoutOwnerRef(
 				Value: spec.WorkerOptions.TemporalNamespace,
 			},
 			v1.EnvVar{
-				Name:  "TEMPORAL_TASK_QUEUE",
-				Value: spec.WorkerOptions.TaskQueue,
+				Name:  "TEMPORAL_DEPLOYMENT_SERIES",
+				Value: spec.WorkerOptions.DeploymentSeries,
 			},
 			v1.EnvVar{
 				Name:  "WORKER_BUILD_ID",
@@ -318,6 +382,35 @@ func newDeploymentWithoutOwnerRef(
 			},
 		)
 		spec.Template.Spec.Containers[i] = container
+	}
+
+	// Add TLS config if mTLS is enabled
+	if connection.MutualTLSSecret != "" {
+		for i, container := range spec.Template.Spec.Containers {
+			container.Env = append(container.Env,
+				v1.EnvVar{
+					Name:  "TEMPORAL_TLS_KEY_PATH",
+					Value: "/etc/temporal/tls/tls.key",
+				},
+				v1.EnvVar{
+					Name:  "TEMPORAL_TLS_CERT_PATH",
+					Value: "/etc/temporal/tls/tls.crt",
+				},
+			)
+			container.VolumeMounts = append(container.VolumeMounts, v1.VolumeMount{
+				Name:      "temporal-tls",
+				MountPath: "/etc/temporal/tls",
+			})
+			spec.Template.Spec.Containers[i] = container
+		}
+		spec.Template.Spec.Volumes = append(spec.Template.Spec.Volumes, v1.Volume{
+			Name: "temporal-tls",
+			VolumeSource: v1.VolumeSource{
+				Secret: &v1.SecretVolumeSource{
+					SecretName: connection.MutualTLSSecret,
+				},
+			},
+		})
 	}
 
 	blockOwnerDeletion := true

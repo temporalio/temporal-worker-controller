@@ -41,13 +41,13 @@ default version after a deployment.
 In order to be compatible with this controller, workers need to be configured using these standard environment
 variables:
 
-- `WORKER_BUILD_ID`
-- `TEMPORAL_HOST_PORT`
-- `TEMPORAL_TASK_QUEUE`
-- `TEMPORAL_NAMESPACE`
+- `TEMPORAL_HOST_PORT`: The host and port of the Temporal server, e.g. `default.foo.tmprl.cloud:7233`
+- `TEMPORAL_NAMESPACE`: The Temporal namespace to connect to, e.g. `default`
+- `TEMPORAL_DEPLOYMENT_SERIES`: The name of the deployment series. This must be unique to the worker deployment and should not
+  change between versions.
+- `WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
 
-Each of these will be automatically set in the pod template's env, and do not need to be manually specified outside the
-`TemporalWorker` spec.
+Each of these will be automatically set by the controller, and must not be manually specified in the worker's pod template.
 
 ## How It Works
 

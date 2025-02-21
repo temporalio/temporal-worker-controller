@@ -14,6 +14,14 @@ import (
 type TemporalConnectionSpec struct {
 	// The host and port of the Temporal server.
 	HostPort string `json:"hostPort"`
+
+	// MutualTLSSecret is the name of the Secret that contains the TLS certificate and key
+	// for mutual TLS authentication. The secret must be `type: kubernetes.io/tls` and exist
+	// in the same Kubernetes namespace as the TemporalConnection resource.
+	//
+	// More information about creating a TLS secret:
+	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
+	MutualTLSSecret string `json:"mutualTLSSecret,omitempty"`
 }
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection

@@ -7,10 +7,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
+	"go.temporal.io/api/common/v1"
+	"go.temporal.io/api/deployment/v1"
+	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -52,75 +58,58 @@ func (r *TemporalWorkerReconciler) executePlan(ctx context.Context, l logr.Logge
 		}
 	}
 
+	for _, wf := range p.startTestWorkflows {
+		if _, err := temporalClient.StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
+			Namespace:  p.TemporalNamespace,
+			WorkflowId: wf.workflowID,
+			WorkflowType: &common.WorkflowType{
+				Name: wf.workflowType,
+			},
+			TaskQueue: &taskqueue.TaskQueue{
+				Name: wf.taskQueue,
+			},
+			VersioningOverride: &workflow.VersioningOverride{
+				Behavior: enums.VERSIONING_BEHAVIOR_PINNED,
+				Deployment: &deployment.Deployment{
+					SeriesName: p.DeploymentSeries,
+					BuildId:    wf.buildID,
+				},
+			},
+			// TODO(jlegrone): make this configurable
+			WorkflowExecutionTimeout: durationpb.New(time.Hour),
+			Identity:                 "",
+			RequestId:                "",
+			WorkflowIdReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+			WorkflowIdConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
+		}); err != nil {
+			return fmt.Errorf("unable to start test workflow execution: %w", err)
+		}
+	}
+
 	// Register default version or ramp
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.setDefault {
-			// Check out API here:
-			// https://github.com/temporalio/api/blob/cfa1a15b960920a47de8ec272873a4ee4db574c4/temporal/api/workflowservice/v1/request_response.proto#L1073-L1132
 			l.Info("registering new default version", "buildID", vcfg.buildID)
-
-			if _, err := temporalClient.UpdateWorkerVersioningRules(ctx, &workflowservice.UpdateWorkerVersioningRulesRequest{
-				Namespace:     p.TemporalNamespace,
-				TaskQueue:     p.TaskQueue,
-				ConflictToken: vcfg.conflictToken,
-				Operation: &workflowservice.UpdateWorkerVersioningRulesRequest_InsertAssignmentRule{InsertAssignmentRule: &workflowservice.UpdateWorkerVersioningRulesRequest_InsertBuildIdAssignmentRule{
-					RuleIndex: 0,
-					Rule: &taskqueue.BuildIdAssignmentRule{
-						TargetBuildId: vcfg.buildID,
-						Ramp:          nil,
+			if _, err := temporalClient.SetCurrentDeployment(ctx, &workflowservice.SetCurrentDeploymentRequest{
+				Namespace: p.TemporalNamespace,
+				Deployment: &deployment.Deployment{
+					SeriesName: p.DeploymentSeries,
+					BuildId:    vcfg.buildID,
+				},
+				Identity: "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.
+				UpdateMetadata: &deployment.UpdateDeploymentMetadata{
+					UpsertEntries: map[string]*common.Payload{
+						// TODO(jlegrone): Add controller identity
+						"temporal.io/managed-by": nil,
 					},
-				}},
+				},
 			}); err != nil {
-				return fmt.Errorf("unable to update versioning rules: %w", err)
+				return fmt.Errorf("unable to set current deployment: %w", err)
 			}
-
-			//rules, err := r.WorkflowServiceClient.GetWorkerVersioningRules(ctx, &workflowservice.GetWorkerVersioningRulesRequest{
-			//	Namespace: p.TemporalNamespace,
-			//	TaskQueue: p.TaskQueue,
-			//})
-			//if err != nil {
-			//	return fmt.Errorf("unable to get versioning rules: %w", err)
-			//}
-			//if len(rules.GetAssignmentRules()) > 0 {
-			//	if _, err := r.WorkflowServiceClient.UpdateWorkerVersioningRules(ctx, &workflowservice.UpdateWorkerVersioningRulesRequest{
-			//		Namespace:     p.TemporalNamespace,
-			//		TaskQueue:     p.TaskQueue,
-			//		ConflictToken: vcfg.conflictToken,
-			//		Operation: &workflowservice.UpdateWorkerVersioningRulesRequest_ReplaceAssignmentRule{ReplaceAssignmentRule: &workflowservice.UpdateWorkerVersioningRulesRequest_ReplaceBuildIdAssignmentRule{
-			//			RuleIndex: 0,
-			//			Rule: &taskqueue.BuildIdAssignmentRule{
-			//				TargetBuildId: vcfg.buildID,
-			//				Ramp:          nil,
-			//			},
-			//			Force: false,
-			//		}},
-			//	}); err != nil {
-			//		return fmt.Errorf("unable to update versioning rules: %w", err)
-			//	}
-			//}
 		} else if ramp := vcfg.rampPercentage; ramp > 0 {
 			// Apply ramp
 			l.Info("applying ramp", "buildID", p.UpdateVersionConfig.buildID, "percentage", p.UpdateVersionConfig.rampPercentage)
-			// TODO(jlegrone): override existing ramp value?
-			_, err := temporalClient.UpdateWorkerVersioningRules(ctx, &workflowservice.UpdateWorkerVersioningRulesRequest{
-				Namespace:     p.TemporalNamespace,
-				TaskQueue:     p.TaskQueue,
-				ConflictToken: vcfg.conflictToken,
-				Operation: &workflowservice.UpdateWorkerVersioningRulesRequest_InsertAssignmentRule{InsertAssignmentRule: &workflowservice.UpdateWorkerVersioningRulesRequest_InsertBuildIdAssignmentRule{
-					RuleIndex: 0,
-					Rule: &taskqueue.BuildIdAssignmentRule{
-						TargetBuildId: vcfg.buildID,
-						Ramp: &taskqueue.BuildIdAssignmentRule_PercentageRamp{
-							PercentageRamp: &taskqueue.RampByPercentage{
-								RampPercentage: float32(ramp),
-							},
-						},
-					},
-				}},
-			})
-			if err != nil {
-				return fmt.Errorf("unable to update versioning rules: %w", err)
-			}
+			return fmt.Errorf("ramp not implemented")
 		}
 	}
 

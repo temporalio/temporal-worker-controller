@@ -44,6 +44,13 @@ spec:
             properties:
               cutover:
                 properties:
+                  gate:
+                    properties:
+                      workflowType:
+                        type: string
+                    required:
+                    - workflowType
+                    type: object
                   steps:
                     items:
                       properties:
@@ -3731,13 +3738,12 @@ spec:
                 properties:
                   connection:
                     type: string
-                  taskQueue:
+                  series:
                     type: string
                   temporalNamespace:
                     type: string
                 required:
                 - connection
-                - taskQueue
                 - temporalNamespace
                 type: object
             required:
@@ -3776,10 +3782,39 @@ spec:
                   healthySince:
                     format: date-time
                     type: string
+                  managedBy:
+                    type: string
                   rampPercentage:
                     type: integer
                   reachability:
                     type: string
+                  taskQueues:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  testWorkflows:
+                    items:
+                      properties:
+                        runID:
+                          type: string
+                        status:
+                          type: string
+                        taskQueue:
+                          type: string
+                        workflowID:
+                          type: string
+                      required:
+                      - runID
+                      - status
+                      - taskQueue
+                      - workflowID
+                      type: object
+                    type: array
                 required:
                 - buildID
                 - reachability
@@ -3814,10 +3849,39 @@ spec:
                     healthySince:
                       format: date-time
                       type: string
+                    managedBy:
+                      type: string
                     rampPercentage:
                       type: integer
                     reachability:
                       type: string
+                    taskQueues:
+                      items:
+                        properties:
+                          name:
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      type: array
+                    testWorkflows:
+                      items:
+                        properties:
+                          runID:
+                            type: string
+                          status:
+                            type: string
+                          taskQueue:
+                            type: string
+                          workflowID:
+                            type: string
+                        required:
+                        - runID
+                        - status
+                        - taskQueue
+                        - workflowID
+                        type: object
+                      type: array
                   required:
                   - buildID
                   - reachability
@@ -3852,10 +3916,39 @@ spec:
                   healthySince:
                     format: date-time
                     type: string
+                  managedBy:
+                    type: string
                   rampPercentage:
                     type: integer
                   reachability:
                     type: string
+                  taskQueues:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  testWorkflows:
+                    items:
+                      properties:
+                        runID:
+                          type: string
+                        status:
+                          type: string
+                        taskQueue:
+                          type: string
+                        workflowID:
+                          type: string
+                      required:
+                      - runID
+                      - status
+                      - taskQueue
+                      - workflowID
+                      type: object
+                    type: array
                 required:
                 - buildID
                 - reachability
