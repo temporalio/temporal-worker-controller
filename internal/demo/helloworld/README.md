@@ -4,6 +4,8 @@
 This demo assumes you have [skaffold](https://skaffold.dev/docs/install/) and [minikube](https://minikube.sigs.k8s.io/docs/) and installed, but any
 Kubernetes cluster should work if you're able to push the demo worker image.
 
+Note: Currently this demo only works with a cloud cluster. 
+
 1. Start local Temporal server:
     ```bash
     make start-temporal-server

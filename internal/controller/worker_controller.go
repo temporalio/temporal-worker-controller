@@ -49,9 +49,11 @@ type TemporalWorkerReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+// The loop runs on a regular interval, or every time one of the watched resources listed above changes.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
+// TODO(carlydf): Add watching of temporal connection custom resource (may have issue)
 func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("Running Reconcile loop")
@@ -75,9 +77,9 @@ func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		l.Error(err, "")
 		return ctrl.Result{}, err
 	}
-	// Set a default deployment series name
-	if workerDeploy.Spec.WorkerOptions.DeploymentSeries == "" {
-		err := fmt.Errorf("DeploymentSeries must be set")
+	// Set a default deployment name
+	if workerDeploy.Spec.WorkerOptions.DeploymentName == "" {
+		err := fmt.Errorf("DeploymentName must be set")
 		l.Error(err, "")
 		return ctrl.Result{}, err
 	}
@@ -131,7 +133,7 @@ func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	workerDeploy.Default()
 
 	// Generate a plan to get to desired spec from current status
-	plan, err := r.generatePlan(ctx, &workerDeploy, temporalConnection.Spec)
+	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

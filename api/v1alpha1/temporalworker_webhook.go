@@ -23,7 +23,7 @@ var _ webhook.Defaulter = &TemporalWorker{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *TemporalWorker) Default() {
-	if r.Spec.WorkerOptions.DeploymentSeries == "" {
-		r.Spec.WorkerOptions.DeploymentSeries = fmt.Sprintf("%s.%s", r.GetName(), r.GetNamespace())
+	if r.Spec.WorkerOptions.DeploymentName == "" {
+		r.Spec.WorkerOptions.DeploymentName = fmt.Sprintf("%s-%s", r.GetName(), r.GetNamespace())
 	}
 }

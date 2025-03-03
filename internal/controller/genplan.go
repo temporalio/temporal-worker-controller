@@ -7,11 +7,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/go-logr/logr"
+	"strings"
 	"time"
 
-	"go.temporal.io/api/taskqueue/v1"
-	"go.temporal.io/api/workflowservice/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,14 +24,14 @@ type plan struct {
 	// Where to take actions
 
 	TemporalNamespace string
-	DeploymentSeries  string
+	DeploymentName    string
 
 	// Which actions to take
 
 	DeleteDeployments []*appsv1.Deployment
 	CreateDeployment  *appsv1.Deployment
 	ScaleDeployments  map[*v1.ObjectReference]uint32
-	// Register a new build ID as the default or with ramp
+	// Register a new version as the default or with ramp
 	UpdateVersionConfig *versionConfig
 
 	// Start a workflow
@@ -42,32 +41,33 @@ type plan struct {
 type versionConfig struct {
 	// Token to use for conflict detection
 	conflictToken []byte
-	// build ID for which this config applies
-	buildID string
+	// version ID for which this config applies
+	versionID string
 
 	// One of rampPercentage OR setDefault must be set to a non-zero value.
 
 	// Set this as the default build ID for all new executions
 	setDefault bool
 	// Acceptable values [0,100]
-	rampPercentage uint8
+	rampPercentage float32
 }
 
 type startWorkflowConfig struct {
 	workflowType string
 	workflowID   string
-	buildID      string
+	versionID    string
 	taskQueue    string
 }
 
 func (r *TemporalWorkerReconciler) generatePlan(
 	ctx context.Context,
+	l logr.Logger,
 	w *temporaliov1alpha1.TemporalWorker,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*plan, error) {
 	plan := plan{
 		TemporalNamespace: w.Spec.WorkerOptions.TemporalNamespace,
-		DeploymentSeries:  w.Spec.WorkerOptions.DeploymentSeries,
+		DeploymentName:    w.Spec.WorkerOptions.DeploymentName,
 		ScaleDeployments:  make(map[*v1.ObjectReference]uint32),
 	}
 
@@ -86,51 +86,69 @@ func (r *TemporalWorkerReconciler) generatePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorker resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	// Scale or delete deployments based on reachability
-	for _, versionSet := range w.Status.DeprecatedVersions {
-		if versionSet.Deployment == nil {
+	// Scale or delete deployments based on drainage status
+	for _, version := range w.Status.DeprecatedVersions {
+		if version.Deployment == nil {
 			// There's nothing we can do if the deployment was already deleted out of band.
 			continue
 		}
 
-		d, err := r.getDeployment(ctx, versionSet.Deployment)
+		d, err := r.getDeployment(ctx, version.Deployment)
 		if err != nil {
 			return nil, err
 		}
-
-		switch versionSet.Reachability {
-		case temporaliov1alpha1.ReachabilityStatusReachable:
-			// Scale up reachable deployments
+		// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
+		// TODO(carlydf): Consolidate scale up cases and verify that scale up is the correct action for inactive versions
+		switch version.Status {
+		case temporaliov1alpha1.VersionStatusInactive:
+			// Scale up inactive deployments because they may be needed for canary tests
 			if d.Spec.Replicas != nil && *d.Spec.Replicas != *w.Spec.Replicas {
-				plan.ScaleDeployments[versionSet.Deployment] = uint32(*w.Spec.Replicas)
+				plan.ScaleDeployments[version.Deployment] = uint32(*w.Spec.Replicas)
 			}
-		case temporaliov1alpha1.ReachabilityStatusUnreachable:
-			// Scale down unreachable deployments. We do this instead
-			// of deleting them so that they can be scaled back up if
-			// their build ID is promoted to default again (i.e. during
-			// a rollback).
-			if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
-				plan.ScaleDeployments[versionSet.Deployment] = 0
+		case temporaliov1alpha1.VersionStatusRamping:
+			// Scale up ramping deployments
+			if d.Spec.Replicas != nil && *d.Spec.Replicas != *w.Spec.Replicas {
+				plan.ScaleDeployments[version.Deployment] = uint32(*w.Spec.Replicas)
 			}
-		case temporaliov1alpha1.ReachabilityStatusClosedOnly:
-			// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
-			// Scale down queryable deployments
-			const closedOnlyReplicas = 0
-			if d.Spec.Replicas != nil && *d.Spec.Replicas != closedOnlyReplicas {
-				plan.ScaleDeployments[versionSet.Deployment] = closedOnlyReplicas
+		case temporaliov1alpha1.VersionStatusCurrent:
+			// Scale up current deployments
+			if d.Spec.Replicas != nil && *d.Spec.Replicas != *w.Spec.Replicas {
+				plan.ScaleDeployments[version.Deployment] = uint32(*w.Spec.Replicas)
 			}
-		case temporaliov1alpha1.ReachabilityStatusNotRegistered:
-			// Delete unregistered deployments
-			plan.DeleteDeployments = append(plan.DeleteDeployments, d)
+		case temporaliov1alpha1.VersionStatusDrained:
+			// Delete deployments that have been drained for long enough.
+			if time.Since(version.DrainedSince.Time) > getDeleteDelay(&w.Spec) {
+				plan.DeleteDeployments = append(plan.DeleteDeployments, d)
+			} else if time.Since(version.DrainedSince.Time) > getScaledownDelay(&w.Spec) {
+				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
+				// Scale down more recently drained deployments. We do this instead
+				// of deleting them so that they can be scaled back up if
+				// their version is promoted to default again (i.e. during
+				// a rollback).
+				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
+					plan.ScaleDeployments[version.Deployment] = 0
+				}
+			}
+		case temporaliov1alpha1.VersionStatusNotRegistered:
+			// NotRegistered versions are versions that the server doesn't know about,
+			// either because the poller hasn't arrived yet or because the version has
+			// been deleted because it's old and has no pollers.
+			// At the beginning of a rollout there might be a short window of time when
+			// the Deployment exists in k8s, but the target version has not been registered yet.
+			// This check prevents us from deleting that version's Deployment.
+			if version != w.Status.TargetVersion {
+				plan.DeleteDeployments = append(plan.DeleteDeployments, d)
+			}
 		}
 	}
 
-	desiredBuildID := computeBuildID(&w.Spec)
+	desiredVersionID := computeVersionID(&w.Spec)
 
 	if targetVersion := w.Status.TargetVersion; targetVersion != nil {
 		if targetVersion.Deployment == nil {
 			// Create new deployment from current pod template when it doesn't exist
-			d, err := r.newDeployment(w, desiredBuildID, connection)
+			_, buildID, _ := strings.Cut(desiredVersionID, ".")
+			d, err := r.newDeployment(w, buildID, connection)
 			if err != nil {
 				return nil, err
 			}
@@ -144,8 +162,8 @@ func (r *TemporalWorkerReconciler) generatePlan(
 				return nil, err
 			}
 
-			if targetVersion.BuildID != desiredBuildID {
-				// Delete the latest (unregistered) deployment if the desired build ID has changed
+			if targetVersion.VersionID != desiredVersionID {
+				// Delete the latest (unregistered) deployment if the desired version ID has changed
 				plan.DeleteDeployments = append(plan.DeleteDeployments, d)
 			} else {
 				// Scale the existing deployment and update versioning config
@@ -156,7 +174,7 @@ func (r *TemporalWorkerReconciler) generatePlan(
 				}
 
 				// Start a test workflow if the target version is not yet the default version and no test workflow is already running
-				if w.Status.DefaultVersion.BuildID != targetVersion.BuildID && w.Spec.RolloutStrategy.Gate != nil {
+				if w.Status.DefaultVersion.VersionID != targetVersion.VersionID && w.Spec.RolloutStrategy.Gate != nil {
 					taskQueuesWithWorkflows := map[string]struct{}{}
 					for _, wf := range targetVersion.TestWorkflows {
 						taskQueuesWithWorkflows[wf.TaskQueue] = struct{}{}
@@ -165,8 +183,8 @@ func (r *TemporalWorkerReconciler) generatePlan(
 						if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 							plan.startTestWorkflows = append(plan.startTestWorkflows, startWorkflowConfig{
 								workflowType: w.Spec.RolloutStrategy.Gate.WorkflowType,
-								workflowID:   getTestWorkflowID(plan.DeploymentSeries, tq.Name, targetVersion.BuildID),
-								buildID:      targetVersion.BuildID,
+								workflowID:   getTestWorkflowID(plan.DeploymentName, tq.Name, targetVersion.VersionID),
+								versionID:    targetVersion.VersionID,
 								taskQueue:    tq.Name,
 							})
 						}
@@ -174,7 +192,7 @@ func (r *TemporalWorkerReconciler) generatePlan(
 				}
 
 				// Update version configuration
-				plan.UpdateVersionConfig = getVersionConfigDiffV2(w.Spec.RolloutStrategy, &w.Status)
+				plan.UpdateVersionConfig = getVersionConfigDiff(l, w.Spec.RolloutStrategy, &w.Status)
 				if plan.UpdateVersionConfig != nil {
 					plan.UpdateVersionConfig.conflictToken = w.Status.VersionConflictToken
 				}
@@ -185,55 +203,12 @@ func (r *TemporalWorkerReconciler) generatePlan(
 	return &plan, nil
 }
 
-func getOldestBuildIDCreateTime(rules *workflowservice.GetWorkerVersioningRulesResponse, buildID string) *timestamppb.Timestamp {
-	var rule *taskqueue.TimestampedBuildIdAssignmentRule
-	for _, r := range rules.GetAssignmentRules() {
-		if r.GetRule().GetTargetBuildId() != buildID {
-			break
-		}
-		rule = r
-	}
-	return rule.GetCreateTime()
-}
-
-func getVersionConfigDiff(rules *workflowservice.GetWorkerVersioningRulesResponse, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus) *versionConfig {
-	vcfg := getVersionConfig(strategy, status, getOldestBuildIDCreateTime(rules, status.TargetVersion.BuildID))
+func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus) *versionConfig {
+	vcfg := getVersionConfig(l, strategy, status)
 	if vcfg == nil {
 		return nil
 	}
-	vcfg.buildID = status.TargetVersion.BuildID
-
-	// Set default version if no assignment rules exist
-	if len(rules.GetAssignmentRules()) == 0 {
-		vcfg.setDefault = true
-		vcfg.rampPercentage = 0
-		return vcfg
-	}
-
-	// Don't make updates if build id already the default or has correct ramp.
-	// TODO(jlegrone): Get ramp values from status instead of rules
-	first := rules.GetAssignmentRules()[0].GetRule()
-	if first.GetTargetBuildId() == vcfg.buildID {
-		ramp := first.GetPercentageRamp()
-		// Skip making changes if build id is already the default
-		if ramp == nil || ramp.GetRampPercentage() == 100 {
-			return nil
-		}
-		// Skip making changes if ramp is already set to the desired value
-		if ramp.GetRampPercentage() == float32(vcfg.rampPercentage) {
-			return nil
-		}
-	}
-
-	return vcfg
-}
-
-func getVersionConfigDiffV2(strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus) *versionConfig {
-	vcfg := getVersionConfig(strategy, status, nil)
-	if vcfg == nil {
-		return nil
-	}
-	vcfg.buildID = status.TargetVersion.BuildID
+	vcfg.versionID = status.TargetVersion.VersionID
 
 	// Set default version if there isn't one yet
 	if status.DefaultVersion == nil {
@@ -242,16 +217,22 @@ func getVersionConfigDiffV2(strategy temporaliov1alpha1.RolloutStrategy, status 
 		return vcfg
 	}
 
-	// Don't make updates if build id already the default or has correct ramp.
-	// TODO(jlegrone): Get ramp values from status instead of rules
-	if status.DefaultVersion.BuildID == vcfg.buildID {
+	// Don't make updates if desired default is already the default
+	if vcfg.versionID == status.DefaultVersion.VersionID {
+		return nil
+	}
+
+	// Don't make updates if desired ramping version is already the target, and ramp percentage is correct
+	if !vcfg.setDefault &&
+		vcfg.versionID == status.TargetVersion.VersionID &&
+		vcfg.rampPercentage == *status.TargetVersion.RampPercentage {
 		return nil
 	}
 
 	return vcfg
 }
 
-func getVersionConfig(strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus, rampCreateTime *timestamppb.Timestamp) *versionConfig {
+func getVersionConfig(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus) *versionConfig {
 	// Do nothing if target version's deployment is not healthy yet
 	if status == nil || status.TargetVersion.HealthySince == nil {
 		return nil
@@ -284,14 +265,17 @@ func getVersionConfig(strategy temporaliov1alpha1.RolloutStrategy, status *tempo
 		// Determine the correct percentage ramp
 		var (
 			healthyDuration    time.Duration
-			currentRamp        uint8
+			currentRamp        float32
 			totalPauseDuration = healthyDuration
 		)
-		if rampCreateTime != nil {
-			healthyDuration = time.Since(rampCreateTime.AsTime())
+		if status.TargetVersion.RampingSince != nil {
+			healthyDuration = time.Since(status.TargetVersion.RampingSince.Time)
+			// TODO(carlydf): Is it important that the version spends x time at each step % ?
+			// Currently, if 1% ramp is set, and then multiple reconcile loops error so the next steps aren't set,
+			// the version could skip straight from 1% to current if the error-ing period > totalPauseDuration
 		}
 		for _, s := range strategy.Steps {
-			if s.RampPercentage != 0 {
+			if s.RampPercentage != 0 { // TODO(carlydf): Support setting any ramp in [0,100]
 				currentRamp = s.RampPercentage
 			}
 			totalPauseDuration += s.PauseDuration.Duration
@@ -373,8 +357,8 @@ func newDeploymentWithoutOwnerRef(
 				Value: spec.WorkerOptions.TemporalNamespace,
 			},
 			v1.EnvVar{
-				Name:  "TEMPORAL_DEPLOYMENT_SERIES",
-				Value: spec.WorkerOptions.DeploymentSeries,
+				Name:  "TEMPORAL_DEPLOYMENT_NAME",
+				Value: spec.WorkerOptions.DeploymentName,
 			},
 			v1.EnvVar{
 				Name:  "WORKER_BUILD_ID",

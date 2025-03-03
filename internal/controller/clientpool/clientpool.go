@@ -11,7 +11,7 @@ import (
 	"os"
 	"sync"
 
-	"go.temporal.io/api/workflowservice/v1"
+	workflowservice "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
 	corev1 "k8s.io/api/core/v1"
@@ -36,6 +36,7 @@ func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	}
 }
 
+// TODO(carlydf): Replace with sdk client (scoped by ns). One controller could need to manage workers for multiple temporal namespaces and/or clusters (self-hosted)
 func (cp *ClientPool) GetWorkflowServiceClient(hostPort string) (workflowservice.WorkflowServiceClient, bool) {
 	cp.mux.RLock()
 	defer cp.mux.RUnlock()
