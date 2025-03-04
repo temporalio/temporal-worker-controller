@@ -15,18 +15,18 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Default BuildID for new workflows
-      jsonPath: .status.defaultVersion.buildID
+    - description: Default Version for new workflows
+      jsonPath: .status.defaultVersion.versionID
       name: Default
       type: string
-    - description: BuildID of the current worker template
-      jsonPath: .status.targetVersion.buildID
+    - description: Version of the current worker template
+      jsonPath: .status.targetVersion.versionID
       name: Target
       type: string
-    - description: Percentage of new workflows starting on Target BuildID
+    - description: Percentage of new workflows starting on Target Version
       jsonPath: .status.targetVersion.rampPercentage
       name: Target-Ramp
-      type: integer
+      type: number
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -57,7 +57,7 @@ spec:
                         pauseDuration:
                           type: string
                         rampPercentage:
-                          type: integer
+                          type: number
                       required:
                       - pauseDuration
                       - rampPercentage
@@ -107,6 +107,13 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              sunset:
+                properties:
+                  deleteDelay:
+                    type: string
+                  scaledownDelay:
+                    type: string
+                type: object
               template:
                 properties:
                   metadata:
@@ -3738,7 +3745,7 @@ spec:
                 properties:
                   connection:
                     type: string
-                  series:
+                  deploymentName:
                     type: string
                   temporalNamespace:
                     type: string
@@ -3748,6 +3755,7 @@ spec:
                 type: object
             required:
             - cutover
+            - sunset
             - template
             - workerOptions
             type: object
@@ -3755,12 +3763,6 @@ spec:
             properties:
               defaultVersion:
                 properties:
-                  buildID:
-                    type: string
-                  compatibleBuildIDs:
-                    items:
-                      type: string
-                    type: array
                   deployment:
                     properties:
                       apiVersion:
@@ -3779,14 +3781,20 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
+                  drainedSince:
+                    format: date-time
+                    type: string
                   healthySince:
                     format: date-time
                     type: string
                   managedBy:
                     type: string
                   rampPercentage:
-                    type: integer
-                  reachability:
+                    type: number
+                  rampingSince:
+                    format: date-time
+                    type: string
+                  status:
                     type: string
                   taskQueues:
                     items:
@@ -3815,19 +3823,15 @@ spec:
                       - workflowID
                       type: object
                     type: array
+                  versionID:
+                    type: string
                 required:
-                - buildID
-                - reachability
+                - status
+                - versionID
                 type: object
               deprecatedVersions:
                 items:
                   properties:
-                    buildID:
-                      type: string
-                    compatibleBuildIDs:
-                      items:
-                        type: string
-                      type: array
                     deployment:
                       properties:
                         apiVersion:
@@ -3846,14 +3850,20 @@ spec:
                           type: string
                       type: object
                       x-kubernetes-map-type: atomic
+                    drainedSince:
+                      format: date-time
+                      type: string
                     healthySince:
                       format: date-time
                       type: string
                     managedBy:
                       type: string
                     rampPercentage:
-                      type: integer
-                    reachability:
+                      type: number
+                    rampingSince:
+                      format: date-time
+                      type: string
+                    status:
                       type: string
                     taskQueues:
                       items:
@@ -3882,19 +3892,15 @@ spec:
                         - workflowID
                         type: object
                       type: array
+                    versionID:
+                      type: string
                   required:
-                  - buildID
-                  - reachability
+                  - status
+                  - versionID
                   type: object
                 type: array
               targetVersion:
                 properties:
-                  buildID:
-                    type: string
-                  compatibleBuildIDs:
-                    items:
-                      type: string
-                    type: array
                   deployment:
                     properties:
                       apiVersion:
@@ -3913,14 +3919,20 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
+                  drainedSince:
+                    format: date-time
+                    type: string
                   healthySince:
                     format: date-time
                     type: string
                   managedBy:
                     type: string
                   rampPercentage:
-                    type: integer
-                  reachability:
+                    type: number
+                  rampingSince:
+                    format: date-time
+                    type: string
+                  status:
                     type: string
                   taskQueues:
                     items:
@@ -3949,9 +3961,11 @@ spec:
                       - workflowID
                       type: object
                     type: array
+                  versionID:
+                    type: string
                 required:
-                - buildID
-                - reachability
+                - status
+                - versionID
                 type: object
               versionConflictToken:
                 format: byte

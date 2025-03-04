@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,7 +37,7 @@ func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerSpec {
 		Template: testPodTemplate,
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace: "baz",
-			DeploymentSeries:  "qux",
+			DeploymentName:    "qux",
 		},
 	}
 }
@@ -58,14 +59,13 @@ func newTestDeployment(podSpec v1.PodTemplateSpec, desiredReplicas int32) *appsv
 	}
 }
 
-func newTestVersionedDeployment(reachabilityStatus temporaliov1alpha1.ReachabilityStatus, deploymentName string) *temporaliov1alpha1.VersionedDeployment {
-	result := temporaliov1alpha1.VersionedDeployment{
-		HealthySince:       nil,
-		BuildID:            "test-id",
-		CompatibleBuildIDs: nil,
-		Reachability:       reachabilityStatus,
-		RampPercentage:     nil,
-		Deployment:         nil,
+func newTestWorkerDeploymentVersion(status temporaliov1alpha1.VersionStatus, deploymentName string) *temporaliov1alpha1.WorkerDeploymentVersion {
+	result := temporaliov1alpha1.WorkerDeploymentVersion{
+		HealthySince:   nil,
+		VersionID:      deploymentName + "." + "test-id",
+		Status:         status,
+		RampPercentage: nil,
+		Deployment:     nil,
 	}
 
 	if deploymentName != "" {
@@ -80,6 +80,7 @@ func newTestVersionedDeployment(reachabilityStatus temporaliov1alpha1.Reachabili
 	return &result
 }
 
+// TODO(carlydf): Make these tests align with VersionStatus instead of reachability
 func TestGeneratePlan(t *testing.T) {
 	type testCase struct {
 		observedState *temporaliov1alpha1.TemporalWorkerStatus
@@ -90,17 +91,16 @@ func TestGeneratePlan(t *testing.T) {
 	testCases := map[string]testCase{
 		"no action needed": {
 			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
+				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-a"), // prev reachable
 			},
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{},
 		},
-		"create deployment": {
+		"create deployment version": {
 			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersion: &temporaliov1alpha1.VersionedDeployment{
-					Reachability:       temporaliov1alpha1.ReachabilityStatusReachable,
-					CompatibleBuildIDs: nil,
-					BuildID:            "a",
+				DefaultVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
+					Status:    temporaliov1alpha1.VersionStatusInactive, // prev reachable
+					VersionID: "foo-a.a",
 				},
 				DeprecatedVersions: nil,
 			},
@@ -111,13 +111,13 @@ func TestGeneratePlan(t *testing.T) {
 				UpdateVersionConfig: nil,
 			},
 		},
-		"delete unreachable deployments": {
+		"delete unreachable deployment versions": {
 			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
-				DefaultVersion: newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-a"),
-				DeprecatedVersions: []*temporaliov1alpha1.VersionedDeployment{
-					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-b"),
-					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusReachable, "foo-c"),
-					newTestVersionedDeployment(temporaliov1alpha1.ReachabilityStatusUnreachable, "foo-d"),
+				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-a"), // prev reachable
+				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-b"), // prev unreachable
+					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-c"), // prev reachable
+					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-d"), // prev unreachable
 				},
 			},
 			desiredState: newTestWorkerSpec(3),
@@ -164,7 +164,7 @@ func TestGeneratePlan(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			actualPlan, err := r.generatePlan(context.Background(), &temporaliov1alpha1.TemporalWorker{
+			actualPlan, err := r.generatePlan(context.Background(), log.FromContext(context.Background()), &temporaliov1alpha1.TemporalWorker{
 				TypeMeta:   metav1.TypeMeta{},
 				ObjectMeta: metav1.ObjectMeta{},
 				Spec:       *tc.desiredState,
