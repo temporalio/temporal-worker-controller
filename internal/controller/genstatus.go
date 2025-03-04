@@ -228,7 +228,7 @@ func newDeploymentVersionCollection() deploymentVersionCollection {
 	}
 }
 
-func (r *TemporalWorkerReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient workflowservice.WorkflowServiceClient, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorker) (*temporaliov1alpha1.TemporalWorkerStatus, error) {
+func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient workflowservice.WorkflowServiceClient, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	var (
 		desiredVersionID, defaultVersionID string
 		deployedVersions                   []string
@@ -418,7 +418,7 @@ func (r *TemporalWorkerReconciler) generateStatus(ctx context.Context, l logr.Lo
 		targetVersion.RampingSince = rampingSinceTime
 	}
 
-	return &temporaliov1alpha1.TemporalWorkerStatus{
+	return &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 		DefaultVersion:       defaultVersion,
 		TargetVersion:        targetVersion,
 		DeprecatedVersions:   deprecatedVersions,

@@ -32,16 +32,16 @@ const (
 	buildIDLabel   = "temporal.io/build-id"
 )
 
-// TemporalWorkerReconciler reconciles a TemporalWorker object
-type TemporalWorkerReconciler struct {
+// TemporalWorkerDeploymentReconciler reconciles a TemporalWorker object
+type TemporalWorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
 }
 
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkers,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkers/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkers/finalizers,verbs=update
+//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
@@ -54,12 +54,12 @@ type TemporalWorkerReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 // TODO(carlydf): Add watching of temporal connection custom resource (may have issue)
-func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("Running Reconcile loop")
 
 	// Fetch the worker deployment
-	var workerDeploy temporaliov1alpha1.TemporalWorker
+	var workerDeploy temporaliov1alpha1.TemporalWorkerDeployment
 	if err := r.Get(ctx, req.NamespacedName, &workerDeploy); err != nil {
 		l.Error(err, "unable to fetch TemporalWorker")
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
@@ -153,7 +153,7 @@ func (r *TemporalWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *TemporalWorkerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
 		// grab the job object, extract the owner...
 		deploy := rawObj.(*appsv1.Deployment)
@@ -175,7 +175,7 @@ func (r *TemporalWorkerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&temporaliov1alpha1.TemporalWorker{}).
+		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Complete(r)
 }

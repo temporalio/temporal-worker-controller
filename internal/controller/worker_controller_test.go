@@ -31,8 +31,8 @@ var (
 	}
 )
 
-func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerSpec {
-	return &temporaliov1alpha1.TemporalWorkerSpec{
+func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
+	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 		Replicas: &replicas,
 		Template: testPodTemplate,
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
@@ -83,21 +83,21 @@ func newTestWorkerDeploymentVersion(status temporaliov1alpha1.VersionStatus, dep
 // TODO(carlydf): Make these tests align with VersionStatus instead of reachability
 func TestGeneratePlan(t *testing.T) {
 	type testCase struct {
-		observedState *temporaliov1alpha1.TemporalWorkerStatus
-		desiredState  *temporaliov1alpha1.TemporalWorkerSpec
+		observedState *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		desiredState  *temporaliov1alpha1.TemporalWorkerDeploymentSpec
 		expectedPlan  plan
 	}
 
 	testCases := map[string]testCase{
 		"no action needed": {
-			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-a"), // prev reachable
 			},
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{},
 		},
 		"create deployment version": {
-			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				DefaultVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
 					Status:    temporaliov1alpha1.VersionStatusInactive, // prev reachable
 					VersionID: "foo-a.a",
@@ -112,7 +112,7 @@ func TestGeneratePlan(t *testing.T) {
 			},
 		},
 		"delete unreachable deployment versions": {
-			observedState: &temporaliov1alpha1.TemporalWorkerStatus{
+			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-a"), // prev reachable
 				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
 					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo-b"), // prev unreachable
@@ -158,13 +158,13 @@ func TestGeneratePlan(t *testing.T) {
 	//	t.Fatal(err)
 	//}
 
-	r := &TemporalWorkerReconciler{
+	r := &TemporalWorkerDeploymentReconciler{
 		Client: c,
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			actualPlan, err := r.generatePlan(context.Background(), log.FromContext(context.Background()), &temporaliov1alpha1.TemporalWorker{
+			actualPlan, err := r.generatePlan(context.Background(), log.FromContext(context.Background()), &temporaliov1alpha1.TemporalWorkerDeployment{
 				TypeMeta:   metav1.TypeMeta{},
 				ObjectMeta: metav1.ObjectMeta{},
 				Spec:       *tc.desiredState,

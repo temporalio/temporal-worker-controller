@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.2
-  name: temporalworkers.temporal.io
+  name: temporalworkerdeployments.temporal.io
 spec:
   group: temporal.io
   names:
-    kind: TemporalWorker
-    listKind: TemporalWorkerList
-    plural: temporalworkers
-    singular: temporalworker
+    kind: TemporalWorkerDeployment
+    listKind: TemporalWorkerDeploymentList
+    plural: temporalworkerdeployments
+    singular: temporalworkerdeployment
   scope: Namespaced
   versions:
   - additionalPrinterColumns:

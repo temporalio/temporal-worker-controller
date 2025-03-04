@@ -83,7 +83,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.TemporalWorkerReconciler{
+	if err = (&controller.TemporalWorkerDeploymentReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		TemporalClientPool: clientpool.New(
@@ -95,7 +95,7 @@ func main() {
 			mgr.GetClient(),
 		),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "TemporalWorker")
+		setupLog.Error(err, "unable to create controller", "controller", "TemporalWorkerDeployment")
 		os.Exit(1)
 	}
 	// TODO(jlegrone): Enable the webhook after fixing TLS

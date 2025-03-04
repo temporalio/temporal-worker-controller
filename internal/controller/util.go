@@ -25,11 +25,11 @@ const (
 	defaultDeleteDelay    = 24 * time.Hour
 )
 
-func computeVersionID(spec *temporaliov1alpha1.TemporalWorkerSpec) string {
+func computeVersionID(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) string {
 	return spec.WorkerOptions.DeploymentName + "." + computeBuildID(spec)
 }
 
-func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerSpec) string {
+func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) string {
 	return utils.ComputeHash(&spec.Template, nil)
 }
 
@@ -37,14 +37,14 @@ func getTestWorkflowID(series, taskQueue, buildID string) string {
 	return fmt.Sprintf("test-deploy:%s:%s:%s", series, taskQueue, buildID)
 }
 
-func getScaledownDelay(spec *temporaliov1alpha1.TemporalWorkerSpec) time.Duration {
+func getScaledownDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
 	if spec.SunsetStrategy.ScaledownDelay == nil {
 		return defaultScaledownDelay
 	}
 	return spec.SunsetStrategy.ScaledownDelay.Duration
 }
 
-func getDeleteDelay(spec *temporaliov1alpha1.TemporalWorkerSpec) time.Duration {
+func getDeleteDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
 	if spec.SunsetStrategy.DeleteDelay == nil {
 		return defaultDeleteDelay
 	}

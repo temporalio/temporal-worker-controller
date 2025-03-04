@@ -16,7 +16,7 @@ RUN go mod download
 # Copy the go source
 COPY util util
 # Copy everything in the worker directory recursively
-# But skip any files named temporal_worker.yaml or Dockerfile or _test.go
+# But skip any files named temporal_worker_deployment.yaml or Dockerfile or _test.go
 COPY ${WORKER} ${WORKER}
 RUN find ${WORKER} -name "temporal_worker.yaml" -prune -o -name "Dockerfile" -prune -o -name "*_test.go" -prune -o -type f -print
 

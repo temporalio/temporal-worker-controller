@@ -60,7 +60,7 @@ Each of these will be automatically set by the controller, and must not be manua
 
 Note: These sequence diagrams have not been fully converted to versioning v0.31 terminology.
 
-Every `TemporalWorker` resource manages one or more standard `Deployment` resources. Each deployment manages pods
+Every `TemporalWorkerDeployment` resource manages one or more standard `Deployment` resources. Each deployment manages pods
 which in turn poll Temporal for tasks pinned to their respective versions.
 
 ```mermaid

@@ -12,7 +12,7 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 type WorkerOptions struct {
-	// The name of a TemporalConnection in the same namespace as the TemporalWorker.
+	// The name of a TemporalConnection in the same namespace as the TemporalWorkerDeployment.
 	TemporalConnection string `json:"connection"`
 	// The Temporal namespace for the worker to connect to.
 	TemporalNamespace string `json:"temporalNamespace"`
@@ -26,13 +26,13 @@ type WorkerOptions struct {
 	DeploymentName string `json:"deploymentName"`
 }
 
-// TemporalWorkerSpec defines the desired state of TemporalWorker
-type TemporalWorkerSpec struct {
+// TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment
+type TemporalWorkerDeploymentSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Number of desired pods. This is a pointer to distinguish between explicit
 	// zero and not specified. Defaults to 1.
-	// This field makes TemporalWorkerSpec implement the scale subresource, which is compatible with auto-scalers.
+	// This field makes TemporalWorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
 	// TODO(jlegrone): Configure min replicas per thousand workflow/activity tasks?
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
@@ -104,8 +104,8 @@ const (
 	VersionStatusDrained VersionStatus = "Drained"
 )
 
-// TemporalWorkerStatus defines the observed state of TemporalWorker
-type TemporalWorkerStatus struct {
+// TemporalWorkerDeploymentStatus defines the observed state of TemporalWorkerDeployment
+type TemporalWorkerDeploymentStatus struct {
 	// Remember, status should be able to be reconstituted from the state of the world,
 	// so it’s generally not a good idea to read from the status of the root object.
 	// Instead, you should reconstruct it every run.
@@ -291,26 +291,26 @@ type QueueStatistics struct {
 //+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// TemporalWorker is the Schema for the temporalworkers API
+// TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
 //
 // TODO(jlegrone): Implement default/validate interface https://book.kubebuilder.io/cronjob-tutorial/webhook-implementation.html
-type TemporalWorker struct {
+type TemporalWorkerDeployment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TemporalWorkerSpec   `json:"spec,omitempty"`
-	Status TemporalWorkerStatus `json:"status,omitempty"`
+	Spec   TemporalWorkerDeploymentSpec   `json:"spec,omitempty"`
+	Status TemporalWorkerDeploymentStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// TemporalWorkerList contains a list of TemporalWorker
-type TemporalWorkerList struct {
+// TemporalWorkerDeploymentList contains a list of TemporalWorkerDeployment
+type TemporalWorkerDeploymentList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []TemporalWorker `json:"items"`
+	Items           []TemporalWorkerDeployment `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&TemporalWorker{}, &TemporalWorkerList{})
+	SchemeBuilder.Register(&TemporalWorkerDeployment{}, &TemporalWorkerDeploymentList{})
 }

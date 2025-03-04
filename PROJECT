@@ -14,7 +14,7 @@ resources:
   controller: true
   domain: temporal.io
   group: temporal.io
-  kind: TemporalWorker
+  kind: TemporalWorkerDeployment
   path: github.com/temporalio/worker-controller/api/v1alpha1
   version: v1alpha1
   webhooks:
