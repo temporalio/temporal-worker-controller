@@ -5,38 +5,28 @@
 package controller
 
 import (
+	"context"
+	"errors"
 	"fmt"
-
-	"golang.org/x/exp/slices"
+	"go.temporal.io/api/deployment/v1"
+	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/api/workflowservice/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	"strings"
+	"time"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
 )
 
-func findHighestPriorityStatus(statuses []temporaliov1alpha1.ReachabilityStatus) temporaliov1alpha1.ReachabilityStatus {
-	if len(statuses) == 0 {
-		return ""
-	}
-	slices.SortFunc(statuses, func(a, b temporaliov1alpha1.ReachabilityStatus) int {
-		return getStatusPriority(a) - getStatusPriority(b)
-	})
-	return statuses[len(statuses)-1]
-}
+const (
+	defaultScaledownDelay = 1 * time.Hour
+	defaultDeleteDelay    = 24 * time.Hour
+)
 
-func getStatusPriority(s temporaliov1alpha1.ReachabilityStatus) int {
-	switch s {
-	case temporaliov1alpha1.ReachabilityStatusReachable:
-		return 4
-	case temporaliov1alpha1.ReachabilityStatusClosedOnly:
-		return 3
-	case temporaliov1alpha1.ReachabilityStatusUnreachable:
-		return 2
-	case temporaliov1alpha1.ReachabilityStatusNotRegistered:
-		return 1
-	}
-	return 0
+func computeVersionID(spec *temporaliov1alpha1.TemporalWorkerSpec) string {
+	return spec.WorkerOptions.DeploymentName + "." + computeBuildID(spec)
 }
 
 func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerSpec) string {
@@ -45,6 +35,20 @@ func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerSpec) string {
 
 func getTestWorkflowID(series, taskQueue, buildID string) string {
 	return fmt.Sprintf("test-deploy:%s:%s:%s", series, taskQueue, buildID)
+}
+
+func getScaledownDelay(spec *temporaliov1alpha1.TemporalWorkerSpec) time.Duration {
+	if spec.SunsetStrategy.ScaledownDelay == nil {
+		return defaultScaledownDelay
+	}
+	return spec.SunsetStrategy.ScaledownDelay.Duration
+}
+
+func getDeleteDelay(spec *temporaliov1alpha1.TemporalWorkerSpec) time.Duration {
+	if spec.SunsetStrategy.DeleteDelay == nil {
+		return defaultDeleteDelay
+	}
+	return spec.SunsetStrategy.DeleteDelay.Duration
 }
 
 func newObjectRef(d *appsv1.Deployment) *v1.ObjectReference {
@@ -58,5 +62,92 @@ func newObjectRef(d *appsv1.Deployment) *v1.ObjectReference {
 		UID:             d.UID,
 		APIVersion:      d.APIVersion,
 		ResourceVersion: d.ResourceVersion,
+	}
+}
+
+func describeWorkerDeploymentHandleNotFound(
+	ctx context.Context,
+	temporalClient workflowservice.WorkflowServiceClient,
+	req *workflowservice.DescribeWorkerDeploymentRequest) (*workflowservice.DescribeWorkerDeploymentResponse, error) {
+	describeResp, err := temporalClient.DescribeWorkerDeployment(ctx, req)
+
+	var notFoundErr *serviceerror.NotFound
+	if err != nil {
+		if errors.As(err, &notFoundErr) {
+			return &workflowservice.DescribeWorkerDeploymentResponse{
+				ConflictToken: nil,
+				WorkerDeploymentInfo: &deployment.WorkerDeploymentInfo{
+					Name:          req.GetDeploymentName(),
+					RoutingConfig: &deployment.RoutingConfig{CurrentVersion: "__unversioned__"},
+				},
+			}, nil
+		} else {
+			return nil, fmt.Errorf("unable to describe worker deployment %s: %w", req.GetDeploymentName(), err)
+		}
+	}
+	return describeResp, err
+}
+
+// TODO(carlydf): Cache describe success for versions that already exist
+// awaitVersionRegistration should be called after a poller starts polling with config of this version, since that is
+// what will register the version with the server. SetRamp and SetCurrent will fail if the version does not exist.
+func awaitVersionRegistration(
+	ctx context.Context,
+	temporalClient workflowservice.WorkflowServiceClient,
+	namespace, versionID string) error {
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return context.Canceled
+		case <-ticker.C:
+			_, err := temporalClient.DescribeWorkerDeploymentVersion(ctx, &workflowservice.DescribeWorkerDeploymentVersionRequest{
+				Namespace: namespace,
+				Version:   versionID,
+			})
+			var notFoundErr *serviceerror.NotFound
+			if err != nil {
+				if errors.As(err, &notFoundErr) {
+					continue
+				} else {
+					return fmt.Errorf("unable to describe worker deployment version %s: %w", versionID, err)
+				}
+			}
+			// After the version exists, confirm that it also exists in the worker deployment
+			// TODO(carlydf): Remove this check after next Temporal Cloud version which solves this inconsistency
+			return awaitVersionRegistrationInDeployment(ctx, temporalClient, namespace, versionID)
+		}
+	}
+}
+
+func awaitVersionRegistrationInDeployment(
+	ctx context.Context,
+	temporalClient workflowservice.WorkflowServiceClient,
+	namespace, versionID string) error {
+	deploymentName, _, _ := strings.Cut(versionID, ".")
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return context.Canceled
+		case <-ticker.C:
+			resp, err := temporalClient.DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
+				Namespace:      namespace,
+				DeploymentName: deploymentName,
+			})
+			var notFoundErr *serviceerror.NotFound
+			if err != nil {
+				if errors.As(err, &notFoundErr) {
+					continue
+				} else {
+					return fmt.Errorf("unable to describe worker deployment %s: %w", deploymentName, err)
+				}
+			}
+			for _, vs := range resp.GetWorkerDeploymentInfo().GetVersionSummaries() {
+				if vs.GetVersion() == versionID {
+					return nil
+				}
+			}
+		}
 	}
 }

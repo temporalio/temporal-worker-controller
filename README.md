@@ -28,13 +28,20 @@ default version after a deployment.
 
 - [x] Registration of new worker versions
 - [x] Creation of versioned worker deployment resources
-- [x] Deletion of unreachable worker deployments
+- [x] Deletion of drained worker deployments
 - [x] Manual, Blue/Green, and Progressive rollouts of new worker versions
 - [ ] Autoscaling of worker deployments
 - [ ] Automated rollover to compatible worker versions
 - [ ] Canary analysis of new worker versions
 - [ ] Optional cancellation after timeout for workflows on old versions
 - [ ] Passing `ContinueAsNew` signal to workflows on old versions
+
+## Terminology
+Note that in Temporal, "Worker Deployment" is sometimes referred to as "Deployment", but since the controller makes
+significant references to Kubernetes Deployment resource, within this repository we will stick to these terms:
+- **Worker Deployment Version**: A version of a deployment or service. It can have multiple Workers, but they all run the same build. Sometimes shortened to "version" or "deployment version."
+- **Worker Deployment**: A deployment or service across multiple versions. In a rainbow deploy, a worker deployment can have multiple active deployment versions running at once.
+- **Deployment**: A Kubernetes Deployment resource.
 
 ## Usage
 
@@ -43,13 +50,15 @@ variables:
 
 - `TEMPORAL_HOST_PORT`: The host and port of the Temporal server, e.g. `default.foo.tmprl.cloud:7233`
 - `TEMPORAL_NAMESPACE`: The Temporal namespace to connect to, e.g. `default`
-- `TEMPORAL_DEPLOYMENT_SERIES`: The name of the deployment series. This must be unique to the worker deployment and should not
+- `TEMPORAL_DEPLOYMENT_NAME`: The name of the worker deployment. This must be unique to the worker deployment and should not
   change between versions.
 - `WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
 
 Each of these will be automatically set by the controller, and must not be manually specified in the worker's pod template.
 
 ## How It Works
+
+Note: These sequence diagrams have not been fully converted to versioning v0.31 terminology.
 
 Every `TemporalWorker` resource manages one or more standard `Deployment` resources. Each deployment manages pods
 which in turn poll Temporal for tasks pinned to their respective versions.
@@ -58,7 +67,7 @@ which in turn poll Temporal for tasks pinned to their respective versions.
 flowchart TD
     wd[TemporalWorker]
 
-    subgraph "Latest/default worker version"
+    subgraph "Latest/default deployment version"
         d5["Deployment v5"]
         rs5["ReplicaSet v5"]
         p5a["Pod v5-a"]
@@ -70,7 +79,7 @@ flowchart TD
         rs5 --> p5c
     end
 
-    subgraph "Deprecated worker versions"
+    subgraph "Deprecated deployment versions"
         d1["Deployment v1"]
         rs1["ReplicaSet v1"]
         p1a["Pod v1-a"]
@@ -98,11 +107,11 @@ flowchart TD
 
 ### Worker Lifecycle
 
-When a new worker version is deployed, the worker controller automates the registration of a new default worker
-version in Temporal.
+When a new worker deployment version is deployed, the worker controller automates the registration of a new default worker
+deployment version in Temporal.
 
-As older workflows finish executing and deprecated worker versions are no longer needed, the worker controller also
-frees up resources by deleting old deployments.
+As older workflows finish executing and deprecated deployment versions are no longer needed, the worker controller also
+frees up resources by deleting old deployment versions.
 
 ```mermaid
 sequenceDiagram

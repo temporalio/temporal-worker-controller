@@ -55,11 +55,13 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 # source secret.env && make start-sample-workflow TEMPORAL_CLOUD_API_KEY=$TEMPORAL_CLOUD_API_KEY
 .PHONY: start-sample-workflow
 start-sample-workflow: ## Start a sample workflow.
-	@$(TEMPORAL) workflow start --type "hello_world" --task-queue "hello_world" \
+	@$(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world" \
       --tls-cert-path certs/ca.pem \
       --tls-key-path certs/ca.key \
-      --address replay-2025.ktasd.tmprl.cloud:7233 \
-      --api-key $(TEMPORAL_CLOUD_API_KEY)
+      --address "worker-controller-test.a2dd6.tmprl.cloud:7233" \
+      -n "worker-controller-test.a2dd6"
+#      --address replay-2025.ktasd.tmprl.cloud:7233 \
+#      --api-key $(TEMPORAL_CLOUD_API_KEY)
 
 .PHONY: apply-load-sample-workflow
 apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
@@ -83,14 +85,8 @@ deploy-sample-worker: build-sample-worker ## Deploy the sample worker to the clu
 .PHONY: start-temporal-server
 start-temporal-server: ## Start an ephemeral Temporal server with versioning APIs enabled.
 	$(TEMPORAL) server start-dev --ip 0.0.0.0 \
-		--dynamic-config-value frontend.workerVersioningRuleAPIs=true \
 		--dynamic-config-value frontend.workerVersioningWorkflowAPIs=true \
-		--dynamic-config-value frontend.workerVersioningDataAPIs=true
-#		--dynamic-config-value worker.buildIdScavengerEnabled=true \
-#		--dynamic-config-value worker.removableBuildIdDurationSinceDefault=0.001 \
-#		--dynamic-config-value frontend.reachabilityQuerySetDurationSinceDefault=0.001 \
-
-# Check for reachabilityCacheClosedTTL
+		--dynamic-config-value system.enableDeploymentVersions=true
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.

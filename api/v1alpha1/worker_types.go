@@ -19,11 +19,11 @@ type WorkerOptions struct {
 	// Assign a deployment series name to this worker. Different versions of the same worker
 	// service/application are linked together by sharing a series name.
 	//
-	// If not set, then the deployment series will default to the worker's name and Kubernetes
+	// If not set, then the deployment name will default to the worker's name and Kubernetes
 	// namespace.
 	//
 	// +optional
-	DeploymentSeries string `json:"series"`
+	DeploymentName string `json:"deploymentName"`
 }
 
 // TemporalWorkerSpec defines the desired state of TemporalWorker
@@ -32,6 +32,7 @@ type TemporalWorkerSpec struct {
 
 	// Number of desired pods. This is a pointer to distinguish between explicit
 	// zero and not specified. Defaults to 1.
+	// This field makes TemporalWorkerSpec implement the scale subresource, which is compatible with auto-scalers.
 	// TODO(jlegrone): Configure min replicas per thousand workflow/activity tasks?
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
@@ -59,33 +60,48 @@ type TemporalWorkerSpec struct {
 	// not be estimated during the time a deployment is paused. Defaults to 600s.
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
 
-	// How to cut over new workflow executions to the target worker version.
+	// How to cut over new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"cutover"`
+
+	// How to manage sunsetting drained versions.
+	SunsetStrategy SunsetStrategy `json:"sunset"`
 
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
-// ReachabilityStatus indicates whether the version set is processing tasks.
+// VersionStatus indicates the status of a version.
 // +enum
-type ReachabilityStatus string
+type VersionStatus string
 
 const (
-	// ReachabilityStatusReachable indicates that the build ID may be used by
-	// new workflows or activities (base on versioning rules), or there MAY
-	// be open workflows or backlogged activities assigned to it.
-	ReachabilityStatusReachable ReachabilityStatus = "Reachable"
-	// ReachabilityStatusClosedOnly indicates that the build ID does not have
-	// open workflows and is not reachable by new workflows, but MAY have
-	// closed workflows within the namespace retention period.
-	ReachabilityStatusClosedOnly ReachabilityStatus = "ClosedWorkflows"
-	// ReachabilityStatusUnreachable indicates that the build ID is not used
-	// for new executions, nor it has been used by any existing execution
-	// within the retention period.
-	ReachabilityStatusUnreachable ReachabilityStatus = "Unreachable"
-	// ReachabilityStatusNotRegistered indicates that the build ID is not registered
-	// with Temporal for the given task queue.
-	ReachabilityStatusNotRegistered ReachabilityStatus = "NotRegistered"
+	// VersionStatusNotRegistered indicates that the version is not registered
+	// with Temporal for any worker deployment.
+	VersionStatusNotRegistered VersionStatus = "NotRegistered"
+
+	// VersionStatusInactive indicates that the version is registered in a Temporal
+	// worker deployment, but has not been set to current or ramping.
+	// A version is registered in a worker deployment after a poller with appropriate
+	// DeploymentOptions starts polling.
+	VersionStatusInactive VersionStatus = "Inactive"
+
+	// VersionStatusRamping indicates that the version is the ramping version of its
+	// worker deployment. It is accepting some percentage of new workflow executions.
+	VersionStatusRamping = "Ramping"
+
+	// VersionStatusCurrent indicates that the version is the current version of its
+	// worker deployment. It is accepting all new workflow executions except for the
+	// percent that are sent to the ramping version, if one exists.
+	VersionStatusCurrent = "Current"
+
+	// VersionStatusDraining indicates that the version has stopped accepting new workflows
+	// (is no longer ramping or current) and DOES have open workflows pinned to it.
+	VersionStatusDraining VersionStatus = "Draining"
+
+	// VersionStatusDrained indicates that the version has stopped accepting new workflows
+	// (is no longer ramping or current) and does NOT have open workflows pinned to it.
+	// This version MAY still receive query tasks associated with closed workflows.
+	VersionStatusDrained VersionStatus = "Drained"
 )
 
 // TemporalWorkerStatus defines the observed state of TemporalWorker
@@ -94,23 +110,23 @@ type TemporalWorkerStatus struct {
 	// so it’s generally not a good idea to read from the status of the root object.
 	// Instead, you should reconstruct it every run.
 
-	// TargetVersion is the desired next version. If the deployment is nil,
+	// TargetVersion is the desired next version. If TargetVersion.Deployment is nil,
 	// then the controller should create it. If not nil, the controller should
-	// wait for it to become healthy and then move it to the DefaultVersionSet.
-	TargetVersion *VersionedDeployment `json:"targetVersion"`
+	// wait for it to become healthy and then move it to the DefaultVersion.
+	TargetVersion *WorkerDeploymentVersion `json:"targetVersion"`
 
-	// DefaultVersion is the deployment that is currently registered with
-	// Temporal as the default. This must never be nil.
+	// DefaultVersion is the version that is currently registered with
+	// Temporal as the current version of its worker deployment. This must never be nil.
 	//
 	// RampPercentage should always be nil for this version.
-	DefaultVersion *VersionedDeployment `json:"defaultVersion"`
+	DefaultVersion *WorkerDeploymentVersion `json:"defaultVersion"`
 
-	// DeprecatedVersions are deployments that are no longer the default. Any
-	// deployments that are unreachable should be deleted by the controller.
+	// DeprecatedVersions are deployment versions that are no longer the default. Any
+	// deployment versions that are unreachable should be deleted by the controller.
 	//
 	// RampPercentage should only be set for DeprecatedVersions when rollout
 	// strategy is set to manual.
-	DeprecatedVersions []*VersionedDeployment `json:"deprecatedVersions,omitempty"`
+	DeprecatedVersions []*WorkerDeploymentVersion `json:"deprecatedVersions,omitempty"`
 
 	// TODO(jlegrone): Add description
 	VersionConflictToken []byte `json:"versionConflictToken"`
@@ -147,35 +163,42 @@ type TaskQueue struct {
 	Name string `json:"name"`
 }
 
-type VersionedDeployment struct {
-	// Healthy indicates whether the deployment is healthy.
+type WorkerDeploymentVersion struct {
+	// Healthy indicates whether the deployment version is healthy.
 	// +optional
 	HealthySince *metav1.Time `json:"healthySince"`
 
-	// The build ID associated with the deployment.
-	BuildID string `json:"buildID"`
+	// The string representation of the deployment version.
+	// Currently, this is always `deployment_name.build_id`.
+	VersionID string `json:"versionID"`
 
-	// Other compatible build IDs that redirect to this deployment.
-	CompatibleBuildIDs []string `json:"compatibleBuildIDs,omitempty"`
-
-	// Reachability indicates whether workers in this version set may
+	// Status indicates whether workers in this version may
 	// be eligible to receive tasks from the Temporal server.
-	Reachability ReachabilityStatus `json:"reachability"`
+	Status VersionStatus `json:"status"`
 
 	// RampPercentage is the percentage of new workflow executions that are
 	// configured to start on this version.
 	//
 	// Acceptable range is [0,100].
-	RampPercentage *uint8 `json:"rampPercentage,omitempty"`
+	RampPercentage *float32 `json:"rampPercentage,omitempty"`
 
-	// A pointer to the version set's managed deployment.
+	// DrainedSince is the time at which the version
+	// became drained.
+	// +optional
+	DrainedSince *metav1.Time `json:"drainedSince"`
+
+	// RampingSince is time when the version first started ramping.
+	// +optional
+	RampingSince *metav1.Time `json:"rampingSince"`
+
+	// A pointer to the version's managed k8s deployment.
 	// +optional
 	Deployment *v1.ObjectReference `json:"deployment"`
 
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
-	// A TestWorkflow is used to validate the deployment before making it the default.
+	// A TestWorkflow is used to validate the deployment version before making it the default.
 	// +optional
 	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
 
@@ -185,7 +208,7 @@ type VersionedDeployment struct {
 }
 
 // DefaultVersionUpdateStrategy describes how to cut over new workflow executions
-// to the target worker version.
+// to the target worker deployment version.
 // +kubebuilder:validation:Enum=Manual;AllAtOnce;Progressive
 type DefaultVersionUpdateStrategy string
 
@@ -205,12 +228,12 @@ type GateWorkflowConfig struct {
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
 	// Valid values are:
-	// - "Manual": do not automatically update the default worker version;
-	// - "AllAtOnce": start 100% of new workflow executions on the new worker version as soon as it's healthy;
-	// - "Progressive": ramp up the percentage of new workflow executions targeting the new worker version over time.
+	// - "Manual": do not automatically update the default worker deployment version;
+	// - "AllAtOnce": start 100% of new workflow executions on the new worker deployment version as soon as it's healthy;
+	// - "Progressive": ramp up the percentage of new workflow executions targeting the new worker deployment version over time.
 	Strategy DefaultVersionUpdateStrategy `json:"strategy"`
 
-	// Gate specifies a workflow type that must run once to completion on the new worker version before
+	// Gate specifies a workflow type that must run once to completion on the new worker deployment version before
 	// any traffic is directed to the new version.
 	Gate *GateWorkflowConfig `json:"gate,omitempty"`
 
@@ -219,14 +242,27 @@ type RolloutStrategy struct {
 	Steps []RolloutStep `json:"steps,omitempty" protobuf:"bytes,3,rep,name=steps"`
 }
 
+// SunsetStrategy defines strategy to apply when sunsetting k8s deployments of drained versions.
+type SunsetStrategy struct {
+	// ScaledownDelay specifies how long to wait after a version is drained before scaling its Deployment to zero.
+	// Defaults to 1 hour.
+	// +optional
+	ScaledownDelay *metav1.Duration `json:"scaledownDelay"`
+
+	// DeleteDelay specifies how long to wait after a version is drained before deleting its Deployment.
+	// Defaults to 24 hours.
+	// +optional
+	DeleteDelay *metav1.Duration `json:"deleteDelay"`
+}
+
 type AllAtOnceRolloutStrategy struct{}
 
 type RolloutStep struct {
 	// RampPercentage indicates what percentage of new workflow executions should be
-	// routed to the new worker version while this step is active.
+	// routed to the new worker deployment version while this step is active.
 	//
 	// Acceptable range is [0,100].
-	RampPercentage uint8 `json:"rampPercentage"`
+	RampPercentage float32 `json:"rampPercentage"`
 
 	// PauseDuration indicates how long to pause before progressing to the next step.
 	PauseDuration metav1.Duration `json:"pauseDuration"`
@@ -250,9 +286,9 @@ type QueueStatistics struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Default",type="string",JSONPath=".status.defaultVersion.buildID",description="Default BuildID for new workflows"
-//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="BuildID of the current worker template"
-//+kubebuilder:printcolumn:name="Target-Ramp",type="integer",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target BuildID"
+//+kubebuilder:printcolumn:name="Default",type="string",JSONPath=".status.defaultVersion.versionID",description="Default Version for new workflows"
+//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.versionID",description="Version of the current worker template"
+//+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // TemporalWorker is the Schema for the temporalworkers API
