@@ -235,11 +235,8 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		versions                           = newDeploymentVersionCollection()
 	)
 
-	if workerDeploy.Spec.WorkerOptions.DeploymentName == "" {
-		panic("nope")
-	}
-	workerDeploymentName := workerDeploy.Spec.WorkerOptions.DeploymentName
-	desiredVersionID = computeVersionID(&workerDeploy.Spec)
+	workerDeploymentName := computeWorkerDeploymentName(workerDeploy)
+	desiredVersionID = computeVersionID(workerDeploy)
 
 	// List k8s deployments that correspond to managed worker deployment versions
 	var childDeploys appsv1.DeploymentList
@@ -339,7 +336,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 			wf, err := temporalClient.DescribeWorkflowExecution(ctx, &workflowservice.DescribeWorkflowExecutionRequest{
 				Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 				Execution: &common.WorkflowExecution{
-					WorkflowId: getTestWorkflowID(workerDeploy.Spec.WorkerOptions.DeploymentName, tq.GetName(), desiredVersionID),
+					WorkflowId: getTestWorkflowID(computeWorkerDeploymentName(workerDeploy), tq.GetName(), desiredVersionID),
 				},
 			})
 			// TODO(jlegrone): Detect "not found" errors properly

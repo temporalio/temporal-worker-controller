@@ -37,7 +37,6 @@ func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerDeploym
 		Template: testPodTemplate,
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace: "baz",
-			DeploymentName:    "qux",
 		},
 	}
 }

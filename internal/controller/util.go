@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/go-logr/logr"
 	"go.temporal.io/api/deployment/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
@@ -25,8 +26,18 @@ const (
 	defaultDeleteDelay    = 24 * time.Hour
 )
 
-func computeVersionID(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) string {
-	return spec.WorkerOptions.DeploymentName + "." + computeBuildID(spec)
+func computeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+	// TODO(carlydf): Consider making this separator "." if/when Temporal can handle that
+	// Use "--" as a separator so that the version ID can be the name of the deployment we create for that version.
+	return fmt.Sprintf("%s--%s", w.GetName(), w.GetNamespace())
+}
+
+func computeVersionID(r *temporaliov1alpha1.TemporalWorkerDeployment) string {
+	return getVersionID(computeWorkerDeploymentName(r), computeBuildID(&r.Spec))
+}
+
+func getVersionID(workerDeploymentName, buildID string) string {
+	return workerDeploymentName + "." + buildID
 }
 
 func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) string {
@@ -93,10 +104,12 @@ func describeWorkerDeploymentHandleNotFound(
 // what will register the version with the server. SetRamp and SetCurrent will fail if the version does not exist.
 func awaitVersionRegistration(
 	ctx context.Context,
+	l logr.Logger,
 	temporalClient workflowservice.WorkflowServiceClient,
 	namespace, versionID string) error {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
+		l.Info(fmt.Sprintf("checking if version %s exists", versionID))
 		select {
 		case <-ctx.Done():
 			return context.Canceled
@@ -115,18 +128,20 @@ func awaitVersionRegistration(
 			}
 			// After the version exists, confirm that it also exists in the worker deployment
 			// TODO(carlydf): Remove this check after next Temporal Cloud version which solves this inconsistency
-			return awaitVersionRegistrationInDeployment(ctx, temporalClient, namespace, versionID)
+			return awaitVersionRegistrationInDeployment(ctx, l, temporalClient, namespace, versionID)
 		}
 	}
 }
 
 func awaitVersionRegistrationInDeployment(
 	ctx context.Context,
+	l logr.Logger,
 	temporalClient workflowservice.WorkflowServiceClient,
 	namespace, versionID string) error {
 	deploymentName, _, _ := strings.Cut(versionID, ".")
 	ticker := time.NewTicker(1 * time.Second)
 	for {
+		l.Info(fmt.Sprintf("checking if version %s exists in worker deployment", versionID))
 		select {
 		case <-ctx.Done():
 			return context.Canceled

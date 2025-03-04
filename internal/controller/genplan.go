@@ -6,7 +6,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"github.com/go-logr/logr"
 	"strings"
 	"time"
@@ -67,7 +66,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 ) (*plan, error) {
 	plan := plan{
 		TemporalNamespace: w.Spec.WorkerOptions.TemporalNamespace,
-		DeploymentName:    w.Spec.WorkerOptions.DeploymentName,
+		DeploymentName:    computeWorkerDeploymentName(w),
 		ScaleDeployments:  make(map[*v1.ObjectReference]uint32),
 	}
 
@@ -142,7 +141,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		}
 	}
 
-	desiredVersionID := computeVersionID(&w.Spec)
+	desiredVersionID := computeVersionID(w)
 
 	if targetVersion := w.Status.TargetVersion; targetVersion != nil {
 		if targetVersion.Deployment == nil {
@@ -314,7 +313,7 @@ func (r *TemporalWorkerDeploymentReconciler) newDeployment(
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*appsv1.Deployment, error) {
-	d := newDeploymentWithoutOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, buildID, connection)
+	d := newDeploymentWithoutOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, computeWorkerDeploymentName(w), buildID, connection)
 	if err := ctrl.SetControllerReference(w, d, r.Scheme); err != nil {
 		return nil, err
 	}
@@ -325,6 +324,7 @@ func newDeploymentWithoutOwnerRef(
 	typeMeta *metav1.TypeMeta,
 	objectMeta *metav1.ObjectMeta,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	workerDeploymentName string,
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
@@ -358,7 +358,7 @@ func newDeploymentWithoutOwnerRef(
 			},
 			v1.EnvVar{
 				Name:  "TEMPORAL_DEPLOYMENT_NAME",
-				Value: spec.WorkerOptions.DeploymentName,
+				Value: workerDeploymentName,
 			},
 			v1.EnvVar{
 				Name:  "WORKER_BUILD_ID",
@@ -401,7 +401,7 @@ func newDeploymentWithoutOwnerRef(
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:                       fmt.Sprintf("%s.%s", objectMeta.Name, buildID),
+			Name:                       getVersionID(workerDeploymentName, buildID), // valid if workerDeploymentName is a valid k8s resource name
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
 			Labels:                     selectorLabels,

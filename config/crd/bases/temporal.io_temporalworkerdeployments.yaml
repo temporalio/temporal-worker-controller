@@ -3745,8 +3745,6 @@ spec:
                 properties:
                   connection:
                     type: string
-                  deploymentName:
-                    type: string
                   temporalNamespace:
                     type: string
                 required:

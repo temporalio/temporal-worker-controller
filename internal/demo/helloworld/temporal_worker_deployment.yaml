@@ -11,7 +11,6 @@ spec:
     connection: dev-server
     #    temporalNamespace: "replay-2025.ktasd"
     temporalNamespace: "worker-controller-test.a2dd6"
-    deploymentName: "my-test-deployment-3"
 
   # How to cut over new workflow executions to the latest worker version
   cutover:

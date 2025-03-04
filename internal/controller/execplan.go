@@ -58,7 +58,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	}
 
 	for _, wf := range p.startTestWorkflows {
-		err := awaitVersionRegistration(ctx, temporalClient, p.TemporalNamespace, wf.versionID)
+		err := awaitVersionRegistration(ctx, l, temporalClient, p.TemporalNamespace, wf.versionID)
 		if err != nil {
 			return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 		}
@@ -89,7 +89,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Register default version or ramp
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.setDefault {
-			err := awaitVersionRegistration(ctx, temporalClient, p.TemporalNamespace, vcfg.versionID)
+			err := awaitVersionRegistration(ctx, l, temporalClient, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {
 				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 			}
@@ -123,7 +123,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
 			}
 		} else if ramp := vcfg.rampPercentage; ramp > 0 { // TODO(carlydf): Support setting any ramp in [0,100]
-			err := awaitVersionRegistration(ctx, temporalClient, p.TemporalNamespace, vcfg.versionID)
+			err := awaitVersionRegistration(ctx, l, temporalClient, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {
 				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 			}

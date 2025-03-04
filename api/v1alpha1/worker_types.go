@@ -16,14 +16,6 @@ type WorkerOptions struct {
 	TemporalConnection string `json:"connection"`
 	// The Temporal namespace for the worker to connect to.
 	TemporalNamespace string `json:"temporalNamespace"`
-	// Assign a deployment series name to this worker. Different versions of the same worker
-	// service/application are linked together by sharing a series name.
-	//
-	// If not set, then the deployment name will default to the worker's name and Kubernetes
-	// namespace.
-	//
-	// +optional
-	DeploymentName string `json:"deploymentName"`
 }
 
 // TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment

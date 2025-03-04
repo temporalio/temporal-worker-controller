@@ -77,12 +77,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		l.Error(err, "")
 		return ctrl.Result{}, err
 	}
-	// Set a default deployment name
-	if workerDeploy.Spec.WorkerOptions.DeploymentName == "" {
-		err := fmt.Errorf("DeploymentName must be set")
-		l.Error(err, "")
-		return ctrl.Result{}, err
-	}
 
 	// Fetch the connection parameters
 	var temporalConnection temporaliov1alpha1.TemporalConnection
@@ -164,7 +158,7 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		}
 		// ...make sure it's a TemporalWorker...
 		// TODO(jlegrone): double check apiGVStr has the correct value
-		if owner.APIVersion != apiGVStr || owner.Kind != "TemporalWorker" {
+		if owner.APIVersion != apiGVStr || owner.Kind != "TemporalWorkerDeployment" {
 			return nil
 		}
 

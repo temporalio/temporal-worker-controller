@@ -5,8 +5,6 @@
 package v1alpha1
 
 import (
-	"fmt"
-
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
@@ -23,7 +21,4 @@ var _ webhook.Defaulter = &TemporalWorkerDeployment{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *TemporalWorkerDeployment) Default() {
-	if r.Spec.WorkerOptions.DeploymentName == "" {
-		r.Spec.WorkerOptions.DeploymentName = fmt.Sprintf("%s-%s", r.GetName(), r.GetNamespace())
-	}
 }
