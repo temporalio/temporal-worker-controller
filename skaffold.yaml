@@ -38,11 +38,11 @@ profiles:
               WORKER: "helloworld"
     manifests:
       rawYaml:
-        - internal/demo/helloworld/temporal_worker.yaml
+        - internal/demo/helloworld/temporal_worker_deployment.yaml
 deploy:
   kubeContext: minikube
   kubectl: {}
 resourceSelector:
   allow:
-    - groupKind: "TemporalWorker.temporal.io"
+    - groupKind: "TemporalWorkerDeployment.temporal.io"
       image: [".*"]

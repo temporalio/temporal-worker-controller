@@ -33,4 +33,4 @@ datadog:
     tlsVerify: false
   orchestratorExplorer:
     customResources:
-      - temporal.io/v1alpha1/temporalworkers
+      - temporal.io/v1alpha1/temporalworkerdeployments

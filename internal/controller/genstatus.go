@@ -228,18 +228,15 @@ func newDeploymentVersionCollection() deploymentVersionCollection {
 	}
 }
 
-func (r *TemporalWorkerReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient workflowservice.WorkflowServiceClient, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorker) (*temporaliov1alpha1.TemporalWorkerStatus, error) {
+func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient workflowservice.WorkflowServiceClient, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	var (
 		desiredVersionID, defaultVersionID string
 		deployedVersions                   []string
 		versions                           = newDeploymentVersionCollection()
 	)
 
-	if workerDeploy.Spec.WorkerOptions.DeploymentName == "" {
-		panic("nope")
-	}
-	workerDeploymentName := workerDeploy.Spec.WorkerOptions.DeploymentName
-	desiredVersionID = computeVersionID(&workerDeploy.Spec)
+	workerDeploymentName := computeWorkerDeploymentName(workerDeploy)
+	desiredVersionID = computeVersionID(workerDeploy)
 
 	// List k8s deployments that correspond to managed worker deployment versions
 	var childDeploys appsv1.DeploymentList
@@ -339,7 +336,7 @@ func (r *TemporalWorkerReconciler) generateStatus(ctx context.Context, l logr.Lo
 			wf, err := temporalClient.DescribeWorkflowExecution(ctx, &workflowservice.DescribeWorkflowExecutionRequest{
 				Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 				Execution: &common.WorkflowExecution{
-					WorkflowId: getTestWorkflowID(workerDeploy.Spec.WorkerOptions.DeploymentName, tq.GetName(), desiredVersionID),
+					WorkflowId: getTestWorkflowID(computeWorkerDeploymentName(workerDeploy), tq.GetName(), desiredVersionID),
 				},
 			})
 			// TODO(jlegrone): Detect "not found" errors properly
@@ -418,7 +415,7 @@ func (r *TemporalWorkerReconciler) generateStatus(ctx context.Context, l logr.Lo
 		targetVersion.RampingSince = rampingSinceTime
 	}
 
-	return &temporaliov1alpha1.TemporalWorkerStatus{
+	return &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 		DefaultVersion:       defaultVersion,
 		TargetVersion:        targetVersion,
 		DeprecatedVersions:   deprecatedVersions,

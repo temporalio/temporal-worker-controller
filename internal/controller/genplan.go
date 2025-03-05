@@ -6,7 +6,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"github.com/go-logr/logr"
 	"strings"
 	"time"
@@ -59,15 +58,15 @@ type startWorkflowConfig struct {
 	taskQueue    string
 }
 
-func (r *TemporalWorkerReconciler) generatePlan(
+func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	ctx context.Context,
 	l logr.Logger,
-	w *temporaliov1alpha1.TemporalWorker,
+	w *temporaliov1alpha1.TemporalWorkerDeployment,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*plan, error) {
 	plan := plan{
 		TemporalNamespace: w.Spec.WorkerOptions.TemporalNamespace,
-		DeploymentName:    w.Spec.WorkerOptions.DeploymentName,
+		DeploymentName:    computeWorkerDeploymentName(w),
 		ScaleDeployments:  make(map[*v1.ObjectReference]uint32),
 	}
 
@@ -83,7 +82,7 @@ func (r *TemporalWorkerReconciler) generatePlan(
 		}
 	}
 
-	// TODO(jlegrone): generate warnings/events on the TemporalWorker resource when buildIDs are reachable
+	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
 	// Scale or delete deployments based on drainage status
@@ -142,7 +141,7 @@ func (r *TemporalWorkerReconciler) generatePlan(
 		}
 	}
 
-	desiredVersionID := computeVersionID(&w.Spec)
+	desiredVersionID := computeVersionID(w)
 
 	if targetVersion := w.Status.TargetVersion; targetVersion != nil {
 		if targetVersion.Deployment == nil {
@@ -203,7 +202,7 @@ func (r *TemporalWorkerReconciler) generatePlan(
 	return &plan, nil
 }
 
-func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus) *versionConfig {
+func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerDeploymentStatus) *versionConfig {
 	vcfg := getVersionConfig(l, strategy, status)
 	if vcfg == nil {
 		return nil
@@ -232,7 +231,7 @@ func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStra
 	return vcfg
 }
 
-func getVersionConfig(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerStatus) *versionConfig {
+func getVersionConfig(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerDeploymentStatus) *versionConfig {
 	// Do nothing if target version's deployment is not healthy yet
 	if status == nil || status.TargetVersion.HealthySince == nil {
 		return nil
@@ -298,7 +297,7 @@ func getVersionConfig(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy
 	return nil
 }
 
-func (r *TemporalWorkerReconciler) getDeployment(ctx context.Context, ref *v1.ObjectReference) (*appsv1.Deployment, error) {
+func (r *TemporalWorkerDeploymentReconciler) getDeployment(ctx context.Context, ref *v1.ObjectReference) (*appsv1.Deployment, error) {
 	var d appsv1.Deployment
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: ref.Namespace,
@@ -309,12 +308,12 @@ func (r *TemporalWorkerReconciler) getDeployment(ctx context.Context, ref *v1.Ob
 	return &d, nil
 }
 
-func (r *TemporalWorkerReconciler) newDeployment(
-	w *temporaliov1alpha1.TemporalWorker,
+func (r *TemporalWorkerDeploymentReconciler) newDeployment(
+	w *temporaliov1alpha1.TemporalWorkerDeployment,
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*appsv1.Deployment, error) {
-	d := newDeploymentWithoutOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, buildID, connection)
+	d := newDeploymentWithoutOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, computeWorkerDeploymentName(w), buildID, connection)
 	if err := ctrl.SetControllerReference(w, d, r.Scheme); err != nil {
 		return nil, err
 	}
@@ -324,7 +323,8 @@ func (r *TemporalWorkerReconciler) newDeployment(
 func newDeploymentWithoutOwnerRef(
 	typeMeta *metav1.TypeMeta,
 	objectMeta *metav1.ObjectMeta,
-	spec *temporaliov1alpha1.TemporalWorkerSpec,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	workerDeploymentName string,
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
@@ -358,7 +358,7 @@ func newDeploymentWithoutOwnerRef(
 			},
 			v1.EnvVar{
 				Name:  "TEMPORAL_DEPLOYMENT_NAME",
-				Value: spec.WorkerOptions.DeploymentName,
+				Value: workerDeploymentName,
 			},
 			v1.EnvVar{
 				Name:  "WORKER_BUILD_ID",
@@ -401,7 +401,7 @@ func newDeploymentWithoutOwnerRef(
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:                       fmt.Sprintf("%s.%s", objectMeta.Name, buildID),
+			Name:                       computeVersionedDeploymentName(objectMeta.Name, buildID),
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
 			Labels:                     selectorLabels,

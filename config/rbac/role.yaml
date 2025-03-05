@@ -41,7 +41,7 @@ rules:
 - apiGroups:
   - temporal.io
   resources:
-  - temporalworkers
+  - temporalworkerdeployments
   verbs:
   - create
   - delete
@@ -53,13 +53,13 @@ rules:
 - apiGroups:
   - temporal.io
   resources:
-  - temporalworkers/finalizers
+  - temporalworkerdeployments/finalizers
   verbs:
   - update
 - apiGroups:
   - temporal.io
   resources:
-  - temporalworkers/status
+  - temporalworkerdeployments/status
   verbs:
   - get
   - patch

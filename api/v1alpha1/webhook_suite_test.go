@@ -91,7 +91,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	err = (&TemporalWorker{}).SetupWebhookWithManager(mgr)
+	err = (&TemporalWorkerDeployment{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:webhook

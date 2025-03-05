@@ -31,7 +31,7 @@ var (
 var (
 	skaffoldRunCmd      = newCommand(`skaffold run --profile demo`)
 	gitResetWorkflowCmd = newCommand(`git checkout internal/demo/worker/workflow.go`)
-	getWorkerStatusCmd  = newCommand(`kubectl get temporalworker demo -o json | jq .status`)
+	getWorkerStatusCmd  = newCommand(`kubectl get temporalworkerdeployment demo -o json | jq .status`)
 )
 
 type demoCommand struct {
@@ -122,9 +122,9 @@ func main() {
 			},
 		},
 		//{
-		//	"Describe the temporalworker custom resource",
+		//	"Describe the temporalworkerdeployment custom resource",
 		//	[]demoCommand{
-		//		newCommand(`kubectl describe temporalworker demo`),
+		//		newCommand(`kubectl describe temporalworkerdeployment demo`),
 		//	},
 		//},
 		//{
@@ -136,7 +136,7 @@ func main() {
 		//{
 		//	description: "Inspect k8s deployments and pods associated with the worker",
 		//	commands: []demoCommand{
-		//		newCommand(`kubectl get temporalworker,deployments,pods`),
+		//		newCommand(`kubectl get temporalworkerdeployment,deployments,pods`),
 		//	},
 		//},
 		{
@@ -168,7 +168,7 @@ func main() {
 		//{
 		//	"Inspect worker status: the deprecated version should still be reachable.",
 		//	[]demoCommand{
-		//		//newCommand(`kubectl get -o yaml temporalworker demo | yq '.status' | grep -v -E 'apiVersion|resourceVersion|kind|uid|namespace|deployment|name|versionConflictToken' | yq`),
+		//		//newCommand(`kubectl get -o yaml temporalworkerdeployment demo | yq '.status' | grep -v -E 'apiVersion|resourceVersion|kind|uid|namespace|deployment|name|versionConflictToken' | yq`),
 		//		getWorkerStatusCmd,
 		//	},
 		//},
@@ -185,7 +185,7 @@ func main() {
 		{
 			"Apply progressive rollout strategy",
 			[]demoCommand{
-				//newCommand(`code internal/demo/temporal_worker.yaml`),
+				//newCommand(`code internal/demo/temporal_worker_deployment.yaml`),
 				newCommand(`git apply internal/demo/changes/progressive-rollout.patch`),
 			},
 		},
@@ -198,7 +198,7 @@ func main() {
 				skaffoldRunCmd,
 				//{
 				//	description:   "Watch traffic to the target version ramp up",
-				//	command:       `kubectl get temporalworker --watch --output-watch-events`,
+				//	command:       `kubectl get temporalworkerdeployment --watch --output-watch-events`,
 				//	watchDuration: 2 * time.Minute,
 				//},
 			},
@@ -209,7 +209,7 @@ func main() {
 		//	[]demoCommand{
 		//		newCommand(`git reset HEAD~1`),
 		//		gitResetWorkflowCmd,
-		//		newCommand(`git checkout -- internal/demo/temporal_worker.yaml`),
+		//		newCommand(`git checkout -- internal/demo/temporal_worker_deployment.yaml`),
 		//		skaffoldRunCmd,
 		//	},
 		//},

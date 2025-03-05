@@ -19,4 +19,4 @@ cwatch() {
    done;
 }
 
-cwatch "kubectl get -o jsonpath=\"{.status}\" temporalworker $1 | yq -p json -o yaml | grep -v -E 'apiVersion|resourceVersion|kind|uid|namespace|deployment|name|versionConflictToken|healthySince' | bat -l yaml --color always --plain --wrap never --theme gruvbox-dark"
+cwatch "kubectl get -o jsonpath=\"{.status}\" temporalworkerdeployment $1 | yq -p json -o yaml | grep -v -E 'apiVersion|resourceVersion|kind|uid|namespace|deployment|name|versionConflictToken|healthySince' | bat -l yaml --color always --plain --wrap never --theme gruvbox-dark"
