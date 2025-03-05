@@ -11,37 +11,44 @@ Temporal's [deterministic constraints](https://docs.temporal.io/workflows#determ
 when rolling out or rolling back workflow code changes.
 
 The traditional approach to workflow determinism is to gate new behavior behind
-[versioning checks](https://docs.temporal.io/workflows#workflow-versioning). Over time these checks can become a
+[versioning checks](https://docs.temporal.io/workflows#workflow-versioning), otherwise known as the Patching API. Over time these checks can become a
 source of technical debt, as safely removing them from a codebase is a careful process that often involves querying all
 running workflows.
 
-Worker Versioning is an alternative approach which enables
-workflow executions to be sticky to workers running a specific code revision. This allows a workflow author
-to omit version checks in code and instead run multiple versions of their worker in parallel, relying on Temporal to
-keep workflow executions pinned to workers running compatible code.
+**Worker Versioning** is a Temporal feature that allows you to pin Workflows to individual versions of your workers, which 
+are called **Worker Deployment Versions**. Using pinning, you’ll no longer need to patch most Workflows as part of routine 
+deploys! With this guarantee, you can freely make changes that would have previously caused non-determinism errors had 
+you done them without patching. And provided your Activities and Workflows are running in the same worker deployment version, 
+you also do not need to ensure interface compatibility across versions.
 
-This project aims to provide automation which simplifies the bookkeeping around tracking which worker versions still
-have active workflows, managing the lifecycle of versioned worker deployments, and calling Temporal APIs to update the
-default version after a deployment.
+This greatly simplifies Workflow upgrades, but the cost is that your deployment system must support multiple versions 
+running simultaneously and allow you to control when they are sunsetted. This is typically known as a [rainbow deploy](https://release.com/blog/rainbow-deployment-why-and-how-to-do-it) 
+(of which a **blue-green deploy** is a special case) and contrasts to a **rolling deploy** in which your Workers are upgraded in
+place without the ability to keep old versions around.
+
+This project aims to provide automation to enable rainbow deployments of your workers by simplifying the bookkeeping around 
+tracking which versions still have active workflows, managing the lifecycle of versioned worker deployments, and calling 
+Temporal APIs to update the routing config of Temporal Worker Deployments to route workflow traffic to new versions.
+
+## Terminology
+Note that in Temporal, **Worker Deployment** is sometimes referred to as **Deployment**, but since the controller makes
+significant references to Kubernetes Deployment resource, within this repository we will stick to these terms:
+- **Worker Deployment Version**: A version of a deployment or service. It can have multiple Workers, but they all run the same build. Sometimes shortened to "version" or "deployment version."
+- **Worker Deployment**: A deployment or service across multiple versions. In a rainbow deploy, a worker deployment can have multiple active deployment versions running at once.
+- **Deployment**: A Kubernetes Deployment resource. A Deployment is "versioned" if it is running versioned Temporal workers/pollers.
 
 ## Features
 
-- [x] Registration of new worker versions
-- [x] Creation of versioned worker deployment resources
-- [x] Deletion of drained worker deployments
-- [x] Manual, Blue/Green, and Progressive rollouts of new worker versions
-- [ ] Autoscaling of worker deployments
-- [ ] Automated rollover to compatible worker versions
+- [x] Registration of new Temporal Worker Deployment Versions
+- [x] Creation of versioned Deployment resources (that manage the Pods that run your Temporal pollers)
+- [x] Deletion of resources associated with drained Worker Deployment Versions
+- [x] `Manual`, `AllAtOnce`, and `Progressive` rollouts of new versions
+- [x] Ability to specify a "gate" workflow that must succeed on the new version before routing real traffic to that version
+- [ ] Autoscaling of versioned Deployments
 - [ ] Canary analysis of new worker versions
 - [ ] Optional cancellation after timeout for workflows on old versions
 - [ ] Passing `ContinueAsNew` signal to workflows on old versions
 
-## Terminology
-Note that in Temporal, "Worker Deployment" is sometimes referred to as "Deployment", but since the controller makes
-significant references to Kubernetes Deployment resource, within this repository we will stick to these terms:
-- **Worker Deployment Version**: A version of a deployment or service. It can have multiple Workers, but they all run the same build. Sometimes shortened to "version" or "deployment version."
-- **Worker Deployment**: A deployment or service across multiple versions. In a rainbow deploy, a worker deployment can have multiple active deployment versions running at once.
-- **Deployment**: A Kubernetes Deployment resource.
 
 ## Usage
 
@@ -61,57 +68,73 @@ Each of these will be automatically set by the controller, and must not be manua
 Note: These sequence diagrams have not been fully converted to versioning v0.31 terminology.
 
 Every `TemporalWorkerDeployment` resource manages one or more standard `Deployment` resources. Each deployment manages pods
-which in turn poll Temporal for tasks pinned to their respective versions.
+which in turn poll Temporal for tasks routed to their respective versions.
 
 ```mermaid
 flowchart TD
-    wd[TemporalWorker]
-
-    subgraph "Latest/default deployment version"
-        d5["Deployment v5"]
-        rs5["ReplicaSet v5"]
-        p5a["Pod v5-a"]
-        p5b["Pod v5-b"]
-        p5c["Pod v5-c"]
+    subgraph "K8s Namespace 'ns'"
+      twd[TemporalWorkerDeployment 'foo']
+      
+      subgraph "Current/default version"
+        d5["Deployment foo-v5 (Version ns/foo.v5)"]
+        rs5["ReplicaSet foo-v5"]
+        p5a["Pod foo-v5-a"]
+        p5b["Pod foo-v5-b"]
+        p5c["Pod foo-v5-c"]
         d5 --> rs5
         rs5 --> p5a
         rs5 --> p5b
         rs5 --> p5c
-    end
+      end
 
-    subgraph "Deprecated deployment versions"
-        d1["Deployment v1"]
-        rs1["ReplicaSet v1"]
-        p1a["Pod v1-a"]
-        p1b["Pod v1-b"]
+      subgraph "Deprecated versions"
+        d1["Deployment foo-v1 (Version ns/foo.v1)"]
+        rs1["ReplicaSet foo-v1"]
+        p1a["Pod foo-v1-a"]
+        p1b["Pod foo-v1-b"]
         d1 --> rs1
         rs1 --> p1a
         rs1 --> p1b
 
         dN["Deployment ..."]
-    end
+      end
+    end  
 
-    wd --> d1
-    wd --> dN
-    wd --> d5
+    twd --> d1
+    twd --> dN
+    twd --> d5
 
-    p1a -. "poll version v1" .-> server
-    p1b -. "poll version v1" .-> server
+    p1a -. "poll version ns/foo.v1" .-> server
+    p1b -. "poll version ns/foo.v1" .-> server
 
-    p5a -. "poll version v5" .-> server
-    p5b -. "poll version v5" .-> server
-    p5c -. "poll version v5" .-> server
+    p5a -. "poll version ns/foo.v5" .-> server
+    p5b -. "poll version ns/foo.v5" .-> server
+    p5c -. "poll version ns/foo.v5" .-> server
 
     server["Temporal Server"]
 ```
 
 ### Worker Lifecycle
 
-When a new worker deployment version is deployed, the worker controller automates the registration of a new default worker
-deployment version in Temporal.
+When a new worker deployment version is deployed, the worker controller detects it and automatically begins the process
+of making that version the new **current** (aka default) version of the worker deployment it is a part of. This could happen
+immediately if `cutover.strategy = AllAtOnce`, or gradually if `cutover.strategy = Progressive`.
 
-As older workflows finish executing and deprecated deployment versions are no longer needed, the worker controller also
-frees up resources by deleting old deployment versions.
+As older pinned workflows finish executing and deprecated deployment versions become drained, the worker controller also
+frees up resources by sunsetting the `Deployment` resources polling those versions.
+
+Here is an example of a progressive cut-over strategy gated on the success of the `HelloWorld` workflow:
+```yaml
+  cutover:
+    strategy: Progressive
+    steps:
+      - rampPercentage: 1
+        pauseDuration: 30s
+      - rampPercentage: 10
+        pauseDuration: 1m
+    gate:
+      workflowType: "HelloWorld"
+```
 
 ```mermaid
 sequenceDiagram
@@ -121,20 +144,17 @@ sequenceDiagram
     participant Ctl as WorkerController
     participant T as Temporal
 
-    Dev->>K8s: Create TemporalWorker "foo" (v1)
-    K8s-->>Ctl: Notify TemporalWorker "foo" created
+    Dev->>K8s: Create TemporalWorkerDeployment "foo" (v1)
+    K8s-->>Ctl: Notify TemporalWorkerDeployment "foo" created
     Ctl->>K8s: Create Deployment "foo-v1"
-    Ctl->>T: Register v1 as new default
+    Ctl->>T: Register "ns/foo.v1" as new current version of "ns/foo"
     Dev->>K8s: Update TemporalWorker "foo" (v2)
     K8s-->>Ctl: Notify TemporalWorker "foo" updated
     Ctl->>K8s: Create Deployment "foo-v2"
-    Ctl->>T: Register v2 as new default
-    
-    Ctl->>Ctl: Run breaking change detection between v1 and v2
-    Ctl->>T: If versions compatible, merge v1 and v2.
+    Ctl->>T: Register "ns/foo.v2" as new current version of "ns/foo"
     
     loop Poll Temporal API
-        Ctl-->>T: Wait for v1 workflow executions to close
+        Ctl-->>T: Wait for "ns/foo.v1" to be drained (no open pinned wfs)
     end
     
     Ctl->>K8s: Delete Deployment "foo-v1"

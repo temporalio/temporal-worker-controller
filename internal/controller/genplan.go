@@ -401,7 +401,7 @@ func newDeploymentWithoutOwnerRef(
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:                       getVersionID(workerDeploymentName, buildID), // valid if workerDeploymentName is a valid k8s resource name
+			Name:                       computeVersionedDeploymentName(objectMeta.Name, buildID),
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
 			Labels:                     selectorLabels,
