@@ -9,9 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-logr/logr"
-	"go.temporal.io/api/deployment/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/api/workflowservice/v1"
+	sdkclient "go.temporal.io/sdk/client"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"strings"
@@ -79,22 +78,24 @@ func newObjectRef(d *appsv1.Deployment) *v1.ObjectReference {
 
 func describeWorkerDeploymentHandleNotFound(
 	ctx context.Context,
-	temporalClient workflowservice.WorkflowServiceClient,
-	req *workflowservice.DescribeWorkerDeploymentRequest) (*workflowservice.DescribeWorkerDeploymentResponse, error) {
-	describeResp, err := temporalClient.DescribeWorkerDeployment(ctx, req)
+	deploymentHandler sdkclient.WorkerDeploymentHandle,
+	workerDeploymentName string) (sdkclient.WorkerDeploymentDescribeResponse, error) {
+	describeResp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 
 	var notFoundErr *serviceerror.NotFound
 	if err != nil {
 		if errors.As(err, &notFoundErr) {
-			return &workflowservice.DescribeWorkerDeploymentResponse{
+			return sdkclient.WorkerDeploymentDescribeResponse{
 				ConflictToken: nil,
-				WorkerDeploymentInfo: &deployment.WorkerDeploymentInfo{
-					Name:          req.GetDeploymentName(),
-					RoutingConfig: &deployment.RoutingConfig{CurrentVersion: "__unversioned__"},
+				Info: sdkclient.WorkerDeploymentInfo{
+					Name: workerDeploymentName,
+					RoutingConfig: sdkclient.WorkerDeploymentRoutingConfig{
+						CurrentVersion: "__unversioned__",
+					},
 				},
 			}, nil
 		} else {
-			return nil, fmt.Errorf("unable to describe worker deployment %s: %w", req.GetDeploymentName(), err)
+			return sdkclient.WorkerDeploymentDescribeResponse{}, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
 		}
 	}
 	return describeResp, err
@@ -106,7 +107,7 @@ func describeWorkerDeploymentHandleNotFound(
 func awaitVersionRegistration(
 	ctx context.Context,
 	l logr.Logger,
-	temporalClient workflowservice.WorkflowServiceClient,
+	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	namespace, versionID string) error {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
@@ -115,9 +116,8 @@ func awaitVersionRegistration(
 		case <-ctx.Done():
 			return context.Canceled
 		case <-ticker.C:
-			_, err := temporalClient.DescribeWorkerDeploymentVersion(ctx, &workflowservice.DescribeWorkerDeploymentVersionRequest{
-				Namespace: namespace,
-				Version:   versionID,
+			_, err := deploymentHandler.DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{
+				Version: versionID,
 			})
 			var notFoundErr *serviceerror.NotFound
 			if err != nil {
@@ -129,7 +129,7 @@ func awaitVersionRegistration(
 			}
 			// After the version exists, confirm that it also exists in the worker deployment
 			// TODO(carlydf): Remove this check after next Temporal Cloud version which solves this inconsistency
-			return awaitVersionRegistrationInDeployment(ctx, l, temporalClient, namespace, versionID)
+			return awaitVersionRegistrationInDeployment(ctx, l, deploymentHandler, namespace, versionID)
 		}
 	}
 }
@@ -137,7 +137,7 @@ func awaitVersionRegistration(
 func awaitVersionRegistrationInDeployment(
 	ctx context.Context,
 	l logr.Logger,
-	temporalClient workflowservice.WorkflowServiceClient,
+	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	namespace, versionID string) error {
 	deploymentName, _, _ := strings.Cut(versionID, ".")
 	ticker := time.NewTicker(1 * time.Second)
@@ -147,10 +147,7 @@ func awaitVersionRegistrationInDeployment(
 		case <-ctx.Done():
 			return context.Canceled
 		case <-ticker.C:
-			resp, err := temporalClient.DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
-				Namespace:      namespace,
-				DeploymentName: deploymentName,
-			})
+			resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 			var notFoundErr *serviceerror.NotFound
 			if err != nil {
 				if errors.As(err, &notFoundErr) {
@@ -159,8 +156,8 @@ func awaitVersionRegistrationInDeployment(
 					return fmt.Errorf("unable to describe worker deployment %s: %w", deploymentName, err)
 				}
 			}
-			for _, vs := range resp.GetWorkerDeploymentInfo().GetVersionSummaries() {
-				if vs.GetVersion() == versionID {
+			for _, vs := range resp.Info.VersionSummaries {
+				if vs.Version == versionID {
 					return nil
 				}
 			}

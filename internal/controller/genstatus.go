@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"go.temporal.io/api/common/v1"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflow/v1"
-	"go.temporal.io/api/workflowservice/v1"
+	sdkclient "go.temporal.io/sdk/client"
+	temporalClient "go.temporal.io/sdk/client"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -228,7 +228,7 @@ func newDeploymentVersionCollection() deploymentVersionCollection {
 	}
 }
 
-func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient workflowservice.WorkflowServiceClient, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
+func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient temporalClient.Client, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	var (
 		desiredVersionID, defaultVersionID string
 		deployedVersions                   []string
@@ -258,87 +258,84 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		// TODO(jlegrone): implement some error handling (maybe a human deleted the label?)
 	}
 
+	// Get deployment handler
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(workerDeploymentName)
+
 	// List deployment versions in Temporal
-	describeResp, err := describeWorkerDeploymentHandleNotFound(ctx, temporalClient, &workflowservice.DescribeWorkerDeploymentRequest{
-		Namespace:      workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		DeploymentName: workerDeploymentName,
-	})
+	describeResp, err := describeWorkerDeploymentHandleNotFound(ctx, deploymentHandler, workerDeploymentName)
 	if err != nil {
 		return nil, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
 	}
-	workerDeploymentInfo := describeResp.GetWorkerDeploymentInfo()
-	routingConfig := workerDeploymentInfo.GetRoutingConfig()
-	defaultVersionID = routingConfig.GetCurrentVersion()
+	workerDeploymentInfo := describeResp.Info
+	routingConfig := workerDeploymentInfo.RoutingConfig
+	defaultVersionID = routingConfig.CurrentVersion
 
 	// Check if the worker deployment was modified out of band of the controller (eg. via the Temporal CLI)
-	if workerDeploymentInfo.GetLastModifierIdentity() != "temporal-worker-controller" &&
-		workerDeploymentInfo.GetLastModifierIdentity() != "" {
+	if workerDeploymentInfo.LastModifierIdentity != "temporal-worker-controller" &&
+		workerDeploymentInfo.LastModifierIdentity != "" {
 		// TODO(jlegrone): if it was set by another client, switch to manual mode
 	}
 
 	var rampingSinceTime *metav1.Time
 	var rampPercentage float32
 	// For each version the server has registered in the worker deployment, compute the status.
-	for _, version := range workerDeploymentInfo.GetVersionSummaries() {
-		drainageStatus := version.GetDrainageStatus()
+	for _, version := range workerDeploymentInfo.VersionSummaries {
+		drainageStatus := version.DrainageStatus
 		var versionStatus temporaliov1alpha1.VersionStatus
-		if version.GetVersion() == routingConfig.GetCurrentVersion() {
+		if version.Version == routingConfig.CurrentVersion {
 			versionStatus = temporaliov1alpha1.VersionStatusCurrent
-		} else if version.GetVersion() == routingConfig.GetRampingVersion() {
+		} else if version.Version == routingConfig.RampingVersion {
 			versionStatus = temporaliov1alpha1.VersionStatusRamping
-			rt := metav1.NewTime(routingConfig.GetRampingVersionChangedTime().AsTime())
+			rt := metav1.NewTime(routingConfig.RampingVersionChangedTime)
 			rampingSinceTime = &rt
-			rampPercentage = routingConfig.GetRampingVersionPercentage()
-			l.Info(fmt.Sprintf("version %s has been ramping since %s, current ramp percentage %v", version.GetVersion(), rt.String(), rampPercentage))
-		} else if drainageStatus == enums.VERSION_DRAINAGE_STATUS_DRAINING {
+			rampPercentage = routingConfig.RampingVersionPercentage
+			l.Info(fmt.Sprintf("version %s has been ramping since %s, current ramp percentage %v", version.Version, rt.String(), rampPercentage))
+		} else if drainageStatus == sdkclient.WorkerDeploymentVersionDrainageStatusDraining {
 			versionStatus = temporaliov1alpha1.VersionStatusDraining
-		} else if drainageStatus == enums.VERSION_DRAINAGE_STATUS_DRAINED {
+		} else if drainageStatus == sdkclient.WorkerDeploymentVersionDrainageStatusDrained {
 			versionStatus = temporaliov1alpha1.VersionStatusDrained
 			// see when it was drained
-			versionResp, err := temporalClient.DescribeWorkerDeploymentVersion(ctx, &workflowservice.DescribeWorkerDeploymentVersionRequest{
-				Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-				Version:   version.GetVersion(),
+			versionResp, err := deploymentHandler.DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{
+				Version: version.Version,
 			})
 			if err != nil {
 				l.Error(err, "unable to describe version to see when it drained")
 				return nil, fmt.Errorf("unable to describe version for version %q: %w", version, err)
 			}
-			drainedSinceTime := versionResp.GetWorkerDeploymentVersionInfo().GetDrainageInfo().GetLastChangedTime()
-			versions.addDrainedSince(version.GetVersion(), drainedSinceTime.AsTime())
+			drainedSinceTime := versionResp.Info.DrainageInfo.LastChangedTime
+			versions.addDrainedSince(version.Version, drainedSinceTime)
 		} else {
 			versionStatus = temporaliov1alpha1.VersionStatusInactive
 		}
-		versions.addVersionStatus(version.GetVersion(), versionStatus)
+		versions.addVersionStatus(version.Version, versionStatus)
 	}
 
 	// Check the status of the test workflow for the next version, if rollout is still happening.
-	if desiredVersionID != routingConfig.GetCurrentVersion() {
+	if desiredVersionID != routingConfig.CurrentVersion {
 		// Describe the desired version to get task queue information
 		// Temporal will error if any task queue in the existing current version is not present in the new current version.
 		// Temporal will also error if any task queue in the existing current version is not present in the new ramping version.
-		versionResp, err := temporalClient.DescribeWorkerDeploymentVersion(ctx, &workflowservice.DescribeWorkerDeploymentVersionRequest{
-			Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-			Version:   desiredVersionID,
+		versionResp, err := deploymentHandler.DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{
+			Version: desiredVersionID,
 		})
 		var notFound *serviceerror.NotFound
 		if err != nil && !errors.As(err, &notFound) {
 			// Ignore NotFound error, because if the version is not found, we know there are no test workflows running on it.
 			return nil, fmt.Errorf("unable to describe worker deployment version for version %q: %w", desiredVersionID, err)
 		}
-		for _, tq := range versionResp.GetWorkerDeploymentVersionInfo().GetTaskQueueInfos() {
+		for _, tq := range versionResp.Info.TaskQueuesInfos {
 			// Keep track of which task queues this version of the worker is polling on
-			if tq.GetType() != enums.TASK_QUEUE_TYPE_WORKFLOW {
+			if tq.Type != sdkclient.TaskQueueTypeWorkflow {
 				continue
 			}
-			versions.addTaskQueue(desiredVersionID, tq.GetName())
+			versions.addTaskQueue(desiredVersionID, tq.Name)
 
 			// If there is a test workflow associated with this task queue and build id, check its status.
-			wf, err := temporalClient.DescribeWorkflowExecution(ctx, &workflowservice.DescribeWorkflowExecutionRequest{
-				Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-				Execution: &common.WorkflowExecution{
-					WorkflowId: getTestWorkflowID(computeWorkerDeploymentName(workerDeploy), tq.GetName(), desiredVersionID),
-				},
-			})
+			wf, err := temporalClient.DescribeWorkflowExecution(
+				ctx,
+				getTestWorkflowID(computeWorkerDeploymentName(workerDeploy), tq.Name, desiredVersionID),
+				"",
+			)
 			// TODO(jlegrone): Detect "not found" errors properly
 			if err != nil && !strings.Contains(err.Error(), "workflow not found") {
 				return nil, fmt.Errorf("unable to describe test workflow: %w", err)
