@@ -30,7 +30,7 @@ const (
 )
 
 func computeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return w.GetNamespace() + deploymentNameSeparator + w.GetName()
+	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
 }
 
 func computeVersionID(r *temporaliov1alpha1.TemporalWorkerDeployment) string {
