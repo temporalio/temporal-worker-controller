@@ -24,12 +24,13 @@ import (
 const (
 	defaultScaledownDelay = 1 * time.Hour
 	defaultDeleteDelay    = 24 * time.Hour
+	// TODO(carlydf): Consider making this separator "." if/when Temporal can handle that
+	// Use "--" as a separator so that the version ID can be the name of the deployment we create for that version.
+	deploymentNameSeparator = "--"
 )
 
 func computeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	// TODO(carlydf): Consider making this separator "." if/when Temporal can handle that
-	// Use "--" as a separator so that the version ID can be the name of the deployment we create for that version.
-	return fmt.Sprintf("%s--%s", w.GetName(), w.GetNamespace())
+	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
 }
 
 func computeVersionID(r *temporaliov1alpha1.TemporalWorkerDeployment) string {
