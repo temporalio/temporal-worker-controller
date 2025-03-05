@@ -11,6 +11,10 @@ spec:
     kind: TemporalWorkerDeployment
     listKind: TemporalWorkerDeploymentList
     plural: temporalworkerdeployments
+    shortNames:
+    - twd
+    - twdeployment
+    - tworkerdeployment
     singular: temporalworkerdeployment
   scope: Namespaced
   versions:

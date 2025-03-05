@@ -278,6 +278,7 @@ type QueueStatistics struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
 //+kubebuilder:printcolumn:name="Default",type="string",JSONPath=".status.defaultVersion.versionID",description="Default Version for new workflows"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.versionID",description="Version of the current worker template"
 //+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
