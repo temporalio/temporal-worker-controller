@@ -8,13 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/go-logr/logr"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	"strings"
-	"time"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -29,7 +30,7 @@ const (
 )
 
 func computeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
+	return w.GetNamespace() + deploymentNameSeparator + w.GetName()
 }
 
 func computeVersionID(r *temporaliov1alpha1.TemporalWorkerDeployment) string {

@@ -29,6 +29,7 @@ import (
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
 
+// TODO (Shivam): Should we be having a map of [versionID] -> Structure?
 type deploymentVersionCollection struct {
 	versionIDsToDeployments map[string]*appsv1.Deployment
 	// map of version IDs to ramp percentages [0,100]
@@ -388,7 +389,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		case desiredVersionID, defaultVersionID:
 			continue
 		}
-		d, _ := versions.getWorkerDeploymentVersion(version)
+		d, _ := versions.getWorkerDeploymentVersion(version) // TODO (Shivam): How do we know these versions have been deleted by Temporal? They could just be draining...
 		deprecatedVersions = append(deprecatedVersions, d)
 	}
 
@@ -399,7 +400,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 
 	// Ugly hack to clear ramp percentages (not quite correctly) for now
 	for _, d := range deprecatedVersions {
-		d.RampPercentage = nil
+		d.RampPercentage = nil // TODO (Shivam): All deprecatedVersions will have rampPercentage set to nil already
 	}
 	if defaultVersion != nil {
 		defaultVersion.RampPercentage = nil

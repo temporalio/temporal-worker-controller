@@ -32,7 +32,7 @@ const (
 	buildIDLabel   = "temporal.io/build-id"
 )
 
-// TemporalWorkerDeploymentReconciler reconciles a TemporalWorker object
+// TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
 type TemporalWorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
