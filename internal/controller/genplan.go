@@ -22,8 +22,8 @@ import (
 type plan struct {
 	// Where to take actions
 
-	TemporalNamespace string
-	DeploymentName    string
+	TemporalNamespace    string
+	WorkerDeploymentName string
 
 	// Which actions to take
 
@@ -65,9 +65,9 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*plan, error) {
 	plan := plan{
-		TemporalNamespace: w.Spec.WorkerOptions.TemporalNamespace,
-		DeploymentName:    computeWorkerDeploymentName(w),
-		ScaleDeployments:  make(map[*v1.ObjectReference]uint32),
+		TemporalNamespace:    w.Spec.WorkerOptions.TemporalNamespace,
+		WorkerDeploymentName: computeWorkerDeploymentName(w),
+		ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
 	}
 
 	// Scale the active deployment if it doesn't match desired replicas
@@ -182,7 +182,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 						if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 							plan.startTestWorkflows = append(plan.startTestWorkflows, startWorkflowConfig{
 								workflowType: w.Spec.RolloutStrategy.Gate.WorkflowType,
-								workflowID:   getTestWorkflowID(plan.DeploymentName, tq.Name, targetVersion.VersionID),
+								workflowID:   getTestWorkflowID(plan.WorkerDeploymentName, tq.Name, targetVersion.VersionID),
 								versionID:    targetVersion.VersionID,
 								taskQueue:    tq.Name,
 							})

@@ -10,19 +10,16 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"go.temporal.io/api/common/v1"
 	"go.temporal.io/api/enums/v1"
-	"go.temporal.io/api/taskqueue/v1"
-	"go.temporal.io/api/workflow/v1"
-	"go.temporal.io/api/workflowservice/v1"
-	"google.golang.org/protobuf/types/known/durationpb"
+	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/workflow"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, temporalClient workflowservice.WorkflowServiceClient, p *plan) error {
+func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, temporalClient sdkclient.Client, p *plan) error {
 	// Create deployment
 	if p.CreateDeployment != nil {
 		l.Info("creating deployment", "deployment", p.CreateDeployment)
@@ -57,31 +54,25 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
+	// Get deployment handler
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+
 	for _, wf := range p.startTestWorkflows {
-		err := awaitVersionRegistration(ctx, l, temporalClient, p.TemporalNamespace, wf.versionID)
+		err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, wf.versionID)
 		if err != nil {
 			return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 		}
-		if _, err = temporalClient.StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
-			Namespace:  p.TemporalNamespace,
-			WorkflowId: wf.workflowID,
-			WorkflowType: &common.WorkflowType{
-				Name: wf.workflowType,
-			},
-			TaskQueue: &taskqueue.TaskQueue{
-				Name: wf.taskQueue,
-			},
-			VersioningOverride: &workflow.VersioningOverride{
-				Behavior:      enums.VERSIONING_BEHAVIOR_PINNED,
+		if _, err = temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
+			ID:                       wf.workflowID,
+			TaskQueue:                wf.taskQueue,
+			WorkflowExecutionTimeout: time.Hour,
+			WorkflowIDReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+			WorkflowIDConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
+			VersioningOverride: sdkclient.VersioningOverride{
+				Behavior:      workflow.VersioningBehaviorPinned,
 				PinnedVersion: wf.versionID,
 			},
-			// TODO(jlegrone): make this configurable
-			WorkflowExecutionTimeout: durationpb.New(time.Hour),
-			Identity:                 "",
-			RequestId:                "",
-			WorkflowIdReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
-			WorkflowIdConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
-		}); err != nil {
+		}, wf.workflowType); err != nil {
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
 		}
 	}
@@ -89,70 +80,62 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Register default version or ramp
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.setDefault {
-			err := awaitVersionRegistration(ctx, l, temporalClient, p.TemporalNamespace, vcfg.versionID)
+			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {
 				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 			}
 
 			l.Info("registering new default version", "version", vcfg.versionID)
-			resp, err := temporalClient.DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
-				Namespace:      p.TemporalNamespace,
-				DeploymentName: p.DeploymentName,
-			})
+			resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 			if err != nil {
 				return fmt.Errorf("unable to describe worker deployment: %w", err)
 			}
-			if _, err := temporalClient.SetWorkerDeploymentCurrentVersion(ctx, &workflowservice.SetWorkerDeploymentCurrentVersionRequest{
-				Namespace:      p.TemporalNamespace,
-				DeploymentName: p.DeploymentName,
-				Version:        vcfg.versionID,
-				ConflictToken:  resp.GetConflictToken(),
-				Identity:       "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.
+			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
+				Version:       vcfg.versionID,
+				ConflictToken: resp.ConflictToken,
+				Identity:      "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
-			if _, err := temporalClient.UpdateWorkerDeploymentVersionMetadata(ctx, &workflowservice.UpdateWorkerDeploymentVersionMetadataRequest{
-				Namespace: p.TemporalNamespace,
-				Version:   vcfg.versionID,
-				UpsertEntries: map[string]*common.Payload{
-					// TODO(jlegrone): Add controller identity
-					// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
-					"temporal.io/managed-by": nil,
+			if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
+				Version: vcfg.versionID,
+				MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
+					UpsertEntries: map[string]interface{}{
+						// TODO(jlegrone): Add controller identity
+						// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
+						"temporal.io/managed-by": nil,
+					},
 				},
 			}); err != nil { // would be cool to do this atomically with the update
 				return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
 			}
 		} else if ramp := vcfg.rampPercentage; ramp > 0 { // TODO(carlydf): Support setting any ramp in [0,100]
-			err := awaitVersionRegistration(ctx, l, temporalClient, p.TemporalNamespace, vcfg.versionID)
+			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {
 				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 			}
 
 			l.Info("applying ramp", "version", p.UpdateVersionConfig.versionID, "percentage", p.UpdateVersionConfig.rampPercentage)
-			resp, err := temporalClient.DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
-				Namespace:      p.TemporalNamespace,
-				DeploymentName: p.DeploymentName,
-			})
+			resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 			if err != nil {
 				return fmt.Errorf("unable to describe worker deployment: %w", err)
 			}
-			if _, err := temporalClient.SetWorkerDeploymentRampingVersion(ctx, &workflowservice.SetWorkerDeploymentRampingVersionRequest{
-				Namespace:      p.TemporalNamespace,
-				DeploymentName: p.DeploymentName,
-				Version:        vcfg.versionID,
-				Percentage:     vcfg.rampPercentage,
-				ConflictToken:  resp.GetConflictToken(),
-				Identity:       "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.
+			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+				Version:       vcfg.versionID,
+				Percentage:    vcfg.rampPercentage,
+				ConflictToken: resp.ConflictToken,
+				Identity:      "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.
 			}); err != nil {
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}
-			if _, err := temporalClient.UpdateWorkerDeploymentVersionMetadata(ctx, &workflowservice.UpdateWorkerDeploymentVersionMetadataRequest{
-				Namespace: p.TemporalNamespace,
-				Version:   vcfg.versionID,
-				UpsertEntries: map[string]*common.Payload{
-					// TODO(jlegrone): Add controller identity
-					// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
-					"temporal.io/managed-by": nil,
+			if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
+				Version: vcfg.versionID,
+				MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
+					UpsertEntries: map[string]interface{}{
+						// TODO(jlegrone): Add controller identity
+						// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
+						"temporal.io/managed-by": nil,
+					},
 				},
 			}); err != nil { // would be cool to do this atomically with the update
 				return fmt.Errorf("unable to update metadata after setting ramping deployment: %w", err)
