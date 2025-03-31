@@ -76,7 +76,7 @@ flowchart TD
       twd[TemporalWorkerDeployment 'foo']
       
       subgraph "Current/default version"
-        d5["Deployment foo-v5 (Version ns/foo.v5)"]
+        d5["Deployment foo-v5 (Version foo/ns.v5)"]
         rs5["ReplicaSet foo-v5"]
         p5a["Pod foo-v5-a"]
         p5b["Pod foo-v5-b"]
@@ -88,7 +88,7 @@ flowchart TD
       end
 
       subgraph "Deprecated versions"
-        d1["Deployment foo-v1 (Version ns/foo.v1)"]
+        d1["Deployment foo-v1 (Version foo/ns.v1)"]
         rs1["ReplicaSet foo-v1"]
         p1a["Pod foo-v1-a"]
         p1b["Pod foo-v1-b"]
@@ -104,12 +104,12 @@ flowchart TD
     twd --> dN
     twd --> d5
 
-    p1a -. "poll version ns/foo.v1" .-> server
-    p1b -. "poll version ns/foo.v1" .-> server
+    p1a -. "poll version foo/ns.v1" .-> server
+    p1b -. "poll version foo/ns.v1" .-> server
 
-    p5a -. "poll version ns/foo.v5" .-> server
-    p5b -. "poll version ns/foo.v5" .-> server
-    p5c -. "poll version ns/foo.v5" .-> server
+    p5a -. "poll version foo/ns.v5" .-> server
+    p5b -. "poll version foo/ns.v5" .-> server
+    p5c -. "poll version foo/ns.v5" .-> server
 
     server["Temporal Server"]
 ```
@@ -147,14 +147,14 @@ sequenceDiagram
     Dev->>K8s: Create TemporalWorkerDeployment "foo" (v1)
     K8s-->>Ctl: Notify TemporalWorkerDeployment "foo" created
     Ctl->>K8s: Create Deployment "foo-v1"
-    Ctl->>T: Register "ns/foo.v1" as new current version of "ns/foo"
+    Ctl->>T: Register "foo/ns.v1" as new current version of "foo/ns"
     Dev->>K8s: Update TemporalWorker "foo" (v2)
     K8s-->>Ctl: Notify TemporalWorker "foo" updated
     Ctl->>K8s: Create Deployment "foo-v2"
-    Ctl->>T: Register "ns/foo.v2" as new current version of "ns/foo"
+    Ctl->>T: Register "foo/ns.v2" as new current version of "foo/ns"
     
     loop Poll Temporal API
-        Ctl-->>T: Wait for "ns/foo.v1" to be drained (no open pinned wfs)
+        Ctl-->>T: Wait for "foo/ns.v1" to be drained (no open pinned wfs)
     end
     
     Ctl->>K8s: Delete Deployment "foo-v1"

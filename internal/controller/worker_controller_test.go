@@ -169,7 +169,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "foo",
+				WorkerDeploymentName: "foo" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments:    nil,
 				CreateDeployment:     nil,
 				ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
@@ -188,7 +188,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "fia",
+				WorkerDeploymentName: "fia" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments:    nil,
 				CreateDeployment:     nil,
 				ScaleDeployments: map[*v1.ObjectReference]uint32{
@@ -212,7 +212,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "fii",
+				WorkerDeploymentName: "fii" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments:    nil,
 				CreateDeployment:     nil,
 				ScaleDeployments: map[*v1.ObjectReference]uint32{
@@ -236,7 +236,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "aii",
+				WorkerDeploymentName: "aii" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments:    nil,
 				CreateDeployment:     nil,
 				ScaleDeployments: map[*v1.ObjectReference]uint32{
@@ -261,7 +261,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "baz",
+				WorkerDeploymentName: "baz" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments:    nil,
 				CreateDeployment:     newTestDeploymentWithHashedBuildID(testPodTemplate, newTestWorkerSpec(3), "baz"),
 				ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
@@ -281,7 +281,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "bar",
+				WorkerDeploymentName: "bar" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments: []*appsv1.Deployment{
 					newTestDeploymentWithBuildID(testPodTemplate, newTestWorkerSpec(3), "bar", "b"),
 				},
@@ -303,7 +303,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(0),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "def",
+				WorkerDeploymentName: "def" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments: []*appsv1.Deployment{
 					newTestDeploymentWithBuildID(testPodTemplate, newTestWorkerSpec(0), "def", "b"),
 				},
@@ -325,7 +325,7 @@ func TestGeneratePlan(t *testing.T) {
 			desiredState: newTestWorkerSpec(3),
 			expectedPlan: plan{
 				TemporalNamespace:    testNamespace,
-				WorkerDeploymentName: testNamespace + deploymentNameSeparator + "abc",
+				WorkerDeploymentName: "abc" + deploymentNameSeparator + testNamespace,
 				DeleteDeployments:    nil,
 				CreateDeployment:     nil,
 				ScaleDeployments: map[*v1.ObjectReference]uint32{
