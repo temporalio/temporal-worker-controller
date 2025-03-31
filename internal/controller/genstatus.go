@@ -8,11 +8,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.temporal.io/api/serviceerror"
-	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"go.temporal.io/api/serviceerror"
 
 	"github.com/go-logr/logr"
 	"go.temporal.io/api/enums/v1"
@@ -139,13 +139,11 @@ func (c *deploymentVersionCollection) addAssignmentRule(rule *taskqueue.BuildIdA
 
 func (c *deploymentVersionCollection) addVersionStatus(version string, status temporaliov1alpha1.VersionStatus) {
 	c.versionStatus[version] = status
-	return
 }
 
 func (c *deploymentVersionCollection) addDrainedSince(version string, drainedSince time.Time) {
 	t := metav1.NewTime(drainedSince)
 	c.drainedSince[version] = &t
-	return
 }
 
 func (c *deploymentVersionCollection) addTaskQueue(versionID, name string) {
@@ -400,7 +398,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 
 	// Ugly hack to clear ramp percentages (not quite correctly) for now
 	for _, d := range deprecatedVersions {
-		d.RampPercentage = nil // TODO (Shivam): All deprecatedVersions will have rampPercentage set to nil already
+		d.RampPercentage = nil
 	}
 	if defaultVersion != nil {
 		defaultVersion.RampPercentage = nil
@@ -419,8 +417,4 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		DeprecatedVersions:   deprecatedVersions,
 		VersionConflictToken: []byte("todo"),
 	}, nil
-}
-
-func convertFloatToUint(val float32) uint8 {
-	return uint8(math.Round(float64(val)))
 }

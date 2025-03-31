@@ -43,7 +43,7 @@ var (
 	testNamespace = "ns"
 )
 
-// Hash is always taken of this for generating the buildID.
+// Hash is always taken of Spec.Template for generating the buildID.
 func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
 	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 		Replicas: &replicas,
@@ -248,7 +248,7 @@ func TestGeneratePlan(t *testing.T) {
 				UpdateVersionConfig: nil,
 			},
 		},
-		"create new k8s deployment from the pod template ": {
+		"create new k8s deployment from the pod template": {
 			workerDeploymentName: "baz",
 			observedReplicas:     3,
 			desiredReplicas:      3,
@@ -268,7 +268,7 @@ func TestGeneratePlan(t *testing.T) {
 				UpdateVersionConfig:  nil,
 			},
 		},
-		"delete unreachable deployment versions": {
+		"delete unregistered deployment version": {
 			workerDeploymentName: "bar",
 			observedReplicas:     3,
 			desiredReplicas:      3,
