@@ -127,7 +127,7 @@ func newTestDeploymentWithBuildID(podSpec v1.PodTemplateSpec, desiredState *temp
 func newTestWorkerDeploymentVersion(status temporaliov1alpha1.VersionStatus, deploymentName string, buildID string, managedK8Deployment bool) *temporaliov1alpha1.WorkerDeploymentVersion {
 	result := temporaliov1alpha1.WorkerDeploymentVersion{
 		HealthySince:   nil,
-		VersionID:      deploymentName + versionIDSeparator + buildID,
+		VersionID:      deploymentName + deploymentNameSeparator + testNamespace + versionIDSeparator + buildID,
 		Status:         status,
 		RampPercentage: nil,
 		Deployment:     nil,
