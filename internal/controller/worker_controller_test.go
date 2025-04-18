@@ -54,9 +54,13 @@ func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerDeploym
 	}
 }
 
-// This is the new Deployment object that will be created by the controller based on the hash of the TemporalWorkerDeploymentSpec
-func newTestDeploymentWithHashedBuildID(podSpec v1.PodTemplateSpec, desiredState *temporaliov1alpha1.TemporalWorkerDeploymentSpec, deploymentName string) *appsv1.Deployment {
-	buildID := utils.ComputeHash(&desiredState.Template, nil)
+// newTestDeployment creates a new Deployment object for testing purposes.
+// If buildID is empty, it will be computed from the desiredState.Template.
+func newTestDeployment(podSpec v1.PodTemplateSpec, desiredState *temporaliov1alpha1.TemporalWorkerDeploymentSpec, deploymentName string, buildID string) *appsv1.Deployment {
+	// If buildID is not provided, compute it from the template
+	if buildID == "" {
+		buildID = utils.ComputeHash(&desiredState.Template, nil)
+	}
 
 	labels := map[string]string{
 		"temporal.io/build-id": buildID,
@@ -90,38 +94,12 @@ func newTestDeploymentWithHashedBuildID(podSpec v1.PodTemplateSpec, desiredState
 	}
 }
 
+func newTestDeploymentWithHashedBuildID(podSpec v1.PodTemplateSpec, desiredState *temporaliov1alpha1.TemporalWorkerDeploymentSpec, deploymentName string) *appsv1.Deployment {
+	return newTestDeployment(podSpec, desiredState, deploymentName, "")
+}
+
 func newTestDeploymentWithBuildID(podSpec v1.PodTemplateSpec, desiredState *temporaliov1alpha1.TemporalWorkerDeploymentSpec, deploymentName string, buildID string) *appsv1.Deployment {
-
-	labels := map[string]string{
-		"temporal.io/build-id": buildID,
-	}
-
-	blockOwnerDeletion := true
-	isController := true
-
-	return &appsv1.Deployment{
-		TypeMeta: metav1.TypeMeta{},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testTemporalNamespace,
-			Name:      deploymentName + k8sResourceNameSeparator + buildID,
-			Labels:    labels,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "temporal.io/v1alpha1",
-				Kind:               "TemporalWorkerDeployment",
-				Name:               deploymentName,
-				UID:                "",
-				Controller:         &isController,
-				BlockOwnerDeletion: &blockOwnerDeletion,
-			}},
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: desiredState.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
-			},
-			Template: podSpec,
-		},
-	}
+	return newTestDeployment(podSpec, desiredState, deploymentName, buildID)
 }
 
 func newTestWorkerDeploymentVersion(status temporaliov1alpha1.VersionStatus, deploymentName string, buildID string, managedK8Deployment bool) *temporaliov1alpha1.WorkerDeploymentVersion {
