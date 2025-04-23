@@ -64,7 +64,7 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 			if len(cert.Certificate) == 0 {
 				continue
 			}
-			expired, err := cp.isCertificateExpiredSoon(cert.Certificate[0], 30*time.Minute)
+			expired, err := cp.isCertificateExpiredSoon(cert.Certificate[0], 5*time.Minute)
 			if err != nil {
 				cp.logger.Error("Error checking certificate expiration", "error", err)
 				return nil, false
@@ -126,7 +126,7 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		}
 
 		// Check if certificate is expired before creating the client
-		expired, err := cp.isCertificateExpiredSoon(secret.Data["tls.crt"], 30*time.Minute)
+		expired, err := cp.isCertificateExpiredSoon(secret.Data["tls.crt"], 5*time.Minute)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
 		}
