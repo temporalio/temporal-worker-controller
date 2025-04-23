@@ -93,22 +93,22 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		// TODO(jlegrone): fix this
 		Credentials: sdkclient.NewAPIKeyStaticCredentials(os.Getenv("TEMPORAL_CLOUD_API_KEY")),
 		//Credentials: client.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
-		//      token, ok := os.LookupEnv("TEMPORAL_CLOUD_API_KEY")
-		//      if ok {
-		//              if token == "" {
-		//                      return "", fmt.Errorf("empty token")
-		//              }
-		//              return token, nil
-		//      }
-		//      return "", fmt.Errorf("token not found")
+		//	token, ok := os.LookupEnv("TEMPORAL_CLOUD_API_KEY")
+		//	if ok {
+		//		if token == "" {
+		//			return "", fmt.Errorf("empty token")
+		//		}
+		//		return token, nil
+		//	}
+		//	return "", fmt.Errorf("token not found")
 		//}),
 		//Credentials: client.NewMTLSCredentials(tls.Certificate{
-		//      Certificate:                  cert.Certificate,
-		//      PrivateKey:                   cert.PrivateKey,
-		//      SupportedSignatureAlgorithms: nil,
-		//      OCSPStaple:                   nil,
-		//      SignedCertificateTimestamps:  nil,
-		//      Leaf:                         nil,
+		//	Certificate:                  cert.Certificate,
+		//	PrivateKey:                   cert.PrivateKey,
+		//	SupportedSignatureAlgorithms: nil,
+		//	OCSPStaple:                   nil,
+		//	SignedCertificateTimestamps:  nil,
+		//	Leaf:                         nil,
 		//}),
 	}
 	// Get the connection secret if it exists
