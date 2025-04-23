@@ -10,6 +10,10 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
+
+	"crypto/x509"
+	"encoding/pem"
 
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
@@ -25,17 +29,22 @@ type ClientPoolKey struct {
 	Namespace string
 }
 
+type ClientInfo struct {
+	Client sdkclient.Client
+	TLS    *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
+}
+
 type ClientPool struct {
 	mux       sync.RWMutex
 	logger    log.Logger
-	clients   map[ClientPoolKey]sdkclient.Client
+	clients   map[ClientPoolKey]ClientInfo
 	k8sClient runtimeclient.Client
 }
 
 func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	return &ClientPool{
 		logger:    l,
-		clients:   make(map[ClientPoolKey]sdkclient.Client),
+		clients:   make(map[ClientPoolKey]ClientInfo),
 		k8sClient: c,
 	}
 }
@@ -44,11 +53,30 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 	cp.mux.RLock()
 	defer cp.mux.RUnlock()
 
-	c, ok := cp.clients[key]
-	if ok {
-		return c, true
+	info, ok := cp.clients[key]
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+
+	// Check if any certificate is expired
+	if info.TLS != nil {
+		for _, cert := range info.TLS.Certificates {
+			if len(cert.Certificate) == 0 {
+				continue
+			}
+			expired, err := cp.isCertificateExpired(cert.Certificate[0])
+			if err != nil {
+				cp.logger.Error("Error checking certificate expiration", "error", err)
+				return nil, false
+			}
+			if expired {
+				cp.logger.Info("Certificate expired", "expiry", cert.Leaf.NotAfter)
+				return nil, false
+			}
+		}
+	}
+
+	return info.Client, true
 }
 
 type NewClientOptions struct {
@@ -65,22 +93,22 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		// TODO(jlegrone): fix this
 		Credentials: sdkclient.NewAPIKeyStaticCredentials(os.Getenv("TEMPORAL_CLOUD_API_KEY")),
 		//Credentials: client.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
-		//	token, ok := os.LookupEnv("TEMPORAL_CLOUD_API_KEY")
-		//	if ok {
-		//		if token == "" {
-		//			return "", fmt.Errorf("empty token")
-		//		}
-		//		return token, nil
-		//	}
-		//	return "", fmt.Errorf("token not found")
+		//      token, ok := os.LookupEnv("TEMPORAL_CLOUD_API_KEY")
+		//      if ok {
+		//              if token == "" {
+		//                      return "", fmt.Errorf("empty token")
+		//              }
+		//              return token, nil
+		//      }
+		//      return "", fmt.Errorf("token not found")
 		//}),
 		//Credentials: client.NewMTLSCredentials(tls.Certificate{
-		//	Certificate:                  cert.Certificate,
-		//	PrivateKey:                   cert.PrivateKey,
-		//	SupportedSignatureAlgorithms: nil,
-		//	OCSPStaple:                   nil,
-		//	SignedCertificateTimestamps:  nil,
-		//	Leaf:                         nil,
+		//      Certificate:                  cert.Certificate,
+		//      PrivateKey:                   cert.PrivateKey,
+		//      SupportedSignatureAlgorithms: nil,
+		//      OCSPStaple:                   nil,
+		//      SignedCertificateTimestamps:  nil,
+		//      Leaf:                         nil,
 		//}),
 	}
 	// Get the connection secret if it exists
@@ -96,10 +124,21 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls", secret.Name)
 			return nil, err
 		}
+
+		// Check if certificate is expired before creating the client
+		expired, err := cp.isCertificateExpired(secret.Data["tls.crt"])
+		if err != nil {
+			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
+		}
+		if expired {
+			return nil, fmt.Errorf("certificate is expired")
+		}
+
 		cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])
 		if err != nil {
 			return nil, err
 		}
+
 		clientOpts.ConnectionOptions.TLS = &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
@@ -121,7 +160,10 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
 	}
-	cp.clients[key] = c
+	cp.clients[key] = ClientInfo{
+		Client: c,
+		TLS:    clientOpts.ConnectionOptions.TLS,
+	}
 
 	return c, nil
 }
@@ -131,8 +173,31 @@ func (cp *ClientPool) Close() {
 	defer cp.mux.Unlock()
 
 	for _, c := range cp.clients {
-		c.Close()
+		c.Client.Close()
 	}
 
-	cp.clients = make(map[ClientPoolKey]sdkclient.Client)
+	cp.clients = make(map[ClientPoolKey]ClientInfo)
+}
+
+func (cp *ClientPool) isCertificateExpired(certBytes []byte) (bool, error) {
+	if len(certBytes) == 0 {
+		return false, nil
+	}
+
+	block, _ := pem.Decode(certBytes)
+	if block == nil {
+		return true, fmt.Errorf("failed to decode PEM block")
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return true, fmt.Errorf("failed to parse certificate: %v", err)
+	}
+
+	// Check if certificate is expired
+	if time.Now().After(cert.NotAfter) {
+		return true, nil
+	}
+
+	return false, nil
 }
