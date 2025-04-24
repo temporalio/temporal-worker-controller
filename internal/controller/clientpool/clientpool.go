@@ -30,8 +30,9 @@ type ClientPoolKey struct {
 }
 
 type ClientInfo struct {
-	Client sdkclient.Client
-	TLS    *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
+	Client  sdkclient.Client
+	TLS     *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
+	PEMCert []byte      // Store the original PEM-encoded certificate for expiration checks
 }
 
 type ClientPool struct {
@@ -59,20 +60,15 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 	}
 
 	// Check if any certificate is expired
-	if info.TLS != nil {
-		for _, cert := range info.TLS.Certificates {
-			if len(cert.Certificate) == 0 {
-				continue
-			}
-			expired, err := cp.isCertificateExpiredSoon(cert.Certificate[0], 5*time.Minute)
-			if err != nil {
-				cp.logger.Error("Error checking certificate expiration", "error", err)
-				return nil, false
-			}
-			if expired {
-				cp.logger.Info("Certificate is expired or is going to expire soon", "expiry", cert.Leaf.NotAfter)
-				return nil, false
-			}
+	if info.PEMCert != nil {
+		expired, err := cp.isCertificateExpiredSoon(info.PEMCert, 5*time.Minute)
+		if err != nil {
+			cp.logger.Error("Error checking certificate expiration", "error", err)
+			return nil, false
+		}
+		if expired {
+			cp.logger.Info("Certificate is expired or is going to expire soon")
+			return nil, false
 		}
 	}
 
@@ -111,6 +107,8 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		//	Leaf:                         nil,
 		//}),
 	}
+
+	var pemCert []byte
 	// Get the connection secret if it exists
 	if opts.Spec.MutualTLSSecret != "" {
 		var secret corev1.Secret
@@ -125,8 +123,11 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 			return nil, err
 		}
 
+		// Store the PEM certificate for future expiration checks
+		pemCert = secret.Data["tls.crt"]
+
 		// Check if certificate is expired before creating the client
-		expired, err := cp.isCertificateExpiredSoon(secret.Data["tls.crt"], 5*time.Minute)
+		expired, err := cp.isCertificateExpiredSoon(pemCert, 5*time.Minute)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
 		}
@@ -138,6 +139,7 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		if err != nil {
 			return nil, err
 		}
+
 		clientOpts.ConnectionOptions.TLS = &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
@@ -159,9 +161,18 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
 	}
-	cp.clients[key] = ClientInfo{
-		Client: c,
-		TLS:    clientOpts.ConnectionOptions.TLS,
+	if opts.Spec.MutualTLSSecret != "" {
+		cp.clients[key] = ClientInfo{
+			Client:  c,
+			TLS:     clientOpts.ConnectionOptions.TLS,
+			PEMCert: pemCert,
+		}
+	} else {
+		cp.clients[key] = ClientInfo{
+			Client:  c,
+			TLS:     nil,
+			PEMCert: nil,
+		}
 	}
 
 	return c, nil
