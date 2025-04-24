@@ -168,3 +168,7 @@ Bug reports and feature requests are welcome! Please [file an issue](https://git
 
 You may also reach out to `@jlegrone` on the [Temporal Slack](https://t.mp/slack) if you have questions, suggestions, or are
 interested in making other contributions.
+
+## Development
+
+For local development setup and running the controller locally, see the [development guide](internal/README.md).

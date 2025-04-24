@@ -8,23 +8,6 @@ build:
       variant: CommitSha
       ignoreChanges: true
 profiles:
-  - name: crds
-    manifests:
-      kustomize:
-        paths:
-          - config/crd
-  - name: manager
-    build:
-      artifacts:
-        - image: controller
-          docker:
-            dockerfile: Dockerfile
-    manifests:
-      kustomize:
-        paths:
-          - config/default
-          - config/rbac
-          - config/manager
   - name: helloworld
     build:
       artifacts:
