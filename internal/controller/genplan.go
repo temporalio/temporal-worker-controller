@@ -6,9 +6,10 @@ package controller
 
 import (
 	"context"
-	"github.com/go-logr/logr"
 	"strings"
 	"time"
+
+	"github.com/go-logr/logr"
 
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -115,8 +116,11 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 				plan.ScaleDeployments[version.Deployment] = uint32(*w.Spec.Replicas)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
-			// Delete deployments that have been drained for long enough.
-			if time.Since(version.DrainedSince.Time) > getDeleteDelay(&w.Spec) {
+			// Deleting a deployment is only possible when:
+			// 1. The deployment has been drained for deleteDelay + scaledownDelay. This is to ensure that on the odd chance that the deleteDelay < scaledownDelay,
+			//    deleting will not occur immediately after scaling down.
+			// 2. The deployment is scaled to 0 replicas. This is to ensure that deletion is only possible if the deployment has been scaled down successfully.
+			if (time.Since(version.DrainedSince.Time) > getDeleteDelay(&w.Spec)+getScaledownDelay(&w.Spec)) && *d.Spec.Replicas == 0 {
 				plan.DeleteDeployments = append(plan.DeleteDeployments, d)
 			} else if time.Since(version.DrainedSince.Time) > getScaledownDelay(&w.Spec) {
 				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?

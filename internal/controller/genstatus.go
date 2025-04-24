@@ -8,11 +8,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.temporal.io/api/serviceerror"
-	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"go.temporal.io/api/serviceerror"
 
 	"github.com/go-logr/logr"
 	"go.temporal.io/api/enums/v1"
@@ -29,6 +29,7 @@ import (
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
 
+// TODO (Shivam): Should we be having a map of [versionID] -> Structure?
 type deploymentVersionCollection struct {
 	versionIDsToDeployments map[string]*appsv1.Deployment
 	// map of version IDs to ramp percentages [0,100]
@@ -138,13 +139,11 @@ func (c *deploymentVersionCollection) addAssignmentRule(rule *taskqueue.BuildIdA
 
 func (c *deploymentVersionCollection) addVersionStatus(version string, status temporaliov1alpha1.VersionStatus) {
 	c.versionStatus[version] = status
-	return
 }
 
 func (c *deploymentVersionCollection) addDrainedSince(version string, drainedSince time.Time) {
 	t := metav1.NewTime(drainedSince)
 	c.drainedSince[version] = &t
-	return
 }
 
 func (c *deploymentVersionCollection) addTaskQueue(versionID, name string) {
@@ -388,7 +387,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		case desiredVersionID, defaultVersionID:
 			continue
 		}
-		d, _ := versions.getWorkerDeploymentVersion(version)
+		d, _ := versions.getWorkerDeploymentVersion(version) // TODO (Shivam): How do we know these versions have been deleted by Temporal? They could just be draining...
 		deprecatedVersions = append(deprecatedVersions, d)
 	}
 
@@ -418,8 +417,4 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		DeprecatedVersions:   deprecatedVersions,
 		VersionConflictToken: []byte("todo"),
 	}, nil
-}
-
-func convertFloatToUint(val float32) uint8 {
-	return uint8(math.Round(float64(val)))
 }
