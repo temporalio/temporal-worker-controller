@@ -51,6 +51,7 @@ func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerDeploym
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace: testTemporalNamespace,
 		},
+		RolloutStrategy: temporaliov1alpha1.RolloutStrategy{Strategy: temporaliov1alpha1.UpdateAllAtOnce},
 	}
 }
 
@@ -102,6 +103,13 @@ func newTestDeploymentWithBuildID(podSpec v1.PodTemplateSpec, desiredState *temp
 	return newTestDeployment(podSpec, desiredState, deploymentName, buildID)
 }
 
+func newTestWorkerDeploymentVersionWithHealthySince(status temporaliov1alpha1.VersionStatus, deploymentName string, buildID string, managedK8Deployment bool) *temporaliov1alpha1.WorkerDeploymentVersion {
+	result := newTestWorkerDeploymentVersion(status, deploymentName, buildID, managedK8Deployment)
+	t := metav1.NewTime(time.Now())
+	result.HealthySince = &t
+	return result
+}
+
 func newTestWorkerDeploymentVersion(status temporaliov1alpha1.VersionStatus, deploymentName string, buildID string, managedK8Deployment bool) *temporaliov1alpha1.WorkerDeploymentVersion {
 	result := temporaliov1alpha1.WorkerDeploymentVersion{
 		HealthySince:   nil,
@@ -115,7 +123,7 @@ func newTestWorkerDeploymentVersion(status temporaliov1alpha1.VersionStatus, dep
 	if managedK8Deployment {
 		result.Deployment = &v1.ObjectReference{
 			Namespace: testTemporalNamespace,
-			Name:      deploymentName + k8sResourceNameSeparator + buildID,
+			Name:      computeVersionedDeploymentName(deploymentName, buildID),
 		}
 	}
 
@@ -315,6 +323,46 @@ func TestGeneratePlan(t *testing.T) {
 				UpdateVersionConfig: nil,
 			},
 		},
+		"unset ramp if target == default but ramping version is not target version (ie. rollback after partial ramp)": {
+			workerDeploymentName: "xyz",
+			observedReplicas:     3,
+			desiredReplicas:      3,
+			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				DefaultVersion: newTestWorkerDeploymentVersionWithHealthySince(
+					temporaliov1alpha1.VersionStatusCurrent,
+					"xyz",
+					"7646585678",
+					true,
+				),
+				RampingVersion: newTestWorkerDeploymentVersionWithHealthySince(
+					temporaliov1alpha1.VersionStatusRamping,
+					"xyz",
+					"b",
+					true,
+				),
+				TargetVersion: newTestWorkerDeploymentVersionWithHealthySince(
+					temporaliov1alpha1.VersionStatusCurrent,
+					"xyz",
+					"7646585678",
+					true,
+				),
+			},
+			desiredState: newTestWorkerSpec(3),
+			expectedPlan: plan{
+				TemporalNamespace:    testTemporalNamespace,
+				WorkerDeploymentName: "xyz" + deploymentNameSeparator + testTemporalNamespace,
+				DeleteDeployments:    nil, // todo(carlydf): do we want to delete the partially-ramped deployment?
+				CreateDeployment:     nil,
+				ScaleDeployments:     nil,
+				UpdateVersionConfig: &versionConfig{
+					conflictToken:  nil,
+					versionID:      "xyz/ns.7646585678",
+					setDefault:     false,
+					rampPercentage: 0,
+					unsetRamp:      true,
+				},
+			},
+		},
 	}
 
 	// Create a new scheme and client for each test case to avoid state bleeding
@@ -333,6 +381,9 @@ func TestGeneratePlan(t *testing.T) {
 	}
 
 	for name, tc := range testCases {
+		if !strings.Contains(name, "unset ramp") {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 
 			// Create the TemporalWorkerDeployment resource.

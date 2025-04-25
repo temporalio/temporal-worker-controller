@@ -230,7 +230,7 @@ func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStra
 			return nil
 		}
 		vcfg.unsetRamp = true
-		return nil
+		vcfg.setDefault = false
 	}
 
 	// Don't make updates if target version is already the ramping version, and ramp percentage is correct
