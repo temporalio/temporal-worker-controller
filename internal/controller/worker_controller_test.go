@@ -351,7 +351,7 @@ func TestGeneratePlan(t *testing.T) {
 			expectedPlan: plan{
 				TemporalNamespace:    testTemporalNamespace,
 				WorkerDeploymentName: "xyz" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments:    nil, // todo(carlydf): do we want to delete the partially-ramped deployment?
+				DeleteDeployments:    nil,
 				CreateDeployment:     nil,
 				ScaleDeployments:     nil,
 				UpdateVersionConfig: &versionConfig{
