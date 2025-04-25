@@ -46,7 +46,8 @@ help: ## Display this help.
 # crd:maxDescLen=0 is to avoid error described in https://github.com/kubernetes-sigs/kubebuilder/issues/2556#issuecomment-1074844483
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true webhook paths="./..." \
+    output:crd:artifacts:config=helm/temporal-worker-controller/templates/crds
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -145,21 +146,20 @@ ifndef ignore-not-found
 endif
 
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply --context $(K8S_CONTEXT) -f -
+install: manifests ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+	$(KUBECTL) apply --context $(K8S_CONTEXT) -f helm/temporal-worker-controller/templates/crds
 
 .PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --context $(K8S_CONTEXT) --ignore-not-found=$(ignore-not-found) -f -
+uninstall: manifests ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	$(KUBECTL) delete --context $(K8S_CONTEXT) --ignore-not-found=$(ignore-not-found) -f helm/temporal-worker-controller/templates/crds
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | $(KUBECTL) apply --context $(K8S_CONTEXT) -f -
+deploy: manifests helm ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	helm install temporal-worker-controller ./helm/temporal-worker-controller --namespace temporal-system
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --context $(K8S_CONTEXT) --ignore-not-found=$(ignore-not-found) -f -
+	helm uninstall temporal-worker-controller --namespace temporal-system
 
 ##@ Build Dependencies
 
@@ -171,23 +171,27 @@ $(LOCALBIN):
 ## Tool Binaries
 KUBECTL ?= kubectl
 K8S_CONTEXT ?= minikube
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
+HELM ?= $(LOCALBIN)/helm
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 TEMPORAL ?= temporal
 
 ## Tool Versions
-KUSTOMIZE_VERSION ?= v5.0.1
+HELM_VERSION ?= v3.14.3
 CONTROLLER_TOOLS_VERSION ?= v0.16.2
 
-.PHONY: kustomize
-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary. If wrong version is installed, it will be removed before downloading.
-$(KUSTOMIZE): $(LOCALBIN)
-	@if test -x $(LOCALBIN)/kustomize && ! $(LOCALBIN)/kustomize version | grep -q $(KUSTOMIZE_VERSION); then \
-		echo "$(LOCALBIN)/kustomize version is not expected $(KUSTOMIZE_VERSION). Removing it before installing."; \
-		rm -rf $(LOCALBIN)/kustomize; \
+.PHONY: helm
+helm: $(HELM) ## Download helm locally if necessary. If wrong version is installed, it will be removed before downloading.
+$(HELM): $(LOCALBIN)
+	@if test -x $(LOCALBIN)/helm && ! $(LOCALBIN)/helm version | grep -q $(HELM_VERSION); then \
+		echo "$(LOCALBIN)/helm version is not expected $(HELM_VERSION). Removing it before installing."; \
+		rm -rf $(LOCALBIN)/helm; \
 	fi
-	test -s $(LOCALBIN)/kustomize || GOBIN=$(LOCALBIN) GO111MODULE=on go install sigs.k8s.io/kustomize/kustomize/v5@$(KUSTOMIZE_VERSION)
+	test -s $(LOCALBIN)/helm || curl -fsSL -o get_helm.sh \
+                                https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 \
+                                && chmod 700 get_helm.sh \
+                                && GOBIN=$(LOCALBIN) GO111MODULE=on DESIRED_VERSION=$(HELM_VERSION) ./get_helm.sh \
+                                && rm get_helm.sh
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary. If wrong version is installed, it will be overwritten.
