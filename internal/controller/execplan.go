@@ -109,19 +109,24 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}); err != nil { // would be cool to do this atomically with the update
 				return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
 			}
-		} else if ramp := vcfg.rampPercentage; ramp > 0 { // TODO(carlydf): Support setting any ramp in [0,100]
+		} else if ramp := vcfg.rampPercentage; ramp > 0 || vcfg.unsetRamp { // TODO(carlydf): Support setting any ramp in [0,100]
 			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {
 				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 			}
 
-			l.Info("applying ramp", "version", p.UpdateVersionConfig.versionID, "percentage", p.UpdateVersionConfig.rampPercentage)
+			desiredRampingVersion := vcfg.versionID
+			if vcfg.unsetRamp {
+				desiredRampingVersion = ""
+			}
+
+			l.Info("applying ramp", "version", desiredRampingVersion, "percentage", p.UpdateVersionConfig.rampPercentage)
 			resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 			if err != nil {
 				return fmt.Errorf("unable to describe worker deployment: %w", err)
 			}
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-				Version:       vcfg.versionID,
+				Version:       desiredRampingVersion,
 				Percentage:    vcfg.rampPercentage,
 				ConflictToken: resp.ConflictToken,
 				Identity:      "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.

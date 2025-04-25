@@ -229,13 +229,14 @@ func newDeploymentVersionCollection() deploymentVersionCollection {
 
 func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient temporalClient.Client, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	var (
-		desiredVersionID, defaultVersionID string
-		deployedVersions                   []string
-		versions                           = newDeploymentVersionCollection()
+		targetVersionID, defaultVersionID, rampingVersionID string
+		targetVersion, defaultVersion, rampingVersion       *temporaliov1alpha1.WorkerDeploymentVersion
+		deployedVersions                                    []string
+		versions                                            = newDeploymentVersionCollection()
 	)
 
 	workerDeploymentName := computeWorkerDeploymentName(workerDeploy)
-	desiredVersionID = computeVersionID(workerDeploy)
+	targetVersionID = computeVersionID(workerDeploy)
 
 	// List k8s deployments that correspond to managed worker deployment versions
 	var childDeploys appsv1.DeploymentList
@@ -268,6 +269,10 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	workerDeploymentInfo := describeResp.Info
 	routingConfig := workerDeploymentInfo.RoutingConfig
 	defaultVersionID = routingConfig.CurrentVersion
+	rampingVersionID = routingConfig.RampingVersion
+	if rampingVersionID != "" {
+		rampingVersion, _ = versions.getWorkerDeploymentVersion(rampingVersionID)
+	}
 
 	// Check if the worker deployment was modified out of band of the controller (eg. via the Temporal CLI)
 	if workerDeploymentInfo.LastModifierIdentity != "temporal-worker-controller" &&
@@ -275,8 +280,6 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		// TODO(jlegrone): if it was set by another client, switch to manual mode
 	}
 
-	var rampingSinceTime *metav1.Time
-	var rampPercentage float32
 	// For each version the server has registered in the worker deployment, compute the status.
 	for _, version := range workerDeploymentInfo.VersionSummaries {
 		drainageStatus := version.DrainageStatus
@@ -286,9 +289,12 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		} else if version.Version == routingConfig.RampingVersion {
 			versionStatus = temporaliov1alpha1.VersionStatusRamping
 			rt := metav1.NewTime(routingConfig.RampingVersionChangedTime)
-			rampingSinceTime = &rt
-			rampPercentage = routingConfig.RampingVersionPercentage
-			l.Info(fmt.Sprintf("version %s has been ramping since %s, current ramp percentage %v", version.Version, rt.String(), rampPercentage))
+			if rampingVersion != nil {
+				rampingVersion.RampingSince = &rt
+				rampingVersion.RampPercentage = &routingConfig.RampingVersionPercentage
+			}
+			l.Info(fmt.Sprintf("version %s has been ramping since %s, current ramp percentage %v",
+				version.Version, rt.String(), routingConfig.RampingVersionPercentage))
 		} else if drainageStatus == sdkclient.WorkerDeploymentVersionDrainageStatusDraining {
 			versionStatus = temporaliov1alpha1.VersionStatusDraining
 		} else if drainageStatus == sdkclient.WorkerDeploymentVersionDrainageStatusDrained {
@@ -310,37 +316,37 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	}
 
 	// Check the status of the test workflow for the next version, if rollout is still happening.
-	if desiredVersionID != routingConfig.CurrentVersion {
+	if targetVersionID != routingConfig.CurrentVersion {
 		// Describe the desired version to get task queue information
 		// Temporal will error if any task queue in the existing current version is not present in the new current version.
 		// Temporal will also error if any task queue in the existing current version is not present in the new ramping version.
 		versionResp, err := deploymentHandler.DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{
-			Version: desiredVersionID,
+			Version: targetVersionID,
 		})
 		var notFound *serviceerror.NotFound
 		if err != nil && !errors.As(err, &notFound) {
 			// Ignore NotFound error, because if the version is not found, we know there are no test workflows running on it.
-			return nil, fmt.Errorf("unable to describe worker deployment version for version %q: %w", desiredVersionID, err)
+			return nil, fmt.Errorf("unable to describe worker deployment version for version %q: %w", targetVersionID, err)
 		}
 		for _, tq := range versionResp.Info.TaskQueuesInfos {
 			// Keep track of which task queues this version of the worker is polling on
 			if tq.Type != sdkclient.TaskQueueTypeWorkflow {
 				continue
 			}
-			versions.addTaskQueue(desiredVersionID, tq.Name)
+			versions.addTaskQueue(targetVersionID, tq.Name)
 
 			// If there is a test workflow associated with this task queue and build id, check its status.
 			wf, err := temporalClient.DescribeWorkflowExecution(
 				ctx,
-				getTestWorkflowID(computeWorkerDeploymentName(workerDeploy), tq.Name, desiredVersionID),
+				getTestWorkflowID(computeWorkerDeploymentName(workerDeploy), tq.Name, targetVersionID),
 				"",
 			)
 			// TODO(jlegrone): Detect "not found" errors properly
 			if err != nil && !strings.Contains(err.Error(), "workflow not found") {
 				return nil, fmt.Errorf("unable to describe test workflow: %w", err)
 			}
-			if err := versions.addTestWorkflowStatus(desiredVersionID, wf.GetWorkflowExecutionInfo()); err != nil {
-				return nil, fmt.Errorf("error computing test workflow status for version %q: %w", desiredVersionID, err)
+			if err := versions.addTestWorkflowStatus(targetVersionID, wf.GetWorkflowExecutionInfo()); err != nil {
+				return nil, fmt.Errorf("error computing test workflow status for version %q: %w", targetVersionID, err)
 			}
 		}
 	}
@@ -384,17 +390,15 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	var deprecatedVersions []*temporaliov1alpha1.WorkerDeploymentVersion
 	for _, version := range deployedVersions {
 		switch version {
-		case desiredVersionID, defaultVersionID:
+		case targetVersionID, defaultVersionID:
 			continue
 		}
 		d, _ := versions.getWorkerDeploymentVersion(version) // TODO (Shivam): How do we know these versions have been deleted by Temporal? They could just be draining...
 		deprecatedVersions = append(deprecatedVersions, d)
 	}
 
-	var (
-		defaultVersion, _ = versions.getWorkerDeploymentVersion(defaultVersionID)
-		targetVersion, _  = versions.getWorkerDeploymentVersion(desiredVersionID)
-	)
+	defaultVersion, _ = versions.getWorkerDeploymentVersion(defaultVersionID)
+	targetVersion, _ = versions.getWorkerDeploymentVersion(targetVersionID)
 
 	// Ugly hack to clear ramp percentages (not quite correctly) for now
 	for _, d := range deprecatedVersions {
@@ -406,13 +410,14 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 			targetVersion.RampPercentage = nil
 		}
 	}
-	if targetVersion != nil {
-		targetVersion.RampPercentage = &rampPercentage
-		targetVersion.RampingSince = rampingSinceTime
+	if targetVersion != nil && targetVersion.VersionID == rampingVersionID {
+		targetVersion.RampPercentage = rampingVersion.RampPercentage
+		targetVersion.RampingSince = rampingVersion.RampingSince
 	}
 
 	return &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 		DefaultVersion:       defaultVersion,
+		RampingVersion:       rampingVersion,
 		TargetVersion:        targetVersion,
 		DeprecatedVersions:   deprecatedVersions,
 		VersionConflictToken: []byte("todo"),

@@ -50,6 +50,9 @@ type versionConfig struct {
 	setDefault bool
 	// Acceptable values [0,100]
 	rampPercentage float32
+
+	// Unset ramp
+	unsetRamp bool
 }
 
 type startWorkflowConfig struct {
@@ -220,15 +223,20 @@ func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStra
 		return vcfg
 	}
 
-	// Don't make updates if desired default is already the default
+	// If desired default is already the default...
 	if vcfg.versionID == status.DefaultVersion.VersionID {
+		// If ramping version is already nil, do nothing
+		if status.RampingVersion == nil {
+			return nil
+		}
+		vcfg.unsetRamp = true
 		return nil
 	}
 
-	// Don't make updates if desired ramping version is already the target, and ramp percentage is correct
+	// Don't make updates if target version is already the ramping version, and ramp percentage is correct
 	if !vcfg.setDefault &&
-		vcfg.versionID == status.TargetVersion.VersionID &&
-		vcfg.rampPercentage == *status.TargetVersion.RampPercentage {
+		vcfg.versionID == status.RampingVersion.VersionID &&
+		vcfg.rampPercentage == *status.RampingVersion.RampPercentage {
 		return nil
 	}
 
