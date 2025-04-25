@@ -381,9 +381,6 @@ func TestGeneratePlan(t *testing.T) {
 	}
 
 	for name, tc := range testCases {
-		if !strings.Contains(name, "unset ramp") {
-			continue
-		}
 		t.Run(name, func(t *testing.T) {
 
 			// Create the TemporalWorkerDeployment resource.
