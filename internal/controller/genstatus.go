@@ -236,7 +236,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	)
 
 	workerDeploymentName := computeWorkerDeploymentName(workerDeploy)
-	targetVersionID = computeVersionID(workerDeploy)
+	targetVersionID = computeVersionID(workerDeploymentName, computeBuildID(&workerDeploy.Spec))
 
 	// List k8s deployments that correspond to managed worker deployment versions
 	var childDeploys appsv1.DeploymentList

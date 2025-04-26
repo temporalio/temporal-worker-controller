@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"encoding/json"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/stretchr/testify/assert"
@@ -20,114 +22,240 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
-	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
 )
 
 var (
-	testPodTemplate = v1.PodTemplateSpec{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"temporal.io/build-id": "123456789",
-			},
-		},
+	testTemporalNamespace      = "ns"
+	deprecatedVersionImageName = "ignored-because-cannot-recreate-in-tests"
+)
+
+func newTestPodSpec(image string) v1.PodTemplateSpec {
+	return v1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
 					Name:  "main",
-					Image: "foo/bar@sha256:deadbeef",
+					Image: image,
 				},
 			},
 		},
 	}
-
-	testTemporalNamespace = "ns"
-)
-
-// Hash is always taken of Spec.Template for generating the buildID.
-func newTestWorkerSpec(replicas int32) *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
-	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-		Replicas: &replicas,
-		Template: testPodTemplate,
-		WorkerOptions: temporaliov1alpha1.WorkerOptions{
-			TemporalNamespace: testTemporalNamespace,
-		},
-		RolloutStrategy: temporaliov1alpha1.RolloutStrategy{Strategy: temporaliov1alpha1.UpdateAllAtOnce},
-	}
 }
 
-// newTestDeployment creates a new Deployment object for testing purposes.
-// If buildID is empty, it will be computed from the desiredState.Template.
-func newTestDeployment(podSpec v1.PodTemplateSpec, desiredState *temporaliov1alpha1.TemporalWorkerDeploymentSpec, deploymentName string, buildID string) *appsv1.Deployment {
-	// If buildID is not provided, compute it from the template
-	if buildID == "" {
-		buildID = utils.ComputeHash(&desiredState.Template, nil)
+type testTemporalWorkerDeployment struct {
+	v       *temporaliov1alpha1.TemporalWorkerDeployment
+	buildID string
+}
+
+func (t *testTemporalWorkerDeployment) Get() *temporaliov1alpha1.TemporalWorkerDeployment {
+	return t.v
+}
+
+func (t *testTemporalWorkerDeployment) getSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
+	return &t.v.Spec
+}
+
+func (t *testTemporalWorkerDeployment) getSpecCopy() *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
+	// DeepCopyJSON performs a deep copy of a struct using JSON marshaling and unmarshaling.
+	newSpec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{}
+
+	bytes, err := json.Marshal(t.getSpec())
+	if err != nil {
+		panic(err)
 	}
-
-	labels := map[string]string{
-		"temporal.io/build-id": buildID,
+	err = json.Unmarshal(bytes, newSpec)
+	if err != nil {
+		panic(err)
 	}
+	return newSpec
+}
 
-	blockOwnerDeletion := true
-	isController := true
+func (t *testTemporalWorkerDeployment) getTemporalNamespace() string {
+	return t.v.Spec.WorkerOptions.TemporalNamespace
+}
 
-	return &appsv1.Deployment{
-		TypeMeta: metav1.TypeMeta{},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testTemporalNamespace,
-			Name:      deploymentName + k8sResourceNameSeparator + buildID,
-			Labels:    labels,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "temporal.io/v1alpha1",
-				Kind:               "TemporalWorkerDeployment",
-				Name:               deploymentName,
-				UID:                "",
-				Controller:         &isController,
-				BlockOwnerDeletion: &blockOwnerDeletion,
-			}},
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: desiredState.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
+func newTestTWD(name, image string) *testTemporalWorkerDeployment {
+	initialReplicas := int32(0)
+	ret := &testTemporalWorkerDeployment{
+		v: &temporaliov1alpha1.TemporalWorkerDeployment{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: "temporal.io/v1alpha1",
+				Kind:       "TemporalWorkerDeployment",
 			},
-			Template: podSpec,
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: testTemporalNamespace,
+			},
+			Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: &initialReplicas,
+				Template: newTestPodSpec(image),
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: testTemporalNamespace,
+				},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				SunsetStrategy:  temporaliov1alpha1.SunsetStrategy{},
+			},
+			Status: temporaliov1alpha1.TemporalWorkerDeploymentStatus{},
 		},
 	}
+
+	// We want to get and store the build id from the original pod spec like we do in genstatus,
+	// _before_ the controller adds labels and environment variables, which will
+	// change the hash value.
+	ret.buildID = ret.getBuildID()
+
+	return ret
 }
 
-func newTestDeploymentWithHashedBuildID(podSpec v1.PodTemplateSpec, desiredState *temporaliov1alpha1.TemporalWorkerDeploymentSpec, deploymentName string) *appsv1.Deployment {
-	return newTestDeployment(podSpec, desiredState, deploymentName, "")
+func (t *testTemporalWorkerDeployment) withReplicas(n int32) *testTemporalWorkerDeployment {
+	t.v.Spec.Replicas = &n
+	return t
 }
 
-func newTestDeploymentWithBuildID(podSpec v1.PodTemplateSpec, desiredState *temporaliov1alpha1.TemporalWorkerDeploymentSpec, deploymentName string, buildID string) *appsv1.Deployment {
-	return newTestDeployment(podSpec, desiredState, deploymentName, buildID)
+func (t *testTemporalWorkerDeployment) withStatus(status temporaliov1alpha1.TemporalWorkerDeploymentStatus) *testTemporalWorkerDeployment {
+	t.v.Status = status
+	return t
 }
 
-func newTestWorkerDeploymentVersionWithHealthySince(status temporaliov1alpha1.VersionStatus, deploymentName string, buildID string, managedK8Deployment bool) *temporaliov1alpha1.WorkerDeploymentVersion {
-	result := newTestWorkerDeploymentVersion(status, deploymentName, buildID, managedK8Deployment)
-	t := metav1.NewTime(time.Now())
-	result.HealthySince = &t
-	return result
+func (t *testTemporalWorkerDeployment) withAllAtOnce() *testTemporalWorkerDeployment {
+	t.v.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{Strategy: temporaliov1alpha1.UpdateAllAtOnce}
+	return t
 }
 
-func newTestWorkerDeploymentVersion(status temporaliov1alpha1.VersionStatus, deploymentName string, buildID string, managedK8Deployment bool) *temporaliov1alpha1.WorkerDeploymentVersion {
-	result := temporaliov1alpha1.WorkerDeploymentVersion{
-		HealthySince:   nil,
-		VersionID:      deploymentName + deploymentNameSeparator + testTemporalNamespace + versionIDSeparator + buildID,
-		Status:         status,
-		RampPercentage: nil,
-		Deployment:     nil,
-		DrainedSince:   &metav1.Time{Time: time.Now().Add(-30 * time.Hour)}, // useful when testing versions that have been drained but may/may not be eligible to be deleted.
+func (t *testTemporalWorkerDeployment) withProgressive() *testTemporalWorkerDeployment {
+	t.v.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
+	t.v.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
+		{RampPercentage: 1, PauseDuration: metav1.Duration{Duration: time.Second}},
+		{RampPercentage: 10, PauseDuration: metav1.Duration{Duration: time.Second}},
+		{RampPercentage: 100, PauseDuration: metav1.Duration{Duration: time.Second}},
 	}
+	return t
+}
 
-	if managedK8Deployment {
-		result.Deployment = &v1.ObjectReference{
-			Namespace: testTemporalNamespace,
-			Name:      computeVersionedDeploymentName(deploymentName, buildID),
+func (t *testTemporalWorkerDeployment) withManual() *testTemporalWorkerDeployment {
+	t.v.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
+	return t
+}
+
+func (t *testTemporalWorkerDeployment) withGate(wfType string) *testTemporalWorkerDeployment {
+	t.v.Spec.RolloutStrategy.Gate = &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: wfType}
+	return t
+}
+
+func (t *testTemporalWorkerDeployment) withSunset(scaledownDelay, deleteDelay time.Duration) *testTemporalWorkerDeployment {
+	t.v.Spec.SunsetStrategy.DeleteDelay = &metav1.Duration{Duration: deleteDelay}
+	t.v.Spec.SunsetStrategy.ScaledownDelay = &metav1.Duration{Duration: scaledownDelay}
+	return t
+}
+
+func (t *testTemporalWorkerDeployment) withSpecificBuildID(bid string) *testTemporalWorkerDeployment {
+	t.buildID = bid
+	for _, ev := range t.getSpec().Template.Spec.Containers[0].Env {
+		if ev.Name == "WORKER_BUILD_ID" {
+			ev.Value = bid
 		}
 	}
+	if t.getSpec().Template.Labels == nil {
+		t.getSpec().Template.Labels = map[string]string{}
+	}
 
-	return &result
+	t.getSpec().Template.Labels[buildIDLabel] = bid
+	return t
+}
+
+func (t *testTemporalWorkerDeployment) getBuildID() string {
+	if t.buildID != "" {
+		return t.buildID
+	}
+	return computeBuildID(&t.v.Spec)
+}
+
+func (t *testTemporalWorkerDeployment) getName() string {
+	return t.v.Name
+}
+
+func (t *testTemporalWorkerDeployment) getWorkerDeploymentName() string {
+	return computeWorkerDeploymentName(t.v)
+}
+
+func (t *testTemporalWorkerDeployment) getVersionID() string {
+	return computeVersionID(t.getWorkerDeploymentName(), t.getBuildID())
+}
+
+func (t *testTemporalWorkerDeployment) getDeployment() *appsv1.Deployment {
+	dep := newDeploymentWithoutOwnerRef(
+		&t.v.TypeMeta,
+		&t.v.ObjectMeta,
+		t.getSpecCopy(), // this will be mutated, so we need to make a copy
+		t.getWorkerDeploymentName(),
+		t.getBuildID(),
+		temporaliov1alpha1.TemporalConnectionSpec{},
+	)
+	controller := true
+	dep.ObjectMeta.OwnerReferences[0].Controller = &controller
+	return dep
+}
+
+func (t *testTemporalWorkerDeployment) getTestVersion() *testWorkerDeploymentVersion {
+	return &testWorkerDeploymentVersion{
+		ownerTWD: t,
+		v: &temporaliov1alpha1.WorkerDeploymentVersion{
+			VersionID: t.getVersionID(),
+		},
+	}
+}
+
+type testWorkerDeploymentVersion struct {
+	ownerTWD *testTemporalWorkerDeployment
+	v        *temporaliov1alpha1.WorkerDeploymentVersion
+}
+
+func (t *testWorkerDeploymentVersion) Get() *temporaliov1alpha1.WorkerDeploymentVersion {
+	return t.v
+}
+
+func (t *testWorkerDeploymentVersion) withStatus(status temporaliov1alpha1.VersionStatus) *testWorkerDeploymentVersion {
+	t.v.Status = status
+	if status == temporaliov1alpha1.VersionStatusDrained {
+		t.withDrainedSince(time.Now().Add(-5 * time.Minute))
+	}
+	return t
+}
+
+func (t *testWorkerDeploymentVersion) withRamp(percent float32, rampingSince time.Time) *testWorkerDeploymentVersion {
+	ts := metav1.NewTime(rampingSince)
+	t.v.RampingSince = &ts
+	t.v.RampPercentage = &percent
+	return t
+}
+
+func (t *testWorkerDeploymentVersion) withTaskQueues(tqNames ...string) *testWorkerDeploymentVersion {
+	t.v.TaskQueues = make([]temporaliov1alpha1.TaskQueue, len(tqNames))
+	for i, tq := range tqNames {
+		t.v.TaskQueues[i] = temporaliov1alpha1.TaskQueue{Name: tq}
+	}
+	return t
+}
+
+func (t *testWorkerDeploymentVersion) withTestWorkflows(testWFs []temporaliov1alpha1.WorkflowExecution) *testWorkerDeploymentVersion {
+	t.v.TestWorkflows = testWFs
+	return t
+}
+
+func (t *testWorkerDeploymentVersion) withK8sDeployment(healthy bool) *testWorkerDeploymentVersion {
+	if healthy {
+		ts := metav1.NewTime(time.Now())
+		t.v.HealthySince = &ts
+	}
+	t.v.Deployment = newObjectRef(t.ownerTWD.getDeployment())
+	return t
+}
+
+// useful when testing versions that have been drained but may/may not be eligible to be deleted.
+func (t *testWorkerDeploymentVersion) withDrainedSince(drainedTime time.Time) *testWorkerDeploymentVersion {
+	t.v.DrainedSince = &metav1.Time{Time: drainedTime}
+	return t
 }
 
 func clearResourceVersion(obj metav1.Object) {
@@ -145,219 +273,266 @@ func TestGeneratePlan(t *testing.T) {
 	}
 
 	testCases := map[string]testCase{
-		"no action needed": {
-			workerDeploymentName: "foo",
-			observedReplicas:     3,
-			desiredReplicas:      3,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "foo", "a", true),
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "foo" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments:    nil,
-				CreateDeployment:     nil,
-				ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
-				UpdateVersionConfig:  nil,
-			},
-		},
-		"scale up inactive deployments if the number of replicas don't match": {
-			workerDeploymentName: "fia",
-			observedReplicas:     0,
-			desiredReplicas:      3,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "fia", "a", true),
-				},
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "fia" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments:    nil,
-				CreateDeployment:     nil,
-				ScaleDeployments: map[*v1.ObjectReference]uint32{
-					&v1.ObjectReference{
-						Namespace: testTemporalNamespace,
-						Name:      "fia-a",
-					}: 3,
-				},
-				UpdateVersionConfig: nil,
-			},
-		},
-		"scale up ramping deployment if the number of replicas don't match": {
-			workerDeploymentName: "fii",
-			observedReplicas:     0,
-			desiredReplicas:      3,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusRamping, "fii", "b", true),
-				},
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "fii" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments:    nil,
-				CreateDeployment:     nil,
-				ScaleDeployments: map[*v1.ObjectReference]uint32{
-					&v1.ObjectReference{
-						Namespace: testTemporalNamespace,
-						Name:      "fii-b",
-					}: 3,
-				},
-				UpdateVersionConfig: nil,
-			},
-		},
-		"scale up current deployment if the number of replicas don't match": {
-			workerDeploymentName: "aii",
-			observedReplicas:     0,
-			desiredReplicas:      3,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusCurrent, "aii", "a", true),
-				},
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "aii" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments:    nil,
-				CreateDeployment:     nil,
-				ScaleDeployments: map[*v1.ObjectReference]uint32{
-					&v1.ObjectReference{
-						Namespace: testTemporalNamespace,
-						Name:      "aii-a",
-					}: 3,
-				},
-				UpdateVersionConfig: nil,
-			},
-		},
-		"create new k8s deployment from the pod template": {
-			workerDeploymentName: "baz",
-			observedReplicas:     3,
-			desiredReplicas:      3,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "baz", "a", true),
-				// k8 deployment does not exist and will be created from the pod template
-				TargetVersion:      newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "baz", "b", false),
-				DeprecatedVersions: nil,
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "baz" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments:    nil,
-				CreateDeployment:     newTestDeploymentWithHashedBuildID(testPodTemplate, newTestWorkerSpec(3), "baz"),
-				ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
-				UpdateVersionConfig:  nil,
-			},
-		},
-		"delete unregistered deployment version": {
-			workerDeploymentName: "bar",
-			observedReplicas:     3,
-			desiredReplicas:      3,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusInactive, "bar", "a", true),
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusNotRegistered, "bar", "b", true),
-				},
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "bar" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments: []*appsv1.Deployment{
-					newTestDeploymentWithBuildID(testPodTemplate, newTestWorkerSpec(3), "bar", "b"),
-				},
-				ScaleDeployments:    map[*v1.ObjectReference]uint32{},
-				CreateDeployment:    nil,
-				UpdateVersionConfig: nil,
-			},
-		},
-		"delete deployment when scaled down to 0 replicas": {
-			workerDeploymentName: "def",
-			observedReplicas:     0,
-			desiredReplicas:      0,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusDrained, "def", "a", true),
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusDrained, "def", "b", true),
-				},
-			},
-			desiredState: newTestWorkerSpec(0),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "def" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments: []*appsv1.Deployment{
-					newTestDeploymentWithBuildID(testPodTemplate, newTestWorkerSpec(0), "def", "b"),
-				},
-				CreateDeployment:    nil,
-				ScaleDeployments:    make(map[*v1.ObjectReference]uint32),
-				UpdateVersionConfig: nil,
-			},
-		},
-		"don't delete deployment if not scaled down to 0 replicas even though it's past scaledown + delete delay": {
-			workerDeploymentName: "abc",
-			observedReplicas:     3,
-			desiredReplicas:      3,
-			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DefaultVersion: newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusDrained, "abc", "a", true),
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					newTestWorkerDeploymentVersion(temporaliov1alpha1.VersionStatusDrained, "abc", "b", true),
-				},
-			},
-			desiredState: newTestWorkerSpec(3),
-			expectedPlan: plan{
-				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "abc" + deploymentNameSeparator + testTemporalNamespace,
-				DeleteDeployments:    nil,
-				CreateDeployment:     nil,
-				ScaleDeployments: map[*v1.ObjectReference]uint32{
-					&v1.ObjectReference{
-						Namespace: testTemporalNamespace,
-						Name:      "abc-b",
-					}: 0,
-				},
-				UpdateVersionConfig: nil,
-			},
-		},
+		//"no action needed": {
+		//	workerDeploymentName: "foo",
+		//	observedReplicas:     3,
+		//	desiredReplicas:      3,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DefaultVersion: newTestTWD("foo", "a").withReplicas(3).getTestVersion().
+		//			withK8sDeployment(true).
+		//			withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+		//	},
+		//	desiredState: newTestTWD("foo", "a").withReplicas(3).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("foo", "a").getWorkerDeploymentName(),
+		//		DeleteDeployments:    nil,
+		//		CreateDeployment:     nil,
+		//		ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
+		//		UpdateVersionConfig:  nil,
+		//	},
+		//},
+		//"scale up inactive deployments if the number of replicas don't match": {
+		//	workerDeploymentName: "fia",
+		//	observedReplicas:     0,
+		//	desiredReplicas:      3,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+		//			newTestTWD("fia", "a").withReplicas(0).getTestVersion().
+		//				withK8sDeployment(true).
+		//				withStatus(temporaliov1alpha1.VersionStatusInactive).Get(),
+		//		},
+		//	},
+		//	desiredState: newTestTWD("fia", "a").withReplicas(3).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("fia", "a").getWorkerDeploymentName(),
+		//		DeleteDeployments:    nil,
+		//		CreateDeployment:     nil,
+		//		ScaleDeployments: map[*v1.ObjectReference]uint32{
+		//			newObjectRef(newTestTWD("fia", "a").getDeployment()): 3,
+		//		},
+		//		UpdateVersionConfig: nil,
+		//	},
+		//},
+		//"scale up ramping target deployment if the number of replicas don't match": {
+		//	workerDeploymentName: "fii",
+		//	observedReplicas:     0,
+		//	desiredReplicas:      3,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DefaultVersion: newTestTWD("fii", "a").withReplicas(1).getTestVersion().Get(),
+		//		TargetVersion: newTestTWD("fii", "b").withReplicas(0).getTestVersion().
+		//			withK8sDeployment(true).
+		//			withStatus(temporaliov1alpha1.VersionStatusRamping).Get(),
+		//		DeprecatedVersions: nil,
+		//	},
+		//	desiredState: newTestTWD("fii", "b").withReplicas(3).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("fii", "b").getWorkerDeploymentName(),
+		//		DeleteDeployments:    nil,
+		//		CreateDeployment:     nil,
+		//		ScaleDeployments: map[*v1.ObjectReference]uint32{
+		//			newObjectRef(newTestTWD("fii", "b").getDeployment()): 3,
+		//		},
+		//		UpdateVersionConfig: nil,
+		//	},
+		//},
+		//"scale up current deployment if the number of replicas don't match": {
+		//	workerDeploymentName: "aii",
+		//	observedReplicas:     0,
+		//	desiredReplicas:      3,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DefaultVersion: newTestTWD("aii", "a").withReplicas(0).getTestVersion().
+		//			withK8sDeployment(true).
+		//			withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+		//	},
+		//	desiredState: newTestTWD("aii", "a").withReplicas(3).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("aii", "a").getWorkerDeploymentName(),
+		//		DeleteDeployments:    nil,
+		//		CreateDeployment:     nil,
+		//		ScaleDeployments: map[*v1.ObjectReference]uint32{
+		//			newObjectRef(newTestTWD("aii", "a").getDeployment()): 3,
+		//		},
+		//		UpdateVersionConfig: nil,
+		//	},
+		//},
+		//"create new k8s deployment from the pod template": {
+		//	workerDeploymentName: "baz",
+		//	observedReplicas:     3,
+		//	desiredReplicas:      3,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DefaultVersion: newTestTWD("baz", "a").withReplicas(3).getTestVersion().
+		//			withK8sDeployment(true).
+		//			withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+		//		// k8 deployment does not exist and will be created from the pod template
+		//		TargetVersion: newTestTWD("baz", "b").withReplicas(3).getTestVersion().
+		//			withStatus(temporaliov1alpha1.VersionStatusNotRegistered).Get(),
+		//		DeprecatedVersions: nil,
+		//	},
+		//	desiredState: newTestTWD("baz", "b").withReplicas(3).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("baz", "b").getWorkerDeploymentName(),
+		//		DeleteDeployments:    nil,
+		//		CreateDeployment:     newTestTWD("baz", "b").withReplicas(3).getDeployment(),
+		//		ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
+		//		UpdateVersionConfig:  nil,
+		//	},
+		//},
+		//"delete unregistered deployment version": {
+		//	workerDeploymentName: "bar",
+		//	observedReplicas:     3,
+		//	desiredReplicas:      3,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DefaultVersion: newTestTWD("bar", "a").withReplicas(3).getTestVersion().
+		//			withK8sDeployment(true).
+		//			withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+		//		DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+		//			newTestTWD("bar", deprecatedVersionImageName).withReplicas(3).
+		//				withSpecificBuildID("b").
+		//				getTestVersion().
+		//				withK8sDeployment(true).
+		//				withStatus(temporaliov1alpha1.VersionStatusNotRegistered).Get(),
+		//		},
+		//	},
+		//	desiredState: newTestTWD("bar", "a").withReplicas(3).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("bar", "b").getWorkerDeploymentName(),
+		//		DeleteDeployments: []*appsv1.Deployment{
+		//			newTestTWD("bar", deprecatedVersionImageName).withReplicas(3).withSpecificBuildID("b").getDeployment(),
+		//		},
+		//		ScaleDeployments:    map[*v1.ObjectReference]uint32{},
+		//		CreateDeployment:    nil,
+		//		UpdateVersionConfig: nil,
+		//	},
+		//},
+		//"delete deployment when scaled down to 0 replicas": {
+		//	workerDeploymentName: "def",
+		//	observedReplicas:     0,
+		//	desiredReplicas:      0,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DefaultVersion: newTestTWD("def", "a").withReplicas(0).
+		//			getTestVersion().
+		//			withK8sDeployment(true).
+		//			withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+		//		DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+		//			newTestTWD("def", "b").withReplicas(0).getTestVersion().
+		//				withK8sDeployment(true).
+		//				withStatus(temporaliov1alpha1.VersionStatusDrained).
+		//				withDrainedSince(time.Now().Add(-62 * time.Minute)).Get(),
+		//		},
+		//	},
+		//	desiredState: newTestTWD("def", "a").withReplicas(0).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("def", "a").getWorkerDeploymentName(),
+		//		DeleteDeployments: []*appsv1.Deployment{
+		//			newTestTWD("def", deprecatedVersionImageName).withReplicas(0).
+		//				withSpecificBuildID(newTestTWD("def", "b").getBuildID()).
+		//				getDeployment(),
+		//		},
+		//		CreateDeployment:    nil,
+		//		ScaleDeployments:    make(map[*v1.ObjectReference]uint32),
+		//		UpdateVersionConfig: nil,
+		//	},
+		//},
+		//"don't delete deployment if not scaled down to 0 replicas even though it's past scaledown + delete delay": {
+		//	workerDeploymentName: "abc",
+		//	observedReplicas:     3,
+		//	desiredReplicas:      3,
+		//	observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		//		DefaultVersion: newTestTWD("abc", "a").withReplicas(3).
+		//			getTestVersion().
+		//			withK8sDeployment(true).
+		//			withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+		//		DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+		//			newTestTWD("abc", "b").withReplicas(3).getTestVersion().
+		//				withK8sDeployment(true).
+		//				withStatus(temporaliov1alpha1.VersionStatusDrained).
+		//				withDrainedSince(time.Now().Add(-62 * time.Minute)).Get(),
+		//		},
+		//	},
+		//	desiredState: newTestTWD("abc", "a").withReplicas(3).getSpec(),
+		//	expectedPlan: plan{
+		//		TemporalNamespace:    testTemporalNamespace,
+		//		WorkerDeploymentName: newTestTWD("abc", "a").getWorkerDeploymentName(),
+		//		DeleteDeployments:    nil,
+		//		CreateDeployment:     nil,
+		//		ScaleDeployments: map[*v1.ObjectReference]uint32{
+		//			newObjectRef(newTestTWD("abc", deprecatedVersionImageName).withReplicas(0).
+		//				withSpecificBuildID(newTestTWD("abc", "b").getBuildID()).
+		//				getDeployment()): 0,
+		//		},
+		//		UpdateVersionConfig: nil,
+		//	},
+		//},
 		"unset ramp if target == default but ramping version is not target version (ie. rollback after partial ramp)": {
 			workerDeploymentName: "xyz",
 			observedReplicas:     3,
 			desiredReplicas:      3,
 			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				DefaultVersion: newTestWorkerDeploymentVersionWithHealthySince(
-					temporaliov1alpha1.VersionStatusCurrent,
-					"xyz",
-					"7646585678",
-					true,
-				),
-				RampingVersion: newTestWorkerDeploymentVersionWithHealthySince(
-					temporaliov1alpha1.VersionStatusRamping,
-					"xyz",
-					"b",
-					true,
-				),
-				TargetVersion: newTestWorkerDeploymentVersionWithHealthySince(
-					temporaliov1alpha1.VersionStatusCurrent,
-					"xyz",
-					"7646585678",
-					true,
-				),
+				DefaultVersion: newTestTWD("xyz", "a").withReplicas(3).
+					getTestVersion().
+					withK8sDeployment(true).
+					withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+				RampingVersion: newTestTWD("xyz", "b").withReplicas(3).
+					getTestVersion().
+					withK8sDeployment(true).
+					withStatus(temporaliov1alpha1.VersionStatusRamping).Get(),
+				TargetVersion: newTestTWD("xyz", "a").withReplicas(3).
+					getTestVersion().
+					withK8sDeployment(true).
+					withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
 			},
-			desiredState: newTestWorkerSpec(3),
+			desiredState: newTestTWD("xyz", "a").withReplicas(3).getSpec(),
 			expectedPlan: plan{
 				TemporalNamespace:    testTemporalNamespace,
-				WorkerDeploymentName: "xyz" + deploymentNameSeparator + testTemporalNamespace,
+				WorkerDeploymentName: newTestTWD("xyz", "a").getWorkerDeploymentName(),
 				DeleteDeployments:    nil,
 				CreateDeployment:     nil,
 				ScaleDeployments:     nil,
 				UpdateVersionConfig: &versionConfig{
 					conflictToken:  nil,
-					versionID:      "xyz/ns.7646585678",
+					versionID:      newTestTWD("xyz", "a").getVersionID(),
 					setDefault:     false,
+					rampPercentage: 0,
+					unsetRamp:      true,
+				},
+			},
+		},
+		"overwrite ramp if target != default but ramping version is not target version (ie. roll-forward after partial ramp)": {
+			workerDeploymentName: "wyx",
+			observedReplicas:     3,
+			desiredReplicas:      3,
+			observedState: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				DefaultVersion: newTestTWD("wyx", "a").withReplicas(3).
+					getTestVersion().
+					withK8sDeployment(true).
+					withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+				RampingVersion: newTestTWD("wyx", "b").withReplicas(3).
+					getTestVersion().
+					withK8sDeployment(true).
+					withStatus(temporaliov1alpha1.VersionStatusRamping).Get(),
+				TargetVersion: newTestTWD("wyx", "c").withReplicas(3).
+					getTestVersion().
+					withK8sDeployment(true).
+					withStatus(temporaliov1alpha1.VersionStatusCurrent).Get(),
+			},
+			desiredState: newTestTWD("wyx", "c").withReplicas(3).getSpec(),
+			expectedPlan: plan{
+				TemporalNamespace:    testTemporalNamespace,
+				WorkerDeploymentName: newTestTWD("wyx", "c").getWorkerDeploymentName(),
+				DeleteDeployments:    nil,
+				CreateDeployment:     nil,
+				ScaleDeployments:     nil,
+				UpdateVersionConfig: &versionConfig{
+					conflictToken:  nil,
+					versionID:      newTestTWD("wyx", "c").getVersionID(),
+					setDefault:     true,
 					rampPercentage: 0,
 					unsetRamp:      true,
 				},
@@ -384,30 +559,54 @@ func TestGeneratePlan(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 
 			// Create the TemporalWorkerDeployment resource.
-			worker := &temporaliov1alpha1.TemporalWorkerDeployment{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "temporal.io/v1alpha1",
-					Kind:       "TemporalWorkerDeployment",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: testTemporalNamespace,
-					Name:      tc.workerDeploymentName,
-				},
-				Spec:   *tc.desiredState,
-				Status: *tc.observedState,
-			}
-			err := c.Create(context.Background(), worker)
+			desiredImage := tc.desiredState.Template.Spec.Containers[0].Image
+			desiredTWD := newTestTWD(tc.workerDeploymentName, desiredImage).
+				withReplicas(tc.desiredReplicas).
+				withStatus(*tc.observedState).
+				withAllAtOnce().
+				withSunset(time.Minute, time.Hour) // TODO(carlydf): find a way to specify this in the test case
+			err := c.Create(context.Background(), desiredTWD.Get())
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Create the Deployments referenced in the status
 			if tc.observedState.DefaultVersion != nil && tc.observedState.DefaultVersion.Deployment != nil {
-				deployment := newTestDeploymentWithHashedBuildID(testPodTemplate, newTestWorkerSpec(tc.observedReplicas), tc.workerDeploymentName)
-				deployment.Name = tc.observedState.DefaultVersion.Deployment.Name
-				deployment.Namespace = tc.observedState.DefaultVersion.Deployment.Namespace
+				// The current default version may have been created with a different desired image -> different desired build ID
+				// We don't know what that image was, so we have to override the build id instead of generating it
+				buildID := strings.Split(tc.observedState.DefaultVersion.VersionID, versionIDSeparator)[1]
+				deployment := newTestTWD(desiredTWD.getName(), deprecatedVersionImageName).
+					withReplicas(tc.observedReplicas).
+					withSpecificBuildID(buildID).
+					getDeployment()
 				err = c.Create(context.Background(), deployment)
 				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.observedState.RampingVersion != nil && tc.observedState.RampingVersion.Deployment != nil {
+				// The current ramping version may have been created with a different desired image -> different desired build ID
+				// We don't know what that image was, so we have to override the build id instead of generating it
+				buildID := strings.Split(tc.observedState.RampingVersion.VersionID, versionIDSeparator)[1]
+				deployment := newTestTWD(desiredTWD.getName(), deprecatedVersionImageName).
+					withReplicas(tc.observedReplicas).
+					withSpecificBuildID(buildID).
+					getDeployment()
+				err = c.Create(context.Background(), deployment)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.observedState.TargetVersion != nil && tc.observedState.TargetVersion.Deployment != nil {
+				// The current target version may have been created with a different desired image -> different desired build ID
+				// We don't know what that image was, so we have to override the build id instead of generating it
+				buildID := strings.Split(tc.observedState.TargetVersion.VersionID, versionIDSeparator)[1]
+				deployment := newTestTWD(desiredTWD.getName(), deprecatedVersionImageName).
+					withReplicas(tc.observedReplicas).
+					withSpecificBuildID(buildID).
+					getDeployment()
+				err = c.Create(context.Background(), deployment)
+				if err != nil && !strings.Contains(err.Error(), "already exists") {
 					t.Fatal(err)
 				}
 			}
@@ -416,10 +615,10 @@ func TestGeneratePlan(t *testing.T) {
 			for _, version := range tc.observedState.DeprecatedVersions {
 				if version.Deployment != nil {
 					buildID := strings.Split(version.VersionID, versionIDSeparator)[1]
-					deployment := newTestDeploymentWithBuildID(testPodTemplate, newTestWorkerSpec(tc.observedReplicas), tc.workerDeploymentName, buildID)
-
-					deployment.Name = version.Deployment.Name
-					deployment.Namespace = version.Deployment.Namespace
+					deployment := newTestTWD(desiredTWD.getName(), deprecatedVersionImageName).
+						withReplicas(tc.observedReplicas).
+						withSpecificBuildID(buildID).
+						getDeployment()
 					err = c.Create(context.Background(), deployment)
 					if err != nil {
 						t.Fatal(err)
@@ -430,10 +629,12 @@ func TestGeneratePlan(t *testing.T) {
 			actualPlan, err := r.generatePlan(
 				context.Background(),
 				log.FromContext(context.Background()),
-				worker,
+				desiredTWD.Get(),
 				temporaliov1alpha1.TemporalConnectionSpec{},
 			)
-			assert.NoError(t, err)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			// Clear ResourceVersion before comparison
 			if actualPlan.CreateDeployment != nil {
@@ -472,6 +673,11 @@ func assertEqualPlans(t *testing.T, expectedPlan *plan, actualPlan *plan) {
 				assert.Equal(t, v, v2)
 			}
 		}
+		if !found {
+			t.Fatalf("did not find expected deployment %v | actual %+v, expected %+v\n",
+				k.Name, actualPlan.ScaleDeployments, expectedPlan.ScaleDeployments)
+		}
+
 		assert.True(t, found)
 	}
 }

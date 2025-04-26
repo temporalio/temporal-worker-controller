@@ -148,7 +148,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		}
 	}
 
-	desiredVersionID := computeVersionID(w)
+	desiredVersionID := computeVersionID(computeWorkerDeploymentName(w), computeBuildID(&w.Spec))
 
 	if targetVersion := w.Status.TargetVersion; targetVersion != nil {
 		if targetVersion.Deployment == nil {
@@ -229,8 +229,14 @@ func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStra
 		if status.RampingVersion == nil {
 			return nil
 		}
-		vcfg.unsetRamp = true
 		vcfg.setDefault = false
+	}
+
+	// If ramping version is not nil, but ramping version is not the target version, and ramp will not be set
+	if status.RampingVersion != nil &&
+		vcfg.versionID != status.RampingVersion.VersionID &&
+		vcfg.rampPercentage == 0 {
+		vcfg.unsetRamp = true
 	}
 
 	// Don't make updates if target version is already the ramping version, and ramp percentage is correct

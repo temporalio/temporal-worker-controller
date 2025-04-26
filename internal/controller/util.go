@@ -29,14 +29,17 @@ const (
 	k8sResourceNameSeparator = "-"
 )
 
+// This is the Worker Deployment Name as seen by Temporal
 func computeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
 }
 
-func computeVersionID(r *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return computeWorkerDeploymentName(r) + versionIDSeparator + computeBuildID(&r.Spec)
+// This is the Version string as seen by Temporal
+func computeVersionID(workerDeploymentName, buildID string) string {
+	return workerDeploymentName + versionIDSeparator + buildID
 }
 
+// This is the name of the kubernetes Deployment
 func computeVersionedDeploymentName(twdName, buildID string) string {
 	return twdName + k8sResourceNameSeparator + buildID
 }
