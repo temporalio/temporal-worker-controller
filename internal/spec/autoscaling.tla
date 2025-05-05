@@ -6,9 +6,10 @@ VARIABLES queueLen, workers, cooldown
 CONSTANTS 
     UPPER_QUEUE_DEPTH_THRESHOLD, \* Max queue length before scaling up
     LOWER_QUEUE_DEPTH_THRESHOLD, \* Min queue length to trigger scaling down
-    MAX_WORKERS,     \* Hard upper limit on workers
-    MIN_WORKERS,     \* Hard lower limit on workers
-    COOLDOWN_PERIOD  \* Steps to wait before another scale
+    MAX_WORKERS,                 \* Hard upper limit on workers
+    MIN_WORKERS,                 \* Hard lower limit on workers
+    COOLDOWN_PERIOD,             \* Steps to wait before another scale
+    MAX_QUEUELEN                 \* Optional bound on queue length
 
 (* ---( INITIAL STATE )--- *)
 Init ==
@@ -80,13 +81,37 @@ CooldownNonNegative ==
 QueueLenNonNegative ==
     queueLen >= 0
 
+QueueLenBound ==
+    queueLen <= MAX_QUEUELEN
+
+NoOverScaling ==
+    (queueLen < UPPER_QUEUE_DEPTH_THRESHOLD => workers' = workers)
+
+NoUnderScaling ==
+    (queueLen > LOWER_QUEUE_DEPTH_THRESHOLD => workers' = workers)
+
+CooldownEnforced ==
+    (cooldown > 0 => workers' = workers)
+
+ProgressGuarantee ==
+    (queueLen > 0 /\ cooldown = 0 => workers' > workers \/ queueLen' < queueLen)
+
+StabilityCheck ==
+    (queueLen < UPPER_QUEUE_DEPTH_THRESHOLD /\ queueLen > LOWER_QUEUE_DEPTH_THRESHOLD => workers' = workers)
+
 (* ---( SPECIFICATION )--- *)
 Spec ==
     Init /\ [][Next]_<<queueLen, workers, cooldown>>
 
-\* Properties to check
 Inv ==
-    WorkerBounds /\ CooldownNonNegative /\ QueueLenNonNegative
+    /\ WorkerBounds
+    /\ CooldownNonNegative
+    /\ QueueLenNonNegative
+    /\ QueueLenBound
+    /\ NoOverScaling
+    /\ NoUnderScaling
+    /\ CooldownEnforced
+    /\ ProgressGuarantee
+    /\ StabilityCheck
 
 ====
-
