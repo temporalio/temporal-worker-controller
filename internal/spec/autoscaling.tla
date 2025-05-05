@@ -107,7 +107,7 @@ CooldownEnforced ==
 ProgressGuarantee ==
     (queueDepth > 0 /\ cooldown = 0 => workers' > workers \/ queueDepth' < queueDepth)
 
-\* System should remain stable if queue depth is within thresholds
+\* Number of workers should remain stable if queue depth is within thresholds
 StabilityCheck ==
     (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD /\ queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD => workers' = workers)
 
