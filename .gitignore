@@ -6,3 +6,5 @@ secret.env
 certs
 
 .DS_Store
+
+internal/spec/AutoScaling.toolbox
