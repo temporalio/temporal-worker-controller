@@ -4,7 +4,8 @@ EXTENDS Naturals, TLC
 \* queueDepth: current number of tasks in the queue
 \* replicas: number of active worker replicas
 \* cooldown: cooldown counter before another scaling operation
-VARIABLES queueDepth, replicas, cooldown
+\* utilization: percentage of current replica utilization (0 to 100)
+VARIABLES queueDepth, replicas, cooldown, utilization
 
 CONSTANTS 
     UPPER_QUEUE_DEPTH_THRESHOLD, \* Queue depth above which we scale up
@@ -12,27 +13,34 @@ CONSTANTS
     MAX_REPLICAS,                 \* Maximum allowed replicas
     MIN_REPLICAS,                 \* Minimum allowed replicas
     COOLDOWN_PERIOD,              \* Cooldown period between scaling actions
-    MAX_QUEUE_DEPTH               \* Hard cap on queue depth
+    MAX_QUEUE_DEPTH,              \* Hard cap on queue depth
+    UTILIZATION_SCALE_DOWN_THRESHOLD \* Utilization below which it's safe to scale down
 
 (* ---( INITIAL STATE )--- *)
-\* System starts with empty queue, minimum replicas, and no cooldown
+\* System starts with empty queue, minimum replicas, no cooldown, and 0 utilization
 Init ==
     /\ queueDepth = 0
     /\ replicas = MIN_REPLICAS
     /\ cooldown = 0
+    /\ utilization = 0
 
 (* ---( ACTIONS )--- *)
 
 \* Simulates a task being enqueued into the system
 EnqueueTasks ==
     /\ queueDepth' = queueDepth + 1
-    /\ UNCHANGED <<replicas, cooldown>>
+    /\ UNCHANGED <<replicas, cooldown, utilization>>
 
 \* Simulates a task being completed by a replica
 DequeueTasks ==
     /\ queueDepth > 0
     /\ queueDepth' = queueDepth - 1
-    /\ UNCHANGED <<replicas, cooldown>>
+    /\ UNCHANGED <<replicas, cooldown, utilization>>
+
+\* Simulates external update of utilization (could be nondeterministic for modeling)
+UpdateUtilization ==
+    /\ utilization' \in 0..100
+    /\ UNCHANGED <<queueDepth, replicas, cooldown>>
 
 \* Scales up replicas if the queue is too deep and we're not in cooldown
 ScaleUp ==
@@ -41,32 +49,37 @@ ScaleUp ==
     /\ replicas < MAX_REPLICAS
     /\ replicas' = replicas + 1
     /\ cooldown' = COOLDOWN_PERIOD
-    /\ UNCHANGED queueDepth
+    /\ UNCHANGED <<queueDepth, utilization>>
 
-\* Scales down replicas if the queue is shallow and we're not in cooldown
+\* Scales down replicas only if:
+\* - queue is shallow
+\* - cooldown expired
+\* - utilization is low
 ScaleDown ==
     /\ queueDepth <= LOWER_QUEUE_DEPTH_THRESHOLD
     /\ cooldown = 0
+    /\ utilization <= UTILIZATION_SCALE_DOWN_THRESHOLD
     /\ replicas > MIN_REPLICAS
     /\ replicas' = replicas - 1
     /\ cooldown' = COOLDOWN_PERIOD
-    /\ UNCHANGED queueDepth
+    /\ UNCHANGED <<queueDepth, utilization>>
 
 \* Decreases the cooldown timer by one if it's active
 CooldownStep ==
     /\ cooldown > 0
     /\ cooldown' = cooldown - 1
-    /\ UNCHANGED <<queueDepth, replicas>>
+    /\ UNCHANGED <<queueDepth, replicas, utilization>>
 
 \* Optional stutter step to allow non-transition
 NoOp ==
-    /\ UNCHANGED <<queueDepth, replicas, cooldown>>
+    /\ UNCHANGED <<queueDepth, replicas, cooldown, utilization>>
 
 (* ---( NEXT STATE RELATION )--- *)
 \* A valid transition is any one of the actions
 Next ==
     \/ EnqueueTasks
     \/ DequeueTasks
+    \/ UpdateUtilization
     \/ ScaleUp
     \/ ScaleDown
     \/ CooldownStep
@@ -95,9 +108,9 @@ QueueDepthBound ==
 NoOverScaling ==
     (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
 
-\* Do not scale down if the queue is above the lower threshold
+\* Do not scale down unless both queue and utilization thresholds are met
 NoUnderScaling ==
-    (queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
+    (queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD \/ utilization > UTILIZATION_SCALE_DOWN_THRESHOLD => replicas' = replicas)
 
 \* No scaling operations are allowed while cooldown is active
 CooldownEnforced ==
@@ -114,7 +127,7 @@ StabilityCheck ==
 (* ---( SPECIFICATION )--- *)
 \* Main specification: starts in Init and always follows Next transitions
 Spec ==
-    Init /\ [][Next]_<<queueDepth, replicas, cooldown>>
+    Init /\ [][Next]_<<queueDepth, replicas, cooldown, utilization>>
 
 \* The system must always maintain the defined invariants
 Inv ==
