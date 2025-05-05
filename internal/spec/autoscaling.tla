@@ -8,12 +8,12 @@ EXTENDS Naturals, TLC
 VARIABLES queueDepth, replicas, cooldown, utilization
 
 CONSTANTS 
-    UPPER_QUEUE_DEPTH_THRESHOLD, \* Queue depth above which we scale up
-    LOWER_QUEUE_DEPTH_THRESHOLD, \* Queue depth below which we scale down
-    MAX_REPLICAS,                 \* Maximum allowed replicas
-    MIN_REPLICAS,                 \* Minimum allowed replicas
-    COOLDOWN_PERIOD,              \* Cooldown period between scaling actions
-    MAX_QUEUE_DEPTH,              \* Hard cap on queue depth
+    UPPER_QUEUE_DEPTH_THRESHOLD,     \* Queue depth above which we scale up
+    LOWER_QUEUE_DEPTH_THRESHOLD,     \* Queue depth below which we scale down
+    MAX_REPLICAS,                    \* Maximum allowed replicas
+    MIN_REPLICAS,                    \* Minimum allowed replicas
+    COOLDOWN_PERIOD,                 \* Cooldown period between scaling actions
+    MAX_QUEUE_DEPTH,                 \* Hard cap on queue depth
     UTILIZATION_SCALE_DOWN_THRESHOLD \* Utilization below which it's safe to scale down
 
 (* ---( INITIAL STATE )--- *)
@@ -116,13 +116,17 @@ NoUnderScaling ==
 CooldownEnforced ==
     (cooldown > 0 => replicas' = replicas)
 
-\* If work exists and we're not in cooldown, progress must be made
-ProgressGuarantee ==
-    (queueDepth > 0 /\ cooldown = 0 => replicas' > replicas \/ queueDepth' < queueDepth)
-
 \* System should remain stable if queue depth is within thresholds
 StabilityCheck ==
     (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD /\ queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
+
+\* If work exists and we're not in cooldown, progress must be made in the next state
+ProgressGuaranteeAction ==
+    (queueDepth > 0 /\ cooldown = 0) => (replicas' > replicas \/ queueDepth' < queueDepth)
+
+\* Progress guarantee must always hold
+ProgressGuarantee ==
+    [][ProgressGuaranteeAction]_<<queueDepth, replicas, cooldown, utilization>>
 
 (* ---( SPECIFICATION )--- *)
 \* Main specification: starts in Init and always follows Next transitions
@@ -138,7 +142,6 @@ Inv ==
     /\ NoOverScaling
     /\ NoUnderScaling
     /\ CooldownEnforced
-    /\ ProgressGuarantee
     /\ StabilityCheck
 
 ====
