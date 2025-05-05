@@ -4,8 +4,8 @@ EXTENDS Naturals, TLC
 VARIABLES queueLen, workers, cooldown
 
 CONSTANTS 
-    UPPER_THRESHOLD, \* Max queue length before scaling up
-    LOWER_THRESHOLD, \* Min queue length to trigger scaling down
+    UPPER_QUEUE_DEPTH_THRESHOLD, \* Max queue length before scaling up
+    LOWER_QUEUE_DEPTH_THRESHOLD, \* Min queue length to trigger scaling down
     MAX_WORKERS,     \* Hard upper limit on workers
     MIN_WORKERS,     \* Hard lower limit on workers
     COOLDOWN_PERIOD  \* Steps to wait before another scale
@@ -31,7 +31,7 @@ DequeueTasks ==
 
 \* Handle scaling up
 ScaleUp ==
-    /\ queueLen >= UPPER_THRESHOLD
+    /\ queueLen >= UPPER_QUEUE_DEPTH_THRESHOLD
     /\ cooldown = 0
     /\ workers < MAX_WORKERS
     /\ workers' = workers + 1
@@ -40,7 +40,7 @@ ScaleUp ==
 
 \* Handle scaling down
 ScaleDown ==
-    /\ queueLen <= LOWER_THRESHOLD
+    /\ queueLen <= LOWER_QUEUE_DEPTH_THRESHOLD
     /\ cooldown = 0
     /\ workers > MIN_WORKERS
     /\ workers' = workers - 1

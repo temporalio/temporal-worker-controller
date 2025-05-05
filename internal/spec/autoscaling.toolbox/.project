@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>autoscaling</name>
+	<name>AutoScaling</name>
 	<comment></comment>
 	<projects>
 	</projects>
@@ -16,9 +16,9 @@
 	</natures>
 	<linkedResources>
 		<link>
-			<name>autoscaling.tla</name>
+			<name>AutoScaling.tla</name>
 			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/autoscaling.tla</locationURI>
+			<locationURI>PARENT-1-PROJECT_LOC/AutoScaling.tla</locationURI>
 		</link>
 	</linkedResources>
 </projectDescription>
