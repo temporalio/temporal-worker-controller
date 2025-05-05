@@ -104,22 +104,6 @@ QueueDepthNonNegative ==
 QueueDepthBound ==
     queueDepth <= MAX_QUEUE_DEPTH
 
-\* Do not scale up if the queue is below the upper threshold
-NoOverScaling ==
-    (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
-
-\* Do not scale down unless both queue and utilization thresholds are met
-NoUnderScaling ==
-    (queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD \/ utilization > UTILIZATION_SCALE_DOWN_THRESHOLD => replicas' = replicas)
-
-\* No scaling operations are allowed while cooldown is active
-CooldownEnforced ==
-    (cooldown > 0 => replicas' = replicas)
-
-\* System should remain stable if queue depth is within thresholds
-StabilityCheck ==
-    (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD /\ queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
-
 \* If work exists and we're not in cooldown, progress must be made in the next state
 ProgressGuaranteeAction ==
     (queueDepth > 0 /\ cooldown = 0) => (replicas' > replicas \/ queueDepth' < queueDepth)
@@ -139,9 +123,29 @@ Inv ==
     /\ CooldownNonNegative
     /\ QueueDepthNonNegative
     /\ QueueDepthBound
-    /\ NoOverScaling
-    /\ NoUnderScaling
-    /\ CooldownEnforced
-    /\ StabilityCheck
+
+\* Do not scale up if the queue is below the upper threshold
+NoOverScalingAction ==
+    (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
+NoOverScaling ==
+    [][NoOverScalingAction]_<<queueDepth, replicas, cooldown, utilization>>
+
+\* Do not scale down if the queue is above the lower threshold or the utilization is high
+NoUnderScalingAction ==
+    (queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD \/ utilization > UTILIZATION_SCALE_DOWN_THRESHOLD => replicas' = replicas)
+NoUnderScaling ==
+    [][NoUnderScalingAction]_<<queueDepth, replicas, cooldown, utilization>>
+
+\* Do not scale if the cooldown is active
+CooldownEnforcedAction ==
+    (cooldown > 0 => replicas' = replicas)
+CooldownEnforced ==
+    [][CooldownEnforcedAction]_<<queueDepth, replicas, cooldown, utilization>>
+
+\* Do not scale if the queue depth is within thresholds
+StabilityCheckAction ==
+    (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD /\ queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
+StabilityCheck ==
+    [][StabilityCheckAction]_<<queueDepth, replicas, cooldown, utilization>>
 
 ====
