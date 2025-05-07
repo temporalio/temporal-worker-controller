@@ -19,9 +19,9 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 
 2. Set up Temporal Cloud mTLS certificates:
    - Create a `certs` directory in the project root
-   - Save your Temporal Cloud mTLS certificates as:
-     - `certs/ca.pem`
-     - `certs/ca.key`
+   - Save your Temporal Cloud mTLS client certificates as:
+     - `certs/client.pem`
+     - `certs/client.key`
    - Create the Kubernetes secret:
      ```bash
      make create-cloud-mtls-secret
