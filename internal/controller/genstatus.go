@@ -29,6 +29,8 @@ import (
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
 
+const controllerIdentity = "temporal-worker-controller"
+
 // TODO (Shivam): Should we be having a map of [versionID] -> Structure?
 type deploymentVersionCollection struct {
 	versionIDsToDeployments map[string]*appsv1.Deployment
@@ -227,6 +229,26 @@ func newDeploymentVersionCollection() deploymentVersionCollection {
 	}
 }
 
+type externalModificationError struct {
+	Resource             string
+	Name                 string
+	LastModifierIdentity string
+}
+
+func (e *externalModificationError) Error() string {
+	return fmt.Sprintf("%s '%s' was modified by an external system: %s", e.Resource, e.Name, e.LastModifierIdentity)
+}
+
+func isExternalModification(err error) bool {
+	var extErr *externalModificationError
+	return errors.As(err, &extErr)
+}
+
+func wasModifiedExternally(workerDeploymentInfo *sdkclient.WorkerDeploymentInfo) bool {
+	return workerDeploymentInfo.LastModifierIdentity != controllerIdentity &&
+		workerDeploymentInfo.LastModifierIdentity != ""
+}
+
 func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient temporalClient.Client, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	var (
 		desiredVersionID, defaultVersionID string
@@ -270,9 +292,12 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	defaultVersionID = routingConfig.CurrentVersion
 
 	// Check if the worker deployment was modified out of band of the controller (eg. via the Temporal CLI)
-	if workerDeploymentInfo.LastModifierIdentity != "temporal-worker-controller" &&
-		workerDeploymentInfo.LastModifierIdentity != "" {
-		// TODO(jlegrone): if it was set by another client, switch to manual mode
+	if wasModifiedExternally(&workerDeploymentInfo) {
+		return nil, &externalModificationError{
+			Resource:             "TemporalWorkerDeployment",
+			Name:                 workerDeploymentName,
+			LastModifierIdentity: workerDeploymentInfo.LastModifierIdentity,
+		}
 	}
 
 	var rampingSinceTime *metav1.Time
