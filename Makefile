@@ -155,7 +155,7 @@ uninstall: manifests ## Uninstall CRDs from the K8s cluster specified in ~/.kube
 
 .PHONY: deploy
 deploy: manifests helm ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	helm install temporal-worker-controller ./helm/temporal-worker-controller --create-namespace--namespace temporal-system
+	helm install temporal-worker-controller ./helm/temporal-worker-controller --create-namespace --namespace temporal-system
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
