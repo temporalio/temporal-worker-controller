@@ -57,8 +57,8 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 .PHONY: start-sample-workflow
 start-sample-workflow: ## Start a sample workflow.
 	@$(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world" \
-      --tls-cert-path certs/ca.pem \
-      --tls-key-path certs/ca.key \
+      --tls-cert-path certs/client.pem \
+      --tls-key-path certs/client.key \
       --address "worker-controller-test.a2dd6.tmprl.cloud:7233" \
       -n "worker-controller-test.a2dd6"
 #      --address replay-2025.ktasd.tmprl.cloud:7233 \
