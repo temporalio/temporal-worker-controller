@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= temporal-worker-controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.27.1
 
@@ -57,8 +57,8 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 .PHONY: start-sample-workflow
 start-sample-workflow: ## Start a sample workflow.
 	@$(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world" \
-      --tls-cert-path certs/ca.pem \
-      --tls-key-path certs/ca.key \
+      --tls-cert-path certs/client.pem \
+      --tls-key-path certs/client.key \
       --address "worker-controller-test.a2dd6.tmprl.cloud:7233" \
       -n "worker-controller-test.a2dd6"
 #      --address replay-2025.ktasd.tmprl.cloud:7233 \
@@ -155,7 +155,7 @@ uninstall: manifests ## Uninstall CRDs from the K8s cluster specified in ~/.kube
 
 .PHONY: deploy
 deploy: manifests helm ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	helm install temporal-worker-controller ./helm/temporal-worker-controller --namespace temporal-system
+	helm install temporal-worker-controller ./helm/temporal-worker-controller --create-namespace --namespace temporal-system
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
@@ -226,8 +226,8 @@ install-datadog-agent:
 .PHONY: create-cloud-mtls-secret
 create-cloud-mtls-secret:
 	kubectl create secret tls temporal-cloud-mtls --namespace default \
-      --cert=certs/ca.pem \
-      --key=certs/ca.key
+      --cert=certs/client.pem \
+      --key=certs/client.key
 
 # View workflows filtered by Build ID
 # http://0.0.0.0:8233/namespaces/default/workflows?query=BuildIds+IN+%28%22versioned%3A5578f87d9c%22%29
