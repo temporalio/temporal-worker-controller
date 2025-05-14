@@ -108,13 +108,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// Compute a new status from k8s and temporal state
 	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy)
-	if isExternalModification(err) {
-		l.Info("Worker deployment was modified by another entity", "error", err)
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: 30 * time.Second,
-		}, nil
-	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}

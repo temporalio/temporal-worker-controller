@@ -229,21 +229,6 @@ func newDeploymentVersionCollection() deploymentVersionCollection {
 	}
 }
 
-type externalModificationError struct {
-	Resource             string
-	Name                 string
-	LastModifierIdentity string
-}
-
-func (e *externalModificationError) Error() string {
-	return fmt.Sprintf("%s '%s' was modified by an external system: %s", e.Resource, e.Name, e.LastModifierIdentity)
-}
-
-func isExternalModification(err error) bool {
-	var extErr *externalModificationError
-	return errors.As(err, &extErr)
-}
-
 func wasModifiedExternally(workerDeploymentInfo *sdkclient.WorkerDeploymentInfo) bool {
 	return workerDeploymentInfo.LastModifierIdentity != controllerIdentity &&
 		workerDeploymentInfo.LastModifierIdentity != ""
@@ -254,6 +239,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		desiredVersionID, defaultVersionID string
 		deployedVersions                   []string
 		versions                           = newDeploymentVersionCollection()
+		externallyModified                 = false
 	)
 
 	workerDeploymentName := computeWorkerDeploymentName(workerDeploy)
@@ -293,11 +279,8 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 
 	// Check if the worker deployment was modified out of band of the controller (eg. via the Temporal CLI)
 	if wasModifiedExternally(&workerDeploymentInfo) {
-		return nil, &externalModificationError{
-			Resource:             "TemporalWorkerDeployment",
-			Name:                 workerDeploymentName,
-			LastModifierIdentity: workerDeploymentInfo.LastModifierIdentity,
-		}
+		externallyModified = true
+		l.Info("Worker deployment was modified by an external system", "lastModifier", workerDeploymentInfo.LastModifierIdentity)
 	}
 
 	var rampingSinceTime *metav1.Time
@@ -441,5 +424,6 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		TargetVersion:        targetVersion,
 		DeprecatedVersions:   deprecatedVersions,
 		VersionConflictToken: []byte("todo"),
+		ExternallyModified:   externallyModified,
 	}, nil
 }

@@ -122,6 +122,9 @@ type TemporalWorkerDeploymentStatus struct {
 
 	// TODO(jlegrone): Add description
 	VersionConflictToken []byte `json:"versionConflictToken"`
+
+	// ExternallyModified indicates if the worker deployment was modified outside of the controller (e.g. via CLI)
+	ExternallyModified bool `json:"externallyModified,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.

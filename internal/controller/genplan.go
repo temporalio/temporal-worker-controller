@@ -241,6 +241,12 @@ func getVersionConfig(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy
 		return nil
 	}
 
+	// Do nothing if the Temporal Deployment has been modified out of band
+	if status.ExternallyModified {
+		l.Info("Forcing manual rollout strategy since deployment was modified externally")
+		return nil
+	}
+
 	// Do nothing if the test workflows have not completed successfully
 	if strategy.Gate != nil {
 		if len(status.TargetVersion.TaskQueues) == 0 {
