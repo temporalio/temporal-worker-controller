@@ -273,6 +273,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
 	}
+	conflictToken := describeResp.ConflictToken
 	workerDeploymentInfo := describeResp.Info
 	routingConfig := workerDeploymentInfo.RoutingConfig
 	defaultVersionID = routingConfig.CurrentVersion
@@ -423,7 +424,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		DefaultVersion:       defaultVersion,
 		TargetVersion:        targetVersion,
 		DeprecatedVersions:   deprecatedVersions,
-		VersionConflictToken: []byte("todo"),
+		VersionConflictToken: conflictToken,
 		ExternallyModified:   externallyModified,
 	}, nil
 }
