@@ -14,44 +14,19 @@ import (
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	temporalClient "go.temporal.io/sdk/client"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
 
-// VersionStatus represents the status of a worker deployment version in Temporal
-type VersionStatus string
-
-const (
-	VersionStatusNotRegistered VersionStatus = "NotRegistered"
-	VersionStatusInactive      VersionStatus = "Inactive"
-	VersionStatusRamping       VersionStatus = "Ramping"
-	VersionStatusCurrent       VersionStatus = "Current"
-	VersionStatusDraining      VersionStatus = "Draining"
-	VersionStatusDrained       VersionStatus = "Drained"
-)
-
-// WorkflowExecutionInfo contains information about a workflow execution
-type WorkflowExecutionInfo struct {
-	WorkflowID string
-	RunID      string
-	TaskQueue  string
-	Status     temporaliov1alpha1.WorkflowExecutionStatus
-}
-
-// TaskQueueInfo contains information about a task queue
-type TaskQueueInfo struct {
-	Name string
-}
-
 // VersionInfo contains information about a specific version
 type VersionInfo struct {
 	VersionID      string
-	Status         VersionStatus
+	Status         temporaliov1alpha1.VersionStatus
 	DrainedSince   *time.Time
 	RampPercentage float32
-	TaskQueues     []TaskQueueInfo
-	TestWorkflows  []WorkflowExecutionInfo
+	TaskQueues     []temporaliov1alpha1.TaskQueue
+	TestWorkflows  []temporaliov1alpha1.WorkflowExecution
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -60,7 +35,7 @@ type TemporalWorkerState struct {
 	VersionConflictToken []byte
 	RampingVersionID     string
 	RampPercentage       float32
-	RampingSince         *v1.Time
+	RampingSince         *metav1.Time
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
 }
@@ -104,7 +79,7 @@ func GetWorkerDeploymentState(
 
 	// Set ramping since time if applicable
 	if routingConfig.RampingVersion != "" {
-		rt := v1.NewTime(routingConfig.RampingVersionChangedTime)
+		rt := metav1.NewTime(routingConfig.RampingVersionChangedTime)
 		state.RampingSince = &rt
 	}
 
@@ -117,14 +92,14 @@ func GetWorkerDeploymentState(
 		// Determine version status
 		drainageStatus := version.DrainageStatus
 		if version.Version == routingConfig.CurrentVersion {
-			versionInfo.Status = VersionStatusCurrent
+			versionInfo.Status = temporaliov1alpha1.VersionStatusCurrent
 		} else if version.Version == routingConfig.RampingVersion {
-			versionInfo.Status = VersionStatusRamping
+			versionInfo.Status = temporaliov1alpha1.VersionStatusRamping
 			versionInfo.RampPercentage = routingConfig.RampingVersionPercentage
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDraining {
-			versionInfo.Status = VersionStatusDraining
+			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDrained {
-			versionInfo.Status = VersionStatusDrained
+			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
 
 			// Get drain time information
 			versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
@@ -135,7 +110,7 @@ func GetWorkerDeploymentState(
 				versionInfo.DrainedSince = &drainedSince
 			}
 		} else {
-			versionInfo.Status = VersionStatusInactive
+			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
 		}
 
 		state.Versions[version.Version] = versionInfo
@@ -151,8 +126,8 @@ func GetTestWorkflowStatus(
 	workerDeploymentName string,
 	versionID string,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
-) ([]WorkflowExecutionInfo, error) {
-	var results []WorkflowExecutionInfo
+) ([]temporaliov1alpha1.WorkflowExecution, error) {
+	var results []temporaliov1alpha1.WorkflowExecution
 
 	// Get deployment handler
 	deploymentHandler := client.WorkerDeploymentClient().GetHandle(workerDeploymentName)
@@ -191,7 +166,7 @@ func GetTestWorkflowStatus(
 		// Add workflow execution info
 		if err == nil {
 			info := wf.GetWorkflowExecutionInfo()
-			workflowInfo := WorkflowExecutionInfo{
+			workflowInfo := temporaliov1alpha1.WorkflowExecution{
 				WorkflowID: info.GetExecution().GetWorkflowId(),
 				RunID:      info.GetExecution().GetRunId(),
 				TaskQueue:  info.GetTaskQueue(),

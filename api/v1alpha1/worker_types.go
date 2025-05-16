@@ -79,12 +79,12 @@ const (
 
 	// VersionStatusRamping indicates that the version is the ramping version of its
 	// worker deployment. It is accepting some percentage of new workflow executions.
-	VersionStatusRamping = "Ramping"
+	VersionStatusRamping VersionStatus = "Ramping"
 
 	// VersionStatusCurrent indicates that the version is the current version of its
 	// worker deployment. It is accepting all new workflow executions except for the
 	// percent that are sent to the ramping version, if one exists.
-	VersionStatusCurrent = "Current"
+	VersionStatusCurrent VersionStatus = "Current"
 
 	// VersionStatusDraining indicates that the version has stopped accepting new workflows
 	// (is no longer ramping or current) and DOES have open workflows pinned to it.
@@ -99,7 +99,7 @@ const (
 // TemporalWorkerDeploymentStatus defines the observed state of TemporalWorkerDeployment
 type TemporalWorkerDeploymentStatus struct {
 	// Remember, status should be able to be reconstituted from the state of the world,
-	// so it’s generally not a good idea to read from the status of the root object.
+	// so it's generally not a good idea to read from the status of the root object.
 	// Instead, you should reconstruct it every run.
 
 	// TargetVersion is the desired next version. If TargetVersion.Deployment is nil,

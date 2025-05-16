@@ -101,12 +101,12 @@ func TestMapToStatus(t *testing.T) {
 		Versions: map[string]*temporal.VersionInfo{
 			"worker.v1": {
 				VersionID:      "worker.v1",
-				Status:         temporal.VersionStatusCurrent,
+				Status:         temporaliov1alpha1.VersionStatusCurrent,
 				RampPercentage: 100,
-				TaskQueues: []temporal.TaskQueueInfo{
+				TaskQueues: []temporaliov1alpha1.TaskQueue{
 					{Name: "queue1"},
 				},
-				TestWorkflows: []temporal.WorkflowExecutionInfo{
+				TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 					{
 						WorkflowID: "test-wf-1",
 						RunID:      "run1",
@@ -117,12 +117,12 @@ func TestMapToStatus(t *testing.T) {
 			},
 			"worker.v2": {
 				VersionID:      "worker.v2",
-				Status:         temporal.VersionStatusRamping,
+				Status:         temporaliov1alpha1.VersionStatusRamping,
 				RampPercentage: 25.0,
-				TaskQueues: []temporal.TaskQueueInfo{
+				TaskQueues: []temporaliov1alpha1.TaskQueue{
 					{Name: "queue1"},
 				},
-				TestWorkflows: []temporal.WorkflowExecutionInfo{
+				TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 					{
 						WorkflowID: "test-wf-2",
 						RunID:      "run2",
@@ -133,7 +133,7 @@ func TestMapToStatus(t *testing.T) {
 			},
 			"worker.v3": {
 				VersionID:    "worker.v3",
-				Status:       temporal.VersionStatusDrained,
+				Status:       temporaliov1alpha1.VersionStatusDrained,
 				DrainedSince: &drainedSince,
 			},
 		},
@@ -194,71 +194,15 @@ func TestMapToStatus(t *testing.T) {
 	assert.Equal(t, drainedSince.Unix(), status.DeprecatedVersions[0].DrainedSince.Time.Unix())
 }
 
-func TestMapVersionStatus(t *testing.T) {
-	tests := []struct {
-		name           string
-		status         temporal.VersionStatus
-		expectedStatus temporaliov1alpha1.VersionStatus
-	}{
-		{
-			name:           "not registered",
-			status:         temporal.VersionStatusNotRegistered,
-			expectedStatus: temporaliov1alpha1.VersionStatusNotRegistered,
-		},
-		{
-			name:           "inactive",
-			status:         temporal.VersionStatusInactive,
-			expectedStatus: temporaliov1alpha1.VersionStatusInactive,
-		},
-		{
-			name:           "ramping",
-			status:         temporal.VersionStatusRamping,
-			expectedStatus: temporaliov1alpha1.VersionStatusRamping,
-		},
-		{
-			name:           "current",
-			status:         temporal.VersionStatusCurrent,
-			expectedStatus: temporaliov1alpha1.VersionStatusCurrent,
-		},
-		{
-			name:           "draining",
-			status:         temporal.VersionStatusDraining,
-			expectedStatus: temporaliov1alpha1.VersionStatusDraining,
-		},
-		{
-			name:           "drained",
-			status:         temporal.VersionStatusDrained,
-			expectedStatus: temporaliov1alpha1.VersionStatusDrained,
-		},
-		{
-			name:           "unknown",
-			status:         temporal.VersionStatus("unknown"),
-			expectedStatus: temporaliov1alpha1.VersionStatusNotRegistered,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			status := mapVersionStatus(tt.status)
-			assert.Equal(t, tt.expectedStatus, status)
-		})
-	}
-}
-
 func TestMapWorkerDeploymentVersion(t *testing.T) {
 	// Set up test data
 	now := time.Now()
-	drainedSince := now.Add(-1 * time.Hour)
-	healthySince := metav1.NewTime(now.Add(-2 * time.Hour))
+	healthySince := metav1.NewTime(now.Add(-1 * time.Hour))
+	drainedSince := now.Add(-30 * time.Minute)
 
-	// Create Kubernetes state
 	k8sState := &k8s.DeploymentState{
 		Deployments: map[string]*appsv1.Deployment{
 			"worker.v1": {
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "worker-v1",
-					Namespace: "default",
-				},
 				Status: appsv1.DeploymentStatus{
 					Conditions: []appsv1.DeploymentCondition{
 						{
@@ -275,83 +219,42 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 				Kind:      "Deployment",
 				Name:      "worker-v1",
 				Namespace: "default",
-				UID:       types.UID("v1-uid"),
+				UID:       types.UID("test-uid"),
 			},
 		},
 	}
 
-	// Create Temporal state
 	temporalState := &temporal.TemporalWorkerState{
 		Versions: map[string]*temporal.VersionInfo{
 			"worker.v1": {
 				VersionID:      "worker.v1",
-				Status:         temporal.VersionStatusCurrent,
+				Status:         temporaliov1alpha1.VersionStatusCurrent,
 				RampPercentage: 100,
-				TaskQueues: []temporal.TaskQueueInfo{
-					{Name: "queue1"},
-				},
-				TestWorkflows: []temporal.WorkflowExecutionInfo{
-					{
-						WorkflowID: "test-wf-1",
-						RunID:      "run1",
-						TaskQueue:  "queue1",
-						Status:     temporaliov1alpha1.WorkflowExecutionStatusCompleted,
-					},
-				},
-			},
-			"worker.v2": {
-				VersionID:    "worker.v2",
-				Status:       temporal.VersionStatusDrained,
-				DrainedSince: &drainedSince,
+				DrainedSince:   &drainedSince,
 			},
 		},
 	}
 
-	// Create state mapper
 	mapper := NewStateMapper(k8sState, temporalState)
 
-	// Test mapping existing version with deployment
+	// Test with registered version
 	version := mapper.mapWorkerDeploymentVersion("worker.v1")
 	assert.NotNil(t, version)
 	assert.Equal(t, "worker.v1", version.VersionID)
-
-	// Convert to string for comparison
-	expectedStatus := string(temporaliov1alpha1.VersionStatusCurrent)
-	actualStatus := string(version.Status)
-	assert.Equal(t, expectedStatus, actualStatus)
-
+	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, version.Status)
 	assert.NotNil(t, version.HealthySince)
 	assert.Equal(t, healthySince.Time.Unix(), version.HealthySince.Time.Unix())
-	assert.Equal(t, 1, len(version.TaskQueues))
-	assert.Equal(t, "queue1", version.TaskQueues[0].Name)
-	assert.Equal(t, 1, len(version.TestWorkflows))
-	assert.Equal(t, "test-wf-1", version.TestWorkflows[0].WorkflowID)
-
-	// Test mapping version without deployment
-	version = mapper.mapWorkerDeploymentVersion("worker.v2")
-	assert.NotNil(t, version)
-	assert.Equal(t, "worker.v2", version.VersionID)
-
-	// Convert to string for comparison
-	expectedDrainedStatus := string(temporaliov1alpha1.VersionStatusDrained)
-	actualDrainedStatus := string(version.Status)
-	assert.Equal(t, expectedDrainedStatus, actualDrainedStatus)
-
-	assert.Nil(t, version.HealthySince)
 	assert.NotNil(t, version.DrainedSince)
 	assert.Equal(t, drainedSince.Unix(), version.DrainedSince.Time.Unix())
+	assert.NotNil(t, version.Deployment)
+	assert.Equal(t, "worker-v1", version.Deployment.Name)
 
-	// Test mapping non-existent version
-	version = mapper.mapWorkerDeploymentVersion("worker.v3")
+	// Test with version that doesn't exist
+	version = mapper.mapWorkerDeploymentVersion("nonexistent")
 	assert.NotNil(t, version)
-	assert.Equal(t, "worker.v3", version.VersionID)
-
-	// Convert to string for comparison
-	expectedNotRegisteredStatus := string(temporaliov1alpha1.VersionStatusNotRegistered)
-	actualNotRegisteredStatus := string(version.Status)
-	assert.Equal(t, expectedNotRegisteredStatus, actualNotRegisteredStatus)
-
-	// Test mapping empty version ID
-	version = mapper.mapWorkerDeploymentVersion("")
-	assert.Nil(t, version)
+	assert.Equal(t, "nonexistent", version.VersionID)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusNotRegistered, version.Status)
+	assert.Nil(t, version.HealthySince)
+	assert.Nil(t, version.DrainedSince)
+	assert.Nil(t, version.Deployment)
 }

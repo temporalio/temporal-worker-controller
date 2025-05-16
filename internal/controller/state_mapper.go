@@ -87,7 +87,7 @@ func (m *StateMapper) mapWorkerDeploymentVersion(versionID string) *v1alpha1.Wor
 
 	// Set version status from temporal state
 	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
-		version.Status = mapVersionStatus(temporalVersion.Status)
+		version.Status = temporalVersion.Status
 
 		// Set drained since if available
 		if temporalVersion.DrainedSince != nil {
@@ -98,47 +98,16 @@ func (m *StateMapper) mapWorkerDeploymentVersion(versionID string) *v1alpha1.Wor
 		// Set ramp percentage if this is a ramping version
 		// TODO(carlydf): Support setting any ramp in [0,100]
 		// NOTE(rob): We are now setting any ramp > 0, is that correct?
-		if temporalVersion.Status == temporal.VersionStatusRamping && temporalVersion.RampPercentage > 0 {
+		if temporalVersion.Status == v1alpha1.VersionStatusRamping && temporalVersion.RampPercentage > 0 {
 			version.RampPercentage = &temporalVersion.RampPercentage
 		}
 
 		// Set task queues
-		for _, tq := range temporalVersion.TaskQueues {
-			version.TaskQueues = append(version.TaskQueues, v1alpha1.TaskQueue{
-				Name: tq.Name,
-			})
-		}
+		version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
 
 		// Set test workflows
-		for _, wf := range temporalVersion.TestWorkflows {
-			version.TestWorkflows = append(version.TestWorkflows, v1alpha1.WorkflowExecution{
-				WorkflowID: wf.WorkflowID,
-				RunID:      wf.RunID,
-				TaskQueue:  wf.TaskQueue,
-				Status:     wf.Status,
-			})
-		}
+		version.TestWorkflows = append(version.TestWorkflows, temporalVersion.TestWorkflows...)
 	}
 
 	return version
-}
-
-// mapVersionStatus converts temporal version status to CRD version status
-func mapVersionStatus(status temporal.VersionStatus) v1alpha1.VersionStatus {
-	switch status {
-	case temporal.VersionStatusNotRegistered:
-		return v1alpha1.VersionStatusNotRegistered
-	case temporal.VersionStatusInactive:
-		return v1alpha1.VersionStatusInactive
-	case temporal.VersionStatusRamping:
-		return v1alpha1.VersionStatusRamping
-	case temporal.VersionStatusCurrent:
-		return v1alpha1.VersionStatusCurrent
-	case temporal.VersionStatusDraining:
-		return v1alpha1.VersionStatusDraining
-	case temporal.VersionStatusDrained:
-		return v1alpha1.VersionStatusDrained
-	default:
-		return v1alpha1.VersionStatusNotRegistered
-	}
 }

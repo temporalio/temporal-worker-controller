@@ -107,9 +107,9 @@ func TestVersionInfoManagement(t *testing.T) {
 	// Create a test version info
 	versionInfo := &VersionInfo{
 		VersionID:      "worker.v1",
-		Status:         VersionStatusCurrent,
+		Status:         temporaliov1alpha1.VersionStatusCurrent,
 		RampPercentage: 100,
-		TaskQueues: []TaskQueueInfo{
+		TaskQueues: []temporaliov1alpha1.TaskQueue{
 			{Name: "queue1"},
 			{Name: "queue2"},
 		},
@@ -120,7 +120,7 @@ func TestVersionInfoManagement(t *testing.T) {
 	versionInfo.DrainedSince = &drainTime
 
 	// Add test workflows
-	versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, WorkflowExecutionInfo{
+	versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, temporaliov1alpha1.WorkflowExecution{
 		WorkflowID: "test-wf-1",
 		RunID:      "run1",
 		TaskQueue:  "queue1",
@@ -129,7 +129,7 @@ func TestVersionInfoManagement(t *testing.T) {
 
 	// Verify fields
 	assert.Equal(t, "worker.v1", versionInfo.VersionID)
-	assert.Equal(t, VersionStatusCurrent, versionInfo.Status)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, versionInfo.Status)
 	assert.Equal(t, float32(100), versionInfo.RampPercentage)
 	assert.Equal(t, 2, len(versionInfo.TaskQueues))
 	assert.Equal(t, "queue1", versionInfo.TaskQueues[0].Name)
@@ -157,13 +157,13 @@ func TestTemporalWorkerState(t *testing.T) {
 	// Add versions
 	state.Versions["worker.v1"] = &VersionInfo{
 		VersionID:      "worker.v1",
-		Status:         VersionStatusCurrent,
+		Status:         temporaliov1alpha1.VersionStatusCurrent,
 		RampPercentage: 100,
 	}
 
 	state.Versions["worker.v2"] = &VersionInfo{
 		VersionID:      "worker.v2",
-		Status:         VersionStatusRamping,
+		Status:         temporaliov1alpha1.VersionStatusRamping,
 		RampPercentage: 25.0,
 	}
 
@@ -177,7 +177,7 @@ func TestTemporalWorkerState(t *testing.T) {
 	assert.Equal(t, 2, len(state.Versions))
 
 	// Verify versions
-	assert.Equal(t, VersionStatusCurrent, state.Versions["worker.v1"].Status)
-	assert.Equal(t, VersionStatusRamping, state.Versions["worker.v2"].Status)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, state.Versions["worker.v1"].Status)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusRamping, state.Versions["worker.v2"].Status)
 	assert.Equal(t, float32(25.0), state.Versions["worker.v2"].RampPercentage)
 }
