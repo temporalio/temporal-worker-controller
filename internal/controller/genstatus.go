@@ -71,8 +71,8 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	}
 
 	// Use the state mapper to convert state objects to CRD status
-	stateMapper := NewStateMapper(k8sState, temporalState)
-	status := stateMapper.MapToStatus(desiredVersionID)
+	stateMapper := newStateMapper(k8sState, temporalState)
+	status := stateMapper.mapToStatus(desiredVersionID)
 
 	return status, nil
 }

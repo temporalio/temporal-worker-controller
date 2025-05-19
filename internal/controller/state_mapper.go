@@ -11,22 +11,22 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// StateMapper maps between Kubernetes and Temporal states
-type StateMapper struct {
+// stateMapper maps between Kubernetes and Temporal states
+type stateMapper struct {
 	k8sState      *k8s.DeploymentState
 	temporalState *temporal.TemporalWorkerState
 }
 
-// NewStateMapper creates a new state mapper
-func NewStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.TemporalWorkerState) *StateMapper {
-	return &StateMapper{
+// newStateMapper creates a new state mapper
+func newStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.TemporalWorkerState) *stateMapper {
+	return &stateMapper{
 		k8sState:      k8sState,
 		temporalState: temporalState,
 	}
 }
 
-// MapToStatus converts the states to a CRD status
-func (m *StateMapper) MapToStatus(desiredVersionID string) *v1alpha1.TemporalWorkerDeploymentStatus {
+// mapToStatus converts the states to a CRD status
+func (m *stateMapper) mapToStatus(desiredVersionID string) *v1alpha1.TemporalWorkerDeploymentStatus {
 	status := &v1alpha1.TemporalWorkerDeploymentStatus{
 		VersionConflictToken: m.temporalState.VersionConflictToken,
 	}
@@ -64,7 +64,7 @@ func (m *StateMapper) MapToStatus(desiredVersionID string) *v1alpha1.TemporalWor
 }
 
 // mapWorkerDeploymentVersion creates a version status from the states
-func (m *StateMapper) mapWorkerDeploymentVersion(versionID string) *v1alpha1.WorkerDeploymentVersion {
+func (m *stateMapper) mapWorkerDeploymentVersion(versionID string) *v1alpha1.WorkerDeploymentVersion {
 	if versionID == "" {
 		return nil
 	}

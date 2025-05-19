@@ -140,10 +140,10 @@ func TestMapToStatus(t *testing.T) {
 	}
 
 	// Create state mapper
-	mapper := NewStateMapper(k8sState, temporalState)
+	mapper := newStateMapper(k8sState, temporalState)
 
 	// Map to status
-	status := mapper.MapToStatus("worker.v2")
+	status := mapper.mapToStatus("worker.v2")
 
 	// Verify status
 	assert.Equal(t, []byte("test-token"), status.VersionConflictToken)
@@ -235,7 +235,7 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 		},
 	}
 
-	mapper := NewStateMapper(k8sState, temporalState)
+	mapper := newStateMapper(k8sState, temporalState)
 
 	// Test with registered version
 	version := mapper.mapWorkerDeploymentVersion("worker.v1")
