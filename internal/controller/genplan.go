@@ -194,8 +194,14 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 					}
 				}
 
+				strategy := w.Spec.RolloutStrategy
+				if w.Status.LastModifierIdentity != controllerIdentity {
+					l.Info("Forcing manual rollout strategy since deployment was modified externally")
+					strategy.Strategy = temporaliov1alpha1.UpdateManual
+				}
+
 				// Update version configuration
-				plan.UpdateVersionConfig = getVersionConfigDiff(l, w.Spec.RolloutStrategy, &w.Status)
+				plan.UpdateVersionConfig = getVersionConfigDiff(l, strategy, &w.Status)
 				if plan.UpdateVersionConfig != nil {
 					plan.UpdateVersionConfig.conflictToken = w.Status.VersionConflictToken
 				}
@@ -238,12 +244,6 @@ func getVersionConfigDiff(l logr.Logger, strategy temporaliov1alpha1.RolloutStra
 func getVersionConfig(l logr.Logger, strategy temporaliov1alpha1.RolloutStrategy, status *temporaliov1alpha1.TemporalWorkerDeploymentStatus) *versionConfig {
 	// Do nothing if target version's deployment is not healthy yet
 	if status == nil || status.TargetVersion.HealthySince == nil {
-		return nil
-	}
-
-	// Do nothing if the Temporal Deployment has been modified out of band
-	if status.ExternallyModified {
-		l.Info("Forcing manual rollout strategy since deployment was modified externally")
 		return nil
 	}
 

@@ -229,17 +229,11 @@ func newDeploymentVersionCollection() deploymentVersionCollection {
 	}
 }
 
-func wasModifiedExternally(workerDeploymentInfo *sdkclient.WorkerDeploymentInfo) bool {
-	return workerDeploymentInfo.LastModifierIdentity != controllerIdentity &&
-		workerDeploymentInfo.LastModifierIdentity != ""
-}
-
 func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context, l logr.Logger, temporalClient temporalClient.Client, req ctrl.Request, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	var (
 		desiredVersionID, defaultVersionID string
 		deployedVersions                   []string
 		versions                           = newDeploymentVersionCollection()
-		externallyModified                 = false
 	)
 
 	workerDeploymentName := computeWorkerDeploymentName(workerDeploy)
@@ -277,12 +271,6 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	workerDeploymentInfo := describeResp.Info
 	routingConfig := workerDeploymentInfo.RoutingConfig
 	defaultVersionID = routingConfig.CurrentVersion
-
-	// Check if the worker deployment was modified out of band of the controller (eg. via the Temporal CLI)
-	if wasModifiedExternally(&workerDeploymentInfo) {
-		externallyModified = true
-		l.Info("Worker deployment was modified by an external system", "lastModifier", workerDeploymentInfo.LastModifierIdentity)
-	}
 
 	var rampingSinceTime *metav1.Time
 	var rampPercentage float32
@@ -425,6 +413,6 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		TargetVersion:        targetVersion,
 		DeprecatedVersions:   deprecatedVersions,
 		VersionConflictToken: conflictToken,
-		ExternallyModified:   externallyModified,
+		LastModifierIdentity: workerDeploymentInfo.LastModifierIdentity,
 	}, nil
 }
