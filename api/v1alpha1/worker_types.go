@@ -122,6 +122,10 @@ type TemporalWorkerDeploymentStatus struct {
 
 	// TODO(jlegrone): Add description
 	VersionConflictToken []byte `json:"versionConflictToken"`
+
+	// LastModifierIdentity is the identity of the client that most recently modified the worker deployment.
+	// +optional
+	LastModifierIdentity string `json:"lastModifierIdentity,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.

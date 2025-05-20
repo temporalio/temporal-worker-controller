@@ -29,6 +29,8 @@ import (
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
 
+const controllerIdentity = "temporal-worker-controller"
+
 // TODO (Shivam): Should we be having a map of [versionID] -> Structure?
 type deploymentVersionCollection struct {
 	versionIDsToDeployments map[string]*appsv1.Deployment
@@ -265,15 +267,10 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
 	}
+	conflictToken := describeResp.ConflictToken
 	workerDeploymentInfo := describeResp.Info
 	routingConfig := workerDeploymentInfo.RoutingConfig
 	defaultVersionID = routingConfig.CurrentVersion
-
-	// Check if the worker deployment was modified out of band of the controller (eg. via the Temporal CLI)
-	if workerDeploymentInfo.LastModifierIdentity != "temporal-worker-controller" &&
-		workerDeploymentInfo.LastModifierIdentity != "" {
-		// TODO(jlegrone): if it was set by another client, switch to manual mode
-	}
 
 	var rampingSinceTime *metav1.Time
 	var rampPercentage float32
@@ -415,6 +412,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(ctx context.Context,
 		DefaultVersion:       defaultVersion,
 		TargetVersion:        targetVersion,
 		DeprecatedVersions:   deprecatedVersions,
-		VersionConflictToken: []byte("todo"),
+		VersionConflictToken: conflictToken,
+		LastModifierIdentity: workerDeploymentInfo.LastModifierIdentity,
 	}, nil
 }

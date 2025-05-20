@@ -86,14 +86,11 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}
 
 			l.Info("registering new default version", "version", vcfg.versionID)
-			resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
-			if err != nil {
-				return fmt.Errorf("unable to describe worker deployment: %w", err)
-			}
+
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 				Version:       vcfg.versionID,
-				ConflictToken: resp.ConflictToken,
-				Identity:      "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.
+				ConflictToken: vcfg.conflictToken,
+				Identity:      controllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
@@ -101,9 +98,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				Version: vcfg.versionID,
 				MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 					UpsertEntries: map[string]interface{}{
-						// TODO(jlegrone): Add controller identity
 						// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
-						"temporal.io/managed-by": nil,
+						"temporal.io/managed-by": controllerIdentity,
 					},
 				},
 			}); err != nil { // would be cool to do this atomically with the update
@@ -116,15 +112,11 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}
 
 			l.Info("applying ramp", "version", p.UpdateVersionConfig.versionID, "percentage", p.UpdateVersionConfig.rampPercentage)
-			resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
-			if err != nil {
-				return fmt.Errorf("unable to describe worker deployment: %w", err)
-			}
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 				Version:       vcfg.versionID,
 				Percentage:    vcfg.rampPercentage,
-				ConflictToken: resp.ConflictToken,
-				Identity:      "temporal-worker-controller", // TODO(jlegrone): Set this to a unique identity, should match metadata.
+				ConflictToken: vcfg.conflictToken,
+				Identity:      controllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}
@@ -132,9 +124,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				Version: vcfg.versionID,
 				MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 					UpsertEntries: map[string]interface{}{
-						// TODO(jlegrone): Add controller identity
 						// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
-						"temporal.io/managed-by": nil,
+						"temporal.io/managed-by": controllerIdentity,
 					},
 				},
 			}); err != nil { // would be cool to do this atomically with the update
