@@ -8,16 +8,21 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
 )
 
 const (
-	buildIDLabel   = "temporal.io/build-id"
 	deployOwnerKey = ".metadata.controller"
+	// BuildIDLabel is the label that identifies the build ID for a deployment
+	BuildIDLabel = "temporal.io/build-id"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -64,11 +69,11 @@ func GetDeploymentState(
 	// Track each k8s deployment by version ID
 	for i := range childDeploys.Items {
 		deploy := &childDeploys.Items[i]
-		if buildID, ok := deploy.GetLabels()[buildIDLabel]; ok {
+		if buildID, ok := deploy.GetLabels()[BuildIDLabel]; ok {
 			versionID := workerDeploymentName + "." + buildID
 			state.Deployments[versionID] = deploy
 			state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
-			state.DeploymentRefs[versionID] = newObjectRef(deploy)
+			state.DeploymentRefs[versionID] = NewObjectRef(deploy)
 		}
 		// Any deployments without the build ID label are ignored
 	}
@@ -87,13 +92,157 @@ func IsDeploymentHealthy(deployment *appsv1.Deployment) (bool, *metav1.Time) {
 	return false, nil
 }
 
-// newObjectRef creates a reference to a Kubernetes object
-func newObjectRef(obj client.Object) *v1.ObjectReference {
+// NewObjectRef creates a reference to a Kubernetes object
+func NewObjectRef(obj client.Object) *v1.ObjectReference {
 	return &v1.ObjectReference{
 		APIVersion: obj.GetObjectKind().GroupVersionKind().GroupVersion().String(),
 		Kind:       obj.GetObjectKind().GroupVersionKind().Kind,
 		Name:       obj.GetName(),
 		Namespace:  obj.GetNamespace(),
 		UID:        obj.GetUID(),
+	}
+}
+
+// ComputeWorkerDeploymentName generates the base worker deployment name
+func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+	// Use the name and namespace to form the worker deployment name
+	return w.GetName() + "/" + w.GetNamespace()
+}
+
+// ComputeVersionID generates a version ID from the worker deployment
+func ComputeVersionID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+	deploymentName := ComputeWorkerDeploymentName(w)
+	// Compute the build ID based on the template
+	buildID := utils.ComputeHash(&w.Spec.Template, nil)
+	return deploymentName + "." + buildID
+}
+
+// ComputeVersionedDeploymentName generates a name for a versioned deployment
+func ComputeVersionedDeploymentName(baseName, buildID string) string {
+	return baseName + "-" + buildID
+}
+
+// SplitVersionID splits a version ID into its components
+func SplitVersionID(versionID string) (deploymentName, buildID string, err error) {
+	parts := strings.Split(versionID, ".")
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("invalid version ID format: %s", versionID)
+	}
+	return parts[0], parts[1], nil
+}
+
+// NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
+func NewDeploymentWithOwnerRef(
+	typeMeta *metav1.TypeMeta,
+	objectMeta *metav1.ObjectMeta,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	workerDeploymentName string,
+	buildID string,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+) *appsv1.Deployment {
+	selectorLabels := map[string]string{}
+	// Merge labels from TemporalWorker with build ID
+	if spec.Selector != nil {
+		for k, v := range spec.Selector.MatchLabels {
+			selectorLabels[k] = v
+		}
+	}
+	selectorLabels[BuildIDLabel] = buildID
+
+	// Set pod labels
+	podLabels := make(map[string]string)
+	for k, v := range spec.Template.Labels {
+		podLabels[k] = v
+	}
+	for k, v := range selectorLabels {
+		podLabels[k] = v
+	}
+
+	podSpec := spec.Template.Spec.DeepCopy()
+
+	// Add environment variables to containers
+	for i, container := range podSpec.Containers {
+		container.Env = append(container.Env,
+			v1.EnvVar{
+				Name:  "TEMPORAL_HOST_PORT",
+				Value: connection.HostPort,
+			},
+			v1.EnvVar{
+				Name:  "TEMPORAL_NAMESPACE",
+				Value: spec.WorkerOptions.TemporalNamespace,
+			},
+			v1.EnvVar{
+				Name:  "TEMPORAL_DEPLOYMENT_NAME",
+				Value: workerDeploymentName,
+			},
+			v1.EnvVar{
+				Name:  "WORKER_BUILD_ID",
+				Value: buildID,
+			},
+		)
+		podSpec.Containers[i] = container
+	}
+
+	// Add TLS config if mTLS is enabled
+	if connection.MutualTLSSecret != "" {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env,
+				v1.EnvVar{
+					Name:  "TEMPORAL_TLS_KEY_PATH",
+					Value: "/etc/temporal/tls/tls.key",
+				},
+				v1.EnvVar{
+					Name:  "TEMPORAL_TLS_CERT_PATH",
+					Value: "/etc/temporal/tls/tls.crt",
+				},
+			)
+			container.VolumeMounts = append(container.VolumeMounts, v1.VolumeMount{
+				Name:      "temporal-tls",
+				MountPath: "/etc/temporal/tls",
+			})
+			podSpec.Containers[i] = container
+		}
+		podSpec.Volumes = append(podSpec.Volumes, v1.Volume{
+			Name: "temporal-tls",
+			VolumeSource: v1.VolumeSource{
+				Secret: &v1.SecretVolumeSource{
+					SecretName: connection.MutualTLSSecret,
+				},
+			},
+		})
+	}
+
+	blockOwnerDeletion := true
+
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:                       ComputeVersionedDeploymentName(objectMeta.Name, buildID),
+			Namespace:                  objectMeta.Namespace,
+			DeletionGracePeriodSeconds: nil,
+			Labels:                     selectorLabels,
+			Annotations:                spec.Template.Annotations,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         typeMeta.APIVersion,
+				Kind:               typeMeta.Kind,
+				Name:               objectMeta.Name,
+				UID:                objectMeta.UID,
+				BlockOwnerDeletion: &blockOwnerDeletion,
+				Controller:         nil,
+			}},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: spec.Replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: selectorLabels,
+			},
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      podLabels,
+					Annotations: spec.Template.Annotations,
+				},
+				Spec: *podSpec,
+			},
+			MinReadySeconds: spec.MinReadySeconds,
+		},
 	}
 }

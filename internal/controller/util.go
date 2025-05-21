@@ -14,8 +14,6 @@ import (
 	"github.com/go-logr/logr"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -37,44 +35,8 @@ func computeVersionID(r *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	return computeWorkerDeploymentName(r) + versionIDSeparator + computeBuildID(&r.Spec)
 }
 
-func computeVersionedDeploymentName(twdName, buildID string) string {
-	return twdName + k8sResourceNameSeparator + buildID
-}
-
 func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) string {
 	return utils.ComputeHash(&spec.Template, nil)
-}
-
-func getTestWorkflowID(series, taskQueue, buildID string) string {
-	return fmt.Sprintf("test-deploy:%s:%s:%s", series, taskQueue, buildID)
-}
-
-func getScaledownDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
-	if spec.SunsetStrategy.ScaledownDelay == nil {
-		return defaultScaledownDelay
-	}
-	return spec.SunsetStrategy.ScaledownDelay.Duration
-}
-
-func getDeleteDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
-	if spec.SunsetStrategy.DeleteDelay == nil {
-		return defaultDeleteDelay
-	}
-	return spec.SunsetStrategy.DeleteDelay.Duration
-}
-
-func newObjectRef(d *appsv1.Deployment) *v1.ObjectReference {
-	if d == nil {
-		return nil
-	}
-	return &v1.ObjectReference{
-		Kind:            d.Kind,
-		Namespace:       d.Namespace,
-		Name:            d.Name,
-		UID:             d.UID,
-		APIVersion:      d.APIVersion,
-		ResourceVersion: d.ResourceVersion,
-	}
 }
 
 func describeWorkerDeploymentHandleNotFound(
