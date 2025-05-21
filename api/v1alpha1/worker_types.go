@@ -120,7 +120,9 @@ type TemporalWorkerDeploymentStatus struct {
 	// strategy is set to manual.
 	DeprecatedVersions []*WorkerDeploymentVersion `json:"deprecatedVersions,omitempty"`
 
-	// TODO(jlegrone): Add description
+	// VersionConflictToken prevents concurrent modifications to the deployment status.
+	// It ensures reconciliation operations don't inadvertently override changes made
+	// by external systems while processing is underway.
 	VersionConflictToken []byte `json:"versionConflictToken"`
 
 	// LastModifierIdentity is the identity of the client that most recently modified the worker deployment.

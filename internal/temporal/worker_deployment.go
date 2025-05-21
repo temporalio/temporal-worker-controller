@@ -35,6 +35,7 @@ type TemporalWorkerState struct {
 	VersionConflictToken []byte
 	RampingVersionID     string
 	RampPercentage       float32
+	// RampingSince is the time when the current ramping version was set.
 	RampingSince         *metav1.Time
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
