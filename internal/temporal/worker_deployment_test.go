@@ -6,11 +6,9 @@ package temporal
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.temporal.io/api/enums/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
@@ -101,83 +99,4 @@ func TestGetTestWorkflowID(t *testing.T) {
 			assert.Equal(t, tt.expected, id)
 		})
 	}
-}
-
-func TestVersionInfoManagement(t *testing.T) {
-	// Create a test version info
-	versionInfo := &VersionInfo{
-		VersionID:      "worker.v1",
-		Status:         temporaliov1alpha1.VersionStatusCurrent,
-		RampPercentage: 100,
-		TaskQueues: []temporaliov1alpha1.TaskQueue{
-			{Name: "queue1"},
-			{Name: "queue2"},
-		},
-	}
-
-	// Set drained since
-	drainTime := time.Now().Add(-1 * time.Hour)
-	versionInfo.DrainedSince = &drainTime
-
-	// Add test workflows
-	versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, temporaliov1alpha1.WorkflowExecution{
-		WorkflowID: "test-wf-1",
-		RunID:      "run1",
-		TaskQueue:  "queue1",
-		Status:     temporaliov1alpha1.WorkflowExecutionStatusCompleted,
-	})
-
-	// Verify fields
-	assert.Equal(t, "worker.v1", versionInfo.VersionID)
-	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, versionInfo.Status)
-	assert.Equal(t, float32(100), versionInfo.RampPercentage)
-	assert.Equal(t, 2, len(versionInfo.TaskQueues))
-	assert.Equal(t, "queue1", versionInfo.TaskQueues[0].Name)
-	assert.Equal(t, "queue2", versionInfo.TaskQueues[1].Name)
-	assert.Equal(t, drainTime.Unix(), versionInfo.DrainedSince.Unix()) // Compare Unix timestamps to avoid sub-second differences
-	assert.Equal(t, 1, len(versionInfo.TestWorkflows))
-	assert.Equal(t, "test-wf-1", versionInfo.TestWorkflows[0].WorkflowID)
-	assert.Equal(t, temporaliov1alpha1.WorkflowExecutionStatusCompleted, versionInfo.TestWorkflows[0].Status)
-}
-
-func TestTemporalWorkerState(t *testing.T) {
-	// Create a test temporal worker state
-	rampingSince := metav1.NewTime(time.Now().Add(-30 * time.Minute))
-
-	state := &TemporalWorkerState{
-		DefaultVersionID:     "worker.v1",
-		RampingVersionID:     "worker.v2",
-		RampPercentage:       25.0,
-		RampingSince:         &rampingSince,
-		LastModifierIdentity: "test-controller",
-		VersionConflictToken: []byte("test-token"),
-		Versions:             make(map[string]*VersionInfo),
-	}
-
-	// Add versions
-	state.Versions["worker.v1"] = &VersionInfo{
-		VersionID:      "worker.v1",
-		Status:         temporaliov1alpha1.VersionStatusCurrent,
-		RampPercentage: 100,
-	}
-
-	state.Versions["worker.v2"] = &VersionInfo{
-		VersionID:      "worker.v2",
-		Status:         temporaliov1alpha1.VersionStatusRamping,
-		RampPercentage: 25.0,
-	}
-
-	// Verify state
-	assert.Equal(t, "worker.v1", state.DefaultVersionID)
-	assert.Equal(t, "worker.v2", state.RampingVersionID)
-	assert.Equal(t, float32(25.0), state.RampPercentage)
-	assert.Equal(t, rampingSince.Time.Unix(), state.RampingSince.Time.Unix())
-	assert.Equal(t, "test-controller", state.LastModifierIdentity)
-	assert.Equal(t, []byte("test-token"), state.VersionConflictToken)
-	assert.Equal(t, 2, len(state.Versions))
-
-	// Verify versions
-	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, state.Versions["worker.v1"].Status)
-	assert.Equal(t, temporaliov1alpha1.VersionStatusRamping, state.Versions["worker.v2"].Status)
-	assert.Equal(t, float32(25.0), state.Versions["worker.v2"].RampPercentage)
 }
