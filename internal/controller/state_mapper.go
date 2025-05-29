@@ -98,8 +98,8 @@ func (m *stateMapper) mapWorkerDeploymentVersion(versionID string) *v1alpha1.Wor
 		// Set ramp percentage if this is a ramping version
 		// TODO(carlydf): Support setting any ramp in [0,100]
 		// NOTE(rob): We are now setting any ramp > 0, is that correct?
-		if temporalVersion.Status == v1alpha1.VersionStatusRamping && temporalVersion.RampPercentage > 0 {
-			version.RampPercentage = &temporalVersion.RampPercentage
+		if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
+			version.RampPercentage = &m.temporalState.RampPercentage
 		}
 
 		// Set task queues

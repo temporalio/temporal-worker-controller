@@ -100,9 +100,8 @@ func TestMapToStatus(t *testing.T) {
 		VersionConflictToken: []byte("test-token"),
 		Versions: map[string]*temporal.VersionInfo{
 			"worker.v1": {
-				VersionID:      "worker.v1",
-				Status:         temporaliov1alpha1.VersionStatusCurrent,
-				RampPercentage: 100,
+				VersionID: "worker.v1",
+				Status:    temporaliov1alpha1.VersionStatusCurrent,
 				TaskQueues: []temporaliov1alpha1.TaskQueue{
 					{Name: "queue1"},
 				},
@@ -116,9 +115,8 @@ func TestMapToStatus(t *testing.T) {
 				},
 			},
 			"worker.v2": {
-				VersionID:      "worker.v2",
-				Status:         temporaliov1alpha1.VersionStatusRamping,
-				RampPercentage: 25.0,
+				VersionID: "worker.v2",
+				Status:    temporaliov1alpha1.VersionStatusRamping,
 				TaskQueues: []temporaliov1alpha1.TaskQueue{
 					{Name: "queue1"},
 				},
@@ -227,10 +225,9 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 	temporalState := &temporal.TemporalWorkerState{
 		Versions: map[string]*temporal.VersionInfo{
 			"worker.v1": {
-				VersionID:      "worker.v1",
-				Status:         temporaliov1alpha1.VersionStatusCurrent,
-				RampPercentage: 100,
-				DrainedSince:   &drainedSince,
+				VersionID:    "worker.v1",
+				Status:       temporaliov1alpha1.VersionStatusCurrent,
+				DrainedSince: &drainedSince,
 			},
 		},
 	}

@@ -21,12 +21,11 @@ import (
 
 // VersionInfo contains information about a specific version
 type VersionInfo struct {
-	VersionID      string
-	Status         temporaliov1alpha1.VersionStatus
-	DrainedSince   *time.Time
-	RampPercentage float32
-	TaskQueues     []temporaliov1alpha1.TaskQueue
-	TestWorkflows  []temporaliov1alpha1.WorkflowExecution
+	VersionID     string
+	Status        temporaliov1alpha1.VersionStatus
+	DrainedSince  *time.Time
+	TaskQueues    []temporaliov1alpha1.TaskQueue
+	TestWorkflows []temporaliov1alpha1.WorkflowExecution
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -96,7 +95,6 @@ func GetWorkerDeploymentState(
 			versionInfo.Status = temporaliov1alpha1.VersionStatusCurrent
 		} else if version.Version == routingConfig.RampingVersion {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusRamping
-			versionInfo.RampPercentage = routingConfig.RampingVersionPercentage
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDraining {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDrained {
