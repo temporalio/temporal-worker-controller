@@ -107,22 +107,9 @@ QueueDepthBound ==
 \* If work exists and we're not in cooldown, progress must be made in the next state
 ProgressGuaranteeAction ==
     (queueDepth > 0 /\ cooldown = 0) => (replicas' > replicas \/ queueDepth' < queueDepth)
-
 \* Progress guarantee must always hold
 ProgressGuarantee ==
     [][ProgressGuaranteeAction]_<<queueDepth, replicas, cooldown, utilization>>
-
-(* ---( SPECIFICATION )--- *)
-\* Main specification: starts in Init and always follows Next transitions
-Spec ==
-    Init /\ [][Next]_<<queueDepth, replicas, cooldown, utilization>>
-
-\* The system must always maintain the defined invariants
-Inv ==
-    /\ ReplicaBounds
-    /\ CooldownNonNegative
-    /\ QueueDepthNonNegative
-    /\ QueueDepthBound
 
 \* Do not scale up if the queue is below the upper threshold
 NoOverScalingAction ==
@@ -147,5 +134,17 @@ StabilityCheckAction ==
     (queueDepth < UPPER_QUEUE_DEPTH_THRESHOLD /\ queueDepth > LOWER_QUEUE_DEPTH_THRESHOLD => replicas' = replicas)
 StabilityCheck ==
     [][StabilityCheckAction]_<<queueDepth, replicas, cooldown, utilization>>
+
+(* ---( SPECIFICATION )--- *)
+\* Main specification: starts in Init and always follows Next transitions
+Spec ==
+    Init /\ [][Next]_<<queueDepth, replicas, cooldown, utilization>>
+
+\* The system must always maintain the defined invariants
+Inv ==
+    /\ ReplicaBounds
+    /\ CooldownNonNegative
+    /\ QueueDepthNonNegative
+    /\ QueueDepthBound
 
 ====
