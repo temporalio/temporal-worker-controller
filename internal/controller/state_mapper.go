@@ -53,6 +53,7 @@ func (m *stateMapper) mapToStatus(desiredVersionID string) *v1alpha1.TemporalWor
 			continue
 		}
 
+		// TODO(rob): We should never see a version here that has VersionStatusCurrent, but should we check?
 		versionStatus := m.mapWorkerDeploymentVersion(versionID)
 		if versionStatus != nil {
 			deprecatedVersions = append(deprecatedVersions, versionStatus)

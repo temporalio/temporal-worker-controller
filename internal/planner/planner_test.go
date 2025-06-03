@@ -389,7 +389,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
 						{
 							VersionID:  "test/namespace.a",
-							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Status:     temporaliov1alpha1.VersionStatusInactive,
 							Deployment: &v1.ObjectReference{Name: "test-a"},
 						},
 					},
@@ -1100,7 +1100,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
 						{
 							VersionID:  "test/namespace.a",
-							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Status:     temporaliov1alpha1.VersionStatusInactive,
 							Deployment: &v1.ObjectReference{Name: "test-a"},
 						},
 						{
