@@ -5,14 +5,21 @@
 package k8s
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 )
 
 func TestIsDeploymentHealthy(t *testing.T) {
@@ -79,7 +86,22 @@ func TestIsDeploymentHealthy(t *testing.T) {
 }
 
 func TestGetDeploymentState(t *testing.T) {
-	// Create test deployments
+	ctx := context.Background()
+
+	// Create test TemporalWorkerDeployment owner
+	owner := &temporaliov1alpha1.TemporalWorkerDeployment{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "temporal.io/v1alpha1",
+			Kind:       "TemporalWorkerDeployment",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-worker",
+			Namespace: "default",
+			UID:       types.UID("test-owner-uid"),
+		},
+	}
+
+	// Create test deployments with proper owner references
 	deploy1 := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "worker-v1",
@@ -90,7 +112,11 @@ func TestGetDeploymentState(t *testing.T) {
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					Name: "test-worker",
+					APIVersion: "temporal.io/v1alpha1",
+					Kind:       "TemporalWorkerDeployment",
+					Name:       "test-worker",
+					UID:        "test-owner-uid",
+					Controller: func() *bool { b := true; return &b }(),
 				},
 			},
 		},
@@ -106,69 +132,74 @@ func TestGetDeploymentState(t *testing.T) {
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					Name: "test-worker",
+					APIVersion: "temporal.io/v1alpha1",
+					Kind:       "TemporalWorkerDeployment",
+					Name:       "test-worker",
+					UID:        "test-owner-uid",
+					Controller: func() *bool { b := true; return &b }(),
 				},
 			},
 		},
 	}
 
-	// The test fails because the client doesn't have the field indexer set up
-	// In a real implementation, the controller would set up this indexer
-	// For testing, we'll create a simple mock implementation that returns our deployments directly
-
-	// Mock method to directly test the deployment state functions without needing the field indexer
-	mockGetDeploymentState := func() *DeploymentState {
-		state := &DeploymentState{
-			Deployments:       make(map[string]*appsv1.Deployment),
-			DeploymentsByTime: []*appsv1.Deployment{deploy1, deploy2},
-			DeploymentRefs:    make(map[string]*v1.ObjectReference),
-		}
-
-		// Set up the deployments map
-		state.Deployments["worker.v1"] = deploy1
-		state.Deployments["worker.v2"] = deploy2
-
-		// Set up the refs map
-		state.DeploymentRefs["worker.v1"] = NewObjectRef(deploy1)
-		state.DeploymentRefs["worker.v2"] = NewObjectRef(deploy2)
-
-		return state
+	// Create deployment without build ID label (should be ignored)
+	deployWithoutLabel := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "worker-no-label",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "temporal.io/v1alpha1",
+					Kind:       "TemporalWorkerDeployment",
+					Name:       "test-worker",
+					UID:        "test-owner-uid",
+					Controller: func() *bool { b := true; return &b }(),
+				},
+			},
+		},
 	}
 
-	// Use our mock to get a valid DeploymentState
-	state := mockGetDeploymentState()
+	// Create scheme and fake client with field indexer
+	scheme := runtime.NewScheme()
+	_ = appsv1.AddToScheme(scheme)
+	_ = v1.AddToScheme(scheme)
+	_ = temporaliov1alpha1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(owner, deploy1, deploy2, deployWithoutLabel).
+		WithIndex(&appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
+			deploy := rawObj.(*appsv1.Deployment)
+			owner := metav1.GetControllerOf(deploy)
+			if owner == nil {
+				return nil
+			}
+			if owner.APIVersion != "temporal.io/v1alpha1" || owner.Kind != "TemporalWorkerDeployment" {
+				return nil
+			}
+			return []string{owner.Name}
+		}).
+		Build()
+
+	// Test the GetDeploymentState function
+	state, err := GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
+	require.NoError(t, err)
 
 	// Verify the state is constructed correctly
 	assert.NotNil(t, state)
-	assert.Equal(t, 2, len(state.Deployments))
+	assert.Equal(t, 2, len(state.Deployments), "Should have 2 deployments (deployments without build ID label should be ignored)")
 	assert.Equal(t, 2, len(state.DeploymentsByTime))
 	assert.Equal(t, 2, len(state.DeploymentRefs))
 
 	// Verify the content of the maps
-	assert.Equal(t, "worker-v1", state.Deployments["worker.v1"].Name)
-	assert.Equal(t, "worker-v2", state.Deployments["worker.v2"].Name)
+	assert.Equal(t, "worker-v1", state.Deployments["test-worker.v1"].Name)
+	assert.Equal(t, "worker-v2", state.Deployments["test-worker.v2"].Name)
 
-	// Verify the deployments are sorted by creation time
+	// Verify the deployments are sorted by creation time (oldest first)
 	assert.Equal(t, "worker-v1", state.DeploymentsByTime[0].Name)
 	assert.Equal(t, "worker-v2", state.DeploymentsByTime[1].Name)
 
 	// Verify refs are correctly created
-	assert.Equal(t, "worker-v1", state.DeploymentRefs["worker.v1"].Name)
-	assert.Equal(t, "worker-v2", state.DeploymentRefs["worker.v2"].Name)
-}
-
-func TestNewObjectRef(t *testing.T) {
-	obj := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-deployment",
-			Namespace: "default",
-			UID:       types.UID("test-uid"),
-		},
-	}
-
-	ref := NewObjectRef(obj)
-
-	assert.Equal(t, "test-deployment", ref.Name)
-	assert.Equal(t, "default", ref.Namespace)
-	assert.Equal(t, types.UID("test-uid"), ref.UID)
+	assert.Equal(t, "worker-v1", state.DeploymentRefs["test-worker.v1"].Name)
+	assert.Equal(t, "worker-v2", state.DeploymentRefs["test-worker.v2"].Name)
 }
