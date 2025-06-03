@@ -368,18 +368,15 @@ func getVersionConfig(
 			}
 			totalPauseDuration += s.PauseDuration.Duration
 			if healthyDuration < totalPauseDuration {
-				break
+				// We're still in this step's pause duration
+				return &VersionConfig{
+					RampPercentage: currentRamp,
+				}
 			}
 		}
 		// We've progressed through all steps; it should now be safe to update the default version
-		if healthyDuration > 0 && healthyDuration > totalPauseDuration {
-			return &VersionConfig{
-				SetDefault: true,
-			}
-		}
-		// We haven't finished waiting for all steps; use the latest ramp value
 		return &VersionConfig{
-			RampPercentage: currentRamp,
+			SetDefault: true,
 		}
 	}
 
