@@ -229,6 +229,8 @@ func NewDeploymentWithOwnerRef(
 				BlockOwnerDeletion: &blockOwnerDeletion,
 				Controller:         nil,
 			}},
+			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
+			//                 deleting deployments that are still reachable.
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: spec.Replicas,

@@ -102,6 +102,9 @@ func GeneratePlan(
 	// Determine version config changes
 	plan.VersionConfig = getVersionConfigDiff(l, config.RolloutStrategy, config.Status, config.ConflictToken)
 
+	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
+	//                 but have no corresponding Deployment.
+
 	return plan, nil
 }
 
@@ -184,12 +187,14 @@ func getScaleDeployments(
 		case temporaliov1alpha1.VersionStatusInactive,
 			temporaliov1alpha1.VersionStatusRamping,
 			temporaliov1alpha1.VersionStatusCurrent:
+			// TODO(carlydf): Consolidate scale up cases and verify that scale up is the correct action for inactive versions
 			// Scale up these deployments
 			if d.Spec.Replicas != nil && *d.Spec.Replicas != config.Replicas {
 				scaleDeployments[version.Deployment] = uint32(config.Replicas)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
 			if time.Since(version.DrainedSince.Time) > getScaledownDelay(config.Spec) {
+				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
 				// Scale down drained deployments after delay
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
 					scaleDeployments[version.Deployment] = 0
@@ -361,9 +366,12 @@ func getVersionConfig(
 		)
 		if status.TargetVersion.RampingSince != nil {
 			healthyDuration = time.Since(status.TargetVersion.RampingSince.Time)
+			// TODO(carlydf): Is it important that the version spends x time at each step % ?
+			// Currently, if 1% ramp is set, and then multiple reconcile loops error so the next steps aren't set,
+			// the version could skip straight from 1% to current if the error-ing period > totalPauseDuration
 		}
 		for _, s := range strategy.Steps {
-			if s.RampPercentage != 0 {
+			if s.RampPercentage != 0 { // TODO(carlydf): Support setting any ramp in [0,100]
 				currentRamp = s.RampPercentage
 			}
 			totalPauseDuration += s.PauseDuration.Duration
