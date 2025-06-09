@@ -107,7 +107,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v1",
 			Namespace: "default",
 			Labels: map[string]string{
-				buildIDLabel: "v1",
+				BuildIDLabel: "v1",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
@@ -127,7 +127,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v2",
 			Namespace: "default",
 			Labels: map[string]string{
-				buildIDLabel: "v2",
+				BuildIDLabel: "v2",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
