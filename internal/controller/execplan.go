@@ -79,7 +79,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 
 	// Register default version or ramp
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
-		if vcfg.setDefault {
+		if vcfg.setCurrent {
 			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {
 				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)

@@ -26,20 +26,20 @@ func newStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.Tempo
 }
 
 // mapToStatus converts the states to a CRD status
-func (m *stateMapper) mapToStatus(desiredVersionID string) *v1alpha1.TemporalWorkerDeploymentStatus {
+func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWorkerDeploymentStatus {
 	status := &v1alpha1.TemporalWorkerDeploymentStatus{
 		VersionConflictToken: m.temporalState.VersionConflictToken,
 	}
 
-	// Set default version
-	defaultVersionID := m.temporalState.DefaultVersionID
-	if defaultVersionID != "" {
-		status.DefaultVersion = m.mapWorkerDeploymentVersion(defaultVersionID)
+	// Set current version
+	currentVersionID := m.temporalState.CurrentVersionID
+	if currentVersionID != "" {
+		status.CurrentVersion = m.mapWorkerDeploymentVersion(currentVersionID)
 	}
 
 	// Set target version (desired version)
-	status.TargetVersion = m.mapWorkerDeploymentVersion(desiredVersionID)
-	if status.TargetVersion != nil && m.temporalState.RampingVersionID == desiredVersionID {
+	status.TargetVersion = m.mapWorkerDeploymentVersion(targetVersionID)
+	if status.TargetVersion != nil && m.temporalState.RampingVersionID == targetVersionID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
 		rampPercentage := m.temporalState.RampPercentage
 		status.TargetVersion.RampPercentage = &rampPercentage
@@ -49,7 +49,7 @@ func (m *stateMapper) mapToStatus(desiredVersionID string) *v1alpha1.TemporalWor
 	var deprecatedVersions []*v1alpha1.WorkerDeploymentVersion
 	for versionID := range m.k8sState.Deployments {
 		// Skip default and target versions
-		if versionID == defaultVersionID || versionID == desiredVersionID {
+		if versionID == currentVersionID || versionID == targetVersionID {
 			continue
 		}
 

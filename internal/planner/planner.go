@@ -33,10 +33,10 @@ type VersionConfig struct {
 	// Version ID for which this config applies
 	VersionID string
 
-	// One of RampPercentage OR SetDefault must be set to a non-zero value.
+	// One of RampPercentage OR SetCurrent must be set to a non-zero value.
 
-	// Set this as the default build ID for all new executions
-	SetDefault bool
+	// Set this as the build ID for all new executions
+	SetCurrent bool
 	// Acceptable values [0,100]
 	RampPercentage float32
 }
@@ -58,7 +58,7 @@ type Config struct {
 	// RolloutStrategy to use
 	RolloutStrategy temporaliov1alpha1.RolloutStrategy
 	// Desired version ID to deploy
-	DesiredVersionID string
+	TargetVersionID string
 	// Number of replicas desired
 	Replicas int32
 	// Token to use for conflict detection
@@ -144,9 +144,9 @@ func getDeleteDeployments(
 		}
 	}
 
-	// If the desired version ID has changed, delete the latest unregistered deployment
+	// If the target version ID has changed, delete the latest unregistered deployment
 	if config.Status.TargetVersion != nil && config.Status.TargetVersion.Deployment != nil &&
-		config.Status.TargetVersion.VersionID != config.DesiredVersionID {
+		config.Status.TargetVersion.VersionID != config.TargetVersionID {
 		if d, exists := k8sState.Deployments[config.Status.TargetVersion.VersionID]; exists {
 			deleteDeployments = append(deleteDeployments, d)
 		}
@@ -162,10 +162,10 @@ func getScaleDeployments(
 ) map[*v1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*v1.ObjectReference]uint32)
 
-	// Scale the default version if needed
-	if config.Status.DefaultVersion != nil && config.Status.DefaultVersion.Deployment != nil {
-		ref := config.Status.DefaultVersion.Deployment
-		if d, exists := k8sState.Deployments[config.Status.DefaultVersion.VersionID]; exists {
+	// Scale the current version if needed
+	if config.Status.CurrentVersion != nil && config.Status.CurrentVersion.Deployment != nil {
+		ref := config.Status.CurrentVersion.Deployment
+		if d, exists := k8sState.Deployments[config.Status.CurrentVersion.VersionID]; exists {
 			if d.Spec.Replicas != nil && *d.Spec.Replicas != config.Replicas {
 				scaleDeployments[ref] = uint32(config.Replicas)
 			}
@@ -205,7 +205,7 @@ func getScaleDeployments(
 
 	// Scale the target version if it exists
 	if config.Status.TargetVersion != nil && config.Status.TargetVersion.Deployment != nil &&
-		config.Status.TargetVersion.VersionID == config.DesiredVersionID {
+		config.Status.TargetVersion.VersionID == config.TargetVersionID {
 		if d, exists := k8sState.Deployments[config.Status.TargetVersion.VersionID]; exists {
 			if d.Spec.Replicas == nil || *d.Spec.Replicas != config.Replicas {
 				scaleDeployments[config.Status.TargetVersion.Deployment] = uint32(config.Replicas)
@@ -229,9 +229,9 @@ func shouldCreateDeployment(
 		return true
 	}
 
-	// If the desired version already has a deployment, we don't need to create another one
-	if config.Status.TargetVersion.VersionID == config.DesiredVersionID {
-		if _, exists := k8sState.Deployments[config.DesiredVersionID]; exists {
+	// If the target version already has a deployment, we don't need to create another one
+	if config.Status.TargetVersion.VersionID == config.TargetVersionID {
+		if _, exists := k8sState.Deployments[config.TargetVersionID]; exists {
 			return false
 		}
 	}
@@ -245,10 +245,10 @@ func getTestWorkflows(
 ) []WorkflowConfig {
 	var testWorkflows []WorkflowConfig
 
-	// Skip if there's no gate workflow defined or if the target version is already the default
+	// Skip if there's no gate workflow defined or if the target version is already the current
 	if config.RolloutStrategy.Gate == nil || config.Status.TargetVersion == nil ||
-		config.Status.DefaultVersion == nil ||
-		config.Status.DefaultVersion.VersionID == config.Status.TargetVersion.VersionID {
+		config.Status.CurrentVersion == nil ||
+		config.Status.CurrentVersion.VersionID == config.Status.TargetVersion.VersionID {
 		return nil
 	}
 
@@ -300,20 +300,20 @@ func getVersionConfigDiff(
 	vcfg.VersionID = status.TargetVersion.VersionID
 	vcfg.ConflictToken = conflictToken
 
-	// Set default version if there isn't one yet
-	if status.DefaultVersion == nil {
-		vcfg.SetDefault = true
+	// Set current version if there isn't one yet
+	if status.CurrentVersion == nil {
+		vcfg.SetCurrent = true
 		vcfg.RampPercentage = 0
 		return vcfg
 	}
 
-	// Don't make updates if desired default is already the default
-	if vcfg.VersionID == status.DefaultVersion.VersionID {
+	// Don't make updates if desired current is already the current
+	if vcfg.VersionID == status.CurrentVersion.VersionID {
 		return nil
 	}
 
 	// Don't make updates if desired ramping version is already the target, and ramp percentage is correct
-	if !vcfg.SetDefault &&
+	if !vcfg.SetCurrent &&
 		vcfg.VersionID == status.TargetVersion.VersionID &&
 		status.TargetVersion.RampPercentage != nil &&
 		vcfg.RampPercentage == *status.TargetVersion.RampPercentage {
@@ -353,9 +353,9 @@ func getVersionConfig(
 	case temporaliov1alpha1.UpdateManual:
 		return nil
 	case temporaliov1alpha1.UpdateAllAtOnce:
-		// Set new default version immediately
+		// Set new current version immediately
 		return &VersionConfig{
-			SetDefault: true,
+			SetCurrent: true,
 		}
 	case temporaliov1alpha1.UpdateProgressive:
 		// Determine the correct percentage ramp
@@ -384,7 +384,7 @@ func getVersionConfig(
 		}
 		// We've progressed through all steps; it should now be safe to update the default version
 		return &VersionConfig{
-			SetDefault: true,
+			SetCurrent: true,
 		}
 	}
 

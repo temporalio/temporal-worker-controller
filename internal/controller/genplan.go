@@ -46,7 +46,7 @@ type versionConfig struct {
 	// One of rampPercentage OR setDefault must be set to a non-zero value.
 
 	// Set this as the default build ID for all new executions
-	setDefault bool
+	setCurrent bool
 	// Acceptable values [0,100]
 	rampPercentage float32
 }
@@ -67,7 +67,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*plan, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(w)
-	desiredVersionID := k8s.ComputeVersionID(w)
+	targetVersionID := k8s.ComputeVersionID(w)
 
 	// Fetch Kubernetes deployment state
 	k8sState, err := k8s.GetDeploymentState(
@@ -97,12 +97,12 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
-		Status:           &w.Status,
-		Spec:             &w.Spec,
-		RolloutStrategy:  rolloutStrategy,
-		DesiredVersionID: desiredVersionID,
-		Replicas:         *w.Spec.Replicas,
-		ConflictToken:    w.Status.VersionConflictToken,
+		Status:          &w.Status,
+		Spec:            &w.Spec,
+		RolloutStrategy: rolloutStrategy,
+		TargetVersionID: targetVersionID,
+		Replicas:        *w.Spec.Replicas,
+		ConflictToken:   w.Status.VersionConflictToken,
 	}
 
 	planResult, err := planner.GeneratePlan(
@@ -123,7 +123,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		plan.UpdateVersionConfig = &versionConfig{
 			conflictToken:  planResult.VersionConfig.ConflictToken,
 			versionID:      planResult.VersionConfig.VersionID,
-			setDefault:     planResult.VersionConfig.SetDefault,
+			setCurrent:     planResult.VersionConfig.SetCurrent,
 			rampPercentage: planResult.VersionConfig.RampPercentage,
 		}
 	}
@@ -140,7 +140,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Handle deployment creation if needed
 	if planResult.ShouldCreateDeployment {
-		_, buildID, _ := k8s.SplitVersionID(desiredVersionID)
+		_, buildID, _ := k8s.SplitVersionID(targetVersionID)
 		d, err := r.newDeployment(w, buildID, connection)
 		if err != nil {
 			return nil, err
