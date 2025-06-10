@@ -22,7 +22,7 @@ type Plan struct {
 	DeleteDeployments      []*appsv1.Deployment
 	ScaleDeployments       map[*v1.ObjectReference]uint32
 	ShouldCreateDeployment bool
-	VersionConfig          *VersionConfig
+	VersionConfigs         []*VersionConfig
 	TestWorkflows          []WorkflowConfig
 }
 
@@ -100,7 +100,7 @@ func GeneratePlan(
 	plan.TestWorkflows = getTestWorkflows(config)
 
 	// Determine version config changes
-	plan.VersionConfig = getVersionConfigDiff(l, config.RolloutStrategy, config.Status, config.ConflictToken)
+	plan.VersionConfigs = getVersionConfigDiff(l, config.RolloutStrategy, config.Status, config.ConflictToken)
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
@@ -286,41 +286,31 @@ func getVersionConfigDiff(
 	strategy temporaliov1alpha1.RolloutStrategy,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	conflictToken []byte,
-) *VersionConfig {
+) []*VersionConfig {
+	var versionConfigs []*VersionConfig
+
 	vcfg := getVersionConfig(l, strategy, status)
-	if vcfg == nil {
-		return nil
+	if vcfg != nil {
+		vcfg.VersionID = status.TargetVersion.VersionID
+		vcfg.ConflictToken = conflictToken
+
+		versionConfigs = append(versionConfigs, vcfg)
 	}
 
-	// Check if target version is nil
-	if status == nil || status.TargetVersion == nil {
-		return nil
+	for _, vcfg := range status.DeprecatedVersions {
+		if vcfg.Status == temporaliov1alpha1.VersionStatusRamping &&
+			vcfg.RampPercentage != nil &&
+			*vcfg.RampPercentage > 0 {
+			resetConfig := &VersionConfig{
+				VersionID:      vcfg.VersionID,
+				ConflictToken:  conflictToken,
+				RampPercentage: 0,
+			}
+			versionConfigs = append(versionConfigs, resetConfig)
+		}
 	}
 
-	vcfg.VersionID = status.TargetVersion.VersionID
-	vcfg.ConflictToken = conflictToken
-
-	// Set current version if there isn't one yet
-	if status.CurrentVersion == nil {
-		vcfg.SetCurrent = true
-		vcfg.RampPercentage = 0
-		return vcfg
-	}
-
-	// Don't make updates if desired current is already the current
-	if vcfg.VersionID == status.CurrentVersion.VersionID {
-		return nil
-	}
-
-	// Don't make updates if desired ramping version is already the target, and ramp percentage is correct
-	if !vcfg.SetCurrent &&
-		vcfg.VersionID == status.TargetVersion.VersionID &&
-		status.TargetVersion.RampPercentage != nil &&
-		vcfg.RampPercentage == *status.TargetVersion.RampPercentage {
-		return nil
-	}
-
-	return vcfg
+	return versionConfigs
 }
 
 // getVersionConfig determines the version configuration based on the rollout strategy
@@ -347,6 +337,18 @@ func getVersionConfig(
 				return nil
 			}
 		}
+	}
+
+	// If there is no current version, set the target version as the current version
+	if status.CurrentVersion == nil {
+		return &VersionConfig{
+			SetCurrent: true,
+		}
+	}
+
+	// If the current version is the target version, do nothing
+	if status.CurrentVersion.VersionID == status.TargetVersion.VersionID {
+		return nil
 	}
 
 	switch strategy.Strategy {
@@ -377,6 +379,12 @@ func getVersionConfig(
 			totalPauseDuration += s.PauseDuration.Duration
 			if healthyDuration < totalPauseDuration {
 				// We're still in this step's pause duration
+
+				// If this step's ramp percentage is the same as the target version's ramp percentage, do nothing
+				if status.TargetVersion.RampPercentage != nil && currentRamp == *status.TargetVersion.RampPercentage {
+					return nil
+				}
+
 				return &VersionConfig{
 					RampPercentage: currentRamp,
 				}

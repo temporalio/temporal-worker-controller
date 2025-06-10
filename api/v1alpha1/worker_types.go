@@ -104,14 +104,14 @@ type TemporalWorkerDeploymentStatus struct {
 
 	// TargetVersion is the desired next version. If TargetVersion.Deployment is nil,
 	// then the controller should create it. If not nil, the controller should
-	// wait for it to become healthy and then move it to the DefaultVersion.
+	// wait for it to become healthy and then move it to the CurrentVersion.
 	TargetVersion *WorkerDeploymentVersion `json:"targetVersion"`
 
 	// CurrentVersion is the version that is currently registered with
 	// Temporal as the current version of its worker deployment. This must never be nil.
 	//
 	// RampPercentage should always be nil for this version.
-	CurrentVersion *WorkerDeploymentVersion `json:"defaultVersion"`
+	CurrentVersion *WorkerDeploymentVersion `json:"currentVersion"`
 
 	// DeprecatedVersions are deployment versions that are no longer the default. Any
 	// deployment versions that are unreachable should be deleted by the controller.

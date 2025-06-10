@@ -77,8 +77,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
-	// Register default version or ramp
-	if vcfg := p.UpdateVersionConfig; vcfg != nil {
+	// Register current version or ramps
+	for _, vcfg := range p.UpdateVersionConfigs {
 		if vcfg.setCurrent {
 			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {
@@ -111,7 +111,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
 			}
 
-			l.Info("applying ramp", "version", p.UpdateVersionConfig.versionID, "percentage", p.UpdateVersionConfig.rampPercentage)
+			l.Info("applying ramp", "version", vcfg.versionID, "percentage", vcfg.rampPercentage)
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 				Version:       vcfg.versionID,
 				Percentage:    vcfg.rampPercentage,
@@ -130,6 +130,17 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				},
 			}); err != nil { // would be cool to do this atomically with the update
 				return fmt.Errorf("unable to update metadata after setting ramping deployment: %w", err)
+			}
+		} else if ramp := vcfg.rampPercentage; ramp == 0 {
+			// Special case: reset ramping to 0 (rollback scenario)
+			l.Info("resetting ramp to 0%", "version", vcfg.versionID)
+			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+				Version:       vcfg.versionID,
+				Percentage:    0,
+				ConflictToken: vcfg.conflictToken,
+				Identity:      controllerIdentity,
+			}); err != nil {
+				return fmt.Errorf("unable to reset ramping deployment: %w", err)
 			}
 		}
 	}
