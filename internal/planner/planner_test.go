@@ -155,6 +155,15 @@ func TestGeneratePlan(t *testing.T) {
 							Time: time.Now().Add(-2 * time.Hour),
 						},
 					},
+					RampingVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
+						VersionID:      "test/namespace.456",
+						Status:         temporaliov1alpha1.VersionStatusRamping,
+						RampPercentage: func() *float32 { f := float32(25); return &f }(),
+						Deployment:     &v1.ObjectReference{Name: "test-456"},
+						HealthySince: &metav1.Time{
+							Time: time.Now().Add(-30 * time.Minute),
+						},
+					},
 					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
 						{
 							VersionID:      "test/namespace.456",
@@ -191,14 +200,15 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectScale, len(plan.ScaleDeployments), "unexpected number of scales")
 			assert.Equal(t, tc.expectCreate, plan.ShouldCreateDeployment, "unexpected create flag")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
-			assert.Equal(t, tc.expectConfig, len(plan.VersionConfigs) > 0, "unexpected version config presence")
+			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
 
-			if tc.expectConfig && len(plan.VersionConfigs) > 0 {
+			if tc.expectConfig {
+				assert.NotNil(t, plan.VersionConfig, "expected version config")
 				if tc.expectConfigSetCurrent != nil {
-					assert.Equal(t, *tc.expectConfigSetCurrent, plan.VersionConfigs[0].SetCurrent, "unexpected SetCurrent value")
+					assert.Equal(t, *tc.expectConfigSetCurrent, plan.VersionConfig.SetCurrent, "unexpected SetCurrent value")
 				}
 				if tc.expectConfigRampPercent != nil {
-					assert.Equal(t, *tc.expectConfigRampPercent, plan.VersionConfigs[0].RampPercentage, "unexpected RampPercentage value")
+					assert.Equal(t, *tc.expectConfigRampPercent, plan.VersionConfig.RampPercentage, "unexpected RampPercentage value")
 				}
 			}
 		})
@@ -823,6 +833,14 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					VersionID: "test/namespace.123",
 					Status:    temporaliov1alpha1.VersionStatusCurrent,
 				},
+				RampingVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
+					VersionID:      "test/namespace.456",
+					Status:         temporaliov1alpha1.VersionStatusRamping,
+					RampPercentage: func() *float32 { f := float32(25); return &f }(),
+					HealthySince: &metav1.Time{
+						Time: time.Now().Add(-30 * time.Minute),
+					},
+				},
 				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
 					{
 						VersionID:      "test/namespace.456",
@@ -876,13 +894,13 @@ func TestGetVersionConfigDiff(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			configs := getVersionConfigDiff(logr.Discard(), tc.strategy, tc.status, tc.conflictToken)
-			assert.Equal(t, tc.expectConfig, len(configs) > 0, "unexpected version config presence")
+			config := getVersionConfigDiff(logr.Discard(), tc.strategy, tc.status, tc.conflictToken)
+			assert.Equal(t, tc.expectConfig, config != nil, "unexpected version config presence")
 			if tc.expectConfig {
-				assert.NotNil(t, configs[0], "expected version config")
-				assert.Equal(t, tc.expectSetCurrent, configs[0].SetCurrent, "unexpected set current value")
+				assert.NotNil(t, config, "expected version config")
+				assert.Equal(t, tc.expectSetCurrent, config.SetCurrent, "unexpected set current value")
 				if tc.expectRampPercent != nil {
-					assert.Equal(t, *tc.expectRampPercent, configs[0].RampPercentage, "unexpected ramp percentage")
+					assert.Equal(t, *tc.expectRampPercent, config.RampPercentage, "unexpected ramp percentage")
 				}
 			}
 		})
@@ -1037,7 +1055,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			config := getVersionConfig(logr.Discard(), tc.strategy, tc.status)
+			config := getVersionConfigDiff(logr.Discard(), tc.strategy, tc.status, []byte("token"))
 			assert.Equal(t, tc.expectConfig, config != nil, "unexpected version config presence")
 			if tc.expectConfig {
 				assert.Equal(t, tc.expectSetCurrent, config.SetCurrent, "unexpected set default value")
@@ -1204,7 +1222,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			config := getVersionConfig(logr.Discard(), tc.strategy, tc.status)
+			config := getVersionConfigDiff(logr.Discard(), tc.strategy, tc.status, []byte("token"))
 			if tc.expectConfig {
 				assert.NotNil(t, config, "expected version config")
 			} else {

@@ -113,6 +113,12 @@ type TemporalWorkerDeploymentStatus struct {
 	// RampPercentage should always be nil for this version.
 	CurrentVersion *WorkerDeploymentVersion `json:"currentVersion"`
 
+	// RampingVersion is the version that is currently registered with
+	// Temporal as the ramping version of its worker deployment. The controller
+	// should ensure that this is always equal to the TargetVersion, or, if the
+	// TargetVersion has been promoted to the current version, this should be nil.
+	RampingVersion *WorkerDeploymentVersion `json:"rampingVersion,omitempty"`
+
 	// DeprecatedVersions are deployment versions that are no longer the default. Any
 	// deployment versions that are unreachable should be deleted by the controller.
 	//

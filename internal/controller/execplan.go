@@ -78,7 +78,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	}
 
 	// Register current version or ramps
-	for _, vcfg := range p.UpdateVersionConfigs {
+	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.setCurrent {
 			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.versionID)
 			if err != nil {

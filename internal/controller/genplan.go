@@ -30,7 +30,7 @@ type plan struct {
 	CreateDeployment  *appsv1.Deployment
 	ScaleDeployments  map[*v1.ObjectReference]uint32
 	// Register new versions as current or with ramp
-	UpdateVersionConfigs []*versionConfig
+	UpdateVersionConfig *versionConfig
 
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
@@ -118,14 +118,14 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.DeleteDeployments = planResult.DeleteDeployments
 	plan.ScaleDeployments = planResult.ScaleDeployments
 
-	// Convert version configs
-	for _, vcfg := range planResult.VersionConfigs {
-		plan.UpdateVersionConfigs = append(plan.UpdateVersionConfigs, &versionConfig{
-			conflictToken:  vcfg.ConflictToken,
-			versionID:      vcfg.VersionID,
-			setCurrent:     vcfg.SetCurrent,
-			rampPercentage: vcfg.RampPercentage,
-		})
+	// Convert version config
+	if planResult.VersionConfig != nil {
+		plan.UpdateVersionConfig = &versionConfig{
+			conflictToken:  planResult.VersionConfig.ConflictToken,
+			versionID:      planResult.VersionConfig.VersionID,
+			setCurrent:     planResult.VersionConfig.SetCurrent,
+			rampPercentage: planResult.VersionConfig.RampPercentage,
+		}
 	}
 
 	// Convert test workflows

@@ -45,6 +45,11 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 		status.TargetVersion.RampPercentage = &rampPercentage
 	}
 
+	// Set ramping version if it exists
+	if m.temporalState.RampingVersionID != "" {
+		status.RampingVersion = m.mapWorkerDeploymentVersion(m.temporalState.RampingVersionID)
+	}
+
 	// Add deprecated versions
 	var deprecatedVersions []*v1alpha1.WorkerDeploymentVersion
 	for versionID := range m.k8sState.Deployments {

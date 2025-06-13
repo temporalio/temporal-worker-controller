@@ -22,7 +22,7 @@ type Plan struct {
 	DeleteDeployments      []*appsv1.Deployment
 	ScaleDeployments       map[*v1.ObjectReference]uint32
 	ShouldCreateDeployment bool
-	VersionConfigs         []*VersionConfig
+	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
 }
 
@@ -100,7 +100,7 @@ func GeneratePlan(
 	plan.TestWorkflows = getTestWorkflows(config)
 
 	// Determine version config changes
-	plan.VersionConfigs = getVersionConfigDiff(l, config.RolloutStrategy, config.Status, config.ConflictToken)
+	plan.VersionConfig = getVersionConfigDiff(l, config.RolloutStrategy, config.Status, config.ConflictToken)
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
@@ -280,44 +280,12 @@ func getTestWorkflowID(config *Config, taskQueue, versionID string) string {
 	return "test-" + versionID + "-" + taskQueue
 }
 
-// getVersionConfigDiff determines if version config needs to be updated
+// getVersionConfigDiff determines the version configuration based on the rollout strategy
 func getVersionConfigDiff(
 	l logr.Logger,
 	strategy temporaliov1alpha1.RolloutStrategy,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	conflictToken []byte,
-) []*VersionConfig {
-	var versionConfigs []*VersionConfig
-
-	vcfg := getVersionConfig(l, strategy, status)
-	if vcfg != nil {
-		vcfg.VersionID = status.TargetVersion.VersionID
-		vcfg.ConflictToken = conflictToken
-
-		versionConfigs = append(versionConfigs, vcfg)
-	}
-
-	for _, vcfg := range status.DeprecatedVersions {
-		if vcfg.Status == temporaliov1alpha1.VersionStatusRamping &&
-			vcfg.RampPercentage != nil &&
-			*vcfg.RampPercentage > 0 {
-			resetConfig := &VersionConfig{
-				VersionID:      vcfg.VersionID,
-				ConflictToken:  conflictToken,
-				RampPercentage: 0,
-			}
-			versionConfigs = append(versionConfigs, resetConfig)
-		}
-	}
-
-	return versionConfigs
-}
-
-// getVersionConfig determines the version configuration based on the rollout strategy
-func getVersionConfig(
-	l logr.Logger,
-	strategy temporaliov1alpha1.RolloutStrategy,
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 ) *VersionConfig {
 	// Do nothing if target version's deployment is not healthy yet
 	if status == nil || status.TargetVersion == nil || status.TargetVersion.HealthySince == nil {
@@ -339,15 +307,26 @@ func getVersionConfig(
 		}
 	}
 
-	// If there is no current version, set the target version as the current version
-	if status.CurrentVersion == nil {
-		return &VersionConfig{
-			SetCurrent: true,
-		}
+	vcfg := &VersionConfig{
+		ConflictToken: conflictToken,
+		VersionID:     status.TargetVersion.VersionID,
 	}
 
-	// If the current version is the target version, do nothing
+	// If there is no current version, set the target version as the current version
+	if status.CurrentVersion == nil {
+		vcfg.SetCurrent = true
+		return vcfg
+	}
+
+	// If the current version is the target version
 	if status.CurrentVersion.VersionID == status.TargetVersion.VersionID {
+		// Reset ramp if needed, this would happen if a ramp has been rolled back before completing
+		if status.RampingVersion != nil {
+			vcfg.VersionID = ""
+			vcfg.RampPercentage = 0
+			return vcfg
+		}
+		// Otherwise, do nothing
 		return nil
 	}
 
@@ -356,9 +335,8 @@ func getVersionConfig(
 		return nil
 	case temporaliov1alpha1.UpdateAllAtOnce:
 		// Set new current version immediately
-		return &VersionConfig{
-			SetCurrent: true,
-		}
+		vcfg.SetCurrent = true
+		return vcfg
 	case temporaliov1alpha1.UpdateProgressive:
 		// Determine the correct percentage ramp
 		var (
@@ -385,15 +363,13 @@ func getVersionConfig(
 					return nil
 				}
 
-				return &VersionConfig{
-					RampPercentage: currentRamp,
-				}
+				vcfg.RampPercentage = currentRamp
+				return vcfg
 			}
 		}
 		// We've progressed through all steps; it should now be safe to update the default version
-		return &VersionConfig{
-			SetCurrent: true,
-		}
+		vcfg.SetCurrent = true
+		return vcfg
 	}
 
 	return nil
