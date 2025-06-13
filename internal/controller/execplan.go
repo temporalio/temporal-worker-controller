@@ -94,21 +94,12 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
-			if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-				Version: vcfg.VersionID,
-				MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
-					UpsertEntries: map[string]interface{}{
-						// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
-						"temporal.io/managed-by": controllerIdentity,
-					},
-				},
-			}); err != nil { // would be cool to do this atomically with the update
-				return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
-			}
 		} else {
-			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.VersionID)
-			if err != nil {
-				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
+			if vcfg.VersionID != "" {
+				err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.VersionID)
+				if err != nil {
+					return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
+				}
 			}
 
 			if vcfg.RampPercentage > 0 {
@@ -125,17 +116,17 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}); err != nil {
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}
-			if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-				Version: vcfg.VersionID,
-				MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
-					UpsertEntries: map[string]interface{}{
-						// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
-						"temporal.io/managed-by": controllerIdentity,
-					},
+		}
+		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
+			Version: vcfg.VersionID,
+			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
+				UpsertEntries: map[string]interface{}{
+					// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
+					"temporal.io/managed-by": controllerIdentity,
 				},
-			}); err != nil { // would be cool to do this atomically with the update
-				return fmt.Errorf("unable to update metadata after setting ramping deployment: %w", err)
-			}
+			},
+		}); err != nil { // would be cool to do this atomically with the update
+			return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
 		}
 	}
 
