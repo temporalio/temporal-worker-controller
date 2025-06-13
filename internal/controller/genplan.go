@@ -30,25 +30,10 @@ type plan struct {
 	CreateDeployment  *appsv1.Deployment
 	ScaleDeployments  map[*v1.ObjectReference]uint32
 	// Register new versions as current or with ramp
-	UpdateVersionConfig *versionConfig
+	UpdateVersionConfig *planner.VersionConfig
 
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
-}
-
-// versionConfig defines how to update version routing
-type versionConfig struct {
-	// Token to use for conflict detection
-	conflictToken []byte
-	// version ID for which this config applies
-	versionID string
-
-	// One of rampPercentage OR setDefault must be set to a non-zero value.
-
-	// Set this as the default build ID for all new executions
-	setCurrent bool
-	// Acceptable values [0,100]
-	rampPercentage float32
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -119,14 +104,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.ScaleDeployments = planResult.ScaleDeployments
 
 	// Convert version config
-	if planResult.VersionConfig != nil {
-		plan.UpdateVersionConfig = &versionConfig{
-			conflictToken:  planResult.VersionConfig.ConflictToken,
-			versionID:      planResult.VersionConfig.VersionID,
-			setCurrent:     planResult.VersionConfig.SetCurrent,
-			rampPercentage: planResult.VersionConfig.RampPercentage,
-		}
-	}
+	plan.UpdateVersionConfig = planResult.VersionConfig
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
