@@ -347,6 +347,11 @@ func (in *TemporalWorkerDeploymentStatus) DeepCopyInto(out *TemporalWorkerDeploy
 		*out = new(WorkerDeploymentVersion)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.RampingVersion != nil {
+		in, out := &in.RampingVersion, &out.RampingVersion
+		*out = new(WorkerDeploymentVersion)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.DeprecatedVersions != nil {
 		in, out := &in.DeprecatedVersions, &out.DeprecatedVersions
 		*out = make([]*WorkerDeploymentVersion, len(*in))
