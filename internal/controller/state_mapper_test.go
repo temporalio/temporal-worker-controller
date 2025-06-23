@@ -93,7 +93,7 @@ func TestMapToStatus(t *testing.T) {
 
 	// Create Temporal state
 	temporalState := &temporal.TemporalWorkerState{
-		DefaultVersionID:     "worker.v1",
+		CurrentVersionID:     "worker.v1",
 		RampingVersionID:     "worker.v2",
 		RampPercentage:       25.0,
 		RampingSince:         &rampingSince,
@@ -147,19 +147,19 @@ func TestMapToStatus(t *testing.T) {
 	assert.Equal(t, []byte("test-token"), status.VersionConflictToken)
 
 	// Verify default version
-	assert.NotNil(t, status.DefaultVersion)
-	assert.Equal(t, "worker.v1", status.DefaultVersion.VersionID)
+	assert.NotNil(t, status.CurrentVersion)
+	assert.Equal(t, "worker.v1", status.CurrentVersion.VersionID)
 
 	// Convert to string for comparison
 	expectedStatus := string(temporaliov1alpha1.VersionStatusCurrent)
-	actualStatus := string(status.DefaultVersion.Status)
+	actualStatus := string(status.CurrentVersion.Status)
 	assert.Equal(t, expectedStatus, actualStatus)
 
-	assert.Equal(t, 1, len(status.DefaultVersion.TaskQueues))
-	assert.Equal(t, "queue1", status.DefaultVersion.TaskQueues[0].Name)
-	assert.Equal(t, 1, len(status.DefaultVersion.TestWorkflows))
-	assert.Equal(t, "test-wf-1", status.DefaultVersion.TestWorkflows[0].WorkflowID)
-	assert.Equal(t, temporaliov1alpha1.WorkflowExecutionStatusCompleted, status.DefaultVersion.TestWorkflows[0].Status)
+	assert.Equal(t, 1, len(status.CurrentVersion.TaskQueues))
+	assert.Equal(t, "queue1", status.CurrentVersion.TaskQueues[0].Name)
+	assert.Equal(t, 1, len(status.CurrentVersion.TestWorkflows))
+	assert.Equal(t, "test-wf-1", status.CurrentVersion.TestWorkflows[0].WorkflowID)
+	assert.Equal(t, temporaliov1alpha1.WorkflowExecutionStatusCompleted, status.CurrentVersion.TestWorkflows[0].Status)
 
 	// Verify target version
 	assert.NotNil(t, status.TargetVersion)

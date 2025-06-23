@@ -29,26 +29,11 @@ type plan struct {
 	DeleteDeployments []*appsv1.Deployment
 	CreateDeployment  *appsv1.Deployment
 	ScaleDeployments  map[*v1.ObjectReference]uint32
-	// Register a new version as the default or with ramp
-	UpdateVersionConfig *versionConfig
+	// Register new versions as current or with ramp
+	UpdateVersionConfig *planner.VersionConfig
 
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
-}
-
-// versionConfig defines how to update version routing
-type versionConfig struct {
-	// Token to use for conflict detection
-	conflictToken []byte
-	// version ID for which this config applies
-	versionID string
-
-	// One of rampPercentage OR setDefault must be set to a non-zero value.
-
-	// Set this as the default build ID for all new executions
-	setDefault bool
-	// Acceptable values [0,100]
-	rampPercentage float32
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -67,7 +52,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*plan, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(w)
-	desiredVersionID := k8s.ComputeVersionID(w)
+	targetVersionID := k8s.ComputeVersionID(w)
 
 	// Fetch Kubernetes deployment state
 	k8sState, err := k8s.GetDeploymentState(
@@ -97,12 +82,12 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
-		Status:           &w.Status,
-		Spec:             &w.Spec,
-		RolloutStrategy:  rolloutStrategy,
-		DesiredVersionID: desiredVersionID,
-		Replicas:         *w.Spec.Replicas,
-		ConflictToken:    w.Status.VersionConflictToken,
+		Status:          &w.Status,
+		Spec:            &w.Spec,
+		RolloutStrategy: rolloutStrategy,
+		TargetVersionID: targetVersionID,
+		Replicas:        *w.Spec.Replicas,
+		ConflictToken:   w.Status.VersionConflictToken,
 	}
 
 	planResult, err := planner.GeneratePlan(
@@ -119,14 +104,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.ScaleDeployments = planResult.ScaleDeployments
 
 	// Convert version config
-	if planResult.VersionConfig != nil {
-		plan.UpdateVersionConfig = &versionConfig{
-			conflictToken:  planResult.VersionConfig.ConflictToken,
-			versionID:      planResult.VersionConfig.VersionID,
-			setDefault:     planResult.VersionConfig.SetDefault,
-			rampPercentage: planResult.VersionConfig.RampPercentage,
-		}
-	}
+	plan.UpdateVersionConfig = planResult.VersionConfig
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
@@ -140,7 +118,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Handle deployment creation if needed
 	if planResult.ShouldCreateDeployment {
-		_, buildID, _ := k8s.SplitVersionID(desiredVersionID)
+		_, buildID, _ := k8s.SplitVersionID(targetVersionID)
 		d, err := r.newDeployment(w, buildID, connection)
 		if err != nil {
 			return nil, err

@@ -30,7 +30,7 @@ type VersionInfo struct {
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
 type TemporalWorkerState struct {
-	DefaultVersionID     string
+	CurrentVersionID     string
 	VersionConflictToken []byte
 	RampingVersionID     string
 	RampPercentage       float32
@@ -69,7 +69,7 @@ func GetWorkerDeploymentState(
 	routingConfig := workerDeploymentInfo.RoutingConfig
 
 	// Set basic information
-	state.DefaultVersionID = routingConfig.CurrentVersion
+	state.CurrentVersionID = routingConfig.CurrentVersion
 	state.RampingVersionID = routingConfig.RampingVersion
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity

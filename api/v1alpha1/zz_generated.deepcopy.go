@@ -342,8 +342,8 @@ func (in *TemporalWorkerDeploymentStatus) DeepCopyInto(out *TemporalWorkerDeploy
 		*out = new(WorkerDeploymentVersion)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.DefaultVersion != nil {
-		in, out := &in.DefaultVersion, &out.DefaultVersion
+	if in.CurrentVersion != nil {
+		in, out := &in.CurrentVersion, &out.CurrentVersion
 		*out = new(WorkerDeploymentVersion)
 		(*in).DeepCopyInto(*out)
 	}
