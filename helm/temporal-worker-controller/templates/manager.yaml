@@ -5,7 +5,6 @@ metadata:
   labels:
     app.kubernetes.io/component: manager
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
-    {{- include "temporal-worker-controller.selectorLabels" . | nindent 4 }}
   name: {{ .Release.Name }}
 {{- end }}
 ---
@@ -17,7 +16,6 @@ metadata:
   labels:
     app.kubernetes.io/component: manager
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
-    {{- include "temporal-worker-controller.selectorLabels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
@@ -32,7 +30,6 @@ spec:
         {{- end }}
       labels:
         {{- include "temporal-worker-controller.labels" . | nindent 8 }}
-        {{- include "temporal-worker-controller.selectorLabels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

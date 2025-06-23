@@ -7,7 +7,6 @@ metadata:
   labels:
     app.kubernetes.io/component: metrics
     {{ include "temporal-worker-controller.labels" $ | indent 4 }}
-    {{ include "temporal-worker-controller.selectorLabels" $ | indent 4 }}
   name: {{ .Release.Name }}-metrics-monitor
   namespace: {{ .Release.Namespace }}
 spec:

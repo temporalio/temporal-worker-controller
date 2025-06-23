@@ -2,8 +2,7 @@
 Common labels
 */}}
 {{- define "temporal-worker-controller.labels" -}}
-app.kubernetes.io/name: temporal-worker-controller
-app.kubernetes.io/instance: {{ .Release.Name }}
+{{ include "temporal-worker-controller.selectorLabels" $ }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}

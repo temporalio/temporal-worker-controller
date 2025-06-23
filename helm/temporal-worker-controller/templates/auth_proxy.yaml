@@ -51,7 +51,6 @@ kind: Service
 metadata:
   labels:
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
-    {{- include "temporal-worker-controller.selectorLabels" . | nindent 4 }}
   name: {{ .Release.Name }}-metrics-service
   namespace: {{ .Release.Namespace }}
 spec:
