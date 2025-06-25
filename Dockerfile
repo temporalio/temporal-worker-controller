@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.22 AS builder
+FROM golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -17,6 +17,7 @@ COPY api/ api/
 COPY internal/k8s internal/k8s
 COPY internal/temporal internal/temporal
 COPY internal/controller internal/controller
+COPY internal/planner internal/planner
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command

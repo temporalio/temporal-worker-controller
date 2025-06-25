@@ -1,6 +1,6 @@
 module github.com/DataDog/temporal-worker-controller/internal/demo
 
-go 1.23.4
+go 1.24
 
 require (
 	github.com/prometheus/client_golang v1.20.3
