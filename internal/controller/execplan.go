@@ -121,8 +121,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			Version: vcfg.VersionID,
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				UpsertEntries: map[string]interface{}{
-					// TODO(carlydf): Add info about which k8s resource initiated the last write to the deployment
-					"temporal.io/managed-by": controllerIdentity,
+					controllerIdentityKey: getControllerIdentity(),
+					controllerVersionKey:  getControllerVersion(),
 				},
 			},
 		}); err != nil { // would be cool to do this atomically with the update

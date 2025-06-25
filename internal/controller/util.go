@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -20,11 +21,14 @@ import (
 )
 
 const (
-	defaultScaledownDelay    = 1 * time.Hour
-	defaultDeleteDelay       = 24 * time.Hour
-	deploymentNameSeparator  = "/"
-	versionIDSeparator       = "."
-	k8sResourceNameSeparator = "-"
+	defaultScaledownDelay     = 1 * time.Hour
+	defaultDeleteDelay        = 24 * time.Hour
+	deploymentNameSeparator   = "/"
+	versionIDSeparator        = "."
+	k8sResourceNameSeparator  = "-"
+	controllerIdentityKey     = "temporal.io/controller"
+	controllerVersionKey      = "temporal.io/controller-version"
+	defaultControllerIdentity = "temporal-worker-controller"
 )
 
 func computeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
@@ -126,4 +130,20 @@ func awaitVersionRegistrationInDeployment(
 			}
 		}
 	}
+}
+
+// getControllerVersion returns the version from environment variable (set by Helm from image.tag)
+func getControllerVersion() string {
+	if version := os.Getenv("CONTROLLER_VERSION"); version != "" {
+		return version
+	}
+	return "unknown"
+}
+
+// getControllerIdentity returns the identity from environment variable (set by Helm)
+func getControllerIdentity() string {
+	if identity := os.Getenv("CONTROLLER_IDENTITY"); identity != "" {
+		return identity
+	}
+	return defaultControllerIdentity
 }

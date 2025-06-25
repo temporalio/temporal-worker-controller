@@ -51,6 +51,11 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /manager
+        env:
+        - name: CONTROLLER_IDENTITY
+          value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
+        - name: CONTROLLER_VERSION
+          value: "{{ .Values.image.tag }}"
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}
