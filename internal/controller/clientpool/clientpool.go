@@ -123,7 +123,7 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 			return nil, err
 		}
 
-		// Store the PEM certificate for future expiration checks
+		// Extract the certificate to calculate the effective expiration time
 		pemCert = secret.Data["tls.crt"]
 
 		// Check if certificate is expired before creating the client
@@ -143,7 +143,6 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		if err != nil {
 			return nil, err
 		}
-
 		clientOpts.ConnectionOptions.TLS = &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
