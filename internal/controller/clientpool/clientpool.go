@@ -164,18 +164,10 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
 	}
-	if opts.Spec.MutualTLSSecret != "" {
-		cp.clients[key] = ClientInfo{
-			client:     c,
-			tls:        clientOpts.ConnectionOptions.TLS,
-			expiryTime: expiryTime,
-		}
-	} else {
-		cp.clients[key] = ClientInfo{
-			client:     c,
-			tls:        nil,
-			expiryTime: expiryTime,
-		}
+	cp.clients[key] = ClientInfo{
+		client:     c,
+		tls:        clientOpts.ConnectionOptions.TLS,
+		expiryTime: expiryTime,
 	}
 
 	return c, nil
