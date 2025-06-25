@@ -65,7 +65,7 @@ go.temporal.io/sdk,,MIT,Temporal Technologies Inc.
 go.uber.org/multierr,,MIT,"Uber Technologies, Inc."
 go.uber.org/zap,,MIT,"Uber Technologies, Inc."
 golang.org/x/crypto,,BSD-3-Clause,The Go Authors
-golang.org/x/exp,,BSD-3-Clause,The Go Authors
+golang.org/x/exp/maps,,BSD-3-Clause,The Go Authors
 golang.org/x/mod/semver,,BSD-3-Clause,The Go Authors
 golang.org/x/net,,BSD-3-Clause,The Go Authors
 golang.org/x/oauth2,,BSD-3-Clause,The Go Authors
