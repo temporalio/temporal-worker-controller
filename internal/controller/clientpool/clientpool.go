@@ -30,9 +30,9 @@ type ClientPoolKey struct {
 }
 
 type ClientInfo struct {
-	Client  sdkclient.Client
-	TLS     *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
-	PEMCert []byte      // Store the original PEM-encoded certificate for expiration checks
+	client     sdkclient.Client
+	tls        *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
+	expiryTime time.Time   // Effective expiration time (cert.NotAfter - buffer) for efficient expiration checking
 }
 
 type ClientPool struct {
@@ -60,19 +60,17 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 	}
 
 	// Check if any certificate is expired
-	if info.PEMCert != nil {
-		expired, err := cp.isCertificateExpiredSoon(info.PEMCert, 5*time.Minute)
-		if err != nil {
-			cp.logger.Error("Error checking certificate expiration", "error", err)
-			return nil, false
-		}
-		if expired {
-			cp.logger.Info("Certificate is expired or is going to expire soon")
-			return nil, false
-		}
+	expired, err := isCertificateExpired(info.expiryTime)
+	if err != nil {
+		cp.logger.Error("Error checking certificate expiration", "error", err)
+		return nil, false
+	}
+	if expired {
+		cp.logger.Warn("Certificate is expired or is going to expire soon")
+		return nil, false
 	}
 
-	return info.Client, true
+	return info.client, true
 }
 
 type NewClientOptions struct {
@@ -109,6 +107,8 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 	}
 
 	var pemCert []byte
+	var expiryTime time.Time
+
 	// Get the connection secret if it exists
 	if opts.Spec.MutualTLSSecret != "" {
 		var secret corev1.Secret
@@ -127,7 +127,11 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		pemCert = secret.Data["tls.crt"]
 
 		// Check if certificate is expired before creating the client
-		expired, err := cp.isCertificateExpiredSoon(pemCert, 5*time.Minute)
+		expiryTime, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
+		}
+		expired, err := isCertificateExpired(expiryTime)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
 		}
@@ -163,15 +167,15 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 	}
 	if opts.Spec.MutualTLSSecret != "" {
 		cp.clients[key] = ClientInfo{
-			Client:  c,
-			TLS:     clientOpts.ConnectionOptions.TLS,
-			PEMCert: pemCert,
+			client:     c,
+			tls:        clientOpts.ConnectionOptions.TLS,
+			expiryTime: expiryTime,
 		}
 	} else {
 		cp.clients[key] = ClientInfo{
-			Client:  c,
-			TLS:     nil,
-			PEMCert: nil,
+			client:     c,
+			tls:        nil,
+			expiryTime: expiryTime,
 		}
 	}
 
@@ -183,33 +187,34 @@ func (cp *ClientPool) Close() {
 	defer cp.mux.Unlock()
 
 	for _, c := range cp.clients {
-		c.Client.Close()
+		c.client.Close()
 	}
 
 	cp.clients = make(map[ClientPoolKey]ClientInfo)
 }
 
-func (cp *ClientPool) isCertificateExpiredSoon(certBytes []byte, howSoon time.Duration) (bool, error) {
+func calculateCertificateExpirationTime(certBytes []byte, bufferTime time.Duration) (time.Time, error) {
 	if len(certBytes) == 0 {
-		return false, nil
+		return time.Time{}, fmt.Errorf("no certificate bytes provided")
 	}
 
 	block, _ := pem.Decode(certBytes)
 	if block == nil {
-		return true, fmt.Errorf("failed to decode PEM block")
+		return time.Time{}, fmt.Errorf("failed to decode PEM block")
 	}
 
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return true, fmt.Errorf("failed to parse certificate: %v", err)
+		return time.Time{}, fmt.Errorf("failed to parse certificate: %v", err)
 	}
 
-	almostExpiredTime := cert.NotAfter.Add(-howSoon)
+	expiryTime := cert.NotAfter.Add(-bufferTime)
+	return expiryTime, nil
+}
 
-	// Check if certificate is expired or will expire within the safety buffer
-	if time.Now().After(almostExpiredTime) {
+func isCertificateExpired(expiryTime time.Time) (bool, error) {
+	if time.Now().After(expiryTime) {
 		return true, nil
 	}
-
 	return false, nil
 }
