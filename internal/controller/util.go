@@ -8,12 +8,30 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
+<<<<<<< img-prefix
+=======
+
+	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
+)
+
+const (
+	defaultScaledownDelay     = 1 * time.Hour
+	defaultDeleteDelay        = 24 * time.Hour
+	deploymentNameSeparator   = "/"
+	versionIDSeparator        = "."
+	k8sResourceNameSeparator  = "-"
+	controllerIdentityKey     = "temporal.io/controller"
+	controllerVersionKey      = "temporal.io/controller-version"
+	defaultControllerIdentity = "temporal-worker-controller"
+>>>>>>> main
 )
 
 // TODO(carlydf): Cache describe success for versions that already exist
@@ -78,4 +96,20 @@ func awaitVersionRegistrationInDeployment(
 			}
 		}
 	}
+}
+
+// getControllerVersion returns the version from environment variable (set by Helm from image.tag)
+func getControllerVersion() string {
+	if version := os.Getenv("CONTROLLER_VERSION"); version != "" {
+		return version
+	}
+	return "unknown"
+}
+
+// getControllerIdentity returns the identity from environment variable (set by Helm)
+func getControllerIdentity() string {
+	if identity := os.Getenv("CONTROLLER_IDENTITY"); identity != "" {
+		return identity
+	}
+	return defaultControllerIdentity
 }

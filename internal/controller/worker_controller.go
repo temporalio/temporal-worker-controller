@@ -57,6 +57,11 @@ type TemporalWorkerDeploymentReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 // TODO(carlydf): Add watching of temporal connection custom resource (may have issue)
 func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// TODO(Shivam): Monitor if the time taken for a successful reconciliation loop is closing in on 5 minutes. If so, we
+	// may need to increase the timeout value.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	l := log.FromContext(ctx)
 	l.Info("Running Reconcile loop")
 
