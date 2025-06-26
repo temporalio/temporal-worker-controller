@@ -218,11 +218,11 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same image different pod specs",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod1 := MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "1"})
-				pod2 := MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "2"})
+				pod1 := temporaliov1alpha1.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "1"})
+				pod2 := temporaliov1alpha1.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "2"})
 
-				twd1 := MakeTWD(1, pod1, nil, nil, nil)
-				twd2 := MakeTWD(1, pod2, nil, nil, nil)
+				twd1 := temporaliov1alpha1.MakeTWD(1, pod1, nil, nil, nil)
+				twd2 := temporaliov1alpha1.MakeTWD(1, pod2, nil, nil, nil)
 				return twd1, twd2
 			},
 			expectedPrefix:  "my-test-image",
@@ -233,10 +233,10 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same pod specs different TWD spec",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod := MakePodSpec([]v1.Container{{Image: img}}, nil)
+				pod := temporaliov1alpha1.MakePodSpec([]v1.Container{{Image: img}}, nil)
 
-				twd1 := MakeTWD(1, pod, nil, nil, nil)
-				twd2 := MakeTWD(2, pod, nil, nil, nil)
+				twd1 := temporaliov1alpha1.MakeTWD(1, pod, nil, nil, nil)
+				twd2 := temporaliov1alpha1.MakeTWD(2, pod, nil, nil, nil)
 				return twd1, twd2
 			},
 			expectedPrefix:  "my-test-image",
@@ -246,7 +246,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "no containers",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
-				twd := MakeTWD(1, MakePodSpec(nil, nil), nil, nil, nil)
+				twd := temporaliov1alpha1.MakeTWD(1, temporaliov1alpha1.MakePodSpec(nil, nil), nil, nil, nil)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",
@@ -256,7 +256,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "empty image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
-				twd := MakeTWDWithImage("")
+				twd := temporaliov1alpha1.MakeTWDWithImage("")
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",
@@ -267,7 +267,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "tagged digest image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				taggedDigestImg := "docker.io/library/busybox:latest@sha256:" + digest
-				twd := MakeTWDWithImage(taggedDigestImg)
+				twd := temporaliov1alpha1.MakeTWDWithImage(taggedDigestImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "latest",
@@ -278,7 +278,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "tagged named image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				taggedNamedImg := "docker.io/library/busybox:latest"
-				twd := MakeTWDWithImage(taggedNamedImg)
+				twd := temporaliov1alpha1.MakeTWDWithImage(taggedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "latest",
@@ -289,7 +289,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "digested image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				digestedImg := "docker.io@sha256:" + digest
-				twd := MakeTWDWithImage(digestedImg)
+				twd := temporaliov1alpha1.MakeTWDWithImage(digestedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  digest[:maxBuildIdLen-5],
@@ -300,7 +300,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "digested named image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				digestedNamedImg := "docker.io/library/busybo@sha256:" + digest
-				twd := MakeTWDWithImage(digestedNamedImg)
+				twd := temporaliov1alpha1.MakeTWDWithImage(digestedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  digest[:maxBuildIdLen-5],
@@ -311,7 +311,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "named image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				namedImg := "docker.io/library/busybox"
-				twd := MakeTWDWithImage(namedImg)
+				twd := temporaliov1alpha1.MakeTWDWithImage(namedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "library-busybox",
@@ -322,7 +322,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "illegal chars image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				illegalCharsImg := "this.is.my_weird/image"
-				twd := MakeTWDWithImage(illegalCharsImg)
+				twd := temporaliov1alpha1.MakeTWDWithImage(illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "this-is-my-weird-image",
@@ -333,7 +333,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "long image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				longImg := "ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage" // 101 chars
-				twd := MakeTWDWithImage(longImg)
+				twd := temporaliov1alpha1.MakeTWDWithImage(longImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  cleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:maxBuildIdLen-5], -1),

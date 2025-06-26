@@ -1,7 +1,6 @@
-package k8s
+package v1alpha1
 
 import (
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -10,13 +9,13 @@ import (
 func MakeTWD(
 	replicas int32,
 	podSpec v1.PodTemplateSpec,
-	rolloutStrategy *temporaliov1alpha1.RolloutStrategy,
-	sunsetStrategy *temporaliov1alpha1.SunsetStrategy,
-	workerOpts *temporaliov1alpha1.WorkerOptions,
-) *temporaliov1alpha1.TemporalWorkerDeployment {
-	r := temporaliov1alpha1.RolloutStrategy{}
-	s := temporaliov1alpha1.SunsetStrategy{}
-	w := temporaliov1alpha1.WorkerOptions{}
+	rolloutStrategy *RolloutStrategy,
+	sunsetStrategy *SunsetStrategy,
+	workerOpts *WorkerOptions,
+) *TemporalWorkerDeployment {
+	r := RolloutStrategy{}
+	s := SunsetStrategy{}
+	w := WorkerOptions{}
 	if rolloutStrategy != nil {
 		r = *rolloutStrategy
 	}
@@ -27,7 +26,7 @@ func MakeTWD(
 		w = *workerOpts
 	}
 
-	return &temporaliov1alpha1.TemporalWorkerDeployment{
+	twd := &TemporalWorkerDeployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "temporal.io/v1alpha1",
 			Kind:       "TemporalWorkerDeployment",
@@ -37,7 +36,7 @@ func MakeTWD(
 			Namespace: "default",
 			UID:       types.UID("test-owner-uid"),
 		},
-		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+		Spec: TemporalWorkerDeploymentSpec{
 			Replicas:        &replicas,
 			Template:        podSpec,
 			RolloutStrategy: r,
@@ -45,6 +44,8 @@ func MakeTWD(
 			WorkerOptions:   w,
 		},
 	}
+	twd.Name = twd.ObjectMeta.Name
+	return twd
 }
 
 // MakePodSpec creates a pod spec. Feel free to add parameters as needed.
@@ -59,6 +60,13 @@ func MakePodSpec(containers []v1.Container, labels map[string]string) v1.PodTemp
 	}
 }
 
-func MakeTWDWithImage(imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
+func MakeTWDWithImage(imageName string) *TemporalWorkerDeployment {
 	return MakeTWD(1, MakePodSpec([]v1.Container{{Image: imageName}}, nil), nil, nil, nil)
+}
+
+func MakeTWDWithName(name string) *TemporalWorkerDeployment {
+	twd := MakeTWD(1, MakePodSpec(nil, nil), nil, nil, nil)
+	twd.ObjectMeta.Name = name
+	twd.Name = name
+	return twd
 }
