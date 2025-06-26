@@ -658,11 +658,11 @@ func TestGetTestWorkflows(t *testing.T) {
 								{Name: "queue1"},
 								{Name: "queue2"},
 							},
-						},
-						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
-							{
-								TaskQueue: "queue1",
-								Status:    temporaliov1alpha1.WorkflowExecutionStatusRunning,
+							TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
+								{
+									TaskQueue: "queue1",
+									Status:    temporaliov1alpha1.WorkflowExecutionStatusRunning,
+								},
 							},
 						},
 					},
@@ -756,15 +756,15 @@ func TestGetTestWorkflows(t *testing.T) {
 								{Name: "queue1"},
 								{Name: "queue2"},
 							},
-						},
-						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
-							{
-								TaskQueue: "queue1",
-								Status:    temporaliov1alpha1.WorkflowExecutionStatusRunning,
-							},
-							{
-								TaskQueue: "queue2",
-								Status:    temporaliov1alpha1.WorkflowExecutionStatusCompleted,
+							TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
+								{
+									TaskQueue: "queue1",
+									Status:    temporaliov1alpha1.WorkflowExecutionStatusRunning,
+								},
+								{
+									TaskQueue: "queue2",
+									Status:    temporaliov1alpha1.WorkflowExecutionStatusCompleted,
+								},
 							},
 						},
 					},
@@ -1162,11 +1162,11 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						TaskQueues: []temporaliov1alpha1.TaskQueue{
 							{Name: "queue1"},
 						},
-					},
-					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
-						{
-							TaskQueue: "queue1",
-							Status:    temporaliov1alpha1.WorkflowExecutionStatusFailed,
+						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
+							{
+								TaskQueue: "queue1",
+								Status:    temporaliov1alpha1.WorkflowExecutionStatusFailed,
+							},
 						},
 					},
 				},
@@ -1196,11 +1196,11 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						TaskQueues: []temporaliov1alpha1.TaskQueue{
 							{Name: "queue1"},
 						},
-					},
-					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
-						{
-							TaskQueue: "queue1",
-							Status:    temporaliov1alpha1.WorkflowExecutionStatusCanceled,
+						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
+							{
+								TaskQueue: "queue1",
+								Status:    temporaliov1alpha1.WorkflowExecutionStatusCanceled,
+							},
 						},
 					},
 				},
@@ -1230,11 +1230,11 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						TaskQueues: []temporaliov1alpha1.TaskQueue{
 							{Name: "queue1"},
 						},
-					},
-					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
-						{
-							TaskQueue: "queue1",
-							Status:    temporaliov1alpha1.WorkflowExecutionStatusTerminated,
+						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
+							{
+								TaskQueue: "queue1",
+								Status:    temporaliov1alpha1.WorkflowExecutionStatusTerminated,
+							},
 						},
 					},
 				},
@@ -1265,13 +1265,13 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 							{Name: "queue1"},
 							{Name: "queue2"},
 						},
-					},
-					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
-						{
-							TaskQueue: "queue1",
-							Status:    temporaliov1alpha1.WorkflowExecutionStatusCompleted,
+						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
+							{
+								TaskQueue: "queue1",
+								Status:    temporaliov1alpha1.WorkflowExecutionStatusCompleted,
+							},
+							// Missing workflow for queue2
 						},
-						// Missing workflow for queue2
 					},
 				},
 			},
