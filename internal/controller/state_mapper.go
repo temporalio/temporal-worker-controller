@@ -5,9 +5,9 @@
 package controller
 
 import (
-	"github.com/DataDog/temporal-worker-controller/api/v1alpha1"
-	"github.com/DataDog/temporal-worker-controller/internal/k8s"
-	"github.com/DataDog/temporal-worker-controller/internal/temporal"
+	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

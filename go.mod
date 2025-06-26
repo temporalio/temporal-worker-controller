@@ -1,4 +1,4 @@
-module github.com/DataDog/temporal-worker-controller
+module github.com/temporalio/temporal-worker-controller
 
 go 1.24
 

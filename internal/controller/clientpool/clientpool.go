@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 type ClientPoolKey struct {

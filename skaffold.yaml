@@ -17,7 +17,7 @@ profiles:
             dockerfile: Dockerfile
             buildArgs:
               DD_GIT_COMMIT_SHA: "{{ .IMAGE_TAG }}"
-              DD_GIT_REPOSITORY_URL: "github.com/DataDog/temporal-worker-controller"
+              DD_GIT_REPOSITORY_URL: "github.com/temporalio/temporal-worker-controller"
               WORKER: "helloworld"
     manifests:
       rawYaml:
