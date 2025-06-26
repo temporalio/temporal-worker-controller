@@ -14,55 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
-
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
-	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
 )
-
-const (
-	defaultScaledownDelay    = 1 * time.Hour
-	defaultDeleteDelay       = 24 * time.Hour
-	deploymentNameSeparator  = "/"
-	versionIDSeparator       = "."
-	k8sResourceNameSeparator = "-"
-)
-
-func computeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
-}
-
-func computeVersionID(r *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return computeWorkerDeploymentName(r) + versionIDSeparator + computeBuildID(&r.Spec)
-}
-
-func computeBuildID(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) string {
-	return utils.ComputeHash(&spec.Template, nil)
-}
-
-func describeWorkerDeploymentHandleNotFound(
-	ctx context.Context,
-	deploymentHandler sdkclient.WorkerDeploymentHandle,
-	workerDeploymentName string) (sdkclient.WorkerDeploymentDescribeResponse, error) {
-	describeResp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
-
-	var notFoundErr *serviceerror.NotFound
-	if err != nil {
-		if errors.As(err, &notFoundErr) {
-			return sdkclient.WorkerDeploymentDescribeResponse{
-				ConflictToken: nil,
-				Info: sdkclient.WorkerDeploymentInfo{
-					Name: workerDeploymentName,
-					RoutingConfig: sdkclient.WorkerDeploymentRoutingConfig{
-						CurrentVersion: "__unversioned__",
-					},
-				},
-			}, nil
-		} else {
-			return sdkclient.WorkerDeploymentDescribeResponse{}, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
-		}
-	}
-	return describeResp, err
-}
 
 // TODO(carlydf): Cache describe success for versions that already exist
 // awaitVersionRegistration should be called after a poller starts polling with config of this version, since that is

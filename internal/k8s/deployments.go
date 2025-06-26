@@ -6,10 +6,14 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/distribution/reference"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,7 +26,14 @@ import (
 const (
 	deployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
-	BuildIDLabel = "temporal.io/build-id"
+	BuildIDLabel                       = "temporal.io/build-id"
+	defaultScaledownDelay              = 1 * time.Hour
+	defaultDeleteDelay                 = 24 * time.Hour
+	deploymentNameSeparator            = "/"
+	versionIDSeparator                 = "."
+	k8sResourceNameSeparator           = "-"
+	maxBuildIdLen                      = 63
+	maxTemporalWorkerDeploymentNameLen = 63
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -103,23 +114,59 @@ func NewObjectRef(obj client.Object) *v1.ObjectReference {
 	}
 }
 
+// ComputeVersionID generates a version ID from the worker deployment spec
+func ComputeVersionID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+	return ComputeWorkerDeploymentName(w) + versionIDSeparator + ComputeBuildID(w)
+}
+
+func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
+		if img := containers[0].Image; img != "" {
+			shortHashSuffix := k8sResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
+			maxImgLen := maxBuildIdLen - len(shortHashSuffix)
+			imagePrefix := computeImagePrefix(img, maxImgLen)
+			return imagePrefix + shortHashSuffix
+		}
+	}
+	return utils.ComputeHash(&w.Spec.Template, nil, false)
+}
+
 // ComputeWorkerDeploymentName generates the base worker deployment name
 func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	// Use the name and namespace to form the worker deployment name
-	return w.GetName() + "/" + w.GetNamespace()
-}
-
-// ComputeVersionID generates a version ID from the worker deployment
-func ComputeVersionID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	deploymentName := ComputeWorkerDeploymentName(w)
-	// Compute the build ID based on the template
-	buildID := utils.ComputeHash(&w.Spec.Template, nil)
-	return deploymentName + "." + buildID
+	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
 }
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
 func ComputeVersionedDeploymentName(baseName, buildID string) string {
 	return baseName + "-" + buildID
+}
+
+func computeImagePrefix(s string, maxLen int) string {
+	ref, err := reference.Parse(s)
+	if err == nil {
+		switch v := ref.(type) {
+		case reference.Tagged: // (e.g., "docker.io/library/busybox:latest", "docker.io/library/busybox:latest@sha256:<digest>")
+			s = v.Tag() // -> latest
+		case reference.Digested: // (e.g., "docker.io@sha256:<digest>", "docker.io/library/busybo@sha256:<digest>")
+			s = v.Digest().Hex() // -> <digest>
+		case reference.Named: // (e.g., "docker.io/library/busybox")
+			s = reference.Path(v) // -> library/busybox
+		default:
+		}
+	}
+	return cleanAndTruncateString(s, maxLen)
+}
+
+// Truncates string to the first n characters, and then removes characters that can't be in a kubernetes resource name.
+// Pass n = -1 to skip truncation.
+func cleanAndTruncateString(s string, n int) string {
+	if len(s) > n && n > 0 {
+		s = s[:n]
+	}
+	// Keep only letters, numbers, and dashes
+	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
+	return re.ReplaceAllString(s, "-")
 }
 
 // SplitVersionID splits a version ID into its components
@@ -247,4 +294,11 @@ func NewDeploymentWithOwnerRef(
 			MinReadySeconds: spec.MinReadySeconds,
 		},
 	}
+}
+
+func ValidateTemporalWorkerDeployment(w *temporaliov1alpha1.TemporalWorkerDeployment) error {
+	if n := w.GetName(); len(n) > maxTemporalWorkerDeploymentNameLen {
+		return errors.New(fmt.Sprintf("name %s cannot be longer than %d", n, maxTemporalWorkerDeploymentNameLen))
+	}
+	return nil
 }

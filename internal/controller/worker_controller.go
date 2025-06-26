@@ -7,6 +7,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/DataDog/temporal-worker-controller/internal/k8s"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -71,6 +72,14 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	workerDeploy.Default()
+
+	if err := k8s.ValidateTemporalWorkerDeployment(&workerDeploy); err != nil {
+		l.Error(err, "invalid TemporalWorkerDeployment")
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: 5 * time.Minute, // user needs time to fix this, if it changes, it will be re-queued immediately
+		}, nil
+	}
 
 	// Verify that a connection is configured
 	if workerDeploy.Spec.WorkerOptions.TemporalConnection == "" {

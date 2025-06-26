@@ -26,8 +26,8 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	req ctrl.Request,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
 ) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
-	workerDeploymentName := computeWorkerDeploymentName(workerDeploy)
-	targetVersionID := computeVersionID(workerDeploy)
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
+	targetVersionID := k8s.ComputeVersionID(workerDeploy)
 
 	// Fetch Kubernetes deployment state
 	k8sState, err := k8s.GetDeploymentState(
