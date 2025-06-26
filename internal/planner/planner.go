@@ -138,7 +138,7 @@ func getDeleteDeployments(
 		case temporaliov1alpha1.VersionStatusNotRegistered:
 			// NotRegistered versions are versions that the server doesn't know about.
 			// Only delete if it's not the target version.
-			if version != config.Status.TargetVersion {
+			if config.Status.TargetVersion == nil || config.Status.TargetVersion.VersionID != version.VersionID {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}

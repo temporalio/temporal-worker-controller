@@ -105,14 +105,6 @@ func TestMapToStatus(t *testing.T) {
 				TaskQueues: []temporaliov1alpha1.TaskQueue{
 					{Name: "queue1"},
 				},
-				TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
-					{
-						WorkflowID: "test-wf-1",
-						RunID:      "run1",
-						TaskQueue:  "queue1",
-						Status:     temporaliov1alpha1.WorkflowExecutionStatusCompleted,
-					},
-				},
 			},
 			"worker.v2": {
 				VersionID: "worker.v2",
@@ -157,9 +149,6 @@ func TestMapToStatus(t *testing.T) {
 
 	assert.Equal(t, 1, len(status.CurrentVersion.TaskQueues))
 	assert.Equal(t, "queue1", status.CurrentVersion.TaskQueues[0].Name)
-	assert.Equal(t, 1, len(status.CurrentVersion.TestWorkflows))
-	assert.Equal(t, "test-wf-1", status.CurrentVersion.TestWorkflows[0].WorkflowID)
-	assert.Equal(t, temporaliov1alpha1.WorkflowExecutionStatusCompleted, status.CurrentVersion.TestWorkflows[0].Status)
 
 	// Verify target version
 	assert.NotNil(t, status.TargetVersion)
@@ -234,24 +223,43 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 
 	mapper := newStateMapper(k8sState, temporalState)
 
-	// Test with registered version
-	version := mapper.mapWorkerDeploymentVersion("worker.v1")
-	assert.NotNil(t, version)
-	assert.Equal(t, "worker.v1", version.VersionID)
-	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, version.Status)
-	assert.NotNil(t, version.HealthySince)
-	assert.Equal(t, healthySince.Time.Unix(), version.HealthySince.Time.Unix())
-	assert.NotNil(t, version.DrainedSince)
-	assert.Equal(t, drainedSince.Unix(), version.DrainedSince.Time.Unix())
-	assert.NotNil(t, version.Deployment)
-	assert.Equal(t, "worker-v1", version.Deployment.Name)
+	// Test current version mapping
+	currentVersion := mapper.mapCurrentWorkerDeploymentVersion("worker.v1")
+	assert.NotNil(t, currentVersion)
+	assert.Equal(t, "worker.v1", currentVersion.VersionID)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, currentVersion.Status)
+	assert.NotNil(t, currentVersion.HealthySince)
+	assert.Equal(t, healthySince.Time.Unix(), currentVersion.HealthySince.Time.Unix())
+	assert.NotNil(t, currentVersion.Deployment)
+	assert.Equal(t, "worker-v1", currentVersion.Deployment.Name)
+
+	// Test target version mapping
+	targetVersion := mapper.mapTargetWorkerDeploymentVersion("worker.v1")
+	assert.NotNil(t, targetVersion)
+	assert.Equal(t, "worker.v1", targetVersion.VersionID)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, targetVersion.Status)
+	assert.NotNil(t, targetVersion.HealthySince)
+	assert.Equal(t, healthySince.Time.Unix(), targetVersion.HealthySince.Time.Unix())
+	assert.NotNil(t, targetVersion.Deployment)
+	assert.Equal(t, "worker-v1", targetVersion.Deployment.Name)
+
+	// Test deprecated version mapping
+	deprecatedVersion := mapper.mapDeprecatedWorkerDeploymentVersion("worker.v1")
+	assert.NotNil(t, deprecatedVersion)
+	assert.Equal(t, "worker.v1", deprecatedVersion.VersionID)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, deprecatedVersion.Status)
+	assert.NotNil(t, deprecatedVersion.HealthySince)
+	assert.Equal(t, healthySince.Time.Unix(), deprecatedVersion.HealthySince.Time.Unix())
+	assert.NotNil(t, deprecatedVersion.DrainedSince)
+	assert.Equal(t, drainedSince.Unix(), deprecatedVersion.DrainedSince.Time.Unix())
+	assert.NotNil(t, deprecatedVersion.Deployment)
+	assert.Equal(t, "worker-v1", deprecatedVersion.Deployment.Name)
 
 	// Test with version that doesn't exist
-	version = mapper.mapWorkerDeploymentVersion("nonexistent")
-	assert.NotNil(t, version)
-	assert.Equal(t, "nonexistent", version.VersionID)
-	assert.Equal(t, temporaliov1alpha1.VersionStatusNotRegistered, version.Status)
-	assert.Nil(t, version.HealthySince)
-	assert.Nil(t, version.DrainedSince)
-	assert.Nil(t, version.Deployment)
+	currentVersion = mapper.mapCurrentWorkerDeploymentVersion("nonexistent")
+	assert.NotNil(t, currentVersion)
+	assert.Equal(t, "nonexistent", currentVersion.VersionID)
+	assert.Equal(t, temporaliov1alpha1.VersionStatusNotRegistered, currentVersion.Status)
+	assert.Nil(t, currentVersion.HealthySince)
+	assert.Nil(t, currentVersion.Deployment)
 }
