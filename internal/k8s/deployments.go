@@ -6,7 +6,6 @@ package k8s
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
