@@ -7,16 +7,14 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"sort"
-	"strings"
-	"time"
-
 	"github.com/distribution/reference"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"regexp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sort"
+	"strings"
 
 	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
 	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -25,14 +23,11 @@ import (
 const (
 	deployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
-	BuildIDLabel                       = "temporal.io/build-id"
-	defaultScaledownDelay              = 1 * time.Hour
-	defaultDeleteDelay                 = 24 * time.Hour
-	deploymentNameSeparator            = "/"
-	versionIDSeparator                 = "."
-	k8sResourceNameSeparator           = "-"
-	maxBuildIdLen                      = 63
-	maxTemporalWorkerDeploymentNameLen = 63
+	BuildIDLabel             = "temporal.io/build-id"
+	deploymentNameSeparator  = "/"
+	versionIDSeparator       = "."
+	k8sResourceNameSeparator = "-"
+	maxBuildIdLen            = 63
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -157,7 +152,8 @@ func computeImagePrefix(s string, maxLen int) string {
 	return cleanAndTruncateString(s, maxLen)
 }
 
-// Truncates string to the first n characters, and then removes characters that can't be in a kubernetes resource name.
+// Truncates string to the first n characters, and then replaces characters that can't be in a
+// kubernetes resource name with a `-` character which can be.
 // Pass n = -1 to skip truncation.
 func cleanAndTruncateString(s string, n int) string {
 	if len(s) > n && n > 0 {
@@ -293,11 +289,4 @@ func NewDeploymentWithOwnerRef(
 			MinReadySeconds: spec.MinReadySeconds,
 		},
 	}
-}
-
-func ValidateTemporalWorkerDeployment(w *temporaliov1alpha1.TemporalWorkerDeployment) error {
-	if n := w.GetName(); len(n) > maxTemporalWorkerDeploymentNameLen {
-		return fmt.Errorf("name %s cannot be longer than %d", n, maxTemporalWorkerDeploymentNameLen)
-	}
-	return nil
 }

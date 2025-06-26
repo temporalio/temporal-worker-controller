@@ -14,6 +14,7 @@ func TestComputeHash(t *testing.T) {
 		collisionCount *int32
 		short          bool
 		expectedLength int
+		expectedResult string
 	}{
 		{
 			name:           "basic template with short hash",
@@ -21,6 +22,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          true,
 			expectedLength: 4, // Short hash should be 4 digits
+			expectedResult: "7d99",
 		},
 		{
 			name:           "basic template with full hash",
@@ -28,6 +30,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          false,
 			expectedLength: 10, // Full hash should be 10 digits
+			expectedResult: "54b88d7d99",
 		},
 		{
 			name:           "template with collision count",
@@ -35,6 +38,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: int32Ptr(5),
 			short:          true,
 			expectedLength: 4,
+			expectedResult: "66bb",
 		},
 		{
 			name:           "empty template",
@@ -42,6 +46,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          true,
 			expectedLength: 4,
+			expectedResult: "5878",
 		},
 	}
 
@@ -49,9 +54,9 @@ func TestComputeHash(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			hash := ComputeHash(tt.template, tt.collisionCount, tt.short)
 
-			// Check that hash is not empty
-			if hash == "" {
-				t.Errorf("ComputeHash() returned empty string")
+			// Check that hash is expected
+			if tt.expectedResult != hash {
+				t.Errorf("ComputeHash() expected result %s but got %s", tt.expectedResult, hash)
 			}
 
 			// For short hashes, verify they are 4 digits
