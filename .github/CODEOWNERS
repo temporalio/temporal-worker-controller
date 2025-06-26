@@ -1,6 +1,4 @@
-# These owners will be the default owners for everything in
-# the repo. Unless a later match takes precedence,
-# @global-owner1 and @global-owner2 will be requested for
-# review when someone opens a pull request.
-*       @carlydf @shivs11 @jlegrone @robholland
+# Syntax is here:
+# https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/about-code-owners#codeowners-syntax
 
+*                @temporalio/worker-controller @jlegrone
