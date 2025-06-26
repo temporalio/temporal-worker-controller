@@ -16,8 +16,8 @@ import (
 	"sort"
 	"strings"
 
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
-	"github.com/DataDog/temporal-worker-controller/internal/controller/k8s.io/utils"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
 )
 
 const (

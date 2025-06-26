@@ -16,7 +16,7 @@ import (
 	temporalClient "go.temporal.io/sdk/client"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 // VersionInfo contains information about a specific version

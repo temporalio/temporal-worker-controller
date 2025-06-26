@@ -22,9 +22,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
-	"github.com/DataDog/temporal-worker-controller/internal/controller"
-	"github.com/DataDog/temporal-worker-controller/internal/controller/clientpool"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	//+kubebuilder:scaffold:imports
 )
 

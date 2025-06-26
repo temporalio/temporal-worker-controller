@@ -9,8 +9,8 @@ import (
 
 	"go.temporal.io/sdk/worker"
 
-	"github.com/DataDog/temporal-worker-controller/internal/demo/helloworld"
-	"github.com/DataDog/temporal-worker-controller/internal/demo/util"
+	"github.com/temporalio/temporal-worker-controller/internal/demo/helloworld"
+	"github.com/temporalio/temporal-worker-controller/internal/demo/util"
 )
 
 func main() {

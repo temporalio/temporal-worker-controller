@@ -16,8 +16,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
-	"github.com/DataDog/temporal-worker-controller/internal/k8s"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -846,8 +846,8 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID:    "test/namespace.123",
-						Status:       temporaliov1alpha1.VersionStatusInactive,
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusInactive,
 						HealthySince: &metav1.Time{
 							Time: time.Now().Add(-30 * time.Minute),
 						},
