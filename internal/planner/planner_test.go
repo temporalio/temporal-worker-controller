@@ -66,14 +66,16 @@ func TestGeneratePlan(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.456",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID: "test/namespace.123",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.123",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-123"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-24 * time.Hour),
 							},
-							Deployment: &v1.ObjectReference{Name: "test-123"},
 						},
 					},
 				},
@@ -101,15 +103,19 @@ func TestGeneratePlan(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &v1.ObjectReference{Name: "test-123"},
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-123"},
+						},
 					},
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &v1.ObjectReference{Name: "test-123"},
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-123"},
+						},
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -139,41 +145,36 @@ func TestGeneratePlan(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123", // Rolling back to current version
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &v1.ObjectReference{Name: "test-123"},
-						HealthySince: &metav1.Time{
-							Time: time.Now().Add(-2 * time.Hour),
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-123"},
+							HealthySince: &metav1.Time{
+								Time: time.Now().Add(-2 * time.Hour),
+							},
 						},
 					},
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &v1.ObjectReference{Name: "test-123"},
-						HealthySince: &metav1.Time{
-							Time: time.Now().Add(-2 * time.Hour),
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-123"},
+							HealthySince: &metav1.Time{
+								Time: time.Now().Add(-2 * time.Hour),
+							},
 						},
 					},
-					RampingVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:      "test/namespace.456",
-						Status:         temporaliov1alpha1.VersionStatusRamping,
-						RampPercentage: func() *float32 { f := float32(25); return &f }(),
-						Deployment:     &v1.ObjectReference{Name: "test-456"},
-						HealthySince: &metav1.Time{
-							Time: time.Now().Add(-30 * time.Minute),
-						},
-					},
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-						{
-							VersionID:      "test/namespace.456",
-							Status:         temporaliov1alpha1.VersionStatusRamping,
-							RampPercentage: func() *float32 { f := float32(25); return &f }(),
-							Deployment:     &v1.ObjectReference{Name: "test-456"},
+					RampingVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.456",
+							Status:     temporaliov1alpha1.VersionStatusRamping,
+							Deployment: &v1.ObjectReference{Name: "test-456"},
 							HealthySince: &metav1.Time{
 								Time: time.Now().Add(-30 * time.Minute),
 							},
 						},
+						RampPercentage: func() *float32 { f := float32(25); return &f }(),
 					},
 				},
 				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -232,14 +233,16 @@ func TestGetDeleteDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.456",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID: "test/namespace.123",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.123",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-123"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-24 * time.Hour),
 							},
-							Deployment: &v1.ObjectReference{Name: "test-123"},
 						},
 					},
 				},
@@ -260,14 +263,16 @@ func TestGetDeleteDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.456",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID: "test/namespace.123",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.123",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-123"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-1 * time.Hour),
 							},
-							Deployment: &v1.ObjectReference{Name: "test-123"},
 						},
 					},
 				},
@@ -294,11 +299,13 @@ func TestGetDeleteDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.456",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID:  "test/namespace.123",
-							Status:     temporaliov1alpha1.VersionStatusNotRegistered,
-							Deployment: &v1.ObjectReference{Name: "test-123"},
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.123",
+								Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+								Deployment: &v1.ObjectReference{Name: "test-123"},
+							},
 						},
 					},
 				},
@@ -319,10 +326,12 @@ func TestGetDeleteDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.c", // Different desired version
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.b",
-						Status:     temporaliov1alpha1.VersionStatusInactive,
-						Deployment: &v1.ObjectReference{Name: "test-b"},
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.b",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							Deployment: &v1.ObjectReference{Name: "test-b"},
+						},
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -359,10 +368,12 @@ func TestGetScaleDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &v1.ObjectReference{Name: "test-123"},
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-123"},
+						},
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -382,14 +393,16 @@ func TestGetScaleDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.456",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID: "test/namespace.123",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.123",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-123"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-24 * time.Hour),
 							},
-							Deployment: &v1.ObjectReference{Name: "test-123"},
 						},
 					},
 				},
@@ -413,11 +426,13 @@ func TestGetScaleDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.b",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID:  "test/namespace.a",
-							Status:     temporaliov1alpha1.VersionStatusInactive,
-							Deployment: &v1.ObjectReference{Name: "test-a"},
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.a",
+								Status:     temporaliov1alpha1.VersionStatusInactive,
+								Deployment: &v1.ObjectReference{Name: "test-a"},
+							},
 						},
 					},
 				},
@@ -441,10 +456,12 @@ func TestGetScaleDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.b",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.b",
-						Status:     temporaliov1alpha1.VersionStatusRamping,
-						Deployment: &v1.ObjectReference{Name: "test-b"},
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.b",
+							Status:     temporaliov1alpha1.VersionStatusRamping,
+							Deployment: &v1.ObjectReference{Name: "test-b"},
+						},
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -467,11 +484,13 @@ func TestGetScaleDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.b",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID:  "test/namespace.a",
-							Status:     temporaliov1alpha1.VersionStatusInactive,
-							Deployment: &v1.ObjectReference{Name: "test-a"},
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.a",
+								Status:     temporaliov1alpha1.VersionStatusInactive,
+								Deployment: &v1.ObjectReference{Name: "test-a"},
+							},
 						},
 					},
 				},
@@ -495,19 +514,23 @@ func TestGetScaleDeployments(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.a",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.a",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &v1.ObjectReference{Name: "test-a"},
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.a",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-a"},
+						},
 					},
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID: "test/namespace.b",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.b",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-b"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-1 * time.Hour), // Recently drained
 							},
-							Deployment: &v1.ObjectReference{Name: "test-b"},
 						},
 					},
 				},
@@ -568,10 +591,12 @@ func TestShouldCreateDeployment(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusInactive,
-						Deployment: &v1.ObjectReference{Name: "test-123"},
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							Deployment: &v1.ObjectReference{Name: "test-123"},
+						},
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -589,10 +614,12 @@ func TestShouldCreateDeployment(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.b",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.b",
-						Status:     temporaliov1alpha1.VersionStatusInactive,
-						Deployment: nil,
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.b",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							Deployment: nil,
+						},
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -623,12 +650,14 @@ func TestGetTestWorkflows(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID: "test/namespace.123",
-						Status:    temporaliov1alpha1.VersionStatusInactive,
-						TaskQueues: []temporaliov1alpha1.TaskQueue{
-							{Name: "queue1"},
-							{Name: "queue2"},
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID: "test/namespace.123",
+							Status:    temporaliov1alpha1.VersionStatusInactive,
+							TaskQueues: []temporaliov1alpha1.TaskQueue{
+								{Name: "queue1"},
+								{Name: "queue2"},
+							},
 						},
 						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 							{
@@ -637,9 +666,11 @@ func TestGetTestWorkflows(t *testing.T) {
 							},
 						},
 					},
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID: "test/namespace.456",
-						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID: "test/namespace.456",
+							Status:    temporaliov1alpha1.VersionStatusCurrent,
+						},
 					},
 				},
 				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -658,17 +689,21 @@ func TestGetTestWorkflows(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID: "test/namespace.123",
-						Status:    temporaliov1alpha1.VersionStatusInactive,
-						TaskQueues: []temporaliov1alpha1.TaskQueue{
-							{Name: "queue1"},
-							{Name: "queue2"},
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID: "test/namespace.123",
+							Status:    temporaliov1alpha1.VersionStatusInactive,
+							TaskQueues: []temporaliov1alpha1.TaskQueue{
+								{Name: "queue1"},
+								{Name: "queue2"},
+							},
 						},
 					},
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID: "test/namespace.456",
-						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID: "test/namespace.456",
+							Status:    temporaliov1alpha1.VersionStatusCurrent,
+						},
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -683,14 +718,18 @@ func TestGetTestWorkflows(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusInactive,
-						TaskQueues: []temporaliov1alpha1.TaskQueue{}, // Empty
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							TaskQueues: []temporaliov1alpha1.TaskQueue{}, // Empty
+						},
 					},
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID: "test/namespace.456",
-						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID: "test/namespace.456",
+							Status:    temporaliov1alpha1.VersionStatusCurrent,
+						},
 					},
 				},
 				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -709,12 +748,14 @@ func TestGetTestWorkflows(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID: "test/namespace.123",
-						Status:    temporaliov1alpha1.VersionStatusInactive,
-						TaskQueues: []temporaliov1alpha1.TaskQueue{
-							{Name: "queue1"},
-							{Name: "queue2"},
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID: "test/namespace.123",
+							Status:    temporaliov1alpha1.VersionStatusInactive,
+							TaskQueues: []temporaliov1alpha1.TaskQueue{
+								{Name: "queue1"},
+								{Name: "queue2"},
+							},
 						},
 						TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 							{
@@ -727,9 +768,11 @@ func TestGetTestWorkflows(t *testing.T) {
 							},
 						},
 					},
-					CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-						VersionID: "test/namespace.456",
-						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID: "test/namespace.456",
+							Status:    temporaliov1alpha1.VersionStatusCurrent,
+						},
 					},
 				},
 				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
@@ -769,16 +812,18 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{
-						Time: time.Now().Add(-1 * time.Hour),
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.123",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
 					},
 				},
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.456",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.456",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
 			},
 			conflictToken:    []byte("token"),
@@ -799,17 +844,21 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{
-						Time: time.Now().Add(-30 * time.Minute),
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.123",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{
+							Time: time.Now().Add(-30 * time.Minute),
+						},
 					},
 					RampPercentage: func() *float32 { f := float32(0); return &f }(),
 				},
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.456",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.456",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
 			},
 			conflictToken:    []byte("token"),
@@ -822,34 +871,30 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
-					HealthySince: &metav1.Time{
-						Time: time.Now().Add(-1 * time.Hour),
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+						HealthySince: &metav1.Time{
+							Time: time.Now().Add(-1 * time.Hour),
+						},
 					},
 				},
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
-				},
-				RampingVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:      "test/namespace.456",
-					Status:         temporaliov1alpha1.VersionStatusRamping,
-					RampPercentage: func() *float32 { f := float32(25); return &f }(),
-					HealthySince: &metav1.Time{
-						Time: time.Now().Add(-30 * time.Minute),
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					{
-						VersionID:      "test/namespace.456",
-						Status:         temporaliov1alpha1.VersionStatusRamping,
-						RampPercentage: func() *float32 { f := float32(25); return &f }(),
+				RampingVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.456",
+						Status:    temporaliov1alpha1.VersionStatusRamping,
 						HealthySince: &metav1.Time{
 							Time: time.Now().Add(-30 * time.Minute),
 						},
 					},
+					RampPercentage: func() *float32 { f := float32(25); return &f }(),
 				},
 			},
 			conflictToken:     []byte("token"),
@@ -863,25 +908,25 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.789",
-					Status:    temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{
-						Time: time.Now().Add(-1 * time.Hour),
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.789",
+						Status:    temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{
+							Time: time.Now().Add(-1 * time.Hour),
+						},
 					},
 				},
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
-					{
-						VersionID:      "test/namespace.456",
-						Status:         temporaliov1alpha1.VersionStatusRamping,
-						RampPercentage: func() *float32 { f := float32(25); return &f }(),
-						HealthySince: &metav1.Time{
-							Time: time.Now().Add(-30 * time.Minute),
-						},
+				RampingVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.456",
+						Status:    temporaliov1alpha1.VersionStatusRamping,
 					},
 				},
 			},
@@ -927,15 +972,19 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.456",
-					Status:    temporaliov1alpha1.VersionStatusRamping,
-					HealthySince: &metav1.Time{
-						Time: time.Now().Add(-1 * time.Hour),
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.456",
+						Status:    temporaliov1alpha1.VersionStatusRamping,
+						HealthySince: &metav1.Time{
+							Time: time.Now().Add(-1 * time.Hour),
+						},
 					},
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
@@ -954,14 +1003,18 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{Time: time.Now()},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now()},
+					},
 					RampingSince: nil, // Not ramping yet
 				},
 			},
@@ -979,14 +1032,18 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusRamping,
-					HealthySince: &metav1.Time{Time: time.Now()},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusRamping,
+						HealthySince: &metav1.Time{Time: time.Now()},
+					},
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2 * time.Hour), // Exactly at step boundary
 					},
@@ -1007,14 +1064,18 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusRamping,
-					HealthySince: &metav1.Time{Time: time.Now()},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusRamping,
+						HealthySince: &metav1.Time{Time: time.Now()},
+					},
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-45 * time.Minute), // In second step
 					},
@@ -1034,14 +1095,18 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusRamping,
-					HealthySince: &metav1.Time{Time: time.Now()},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusRamping,
+						HealthySince: &metav1.Time{Time: time.Now()},
+					},
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
@@ -1083,16 +1148,20 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
-					TaskQueues: []temporaliov1alpha1.TaskQueue{
-						{Name: "queue1"},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+						},
 					},
 					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 						{
@@ -1113,16 +1182,20 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
-					TaskQueues: []temporaliov1alpha1.TaskQueue{
-						{Name: "queue1"},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+						},
 					},
 					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 						{
@@ -1143,16 +1216,20 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
-					TaskQueues: []temporaliov1alpha1.TaskQueue{
-						{Name: "queue1"},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+						},
 					},
 					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 						{
@@ -1173,17 +1250,21 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
-					TaskQueues: []temporaliov1alpha1.TaskQueue{
-						{Name: "queue1"},
-						{Name: "queue2"},
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+							{Name: "queue2"},
+						},
 					},
 					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
 						{
@@ -1205,15 +1286,19 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID: "test/namespace.123",
-					Status:    temporaliov1alpha1.VersionStatusCurrent,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
 				},
-				TargetVersion: &temporaliov1alpha1.WorkerDeploymentVersion{
-					VersionID:    "test/namespace.456",
-					Status:       temporaliov1alpha1.VersionStatusInactive,
-					HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
-					TaskQueues:   []temporaliov1alpha1.TaskQueue{}, // Empty
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+						TaskQueues:   []temporaliov1alpha1.TaskQueue{}, // Empty
+					},
 				},
 			},
 			expectConfig: false, // Should not proceed with no task queues
@@ -1293,32 +1378,40 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.e",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID:  "test/namespace.a",
-							Status:     temporaliov1alpha1.VersionStatusInactive,
-							Deployment: &v1.ObjectReference{Name: "test-a"},
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.a",
+								Status:     temporaliov1alpha1.VersionStatusInactive,
+								Deployment: &v1.ObjectReference{Name: "test-a"},
+							},
 						},
 						{
-							VersionID:  "test/namespace.b",
-							Status:     temporaliov1alpha1.VersionStatusDraining,
-							Deployment: &v1.ObjectReference{Name: "test-b"},
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.b",
+								Status:     temporaliov1alpha1.VersionStatusDraining,
+								Deployment: &v1.ObjectReference{Name: "test-b"},
+							},
 						},
 						{
-							VersionID: "test/namespace.c",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.c",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-c"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-2 * time.Hour), // Recently drained
 							},
-							Deployment: &v1.ObjectReference{Name: "test-c"},
 						},
 						{
-							VersionID: "test/namespace.d",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.d",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-d"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-48 * time.Hour), // Long time drained
 							},
-							Deployment: &v1.ObjectReference{Name: "test-d"},
 						},
 					},
 				},
@@ -1346,14 +1439,16 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			config: &Config{
 				TargetVersionID: "test/namespace.b",
 				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					DeprecatedVersions: []*temporaliov1alpha1.WorkerDeploymentVersion{
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 						{
-							VersionID: "test/namespace.a",
-							Status:    temporaliov1alpha1.VersionStatusDrained,
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.a",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-a"},
+							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-30 * time.Minute), // Not long enough
 							},
-							Deployment: &v1.ObjectReference{Name: "test-a"},
 						},
 					},
 				},

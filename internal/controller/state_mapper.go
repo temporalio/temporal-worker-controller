@@ -34,32 +34,33 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 	// Set current version
 	currentVersionID := m.temporalState.CurrentVersionID
 	if currentVersionID != "" {
-		status.CurrentVersion = m.mapWorkerDeploymentVersion(currentVersionID)
+		status.CurrentVersion = m.mapCurrentWorkerDeploymentVersion(currentVersionID)
 	}
 
 	// Set target version (desired version)
-	status.TargetVersion = m.mapWorkerDeploymentVersion(targetVersionID)
+	status.TargetVersion = m.mapTargetWorkerDeploymentVersion(targetVersionID)
 	if status.TargetVersion != nil && m.temporalState.RampingVersionID == targetVersionID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
 		rampPercentage := m.temporalState.RampPercentage
 		status.TargetVersion.RampPercentage = &rampPercentage
 	}
 
+	rampingVersionID := m.temporalState.RampingVersionID
 	// Set ramping version if it exists
-	if m.temporalState.RampingVersionID != "" {
-		status.RampingVersion = m.mapWorkerDeploymentVersion(m.temporalState.RampingVersionID)
+	if rampingVersionID != "" {
+		status.RampingVersion = m.mapTargetWorkerDeploymentVersion(rampingVersionID)
 	}
 
 	// Add deprecated versions
-	var deprecatedVersions []*v1alpha1.WorkerDeploymentVersion
+	var deprecatedVersions []*v1alpha1.DeprecatedWorkerDeploymentVersion
 	for versionID := range m.k8sState.Deployments {
-		// Skip default and target versions
-		if versionID == currentVersionID || versionID == targetVersionID {
+		// Skip current and target versions
+		if versionID == currentVersionID || versionID == targetVersionID || versionID == rampingVersionID {
 			continue
 		}
 
 		// TODO(rob): We should never see a version here that has VersionStatusCurrent, but should we check?
-		versionStatus := m.mapWorkerDeploymentVersion(versionID)
+		versionStatus := m.mapDeprecatedWorkerDeploymentVersion(versionID)
 		if versionStatus != nil {
 			deprecatedVersions = append(deprecatedVersions, versionStatus)
 		}
@@ -69,15 +70,97 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 	return status
 }
 
-// mapWorkerDeploymentVersion creates a version status from the states
-func (m *stateMapper) mapWorkerDeploymentVersion(versionID string) *v1alpha1.WorkerDeploymentVersion {
+// mapCurrentWorkerDeploymentVersion creates a current version status from the states
+func (m *stateMapper) mapCurrentWorkerDeploymentVersion(versionID string) *v1alpha1.CurrentWorkerDeploymentVersion {
 	if versionID == "" {
 		return nil
 	}
 
-	version := &v1alpha1.WorkerDeploymentVersion{
-		VersionID: versionID,
-		Status:    v1alpha1.VersionStatusNotRegistered,
+	version := &v1alpha1.CurrentWorkerDeploymentVersion{
+		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
+			VersionID: versionID,
+			Status:    v1alpha1.VersionStatusNotRegistered,
+		},
+	}
+
+	// Set deployment reference if it exists
+	if deployment, exists := m.k8sState.Deployments[versionID]; exists {
+		version.Deployment = m.k8sState.DeploymentRefs[versionID]
+
+		// Check deployment health
+		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
+		if healthy {
+			version.HealthySince = healthySince
+		}
+	}
+
+	// Set version status from temporal state
+	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
+		version.Status = temporalVersion.Status
+
+		// Set task queues
+		version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
+	}
+
+	return version
+}
+
+// mapTargetWorkerDeploymentVersion creates a target version status from the states
+func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) *v1alpha1.TargetWorkerDeploymentVersion {
+	if versionID == "" {
+		return nil
+	}
+
+	version := &v1alpha1.TargetWorkerDeploymentVersion{
+		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
+			VersionID: versionID,
+			Status:    v1alpha1.VersionStatusNotRegistered,
+		},
+	}
+
+	// Set deployment reference if it exists
+	if deployment, exists := m.k8sState.Deployments[versionID]; exists {
+		version.Deployment = m.k8sState.DeploymentRefs[versionID]
+
+		// Check deployment health
+		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
+		if healthy {
+			version.HealthySince = healthySince
+		}
+	}
+
+	// Set version status from temporal state
+	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
+		version.Status = temporalVersion.Status
+
+		// Set ramp percentage if this is a ramping version
+		// TODO(carlydf): Support setting any ramp in [0,100]
+		// NOTE(rob): We are now setting any ramp > 0, is that correct?
+		if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
+			version.RampPercentage = &m.temporalState.RampPercentage
+		}
+
+		// Set task queues
+		version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
+
+		// Set test workflows
+		version.TestWorkflows = append(version.TestWorkflows, temporalVersion.TestWorkflows...)
+	}
+
+	return version
+}
+
+// mapDeprecatedWorkerDeploymentVersion creates a deprecated version status from the states
+func (m *stateMapper) mapDeprecatedWorkerDeploymentVersion(versionID string) *v1alpha1.DeprecatedWorkerDeploymentVersion {
+	if versionID == "" {
+		return nil
+	}
+
+	version := &v1alpha1.DeprecatedWorkerDeploymentVersion{
+		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
+			VersionID: versionID,
+			Status:    v1alpha1.VersionStatusNotRegistered,
+		},
 	}
 
 	// Set deployment reference if it exists
@@ -101,18 +184,8 @@ func (m *stateMapper) mapWorkerDeploymentVersion(versionID string) *v1alpha1.Wor
 			version.DrainedSince = &drainedSince
 		}
 
-		// Set ramp percentage if this is a ramping version
-		// TODO(carlydf): Support setting any ramp in [0,100]
-		// NOTE(rob): We are now setting any ramp > 0, is that correct?
-		if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
-			version.RampPercentage = &m.temporalState.RampPercentage
-		}
-
 		// Set task queues
 		version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
-
-		// Set test workflows
-		version.TestWorkflows = append(version.TestWorkflows, temporalVersion.TestWorkflows...)
 	}
 
 	return version

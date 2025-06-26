@@ -19,9 +19,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Default Version for new workflows
-      jsonPath: .status.defaultVersion.versionID
-      name: Default
+    - description: Current Version for new workflows
+      jsonPath: .status.currentVersion.versionID
+      name: Current
       type: string
     - description: Version of the current worker template
       jsonPath: .status.targetVersion.versionID
@@ -3783,18 +3783,10 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
-                  drainedSince:
-                    format: date-time
-                    type: string
                   healthySince:
                     format: date-time
                     type: string
                   managedBy:
-                    type: string
-                  rampPercentage:
-                    type: number
-                  rampingSince:
-                    format: date-time
                     type: string
                   status:
                     type: string
@@ -3805,24 +3797,6 @@ spec:
                           type: string
                       required:
                       - name
-                      type: object
-                    type: array
-                  testWorkflows:
-                    items:
-                      properties:
-                        runID:
-                          type: string
-                        status:
-                          type: string
-                        taskQueue:
-                          type: string
-                        workflowID:
-                          type: string
-                      required:
-                      - runID
-                      - status
-                      - taskQueue
-                      - workflowID
                       type: object
                     type: array
                   versionID:
@@ -3860,11 +3834,6 @@ spec:
                       type: string
                     managedBy:
                       type: string
-                    rampPercentage:
-                      type: number
-                    rampingSince:
-                      format: date-time
-                      type: string
                     status:
                       type: string
                     taskQueues:
@@ -3874,24 +3843,6 @@ spec:
                             type: string
                         required:
                         - name
-                        type: object
-                      type: array
-                    testWorkflows:
-                      items:
-                        properties:
-                          runID:
-                            type: string
-                          status:
-                            type: string
-                          taskQueue:
-                            type: string
-                          workflowID:
-                            type: string
-                        required:
-                        - runID
-                        - status
-                        - taskQueue
-                        - workflowID
                         type: object
                       type: array
                     versionID:
@@ -3923,9 +3874,6 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
-                  drainedSince:
-                    format: date-time
-                    type: string
                   healthySince:
                     format: date-time
                     type: string
@@ -3991,9 +3939,6 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
-                  drainedSince:
-                    format: date-time
-                    type: string
                   healthySince:
                     format: date-time
                     type: string

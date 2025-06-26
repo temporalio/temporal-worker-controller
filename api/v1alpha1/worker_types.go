@@ -105,26 +105,21 @@ type TemporalWorkerDeploymentStatus struct {
 	// TargetVersion is the desired next version. If TargetVersion.Deployment is nil,
 	// then the controller should create it. If not nil, the controller should
 	// wait for it to become healthy and then move it to the CurrentVersion.
-	TargetVersion *WorkerDeploymentVersion `json:"targetVersion"`
+	TargetVersion *TargetWorkerDeploymentVersion `json:"targetVersion"`
 
 	// CurrentVersion is the version that is currently registered with
 	// Temporal as the current version of its worker deployment. This must never be nil.
-	//
-	// RampPercentage should always be nil for this version.
-	CurrentVersion *WorkerDeploymentVersion `json:"currentVersion"`
+	CurrentVersion *CurrentWorkerDeploymentVersion `json:"currentVersion"`
 
 	// RampingVersion is the version that is currently registered with
 	// Temporal as the ramping version of its worker deployment. The controller
 	// should ensure that this is always equal to the TargetVersion, or, if the
 	// TargetVersion has been promoted to the current version, this should be nil.
-	RampingVersion *WorkerDeploymentVersion `json:"rampingVersion,omitempty"`
+	RampingVersion *TargetWorkerDeploymentVersion `json:"rampingVersion,omitempty"`
 
 	// DeprecatedVersions are deployment versions that are no longer the default. Any
 	// deployment versions that are unreachable should be deleted by the controller.
-	//
-	// RampPercentage should only be set for DeprecatedVersions when rollout
-	// strategy is set to manual.
-	DeprecatedVersions []*WorkerDeploymentVersion `json:"deprecatedVersions,omitempty"`
+	DeprecatedVersions []*DeprecatedWorkerDeploymentVersion `json:"deprecatedVersions,omitempty"`
 
 	// VersionConflictToken prevents concurrent modifications to the deployment status.
 	// It ensures reconciliation operations don't inadvertently override changes made
@@ -167,11 +162,8 @@ type TaskQueue struct {
 	Name string `json:"name"`
 }
 
-type WorkerDeploymentVersion struct {
-	// Healthy indicates whether the deployment version is healthy.
-	// +optional
-	HealthySince *metav1.Time `json:"healthySince"`
-
+// BaseWorkerDeploymentVersion contains fields common to all worker deployment version types
+type BaseWorkerDeploymentVersion struct {
 	// The string representation of the deployment version.
 	// Currently, this is always `deployment_name.build_id`.
 	VersionID string `json:"versionID"`
@@ -180,20 +172,9 @@ type WorkerDeploymentVersion struct {
 	// be eligible to receive tasks from the Temporal server.
 	Status VersionStatus `json:"status"`
 
-	// RampPercentage is the percentage of new workflow executions that are
-	// configured to start on this version.
-	//
-	// Acceptable range is [0,100].
-	RampPercentage *float32 `json:"rampPercentage,omitempty"`
-
-	// DrainedSince is the time at which the version
-	// became drained.
+	// Healthy indicates whether the deployment version is healthy.
 	// +optional
-	DrainedSince *metav1.Time `json:"drainedSince"`
-
-	// RampingSince is time when the version first started ramping.
-	// +optional
-	RampingSince *metav1.Time `json:"rampingSince"`
+	HealthySince *metav1.Time `json:"healthySince"`
 
 	// A pointer to the version's managed k8s deployment.
 	// +optional
@@ -202,13 +183,48 @@ type WorkerDeploymentVersion struct {
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
+	// ManagedBy is the identity of the client that is managing the rollout of this version.
+	// +optional
+	ManagedBy string `json:"managedBy,omitempty"`
+}
+
+// CurrentWorkerDeploymentVersion represents a worker deployment version that is currently
+// the default version for new workflow executions.
+type CurrentWorkerDeploymentVersion struct {
+	BaseWorkerDeploymentVersion `json:",inline"`
+	// No additional fields - current versions are already validated and promoted
+}
+
+// TargetWorkerDeploymentVersion represents a worker deployment version that is the desired
+// next version. It may be in various states during its lifecycle.
+type TargetWorkerDeploymentVersion struct {
+	BaseWorkerDeploymentVersion `json:",inline"`
+
 	// A TestWorkflow is used to validate the deployment version before making it the default.
 	// +optional
 	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
 
-	// ManagedBy is the identity of the client that is managing the rollout of this version.
+	// RampPercentage is the percentage of new workflow executions that are
+	// configured to start on this version. Only set when Status is VersionStatusRamping.
+	//
+	// Acceptable range is [0,100].
+	RampPercentage *float32 `json:"rampPercentage,omitempty"`
+
+	// RampingSince is time when the version first started ramping.
+	// Only set when Status is VersionStatusRamping.
 	// +optional
-	ManagedBy string `json:"managedBy,omitempty"`
+	RampingSince *metav1.Time `json:"rampingSince"`
+}
+
+// DeprecatedWorkerDeploymentVersion represents a worker deployment version that is no longer
+// the default and is being phased out.
+type DeprecatedWorkerDeploymentVersion struct {
+	BaseWorkerDeploymentVersion `json:",inline"`
+
+	// DrainedSince is the time at which the version became drained.
+	// Only set when Status is VersionStatusDrained.
+	// +optional
+	DrainedSince *metav1.Time `json:"drainedSince"`
 }
 
 // DefaultVersionUpdateStrategy describes how to cut over new workflow executions
@@ -291,7 +307,7 @@ type QueueStatistics struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
-//+kubebuilder:printcolumn:name="Default",type="string",JSONPath=".status.defaultVersion.versionID",description="Default Version for new workflows"
+//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.versionID",description="Current Version for new workflows"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.versionID",description="Version of the current worker template"
 //+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
