@@ -108,8 +108,9 @@ type TemporalWorkerDeploymentStatus struct {
 	TargetVersion *TargetWorkerDeploymentVersion `json:"targetVersion"`
 
 	// CurrentVersion is the version that is currently registered with
-	// Temporal as the current version of its worker deployment. This must never be nil.
-	CurrentVersion *CurrentWorkerDeploymentVersion `json:"currentVersion"`
+	// Temporal as the current version of its worker deployment. This will be nil
+	// during initial bootstrap until a version is registered and set as current.
+	CurrentVersion *CurrentWorkerDeploymentVersion `json:"currentVersion,omitempty"`
 
 	// RampingVersion is the version that is currently registered with
 	// Temporal as the ramping version of its worker deployment. The controller
@@ -124,7 +125,7 @@ type TemporalWorkerDeploymentStatus struct {
 	// VersionConflictToken prevents concurrent modifications to the deployment status.
 	// It ensures reconciliation operations don't inadvertently override changes made
 	// by external systems while processing is underway.
-	VersionConflictToken []byte `json:"versionConflictToken"`
+	VersionConflictToken []byte `json:"versionConflictToken,omitempty"`
 
 	// LastModifierIdentity is the identity of the client that most recently modified the worker deployment.
 	// +optional

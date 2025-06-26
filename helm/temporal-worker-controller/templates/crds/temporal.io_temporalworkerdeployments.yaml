@@ -3988,9 +3988,7 @@ spec:
                 format: byte
                 type: string
             required:
-            - currentVersion
             - targetVersion
-            - versionConflictToken
             type: object
         type: object
     served: true
