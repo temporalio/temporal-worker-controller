@@ -183,10 +183,6 @@ type BaseWorkerDeploymentVersion struct {
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
-	// A TestWorkflow is used to validate the deployment version before making it the default.
-	// +optional
-	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
-
 	// ManagedBy is the identity of the client that is managing the rollout of this version.
 	// +optional
 	ManagedBy string `json:"managedBy,omitempty"`
@@ -203,6 +199,10 @@ type CurrentWorkerDeploymentVersion struct {
 // next version. It may be in various states during its lifecycle.
 type TargetWorkerDeploymentVersion struct {
 	BaseWorkerDeploymentVersion `json:",inline"`
+
+	// A TestWorkflow is used to validate the deployment version before making it the default.
+	// +optional
+	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
 
 	// RampPercentage is the percentage of new workflow executions that are
 	// configured to start on this version. Only set when Status is VersionStatusRamping.
