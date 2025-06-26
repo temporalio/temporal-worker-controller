@@ -75,7 +75,19 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
-	workerDeploy.Default()
+	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
+		l.Error(err, "TemporalWorkerDeployment defaulter failed")
+		return ctrl.Result{}, err
+	}
+
+	// TODO(carlydf): Handle warnings once we have some, handle ValidateUpdate once it is different from ValidateCreate
+	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
+		l.Error(err, "invalid TemporalWorkerDeployment")
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: 5 * time.Minute, // user needs time to fix this, if it changes, it will be re-queued immediately
+		}, nil
+	}
 
 	// Verify that a connection is configured
 	if workerDeploy.Spec.WorkerOptions.TemporalConnection == "" {
@@ -133,7 +145,10 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	//                 (defaults were already set above, but have to be set again after status update)
-	workerDeploy.Default()
+	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
+		l.Error(err, "TemporalWorkerDeployment defaulter failed")
+		return ctrl.Result{}, err
+	}
 
 	// Generate a plan to get to desired spec from current status
 	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec)
