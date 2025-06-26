@@ -298,7 +298,7 @@ func NewDeploymentWithOwnerRef(
 
 func ValidateTemporalWorkerDeployment(w *temporaliov1alpha1.TemporalWorkerDeployment) error {
 	if n := w.GetName(); len(n) > maxTemporalWorkerDeploymentNameLen {
-		return errors.New(fmt.Sprintf("name %s cannot be longer than %d", n, maxTemporalWorkerDeploymentNameLen))
+		return fmt.Errorf("name %s cannot be longer than %d", n, maxTemporalWorkerDeploymentNameLen)
 	}
 	return nil
 }
