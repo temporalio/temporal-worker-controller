@@ -14,6 +14,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
@@ -81,17 +82,21 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			ctx := context.Background()
 			webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
 
-			warnings, err := webhook.ValidateCreate(ctx, tc.obj)
+			assertAdmission := func(warnings admission.Warnings, err error) {
+				if tc.errorMsg != "" {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tc.errorMsg)
+				} else {
+					require.NoError(t, err)
+				}
 
-			if tc.errorMsg != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.errorMsg)
-			} else {
-				require.NoError(t, err)
+				// Warnings should always be nil for this implementation
+				assert.Nil(t, warnings)
 			}
 
-			// Warnings should always be nil for this implementation
-			assert.Nil(t, warnings)
+			// Verify that create and update enforce the same rules
+			assertAdmission(webhook.ValidateCreate(ctx, tc.obj))
+			assertAdmission(webhook.ValidateUpdate(ctx, nil, tc.obj))
 		})
 	}
 }
