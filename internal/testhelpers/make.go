@@ -51,7 +51,11 @@ func MakeTWD(
 }
 
 // MakePodSpec creates a pod spec. Feel free to add parameters as needed.
-func MakePodSpec(containers []v1.Container, labels map[string]string) v1.PodTemplateSpec {
+func MakePodSpec(containers []v1.Container, labels map[string]string, taskQueue string) v1.PodTemplateSpec {
+	for i := range containers {
+		containers[i].Env = append(containers[i].Env, v1.EnvVar{Name: "TEMPORAL_TASK_QUEUE", Value: taskQueue})
+	}
+
 	return v1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: labels,
@@ -63,11 +67,11 @@ func MakePodSpec(containers []v1.Container, labels map[string]string) v1.PodTemp
 }
 
 func MakeTWDWithImage(imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
-	return MakeTWD(1, MakePodSpec([]v1.Container{{Image: imageName}}, nil), nil, nil, nil)
+	return MakeTWD(1, MakePodSpec([]v1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
 }
 
 func MakeTWDWithName(name string) *temporaliov1alpha1.TemporalWorkerDeployment {
-	twd := MakeTWD(1, MakePodSpec(nil, nil), nil, nil, nil)
+	twd := MakeTWD(1, MakePodSpec(nil, nil, ""), nil, nil, nil)
 	twd.ObjectMeta.Name = name
 	twd.Name = name
 	return twd

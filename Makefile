@@ -103,19 +103,8 @@ test: manifests generate fmt vet envtest ## Run tests.
 
 .PHONY: test-integration
 test-integration: manifests generate fmt vet envtest ## Run integration tests against local Temporal dev server.
-	# @echo "Starting Temporal dev server..."
-	# @docker run -d --name temporal-dev-test -p 7233:7233 temporalio/auto-setup:1.22.3 || true
-	# @sleep 10
 	@echo "Running integration tests..."
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -v ./tests -run TestIntegration
-	@echo "Cleaning up Temporal dev server..."
-	@docker stop temporal-dev-test || true
-	@docker rm temporal-dev-test || true
-
-.PHONY: test-integration-clean
-test-integration-clean: ## Clean up any leftover Temporal dev server containers from integration tests.
-	@docker stop temporal-dev-test || true
-	@docker rm temporal-dev-test || true
 
 ##@ Build
 
