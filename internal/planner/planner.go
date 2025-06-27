@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -338,39 +339,65 @@ func getVersionConfigDiff(
 		vcfg.SetCurrent = true
 		return vcfg
 	case temporaliov1alpha1.UpdateProgressive:
-		// Determine the correct percentage ramp
-		var (
-			healthyDuration    time.Duration
-			currentRamp        float32
-			totalPauseDuration = healthyDuration
-		)
-		if status.TargetVersion.RampingSince != nil {
-			healthyDuration = time.Since(status.TargetVersion.RampingSince.Time)
-			// TODO(carlydf): Is it important that the version spends x time at each step % ?
-			// Currently, if 1% ramp is set, and then multiple reconcile loops error so the next steps aren't set,
-			// the version could skip straight from 1% to current if the error-ing period > totalPauseDuration
-		}
-		for _, s := range strategy.Steps {
-			if s.RampPercentage != 0 { // TODO(carlydf): Support setting any ramp in [0,100]
-				currentRamp = s.RampPercentage
-			}
-			totalPauseDuration += s.PauseDuration.Duration
-			if healthyDuration < totalPauseDuration {
-				// We're still in this step's pause duration
+		return handleProgressiveRollout(strategy.Steps, time.Now(), status.RampLastModifiedAt, status.TargetVersion.RampPercentage, vcfg)
+	}
 
-				// If this step's ramp percentage is the same as the target version's ramp percentage, do nothing
-				if status.TargetVersion.RampPercentage != nil && currentRamp == *status.TargetVersion.RampPercentage {
-					return nil
-				}
+	return nil
+}
 
-				vcfg.RampPercentage = currentRamp
-				return vcfg
-			}
-		}
-		// We've progressed through all steps; it should now be safe to update the default version
+// handleProgressiveRollout handles the progressive rollout strategy logic
+func handleProgressiveRollout(
+	steps []temporaliov1alpha1.RolloutStep,
+	currentTime time.Time, // avoid calling time.Now() inside function to make it easier to test
+	rampLastModifiedAt *metav1.Time,
+	targetRampPercentage *float32,
+	vcfg *VersionConfig,
+) *VersionConfig {
+	// Set current right away if there are no steps.
+	// This is equivalent to the AllAtOnce cutover strategy.
+	if len(steps) == 0 {
 		vcfg.SetCurrent = true
 		return vcfg
 	}
 
+	// Get the currently active step
+	i := getCurrentStepIndex(steps, targetRampPercentage)
+	currentStep := steps[i]
+
+	// If this is the first step and there is no ramp percentage set, set the ramp percentage to the step's ramp percentage
+	if targetRampPercentage == nil || *targetRampPercentage != currentStep.RampPercentage {
+		vcfg.RampPercentage = currentStep.RampPercentage
+		return vcfg
+	}
+
+	// Move to the next step if it has been long enough since the last update
+	if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
+		if i < len(steps)-1 {
+			vcfg.RampPercentage = steps[i+1].RampPercentage
+			return vcfg
+		} else {
+			vcfg.SetCurrent = true
+			return vcfg
+		}
+	}
+
+	// In all other cases, do nothing
 	return nil
+}
+
+func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPercentage *float32) int {
+	if targetRampPercentage == nil {
+		return 0
+	}
+
+	var result int
+	for i, s := range steps {
+		// Break if ramp percentage is greater than current (use last index)
+		if s.RampPercentage > *targetRampPercentage {
+			break
+		}
+		result = i
+	}
+
+	return result
 }

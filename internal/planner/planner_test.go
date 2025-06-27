@@ -11,13 +11,13 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testlogr"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -844,6 +844,9 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				RampLastModifiedAt: &metav1.Time{
+					Time: time.Now().Add(-30 * time.Minute),
+				},
 				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -953,16 +956,14 @@ func TestGetVersionConfigDiff(t *testing.T) {
 }
 
 func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
-	testCases := []struct {
-		name              string
+	testCases := map[string]struct {
 		strategy          temporaliov1alpha1.RolloutStrategy
 		status            *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 		expectConfig      bool
 		expectSetCurrent  bool
 		expectRampPercent float32
 	}{
-		{
-			name: "progressive rollout completes all steps",
+		"progressive rollout completes last step": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
@@ -972,6 +973,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				RampLastModifiedAt: &metav1.Time{
+					Time: time.Now().Add(-4 * time.Hour), // Past all steps
+				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -989,13 +993,13 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
+					RampPercentage: float32Ptr(75),
 				},
 			},
 			expectConfig:     true,
 			expectSetCurrent: true, // Should become current after all steps
 		},
-		{
-			name: "progressive rollout with nil RampingSince",
+		"progressive rollout with nil RampingSince": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
@@ -1003,6 +1007,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				RampLastModifiedAt: nil,
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1022,8 +1027,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			expectRampPercent: 25, // First step
 			expectSetCurrent:  false,
 		},
-		{
-			name: "progressive rollout at exact step boundary",
+		"progressive rollout at exact step boundary": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
@@ -1032,6 +1036,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				RampLastModifiedAt: &metav1.Time{
+					Time: time.Now().Add(-1 * time.Hour), // Exactly at step boundary
+				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1045,16 +1052,16 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						HealthySince: &metav1.Time{Time: time.Now()},
 					},
 					RampingSince: &metav1.Time{
-						Time: time.Now().Add(-2 * time.Hour), // Exactly at step boundary
+						Time: time.Now().Add(-4 * time.Hour),
 					},
+					RampPercentage: float32Ptr(25),
 				},
 			},
 			expectConfig:      true,
-			expectRampPercent: 0,    // When set as current, ramp is 0
-			expectSetCurrent:  true, // At exactly 2 hours, it sets as current
+			expectRampPercent: 50,    // When set as current, ramp is 0
+			expectSetCurrent:  false, // At exactly 2 hours, it sets as current
 		},
-		{
-			name: "progressive rollout with zero ramp percentage step",
+		"progressive rollout with zero ramp percentage step": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
@@ -1064,6 +1071,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				RampLastModifiedAt: &metav1.Time{
+					Time: time.Now().Add(-45 * time.Minute), // In second step
+				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1085,8 +1095,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			expectRampPercent: 25, // Should maintain previous ramp value
 			expectSetCurrent:  false,
 		},
-		{
-			name: "progressive rollout just past exact boundary",
+		"progressive rollout just past exact boundary": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
@@ -1095,6 +1104,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				RampLastModifiedAt: &metav1.Time{
+					Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
+				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1110,6 +1122,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
+					RampPercentage: float32Ptr(50),
 				},
 			},
 			expectConfig:      true,
@@ -1118,9 +1131,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			config := getVersionConfigDiff(logr.Discard(), tc.strategy, tc.status, []byte("token"))
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			config := getVersionConfigDiff(testlogr.New(t), tc.strategy, tc.status, []byte("token"))
 			assert.Equal(t, tc.expectConfig, config != nil, "unexpected version config presence")
 			if tc.expectConfig {
 				assert.Equal(t, tc.expectSetCurrent, config.SetCurrent, "unexpected set default value")
@@ -1128,6 +1141,109 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					assert.Equal(t, tc.expectRampPercent, config.RampPercentage, "unexpected ramp percentage")
 				}
 			}
+		})
+	}
+}
+
+func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
+	testCases := map[string]struct {
+		steps                 []temporaliov1alpha1.RolloutStep
+		reconcileFreq         time.Duration
+		initialRamp           *float32
+		expectRamps           []float32
+		expectRolloutDuration time.Duration
+	}{
+		"controller keeping up": {
+			steps: []temporaliov1alpha1.RolloutStep{
+				rolloutStep(25, 5*time.Second),
+				rolloutStep(50, 10*time.Second),
+				rolloutStep(75, 30*time.Second),
+			},
+			reconcileFreq:         time.Second,
+			expectRamps:           []float32{25, 50, 75, 100},
+			expectRolloutDuration: 5*time.Second + 10*time.Second + 30*time.Second + 3*time.Second,
+		},
+		"controller reconciles slower than step durations": {
+			steps: []temporaliov1alpha1.RolloutStep{
+				rolloutStep(25, 5*time.Second),
+				rolloutStep(50, 10*time.Second),
+				rolloutStep(75, 30*time.Second),
+			},
+			reconcileFreq:         time.Minute,
+			expectRamps:           []float32{25, 50, 75, 100},
+			expectRolloutDuration: 3 * time.Minute,
+		},
+		"pick up ramping from last step that is <= current ramp": {
+			steps: []temporaliov1alpha1.RolloutStep{
+				rolloutStep(5, 10*time.Second),
+				rolloutStep(10, 10*time.Second),
+				rolloutStep(25, 10*time.Second),
+				rolloutStep(50, 10*time.Second),
+			},
+			reconcileFreq: time.Second,
+			// Simulate a ramp value set manually via Temporal CLI
+			initialRamp:           float32Ptr(20),
+			expectRamps:           []float32{10, 25, 50, 100},
+			expectRolloutDuration: 30*time.Second + 3*time.Second,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			var (
+				diffs                 []float32
+				testStart             = time.Now()
+				testTimeout           = testStart.Add(5 * time.Minute)
+				currentRampPercentage *float32
+				now                   time.Time
+				rampLastModified      *metav1.Time
+			)
+
+			// Simulate an initial ramping value that is different from existing steps in the rollout.
+			// This could happen if the progressive rollout spec was updated, or if the user modified
+			// the current ramp value externally, e.g. via the Temporal CLI/UI.
+			if tc.initialRamp != nil {
+				currentRampPercentage = tc.initialRamp
+				// Imitate the "worst case" of ramp having just been updated.
+				rampLastModified = &metav1.Time{Time: now}
+			}
+
+			for ct := testStart; ct.Before(testTimeout); ct = ct.Add(tc.reconcileFreq) {
+				now = ct
+				currentTime := metav1.NewTime(ct)
+
+				config := handleProgressiveRollout(
+					tc.steps,
+					currentTime.Time,
+					rampLastModified,
+					currentRampPercentage,
+					&VersionConfig{},
+				)
+				if config == nil {
+					continue
+				}
+
+				// Keep track of the diff
+				if config.SetCurrent {
+					diffs = append(diffs, 100)
+				} else {
+					diffs = append(diffs, config.RampPercentage)
+				}
+
+				// Set ramp value and last modified time if it was updated (simulates what Temporal server would return on next reconcile loop)
+				if config.RampPercentage != 0 {
+					rampLastModified = &currentTime
+					currentRampPercentage = &config.RampPercentage
+				}
+
+				// Exit early if ramping is complete
+				if config.SetCurrent {
+					break
+				}
+			}
+
+			assert.Equal(t, tc.expectRamps, diffs)
+			assert.Equal(t, tc.expectRolloutDuration, now.Sub(testStart))
 		})
 	}
 }
@@ -1551,5 +1667,20 @@ func createDeploymentWithReplicas(replicas int32) *appsv1.Deployment {
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 		},
+	}
+}
+
+func float32Ptr(v float32) *float32 {
+	return &v
+}
+
+func metav1Duration(d time.Duration) metav1.Duration {
+	return metav1.Duration{Duration: d}
+}
+
+func rolloutStep(ramp float32, d time.Duration) temporaliov1alpha1.RolloutStep {
+	return temporaliov1alpha1.RolloutStep{
+		RampPercentage: ramp,
+		PauseDuration:  metav1Duration(d),
 	}
 }

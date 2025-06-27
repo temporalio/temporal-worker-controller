@@ -7,15 +7,15 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"time"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-	"time"
 )
 
 const (
@@ -75,19 +75,45 @@ func (r *TemporalWorkerDeployment) validateForUpdateOrCreate(ctx context.Context
 
 	var allErrs field.ErrorList
 
-	if len(dep.Name) > maxTemporalWorkerDeploymentNameLen {
+	if len(dep.GetName()) > maxTemporalWorkerDeploymentNameLen {
 		allErrs = append(allErrs,
-			field.Invalid(field.NewPath("name"), dep.Name, fmt.Sprintf("cannot be more than %d characters", maxTemporalWorkerDeploymentNameLen)),
+			field.Invalid(field.NewPath("metadata.name"), dep.Name, fmt.Sprintf("cannot be more than %d characters", maxTemporalWorkerDeploymentNameLen)),
 		)
+	}
+
+	if dep.Spec.RolloutStrategy.Strategy == UpdateProgressive {
+		rolloutSteps := dep.Spec.RolloutStrategy.Steps
+		if len(rolloutSteps) == 0 {
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.cutover.steps"), rolloutSteps, "steps are required for Progressive cutover"),
+			)
+		}
+		var lastRamp float32
+		for i, s := range rolloutSteps {
+			// Check duration >= 30s
+			if s.PauseDuration.Duration < 30*time.Second {
+				allErrs = append(allErrs,
+					field.Invalid(field.NewPath(fmt.Sprintf("spec.cutover.steps[%d].pauseDuration", i)), s.PauseDuration.Duration.String(), "pause duration must be at least 30s"),
+				)
+			}
+
+			// Check ramp value greater than last
+			if s.RampPercentage <= lastRamp {
+				allErrs = append(allErrs,
+					field.Invalid(field.NewPath(fmt.Sprintf("spec.cutover.steps[%d].rampPercentage", i)), s.RampPercentage, "rampPercentage must increase between each step"),
+				)
+			}
+			lastRamp = s.RampPercentage
+		}
 	}
 
 	if len(allErrs) > 0 {
-		return nil, apierrors.NewInvalid(
-			schema.GroupKind{Group: "your.group", Kind: "TemporalWorkerDeployment"},
-			dep.Name,
-			allErrs,
-		)
+		return nil, newInvalidErr(dep, allErrs)
 	}
 
 	return nil, nil
+}
+
+func newInvalidErr(dep *TemporalWorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
+	return apierrors.NewInvalid(dep.GroupVersionKind().GroupKind(), dep.GetName(), errs)
 }

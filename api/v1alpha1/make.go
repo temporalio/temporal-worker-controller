@@ -70,3 +70,7 @@ func MakeTWDWithName(name string) *TemporalWorkerDeployment {
 	twd.Name = name
 	return twd
 }
+
+func ModifyObj[T any](twd T, callback func(obj T) T) T {
+	return callback(twd)
+}

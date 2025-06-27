@@ -41,6 +41,7 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 	status.TargetVersion = m.mapTargetWorkerDeploymentVersion(targetVersionID)
 	if status.TargetVersion != nil && m.temporalState.RampingVersionID == targetVersionID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
+		status.RampLastModifiedAt = m.temporalState.RampLastModifiedAt
 		rampPercentage := m.temporalState.RampPercentage
 		status.TargetVersion.RampPercentage = &rampPercentage
 	}
