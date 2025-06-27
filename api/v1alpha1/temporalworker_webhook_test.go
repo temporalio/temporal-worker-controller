@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package v1alpha1
+package v1alpha1_test
 
 import (
 	"context"
@@ -14,6 +14,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
@@ -22,10 +25,10 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 		errorMsg string
 	}{
 		"valid temporal worker deployment": {
-			obj: MakeTWDWithName("valid-worker"),
+			obj: testhelpers.MakeTWDWithName("valid-worker"),
 		},
 		"temporal worker deployment with name too long": {
-			obj:      MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters"),
+			obj:      testhelpers.MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters"),
 			errorMsg: "cannot be more than 63 characters",
 		},
 		"invalid object type": {
@@ -37,17 +40,17 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "expected a TemporalWorkerDeployment",
 		},
 		"missing rollout steps": {
-			obj: ModifyObj(MakeTWDWithName("prog-rollout-missing-steps"), func(obj *TemporalWorkerDeployment) *TemporalWorkerDeployment {
-				obj.Spec.RolloutStrategy.Strategy = UpdateProgressive
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-missing-steps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = nil
 				return obj
 			}),
 			errorMsg: "spec.cutover.steps: Invalid value: []v1alpha1.RolloutStep(nil): steps are required for Progressive cutover",
 		},
 		"ramp value for step <= previous step": {
-			obj: ModifyObj(MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *TemporalWorkerDeployment) *TemporalWorkerDeployment {
-				obj.Spec.RolloutStrategy.Strategy = UpdateProgressive
-				obj.Spec.RolloutStrategy.Steps = []RolloutStep{
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
+				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
 					{5, metav1.Duration{Duration: time.Minute}},
 					{10, metav1.Duration{Duration: time.Minute}},
 					{9, metav1.Duration{Duration: time.Minute}},
@@ -60,9 +63,9 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "[spec.cutover.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.cutover.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
 		},
 		"pause duration < 30s": {
-			obj: ModifyObj(MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *TemporalWorkerDeployment) *TemporalWorkerDeployment {
-				obj.Spec.RolloutStrategy.Strategy = UpdateProgressive
-				obj.Spec.RolloutStrategy.Steps = []RolloutStep{
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
+				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
 					{10, metav1.Duration{Duration: time.Minute}},
 					{25, metav1.Duration{Duration: 10 * time.Second}},
 					{50, metav1.Duration{Duration: time.Minute}},
@@ -76,7 +79,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			webhook := &TemporalWorkerDeployment{}
+			webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
 
 			warnings, err := webhook.ValidateCreate(ctx, tc.obj)
 
@@ -94,38 +97,32 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 }
 
 func TestTemporalWorkerDeployment_ValidateUpdate(t *testing.T) {
-	tests := []struct {
-		name        string
-		oldObj      runtime.Object
-		newObj      runtime.Object
-		expectError bool
-		errorMsg    string
+	tests := map[string]struct {
+		oldObj   runtime.Object
+		newObj   runtime.Object
+		errorMsg string
 	}{
-		{
-			name:        "valid update",
-			oldObj:      nil,
-			newObj:      MakeTWDWithName("valid-worker"),
-			expectError: false,
+		"valid update": {
+			oldObj: nil,
+			newObj: testhelpers.MakeTWDWithName("valid-worker"),
 		},
-		{
-			name:        "update with name too long",
-			oldObj:      nil,
-			newObj:      MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters"),
-			expectError: true,
-			errorMsg:    "cannot be more than 63 characters",
+		"update with name too long": {
+			oldObj:   nil,
+			newObj:   testhelpers.MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters"),
+			errorMsg: "cannot be more than 63 characters",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			webhook := &TemporalWorkerDeployment{}
+			webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
 
-			warnings, err := webhook.ValidateUpdate(ctx, tt.oldObj, tt.newObj)
+			warnings, err := webhook.ValidateUpdate(ctx, tc.oldObj, tc.newObj)
 
-			if tt.expectError {
+			if tc.errorMsg != "" {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorMsg)
+				assert.Contains(t, err.Error(), tc.errorMsg)
 			} else {
 				require.NoError(t, err)
 			}
@@ -138,9 +135,9 @@ func TestTemporalWorkerDeployment_ValidateUpdate(t *testing.T) {
 
 func TestTemporalWorkerDeployment_ValidateDelete(t *testing.T) {
 	ctx := context.Background()
-	webhook := &TemporalWorkerDeployment{}
+	webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
 
-	obj := &TemporalWorkerDeployment{
+	obj := &temporaliov1alpha1.TemporalWorkerDeployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "worker",
 		},

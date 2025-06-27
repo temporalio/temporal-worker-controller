@@ -73,16 +73,20 @@ func (r *TemporalWorkerDeployment) validateForUpdateOrCreate(ctx context.Context
 		return nil, apierrors.NewBadRequest("expected a TemporalWorkerDeployment")
 	}
 
+	return validateForUpdateOrCreate(nil, dep)
+}
+
+func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 
-	if len(dep.GetName()) > maxTemporalWorkerDeploymentNameLen {
+	if len(new.GetName()) > maxTemporalWorkerDeploymentNameLen {
 		allErrs = append(allErrs,
-			field.Invalid(field.NewPath("metadata.name"), dep.Name, fmt.Sprintf("cannot be more than %d characters", maxTemporalWorkerDeploymentNameLen)),
+			field.Invalid(field.NewPath("metadata.name"), new.GetName(), fmt.Sprintf("cannot be more than %d characters", maxTemporalWorkerDeploymentNameLen)),
 		)
 	}
 
-	if dep.Spec.RolloutStrategy.Strategy == UpdateProgressive {
-		rolloutSteps := dep.Spec.RolloutStrategy.Steps
+	if new.Spec.RolloutStrategy.Strategy == UpdateProgressive {
+		rolloutSteps := new.Spec.RolloutStrategy.Steps
 		if len(rolloutSteps) == 0 {
 			allErrs = append(allErrs,
 				field.Invalid(field.NewPath("spec.cutover.steps"), rolloutSteps, "steps are required for Progressive cutover"),
@@ -108,7 +112,7 @@ func (r *TemporalWorkerDeployment) validateForUpdateOrCreate(ctx context.Context
 	}
 
 	if len(allErrs) > 0 {
-		return nil, newInvalidErr(dep, allErrs)
+		return nil, newInvalidErr(new, allErrs)
 	}
 
 	return nil, nil
