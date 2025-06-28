@@ -3854,6 +3854,9 @@ spec:
                 type: array
               lastModifierIdentity:
                 type: string
+              rampLastModifiedAt:
+                format: date-time
+                type: string
               rampingVersion:
                 properties:
                   deployment:

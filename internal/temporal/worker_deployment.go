@@ -36,6 +36,7 @@ type TemporalWorkerState struct {
 	RampPercentage       float32
 	// RampingSince is the time when the current ramping version was set.
 	RampingSince         *metav1.Time
+	RampLastModifiedAt   *metav1.Time
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
 }
@@ -79,8 +80,12 @@ func GetWorkerDeploymentState(
 
 	// Set ramping since time if applicable
 	if routingConfig.RampingVersion != "" {
-		rt := metav1.NewTime(routingConfig.RampingVersionChangedTime)
-		state.RampingSince = &rt
+		var (
+			rampingSinceTime   = metav1.NewTime(routingConfig.RampingVersionChangedTime)
+			lastRampUpdateTime = metav1.NewTime(workerDeploymentInfo.RoutingConfig.RampingVersionPercentageChangedTime)
+		)
+		state.RampingSince = &rampingSinceTime
+		state.RampLastModifiedAt = &lastRampUpdateTime
 	}
 
 	// Process each version
