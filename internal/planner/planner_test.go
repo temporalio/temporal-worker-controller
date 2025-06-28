@@ -1186,6 +1186,18 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 			expectRamps:           []float32{10, 25, 50, 100},
 			expectRolloutDuration: 30*time.Second + 3*time.Second,
 		},
+		"pick up ramping from first step if current ramp less than all steps": {
+			steps: []temporaliov1alpha1.RolloutStep{
+				rolloutStep(10, 10*time.Second),
+				rolloutStep(25, 10*time.Second),
+				rolloutStep(50, 10*time.Second),
+			},
+			reconcileFreq: time.Second,
+			// Simulate a ramp value set manually via Temporal CLI
+			initialRamp:           float32Ptr(1),
+			expectRamps:           []float32{10, 25, 50, 100},
+			expectRolloutDuration: 30*time.Second + 3*time.Second,
+		},
 	}
 
 	for name, tc := range testCases {
