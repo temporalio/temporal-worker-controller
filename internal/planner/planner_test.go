@@ -844,9 +844,6 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				RampLastModifiedAt: &metav1.Time{
-					Time: time.Now().Add(-30 * time.Minute),
-				},
 				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -856,6 +853,9 @@ func TestGetVersionConfigDiff(t *testing.T) {
 						},
 					},
 					RampPercentage: nil,
+					RampLastModifiedAt: &metav1.Time{
+						Time: time.Now().Add(-30 * time.Minute),
+					},
 				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -974,9 +974,6 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				RampLastModifiedAt: &metav1.Time{
-					Time: time.Now().Add(-4 * time.Hour), // Past all steps
-				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -995,6 +992,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
 					RampPercentage: float32Ptr(75),
+					RampLastModifiedAt: &metav1.Time{
+						Time: time.Now().Add(-4 * time.Hour), // Past all steps
+					},
 				},
 			},
 			expectConfig:     true,
@@ -1008,7 +1008,6 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				RampLastModifiedAt: nil,
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1021,7 +1020,8 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Status:       temporaliov1alpha1.VersionStatusInactive,
 						HealthySince: &metav1.Time{Time: time.Now()},
 					},
-					RampingSince: nil, // Not ramping yet
+					RampingSince:       nil, // Not ramping yet
+					RampLastModifiedAt: nil,
 				},
 			},
 			expectConfig:      true,
@@ -1037,9 +1037,6 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				RampLastModifiedAt: &metav1.Time{
-					Time: time.Now().Add(-1 * time.Hour), // Exactly at step boundary
-				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1056,6 +1053,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Time: time.Now().Add(-4 * time.Hour),
 					},
 					RampPercentage: float32Ptr(25),
+					RampLastModifiedAt: &metav1.Time{
+						Time: time.Now().Add(-1 * time.Hour), // Exactly at step boundary
+					},
 				},
 			},
 			expectConfig:      true,
@@ -1072,9 +1072,6 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				RampLastModifiedAt: &metav1.Time{
-					Time: time.Now().Add(-45 * time.Minute), // In second step
-				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1088,6 +1085,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						HealthySince: &metav1.Time{Time: time.Now()},
 					},
 					RampingSince: &metav1.Time{
+						Time: time.Now().Add(-45 * time.Minute), // In second step
+					},
+					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-45 * time.Minute), // In second step
 					},
 				},
@@ -1105,9 +1105,6 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				RampLastModifiedAt: &metav1.Time{
-					Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
-				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
@@ -1124,6 +1121,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
 					RampPercentage: float32Ptr(50),
+					RampLastModifiedAt: &metav1.Time{
+						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
+					},
 				},
 			},
 			expectConfig:      true,

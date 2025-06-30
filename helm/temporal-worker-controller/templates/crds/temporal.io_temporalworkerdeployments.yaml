@@ -3854,9 +3854,6 @@ spec:
                 type: array
               lastModifierIdentity:
                 type: string
-              rampLastModifiedAt:
-                format: date-time
-                type: string
               rampingVersion:
                 properties:
                   deployment:
@@ -3881,6 +3878,9 @@ spec:
                     format: date-time
                     type: string
                   managedBy:
+                    type: string
+                  rampLastModifiedAt:
+                    format: date-time
                     type: string
                   rampPercentage:
                     type: number
@@ -3946,6 +3946,9 @@ spec:
                     format: date-time
                     type: string
                   managedBy:
+                    type: string
+                  rampLastModifiedAt:
+                    format: date-time
                     type: string
                   rampPercentage:
                     type: number

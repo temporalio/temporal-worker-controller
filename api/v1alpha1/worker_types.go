@@ -118,10 +118,6 @@ type TemporalWorkerDeploymentStatus struct {
 	// TargetVersion has been promoted to the current version, this should be nil.
 	RampingVersion *TargetWorkerDeploymentVersion `json:"rampingVersion,omitempty"`
 
-	// RampLastModifiedAt is the time when the ramp percentage was last changed.
-	// +optional
-	RampLastModifiedAt *metav1.Time `json:"rampLastModifiedAt,omitempty"`
-
 	// DeprecatedVersions are deployment versions that are no longer the default. Any
 	// deployment versions that are unreachable should be deleted by the controller.
 	DeprecatedVersions []*DeprecatedWorkerDeploymentVersion `json:"deprecatedVersions,omitempty"`
@@ -219,6 +215,10 @@ type TargetWorkerDeploymentVersion struct {
 	// Only set when Status is VersionStatusRamping.
 	// +optional
 	RampingSince *metav1.Time `json:"rampingSince"`
+
+	// RampLastModifiedAt is the time when the ramp percentage was last changed.
+	// +optional
+	RampLastModifiedAt *metav1.Time `json:"rampLastModifiedAt,omitempty"`
 }
 
 // DeprecatedWorkerDeploymentVersion represents a worker deployment version that is no longer

@@ -339,7 +339,7 @@ func getVersionConfigDiff(
 		vcfg.SetCurrent = true
 		return vcfg
 	case temporaliov1alpha1.UpdateProgressive:
-		return handleProgressiveRollout(strategy.Steps, time.Now(), status.RampLastModifiedAt, status.TargetVersion.RampPercentage, vcfg)
+		return handleProgressiveRollout(strategy.Steps, time.Now(), status.TargetVersion.RampLastModifiedAt, status.TargetVersion.RampPercentage, vcfg)
 	}
 
 	return nil
