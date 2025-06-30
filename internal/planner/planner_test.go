@@ -855,7 +855,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 							Time: time.Now().Add(-30 * time.Minute),
 						},
 					},
-					RampPercentage: func() *float32 { f := float32(0); return &f }(),
+					RampPercentage: nil,
 				},
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -864,9 +864,10 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					},
 				},
 			},
-			conflictToken:    []byte("token"),
-			expectConfig:     true,
-			expectSetCurrent: false,
+			conflictToken:     []byte("token"),
+			expectConfig:      true,
+			expectRampPercent: float32Ptr(25),
+			expectSetCurrent:  false,
 		},
 		{
 			name: "rollback scenario - target equals current but different version is ramping",

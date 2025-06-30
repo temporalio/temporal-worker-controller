@@ -364,8 +364,18 @@ func handleProgressiveRollout(
 	i := getCurrentStepIndex(steps, targetRampPercentage)
 	currentStep := steps[i]
 
-	// If this is the first step and there is no ramp percentage set, set the ramp percentage to the step's ramp percentage
-	if targetRampPercentage == nil || *targetRampPercentage != currentStep.RampPercentage {
+	// If this is the first step and there is no ramp percentage set, set the ramp percentage
+	// to the step's ramp percentage.
+	if targetRampPercentage == nil {
+		vcfg.RampPercentage = currentStep.RampPercentage
+		return vcfg
+	}
+
+	// If the target ramp percentage doesn't match the current step's defined ramp, the ramp
+	// is reset immediately. This might be considered overly conservative, but it guarantees that
+	// rollouts resume from the earliest possible step, and that at least the last step is always
+	// respected (both % and duration).
+	if *targetRampPercentage != currentStep.RampPercentage {
 		vcfg.RampPercentage = currentStep.RampPercentage
 		return vcfg
 	}
