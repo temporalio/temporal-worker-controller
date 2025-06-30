@@ -73,6 +73,6 @@ func MakeTWDWithName(name string) *temporaliov1alpha1.TemporalWorkerDeployment {
 	return twd
 }
 
-func ModifyObj[T any](twd T, callback func(obj T) T) T {
-	return callback(twd)
+func ModifyObj[T any](obj T, callback func(obj T) T) T {
+	return callback(obj)
 }
