@@ -17,7 +17,7 @@ import (
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
-	"github.com/temporalio/temporal-worker-controller/internal/testlogr"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
 )
 
 func TestGeneratePlan(t *testing.T) {
