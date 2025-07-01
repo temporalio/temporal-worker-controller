@@ -85,8 +85,20 @@ func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Wa
 		)
 	}
 
-	if new.Spec.RolloutStrategy.Strategy == UpdateProgressive {
-		rolloutSteps := new.Spec.RolloutStrategy.Steps
+	allErrs = append(allErrs, validateRolloutStrategy(new.Spec.RolloutStrategy)...)
+
+	if len(allErrs) > 0 {
+		return nil, newInvalidErr(new, allErrs)
+	}
+
+	return nil, nil
+}
+
+func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
+	var allErrs []*field.Error
+
+	if s.Strategy == UpdateProgressive {
+		rolloutSteps := s.Steps
 		if len(rolloutSteps) == 0 {
 			allErrs = append(allErrs,
 				field.Invalid(field.NewPath("spec.cutover.steps"), rolloutSteps, "steps are required for Progressive cutover"),
@@ -111,11 +123,7 @@ func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Wa
 		}
 	}
 
-	if len(allErrs) > 0 {
-		return nil, newInvalidErr(new, allErrs)
-	}
-
-	return nil, nil
+	return allErrs
 }
 
 func newInvalidErr(dep *TemporalWorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
