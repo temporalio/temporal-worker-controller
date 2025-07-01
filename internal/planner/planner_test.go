@@ -1154,6 +1154,12 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 		expectRamps           []float32
 		expectRolloutDuration time.Duration
 	}{
+		"no steps, no ramps": {
+			steps:                 []temporaliov1alpha1.RolloutStep{},
+			reconcileFreq:         time.Second,
+			expectRamps:           nil,
+			expectRolloutDuration: 5*time.Minute - time.Second, // should reach test timeout with zero ramps
+		},
 		"controller keeping up": {
 			steps: []temporaliov1alpha1.RolloutStep{
 				rolloutStep(25, 5*time.Second),

@@ -353,11 +353,13 @@ func handleProgressiveRollout(
 	targetRampPercentage *float32,
 	vcfg *VersionConfig,
 ) *VersionConfig {
-	// Set current right away if there are no steps.
-	// This is equivalent to the AllAtOnce cutover strategy.
+	// Protect against modifying the current version right away if there are no steps.
+	//
+	// The validating admission webhook _should_ prevent creating rollouts with 0 steps,
+	// but just in case validation is skipped we should go with the more conservative
+	// behavior of not updating the current version from the controller.
 	if len(steps) == 0 {
-		vcfg.SetCurrent = true
-		return vcfg
+		return nil
 	}
 
 	// Get the currently active step
