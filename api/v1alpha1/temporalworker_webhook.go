@@ -7,15 +7,15 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"time"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-	"time"
 )
 
 const (
@@ -73,21 +73,59 @@ func (r *TemporalWorkerDeployment) validateForUpdateOrCreate(ctx context.Context
 		return nil, apierrors.NewBadRequest("expected a TemporalWorkerDeployment")
 	}
 
+	return validateForUpdateOrCreate(nil, dep)
+}
+
+func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 
-	if len(dep.Name) > maxTemporalWorkerDeploymentNameLen {
+	if len(new.GetName()) > maxTemporalWorkerDeploymentNameLen {
 		allErrs = append(allErrs,
-			field.Invalid(field.NewPath("name"), dep.Name, fmt.Sprintf("cannot be more than %d characters", maxTemporalWorkerDeploymentNameLen)),
+			field.Invalid(field.NewPath("metadata.name"), new.GetName(), fmt.Sprintf("cannot be more than %d characters", maxTemporalWorkerDeploymentNameLen)),
 		)
 	}
 
+	allErrs = append(allErrs, validateRolloutStrategy(new.Spec.RolloutStrategy)...)
+
 	if len(allErrs) > 0 {
-		return nil, apierrors.NewInvalid(
-			schema.GroupKind{Group: "your.group", Kind: "TemporalWorkerDeployment"},
-			dep.Name,
-			allErrs,
-		)
+		return nil, newInvalidErr(new, allErrs)
 	}
 
 	return nil, nil
+}
+
+func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
+	var allErrs []*field.Error
+
+	if s.Strategy == UpdateProgressive {
+		rolloutSteps := s.Steps
+		if len(rolloutSteps) == 0 {
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.cutover.steps"), rolloutSteps, "steps are required for Progressive cutover"),
+			)
+		}
+		var lastRamp float32
+		for i, s := range rolloutSteps {
+			// Check duration >= 30s
+			if s.PauseDuration.Duration < 30*time.Second {
+				allErrs = append(allErrs,
+					field.Invalid(field.NewPath(fmt.Sprintf("spec.cutover.steps[%d].pauseDuration", i)), s.PauseDuration.Duration.String(), "pause duration must be at least 30s"),
+				)
+			}
+
+			// Check ramp value greater than last
+			if s.RampPercentage <= lastRamp {
+				allErrs = append(allErrs,
+					field.Invalid(field.NewPath(fmt.Sprintf("spec.cutover.steps[%d].rampPercentage", i)), s.RampPercentage, "rampPercentage must increase between each step"),
+				)
+			}
+			lastRamp = s.RampPercentage
+		}
+	}
+
+	return allErrs
+}
+
+func newInvalidErr(dep *TemporalWorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
+	return apierrors.NewInvalid(dep.GroupVersionKind().GroupKind(), dep.GetName(), errs)
 }

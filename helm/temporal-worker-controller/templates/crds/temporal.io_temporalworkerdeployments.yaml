@@ -3879,6 +3879,9 @@ spec:
                     type: string
                   managedBy:
                     type: string
+                  rampLastModifiedAt:
+                    format: date-time
+                    type: string
                   rampPercentage:
                     type: number
                   rampingSince:
@@ -3943,6 +3946,9 @@ spec:
                     format: date-time
                     type: string
                   managedBy:
+                    type: string
+                  rampLastModifiedAt:
+                    format: date-time
                     type: string
                   rampPercentage:
                     type: number

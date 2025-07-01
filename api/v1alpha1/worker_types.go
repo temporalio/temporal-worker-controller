@@ -215,6 +215,10 @@ type TargetWorkerDeploymentVersion struct {
 	// Only set when Status is VersionStatusRamping.
 	// +optional
 	RampingSince *metav1.Time `json:"rampingSince"`
+
+	// RampLastModifiedAt is the time when the ramp percentage was last changed for the target version.
+	// +optional
+	RampLastModifiedAt *metav1.Time `json:"rampLastModifiedAt,omitempty"`
 }
 
 // DeprecatedWorkerDeploymentVersion represents a worker deployment version that is no longer
