@@ -85,9 +85,9 @@ func ModifyObj[T any](obj T, callback func(obj T) T) T {
 //
 // Examples:
 //
-//	testhelpers.Ptr[int32](42)     // *int32
-//	testhelpers.Ptr[string]("hi")  // *string
-//	testhelpers.Ptr[bool](true)    // *bool
+//	testhelpers.Ptr(int32(42))  // *int32
+//	testhelpers.Ptr("hi")       // *string
+//	testhelpers.Ptr(true)       // *bool
 func Ptr[T any](v T) *T {
 	return &v
 }

@@ -36,7 +36,7 @@ func TestComputeHash(t *testing.T) {
 		{
 			name:           "template with collision count",
 			template:       makePodTemplateSpec("test-pod", "nginx:latest"),
-			collisionCount: testhelpers.Ptr[int32](5),
+			collisionCount: testhelpers.Ptr(int32(5)),
 			short:          true,
 			expectedLength: 4,
 			expectedResult: "66bb",
