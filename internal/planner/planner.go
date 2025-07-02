@@ -95,7 +95,7 @@ func GeneratePlan(
 	plan.TestWorkflows = getTestWorkflows(status, config)
 
 	// Determine version config changes
-	plan.VersionConfig = getVersionConfigDiff(l, status, spec, temporalState, config)
+	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config)
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
@@ -134,7 +134,7 @@ func getDeleteDeployments(
 		case temporaliov1alpha1.VersionStatusNotRegistered:
 			// NotRegistered versions are versions that the server doesn't know about.
 			// Only delete if it's not the target version.
-			if status.TargetVersion == nil || status.TargetVersion.VersionID != version.VersionID {
+			if status.TargetVersion.VersionID != version.VersionID {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}
@@ -259,7 +259,6 @@ func getTestWorkflowID(taskQueue, versionID string) string {
 func getVersionConfigDiff(
 	l logr.Logger,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
 	temporalState *temporal.TemporalWorkerState,
 	config *Config,
 ) *VersionConfig {
@@ -267,7 +266,7 @@ func getVersionConfigDiff(
 	conflictToken := status.VersionConflictToken
 
 	// Do nothing if target version's deployment is not healthy yet
-	if status == nil || status.TargetVersion.HealthySince == nil {
+	if status.TargetVersion.HealthySince == nil {
 		return nil
 	}
 

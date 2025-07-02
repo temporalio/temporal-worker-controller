@@ -275,17 +275,10 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "not yet drained long enough",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(0),
+					"test/namespace.456": createDeploymentWithReplicas(0),
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID:  "test/namespace.123",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &v1.ObjectReference{Name: "test-123"},
-					},
-				},
 				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 					{
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -482,7 +475,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			expectScales: 1,
 		},
 		{
-			name: "current version needs scaling up",
+			name: "target version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
 					"test/namespace.a": createDeploymentWithReplicas(0),
@@ -662,12 +655,6 @@ func TestGetTestWorkflows(t *testing.T) {
 						},
 					},
 				},
-				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: "test/namespace.456",
-						Status:    temporaliov1alpha1.VersionStatusCurrent,
-					},
-				},
 			},
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
@@ -682,12 +669,6 @@ func TestGetTestWorkflows(t *testing.T) {
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
 						TaskQueues: []temporaliov1alpha1.TaskQueue{}, // Empty
-					},
-				},
-				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: "test/namespace.456",
-						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
 			},
@@ -721,12 +702,6 @@ func TestGetTestWorkflows(t *testing.T) {
 							TaskQueue: "queue2",
 							Status:    temporaliov1alpha1.WorkflowExecutionStatusCompleted,
 						},
-					},
-				},
-				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: "test/namespace.456",
-						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
 			},
@@ -903,7 +878,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			config := &Config{
 				RolloutStrategy: tc.strategy,
 			}
-			versionConfig := getVersionConfigDiff(logr.Discard(), tc.status, tc.spec, tc.state, config)
+			versionConfig := getVersionConfigDiff(logr.Discard(), tc.status, tc.state, config)
 			assert.Equal(t, tc.expectConfig, versionConfig != nil, "unexpected version config presence")
 			if tc.expectConfig {
 				assert.NotNil(t, versionConfig, "expected version config")
@@ -1098,8 +1073,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			config := &Config{
 				RolloutStrategy: tc.strategy,
 			}
-			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{}
-			versionConfig := getVersionConfigDiff(testlogr.New(t), tc.status, spec, tc.state, config)
+			versionConfig := getVersionConfigDiff(testlogr.New(t), tc.status, tc.state, config)
 			assert.Equal(t, tc.expectConfig, versionConfig != nil, "unexpected version config presence")
 			if tc.expectConfig {
 				assert.Equal(t, tc.expectSetCurrent, versionConfig.SetCurrent, "unexpected set default value")
@@ -1237,7 +1211,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 		name         string
 		strategy     temporaliov1alpha1.RolloutStrategy
 		status       *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec         *temporaliov1alpha1.TemporalWorkerDeploymentSpec
 		state        *temporal.TemporalWorkerState
 		expectConfig bool
 	}{
@@ -1273,7 +1246,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					},
 				},
 			},
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig: false, // Should not proceed with failed test
 		},
 		{
@@ -1308,7 +1280,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					},
 				},
 			},
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig: false, // Should not proceed with cancelled test
 		},
 		{
@@ -1343,7 +1314,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					},
 				},
 			},
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig: false, // Should not proceed with terminated test
 		},
 		{
@@ -1380,7 +1350,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					},
 				},
 			},
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig: false, // Should not proceed with incomplete tests
 		},
 		{
@@ -1407,7 +1376,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					},
 				},
 			},
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig: false, // Should not proceed with no task queues
 		},
 	}
@@ -1417,7 +1385,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 			config := &Config{
 				RolloutStrategy: tc.strategy,
 			}
-			versionConfig := getVersionConfigDiff(logr.Discard(), tc.status, tc.spec, tc.state, config)
+			versionConfig := getVersionConfigDiff(logr.Discard(), tc.status, tc.state, config)
 			if tc.expectConfig {
 				assert.NotNil(t, versionConfig, "expected version config")
 			} else {
