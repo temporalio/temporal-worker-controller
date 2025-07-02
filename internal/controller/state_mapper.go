@@ -45,21 +45,14 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 		status.TargetVersion.RampPercentage = &rampPercentage
 	}
 
-	rampingVersionID := m.temporalState.RampingVersionID
-	// Set ramping version if it exists
-	if rampingVersionID != "" {
-		status.RampingVersion = m.mapTargetWorkerDeploymentVersion(rampingVersionID)
-	}
-
 	// Add deprecated versions
 	var deprecatedVersions []*v1alpha1.DeprecatedWorkerDeploymentVersion
 	for versionID := range m.k8sState.Deployments {
 		// Skip current and target versions
-		if versionID == currentVersionID || versionID == targetVersionID || versionID == rampingVersionID {
+		if versionID == currentVersionID || versionID == targetVersionID {
 			continue
 		}
 
-		// TODO(rob): We should never see a version here that has VersionStatusCurrent, but should we check?
 		versionStatus := m.mapDeprecatedWorkerDeploymentVersion(versionID)
 		if versionStatus != nil {
 			deprecatedVersions = append(deprecatedVersions, versionStatus)
