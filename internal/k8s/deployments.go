@@ -7,14 +7,15 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+
 	"github.com/distribution/reference"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"regexp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sort"
-	"strings"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -271,8 +272,8 @@ func NewDeploymentWithOwnerRef(
 				BlockOwnerDeletion: &blockOwnerDeletion,
 				Controller:         nil,
 			}},
-			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
-			//                 deleting deployments that are still reachable.
+			// Note: Finalizer is managed at the TemporalWorkerDeployment level to ensure
+			//       proper cleanup of all managed resources including deployments.
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: spec.Replicas,
