@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.temporal.io/api/enums/v1"
 
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 func TestMapWorkflowStatus(t *testing.T) {

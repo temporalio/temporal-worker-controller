@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 type ClientPoolKey struct {
@@ -127,11 +127,11 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		pemCert = secret.Data["tls.crt"]
 
 		// Check if certificate is expired before creating the client
-		expiryTime, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
+		exp, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
 		}
-		expired, err := isCertificateExpired(expiryTime)
+		expired, err := isCertificateExpired(exp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
 		}
@@ -146,6 +146,7 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		clientOpts.ConnectionOptions.TLS = &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
+		expiryTime = exp
 	}
 
 	c, err := sdkclient.Dial(clientOpts)

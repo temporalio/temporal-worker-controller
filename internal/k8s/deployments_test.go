@@ -6,6 +6,7 @@ package k8s
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	temporaliov1alpha1 "github.com/DataDog/temporal-worker-controller/api/v1alpha1"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestIsDeploymentHealthy(t *testing.T) {
@@ -202,4 +204,173 @@ func TestGetDeploymentState(t *testing.T) {
 	// Verify refs are correctly created
 	assert.Equal(t, "worker-v1", state.DeploymentRefs["test-worker.v1"].Name)
 	assert.Equal(t, "worker-v2", state.DeploymentRefs["test-worker.v2"].Name)
+}
+
+func TestGenerateBuildID(t *testing.T) {
+	digest := "a428de44a9059f31a59237a5881c2d2cffa93757d99026156e4ea544577ab7f3"
+	tests := []struct {
+		name            string
+		generateInputs  func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment)
+		expectedPrefix  string
+		expectedHashLen int
+		expectEquality  bool // if true, both build ids should be equal
+	}{
+		{
+			name: "same image different pod specs",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				img := "my.test_image"
+				pod1 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "1"})
+				pod2 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "2"})
+
+				twd1 := testhelpers.MakeTWD(1, pod1, nil, nil, nil)
+				twd2 := testhelpers.MakeTWD(1, pod2, nil, nil, nil)
+				return twd1, twd2
+			},
+			expectedPrefix:  "my-test-image",
+			expectedHashLen: 4,
+			expectEquality:  false, // should be different
+		},
+		{
+			name: "same pod specs different TWD spec",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				img := "my.test_image"
+				pod := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, nil)
+
+				twd1 := testhelpers.MakeTWD(1, pod, nil, nil, nil)
+				twd2 := testhelpers.MakeTWD(2, pod, nil, nil, nil)
+				return twd1, twd2
+			},
+			expectedPrefix:  "my-test-image",
+			expectedHashLen: 4,
+			expectEquality:  true, // should be the same
+		},
+		{
+			name: "no containers",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				twd := testhelpers.MakeTWD(1, testhelpers.MakePodSpec(nil, nil), nil, nil, nil)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  "",
+			expectedHashLen: 10, // expect long hash no prefix
+			expectEquality:  false,
+		},
+		{
+			name: "empty image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				twd := testhelpers.MakeTWDWithImage("")
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  "",
+			expectedHashLen: 10, // expect long hash no prefix
+			expectEquality:  false,
+		},
+		{
+			name: "tagged digest image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				taggedDigestImg := "docker.io/library/busybox:latest@sha256:" + digest
+				twd := testhelpers.MakeTWDWithImage(taggedDigestImg)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  "latest",
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "tagged named image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				taggedNamedImg := "docker.io/library/busybox:latest"
+				twd := testhelpers.MakeTWDWithImage(taggedNamedImg)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  "latest",
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "digested image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				digestedImg := "docker.io@sha256:" + digest
+				twd := testhelpers.MakeTWDWithImage(digestedImg)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "digested named image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				digestedNamedImg := "docker.io/library/busybo@sha256:" + digest
+				twd := testhelpers.MakeTWDWithImage(digestedNamedImg)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "named image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				namedImg := "docker.io/library/busybox"
+				twd := testhelpers.MakeTWDWithImage(namedImg)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  "library-busybox",
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "illegal chars image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				illegalCharsImg := "this.is.my_weird/image"
+				twd := testhelpers.MakeTWDWithImage(illegalCharsImg)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  "this-is-my-weird-image",
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "long image",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				longImg := "ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage" // 101 chars
+				twd := testhelpers.MakeTWDWithImage(longImg)
+				return twd, nil // only check 1 result, no need to compare
+			},
+			expectedPrefix:  cleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:maxBuildIdLen-5], -1),
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			twd1, twd2 := tt.generateInputs()
+
+			var build1, build2 string
+			if twd1 != nil {
+				build1 = ComputeBuildID(twd1)
+				verifyBuildId(t, build1, tt.expectedPrefix, tt.expectedHashLen)
+			}
+			if twd2 != nil {
+				build2 = ComputeBuildID(twd2)
+				verifyBuildId(t, build2, tt.expectedPrefix, tt.expectedHashLen)
+			}
+
+			// Check equality based on test case
+			if tt.expectEquality {
+				assert.Equal(t, build1, build2, "Build IDs should be equal for same pod spec")
+			} else {
+				assert.NotEqual(t, build1, build2, "Build IDs should be different for different pod specs")
+			}
+		})
+	}
+}
+
+func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen int) {
+	assert.Truef(t, strings.HasPrefix(build, expectedPrefix), "expected prefix %s in build %s", expectedPrefix, build)
+	assert.LessOrEqual(t, len(build), maxBuildIdLen)
+	assert.Equalf(t, cleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
+	split := strings.Split(build, k8sResourceNameSeparator)
+	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
 }

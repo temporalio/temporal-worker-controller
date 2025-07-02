@@ -109,7 +109,8 @@ type TemporalWorkerDeploymentStatus struct {
 	TargetVersion *TargetWorkerDeploymentVersion `json:"targetVersion"`
 
 	// CurrentVersion is the version that is currently registered with
-	// Temporal as the current version of its worker deployment.
+	// Temporal as the current version of its worker deployment. This will be nil
+	// during initial bootstrap until a version is registered and set as current.
 	CurrentVersion *CurrentWorkerDeploymentVersion `json:"currentVersion,omitempty"`
 
 	// DeprecatedVersions are deployment versions that are no longer the default. Any
@@ -119,7 +120,7 @@ type TemporalWorkerDeploymentStatus struct {
 	// VersionConflictToken prevents concurrent modifications to the deployment status.
 	// It ensures reconciliation operations don't inadvertently override changes made
 	// by external systems while processing is underway.
-	VersionConflictToken []byte `json:"versionConflictToken"`
+	VersionConflictToken []byte `json:"versionConflictToken,omitempty"`
 
 	// LastModifierIdentity is the identity of the client that most recently modified the worker deployment.
 	// +optional
@@ -209,6 +210,10 @@ type TargetWorkerDeploymentVersion struct {
 	// Only set when Status is VersionStatusRamping.
 	// +optional
 	RampingSince *metav1.Time `json:"rampingSince"`
+
+	// RampLastModifiedAt is the time when the ramp percentage was last changed for the target version.
+	// +optional
+	RampLastModifiedAt *metav1.Time `json:"rampLastModifiedAt,omitempty"`
 }
 
 // DeprecatedWorkerDeploymentVersion represents a worker deployment version that is no longer
