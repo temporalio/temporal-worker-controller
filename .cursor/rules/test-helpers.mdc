@@ -1,0 +1,11 @@
+---
+description: 
+globs: **/*_test.go
+alwaysApply: false
+---
+# Test Helpers
+
+Refactor commonly repeated test code into shared functions in the `internal/testhelpers` package.
+
+For example [make.go](mdc:internal/testhelpers/make.go) contains helpers for generated `TemporalWorkerDeployment` resources and other objects for use in unit tests.
+

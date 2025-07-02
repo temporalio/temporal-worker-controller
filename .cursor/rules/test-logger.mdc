@@ -1,0 +1,16 @@
+---
+description: 
+globs: **/*_test.go
+alwaysApply: false
+---
+# Logger Usage in Tests
+
+Always use the `internal/testhelpers/testlogr` package for logging in tests instead of `logr.Discard()`:
+
+```go
+// ✅ Correct
+logger := testlogr.New(t)
+
+// ❌ Incorrect  
+logger := logr.Discard()
+```
