@@ -8,7 +8,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
 )
 
 func TestFinalizerAddition(t *testing.T) {
@@ -195,8 +195,8 @@ func TestCleanupManagedResources(t *testing.T) {
 		Scheme: s,
 	}
 
-	// Create a test logger
-	logger := logr.Discard()
+	// Create a test logger using testlogr
+	logger := testlogr.New(t)
 
 	// Test cleanup - should only delete owned deployments
 	err := reconciler.cleanupManagedResources(ctx, logger, workerDeploy)
@@ -254,8 +254,8 @@ func TestHandleDeletion(t *testing.T) {
 		Scheme: s,
 	}
 
-	// Create a test logger
-	logger := logr.Discard()
+	// Create a test logger using testlogr
+	logger := testlogr.New(t)
 
 	// Verify finalizer is present before deletion
 	if !controllerutil.ContainsFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer) {
