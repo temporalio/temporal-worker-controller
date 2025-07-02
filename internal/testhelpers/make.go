@@ -81,9 +81,15 @@ func ModifyObj[T any](obj T, callback func(obj T) T) T {
 	return callback(obj)
 }
 
-// Int32Ptr returns a pointer to the given int32 value
-func Int32Ptr(i int32) *int32 {
-	return &i
+// Ptr returns a pointer to the given value of any type
+//
+// Examples:
+//
+//	testhelpers.Ptr[int32](42)     // *int32
+//	testhelpers.Ptr[string]("hi")  // *string
+//	testhelpers.Ptr[bool](true)    // *bool
+func Ptr[T any](v T) *T {
+	return &v
 }
 
 // SetupTestScheme creates a runtime.Scheme with common types registered
