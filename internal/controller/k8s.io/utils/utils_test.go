@@ -3,6 +3,7 @@ package utils
 import (
 	"testing"
 
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -35,7 +36,7 @@ func TestComputeHash(t *testing.T) {
 		{
 			name:           "template with collision count",
 			template:       makePodTemplateSpec("test-pod", "nginx:latest"),
-			collisionCount: int32Ptr(5),
+			collisionCount: testhelpers.Int32Ptr(5),
 			short:          true,
 			expectedLength: 4,
 			expectedResult: "66bb",
@@ -101,10 +102,6 @@ func TestComputeHashDifferentInputs(t *testing.T) {
 	if hash1 == hash2 {
 		t.Errorf("ComputeHash() produced same hash for different templates: %s", hash1)
 	}
-}
-
-func int32Ptr(i int32) *int32 {
-	return &i
 }
 
 func makePodTemplateSpec(name, image string) *v1.PodTemplateSpec {

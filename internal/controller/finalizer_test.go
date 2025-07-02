@@ -11,51 +11,38 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
 )
 
 func TestFinalizerAddition(t *testing.T) {
 	ctx := context.Background()
 
-	// Set up the scheme with our custom resource
-	s := runtime.NewScheme()
-	_ = scheme.AddToScheme(s)
-	_ = temporaliov1alpha1.AddToScheme(s)
-
-	// Create a fake client
-	client := fake.NewClientBuilder().WithScheme(s).Build()
-
-	// Create a TemporalWorkerDeployment without finalizer
-	workerDeploy := &temporaliov1alpha1.TemporalWorkerDeployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-worker",
-			Namespace: "default",
-		},
-		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-			Replicas: int32Ptr(1),
-			WorkerOptions: temporaliov1alpha1.WorkerOptions{
-				TemporalNamespace:  "test-namespace",
-				TemporalConnection: "test-connection",
-			},
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "worker",
-							Image: "test-image:latest",
-						},
+	// Create a TemporalWorkerDeployment without finalizer using test helpers
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+		twd.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
+			TemporalNamespace:  "test-namespace",
+			TemporalConnection: "test-connection",
+		}
+		twd.Spec.Template = corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "worker",
+						Image: "test-image:latest",
 					},
 				},
 			},
-		},
-	}
+		}
+		return twd
+	})
+
+	// Create fake client with test helpers
+	client := testhelpers.SetupFakeClient()
 
 	// Create the resource in the fake client
 	err := client.Create(ctx, workerDeploy)
@@ -66,7 +53,7 @@ func TestFinalizerAddition(t *testing.T) {
 	// Create reconciler
 	reconciler := &TemporalWorkerDeploymentReconciler{
 		Client: client,
-		Scheme: s,
+		Scheme: testhelpers.SetupTestScheme(),
 	}
 
 	// Verify finalizer is not present initially
@@ -146,19 +133,11 @@ func TestIsOwnedByWorkerDeployment(t *testing.T) {
 func TestCleanupManagedResources(t *testing.T) {
 	ctx := context.Background()
 
-	// Set up the scheme
-	s := runtime.NewScheme()
-	_ = scheme.AddToScheme(s)
-	_ = temporaliov1alpha1.AddToScheme(s)
-
-	// Create a TemporalWorkerDeployment
-	workerDeploy := &temporaliov1alpha1.TemporalWorkerDeployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-worker",
-			Namespace: "default",
-			UID:       "worker-uid-123",
-		},
-	}
+	// Create a TemporalWorkerDeployment using test helpers
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+		twd.UID = "worker-uid-123"
+		return twd
+	})
 
 	// Create a deployment owned by the worker deployment
 	ownedDeployment := &appsv1.Deployment{
@@ -184,15 +163,12 @@ func TestCleanupManagedResources(t *testing.T) {
 		},
 	}
 
-	// Create fake client with the deployments
-	client := fake.NewClientBuilder().
-		WithScheme(s).
-		WithObjects(ownedDeployment, unownedDeployment).
-		Build()
+	// Create fake client with the deployments using test helpers
+	client := testhelpers.SetupFakeClient(ownedDeployment, unownedDeployment)
 
 	reconciler := &TemporalWorkerDeploymentReconciler{
 		Client: client,
-		Scheme: s,
+		Scheme: testhelpers.SetupTestScheme(),
 	}
 
 	// Create a test logger using testlogr
@@ -220,38 +196,25 @@ func TestCleanupManagedResources(t *testing.T) {
 func TestHandleDeletion(t *testing.T) {
 	ctx := context.Background()
 
-	// Set up the scheme
-	s := runtime.NewScheme()
-	_ = scheme.AddToScheme(s)
-	_ = temporaliov1alpha1.AddToScheme(s)
-
-	// Create a TemporalWorkerDeployment with finalizer and deletion timestamp
+	// Create a TemporalWorkerDeployment with finalizer and deletion timestamp using test helpers
 	now := metav1.Now()
-	workerDeploy := &temporaliov1alpha1.TemporalWorkerDeployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "test-worker",
-			Namespace:         "default",
-			UID:               "worker-uid-123",
-			DeletionTimestamp: &now,
-			Finalizers:        []string{TemporalWorkerDeploymentFinalizer},
-		},
-		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-			WorkerOptions: temporaliov1alpha1.WorkerOptions{
-				TemporalNamespace:  "test-namespace",
-				TemporalConnection: "test-connection",
-			},
-		},
-	}
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+		twd.UID = "worker-uid-123"
+		twd.DeletionTimestamp = &now
+		twd.Finalizers = []string{TemporalWorkerDeploymentFinalizer}
+		twd.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
+			TemporalNamespace:  "test-namespace",
+			TemporalConnection: "test-connection",
+		}
+		return twd
+	})
 
-	// Create fake client
-	client := fake.NewClientBuilder().
-		WithScheme(s).
-		WithObjects(workerDeploy).
-		Build()
+	// Create fake client using test helpers
+	client := testhelpers.SetupFakeClient(workerDeploy)
 
 	reconciler := &TemporalWorkerDeploymentReconciler{
 		Client: client,
-		Scheme: s,
+		Scheme: testhelpers.SetupTestScheme(),
 	}
 
 	// Create a test logger using testlogr
@@ -276,9 +239,4 @@ func TestHandleDeletion(t *testing.T) {
 	// In a real cluster, the resource would be gone. In the fake client, we can verify it was marked for deletion
 	// by checking if the finalizer was removed (which we can't easily do since the resource is deleted)
 	// Instead, we'll verify that the deletion handling completed without error, which means cleanup was successful
-}
-
-// Helper function to create an int32 pointer
-func int32Ptr(i int32) *int32 {
-	return &i
 }

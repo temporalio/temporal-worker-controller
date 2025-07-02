@@ -3,7 +3,11 @@ package testhelpers
 import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
@@ -75,4 +79,27 @@ func MakeTWDWithName(name string) *temporaliov1alpha1.TemporalWorkerDeployment {
 
 func ModifyObj[T any](obj T, callback func(obj T) T) T {
 	return callback(obj)
+}
+
+// Int32Ptr returns a pointer to the given int32 value
+func Int32Ptr(i int32) *int32 {
+	return &i
+}
+
+// SetupTestScheme creates a runtime.Scheme with common types registered
+func SetupTestScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = scheme.AddToScheme(s)
+	_ = temporaliov1alpha1.AddToScheme(s)
+	return s
+}
+
+// SetupFakeClient creates a fake client with the test scheme and optional objects
+func SetupFakeClient(objects ...client.Object) client.Client {
+	s := SetupTestScheme()
+	builder := fake.NewClientBuilder().WithScheme(s)
+	if len(objects) > 0 {
+		builder = builder.WithObjects(objects...)
+	}
+	return builder.Build()
 }
