@@ -23,7 +23,7 @@ jobs:
     - name: Install Temporal CLI
       run: |
         curl -sSf https://temporal.download/cli.sh | sh
-        sudo mv temporal /usr/local/bin/
+        echo "$HOME/.temporalio/bin" >> $GITHUB_PATH
         
     - name: Install kubectl
       uses: azure/setup-kubectl@v3
