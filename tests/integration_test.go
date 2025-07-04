@@ -7,7 +7,6 @@ package tests
 import (
 	"context"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/rest"
 	"testing"
 	"time"
 
@@ -27,35 +26,14 @@ func TestIntegration(t *testing.T) {
 	testNamespace := createTestNamespace(t, k8sClient)
 	defer cleanupTestNamespace(t, cfg, k8sClient, testNamespace)
 
-	// Run the actual test
-	testTemporalWorkerDeploymentCreation(t, cfg, k8sClient, testNamespace.Name, "v1")
-}
-
-// testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment
-func testTemporalWorkerDeploymentCreation(t *testing.T, cfg *rest.Config, k8sClient client.Client, namespace string, workerImage string) {
-	ctx := context.Background()
-
-	t.Log("Creating a TemporalConnection")
-	temporalConnection := &temporaliov1alpha1.TemporalConnection{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-connection",
-			Namespace: namespace,
-		},
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort: "0.0.0.0:7233", // Temporal dev server
-		},
-	}
-	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to create TemporalConnection: %v", err)
-	}
-
-	t.Log("Creating a TemporalWorkerDeployment")
-	replicas := int32(1)
+	replicas := int32(2)
+	workerImage := "v1"
 	taskQueue := "hello_world"
+
 	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-worker",
-			Namespace: namespace,
+			Namespace: testNamespace.Name,
 			Labels:    map[string]string{"app": "test-worker"},
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
@@ -80,31 +58,6 @@ func testTemporalWorkerDeploymentCreation(t *testing.T, cfg *rest.Config, k8sCli
 			},
 		},
 	}
-	for _, c := range twd.Spec.Template.Spec.Containers {
-		found := false
-		for _, e := range c.Env {
-			if e.Name == "TEMPORAL_TASK_QUEUE" {
-				found = true
-				if e.Value != taskQueue {
-					t.Errorf("expected deployment to have `TEMPORAL_TASK_QUEUE=%s` in pod spec but was %s", taskQueue, e.Value)
-				}
-			}
-		}
-		if !found {
-			t.Errorf("expected deployment to have `TEMPORAL_TASK_QUEUE` in pod spec but did not find it")
-		}
-	}
-
-	if err := k8sClient.Create(ctx, twd); err != nil {
-		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
-	}
-
-	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
-
-	t.Log("Waiting for the controller to reconcile")
-	waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
-	verifyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace, taskQueue)
-	applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
 
 	expectedStatus := &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 		TargetVersion: nil,
@@ -113,7 +66,7 @@ func testTemporalWorkerDeploymentCreation(t *testing.T, cfg *rest.Config, k8sCli
 				VersionID: k8s.ComputeVersionID(twd),
 				Deployment: &corev1.ObjectReference{
 					Namespace: twd.Namespace,
-					Name:      expectedDeploymentName,
+					Name:      k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd)),
 				},
 			},
 		},
@@ -122,5 +75,45 @@ func testTemporalWorkerDeploymentCreation(t *testing.T, cfg *rest.Config, k8sCli
 		VersionConflictToken: nil,
 		LastModifierIdentity: "",
 	}
+
+	testTemporalWorkerDeploymentCreation(t, k8sClient, twd, expectedStatus)
+}
+
+// testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
+func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client, twd *temporaliov1alpha1.TemporalWorkerDeployment, expectedStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus) {
+	ctx := context.Background()
+
+	t.Log("Creating a TemporalConnection")
+	temporalConnection := &temporaliov1alpha1.TemporalConnection{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-connection",
+			Namespace: twd.Namespace,
+		},
+		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort: "0.0.0.0:7233", // Temporal dev server
+		},
+	}
+	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
+		t.Fatalf("failed to create TemporalConnection: %v", err)
+	}
+
+	t.Log("Creating a TemporalWorkerDeployment")
+	if err := k8sClient.Create(ctx, twd); err != nil {
+		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+	}
+
+	t.Log("Waiting for the controller to reconcile")
+	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
+	waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
+	verifyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+	defer func() {
+		for _, f := range workerStopFuncs {
+			if f != nil {
+				f()
+			}
+		}
+	}()
+
 	verifyTemporalWorkerDeploymentStatusEventually(t, ctx, k8sClient, twd.Name, twd.Namespace, expectedStatus, 60*time.Second, 10*time.Second)
 }

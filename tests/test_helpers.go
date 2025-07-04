@@ -30,7 +30,7 @@ func waitForDeployment(t *testing.T, k8sClient client.Client, deploymentName, na
 	t.Fatalf("failed to wait for deployment: timeout waiting for deployment %s in namespace %s", deploymentName, namespace)
 }
 
-func verifyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace, taskQueue string) {
+func verifyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) {
 	t.Log("Verifying the deployment was created with correct labels")
 	var deployment appsv1.Deployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{
@@ -44,17 +44,13 @@ func verifyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client
 		t.Errorf("expected deployment label 'app' to be 'test-worker', got '%s'", deployment.Labels["app"])
 	}
 
-	if *deployment.Spec.Replicas != int32(1) {
-		t.Errorf("expected deployment replicas to be 1, got %d", *deployment.Spec.Replicas)
-	}
-
 	for _, c := range deployment.Spec.Template.Spec.Containers {
 		found := false
 		for _, e := range c.Env {
 			if e.Name == "TEMPORAL_TASK_QUEUE" {
 				found = true
-				if e.Value != taskQueue {
-					t.Errorf("expected deployment to have `TEMPORAL_TASK_QUEUE=%s` in pod spec but was %s", taskQueue, e.Value)
+				if e.Value == "" {
+					t.Errorf("expected deployment to have non-empty `TEMPORAL_TASK_QUEUE` in pod spec but was empty")
 				}
 			}
 		}

@@ -12,21 +12,36 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func mustGetEnv(podTemplateSpec corev1.PodTemplateSpec, key string) string {
+func getEnv(podTemplateSpec corev1.PodTemplateSpec, key string) (string, error) {
 	for _, e := range podTemplateSpec.Spec.Containers[0].Env {
 		if e.Name == key {
-			return e.Value
+			return e.Value, nil
 		}
 	}
-	panic(fmt.Errorf("environment variable %q must be set", key))
+	return "", fmt.Errorf("environment variable %q must be set", key)
 }
 
-func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec) (w worker.Worker, stopFunc func()) {
-	temporalDeploymentName := mustGetEnv(podTemplateSpec, "TEMPORAL_DEPLOYMENT_NAME")
-	workerBuildId := mustGetEnv(podTemplateSpec, "WORKER_BUILD_ID")
-	temporalTaskQueue := mustGetEnv(podTemplateSpec, "TEMPORAL_TASK_QUEUE")
-	temporalHostPort := mustGetEnv(podTemplateSpec, "TEMPORAL_HOST_PORT")
-	temporalNamespace := mustGetEnv(podTemplateSpec, "TEMPORAL_NAMESPACE")
+func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec) (w worker.Worker, stopFunc func(), err error) {
+	temporalDeploymentName, err := getEnv(podTemplateSpec, "TEMPORAL_DEPLOYMENT_NAME")
+	if err != nil {
+		return nil, nil, err
+	}
+	workerBuildId, err := getEnv(podTemplateSpec, "WORKER_BUILD_ID")
+	if err != nil {
+		return nil, nil, err
+	}
+	temporalTaskQueue, err := getEnv(podTemplateSpec, "TEMPORAL_TASK_QUEUE")
+	if err != nil {
+		return nil, nil, err
+	}
+	temporalHostPort, err := getEnv(podTemplateSpec, "TEMPORAL_HOST_PORT")
+	if err != nil {
+		return nil, nil, err
+	}
+	temporalNamespace, err := getEnv(podTemplateSpec, "TEMPORAL_NAMESPACE")
+	if err != nil {
+		return nil, nil, err
+	}
 
 	opts := worker.Options{
 		DeploymentOptions: worker.DeploymentOptions{
@@ -36,46 +51,51 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 		},
 	}
 
-	c, stopClient := newClient(ctx, temporalHostPort, temporalNamespace)
+	c, err := newClient(ctx, temporalHostPort, temporalNamespace)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	w = worker.New(c, temporalTaskQueue, opts)
 
 	return w, func() {
 		w.Stop()
-		stopClient()
-	}
+	}, nil
 }
 
-func newClient(ctx context.Context, hostPort, namespace string) (c client.Client, stopFunc func()) {
+func newClient(ctx context.Context, hostPort, namespace string) (client.Client, error) {
 	opts := client.Options{
 		Identity:  "integration-tests",
 		HostPort:  hostPort,
 		Namespace: namespace,
-		Logger:    nil, // do we want a test-related logger?
+		Logger:    nil, // todo: do we want to pass a test-related logger?
 	}
 	c, err := client.Dial(opts)
 	if err != nil {
-		panic(fmt.Errorf("failed to dial server: %v", err))
+		return nil, fmt.Errorf("failed to dial server: %v", err)
 	}
 
 	if _, err := c.CheckHealth(ctx, &client.CheckHealthRequest{}); err != nil {
-		panic(fmt.Errorf("failed to check health for server client: %v", err))
+		return nil, fmt.Errorf("failed to check health for server client: %v", err)
 	}
 
 	if _, err := c.ListWorkflow(ctx, &workflowservice.ListWorkflowExecutionsRequest{
 		Namespace: namespace,
 	}); err != nil {
-		panic(fmt.Errorf("failed to list workflows with server client: %v", err))
+		return nil, fmt.Errorf("failed to list workflows with server client: %v", err)
 	}
 
-	return c, stopFunc
+	return c, nil
 }
 
-func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec) {
-	w, stopFunc := newVersionedWorker(ctx, podTemplateSpec)
-	defer stopFunc()
-
-	// todo: periodically check Deployment, and if replicas go down or up, or are deleted, scale these
+func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec, callback func(stopFunc func(), err error)) {
+	w, stopFunc, err := newVersionedWorker(ctx, podTemplateSpec)
+	defer func() {
+		callback(stopFunc, err)
+	}()
+	if err != nil {
+		return
+	}
 
 	getSubject := func(ctx context.Context) (string, error) {
 		return "World10", nil
@@ -110,10 +130,7 @@ func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplate
 	w.RegisterWorkflow(helloWorld)
 	w.RegisterActivity(getSubject)
 	w.RegisterActivity(sleep)
-
-	if err := w.Run(worker.InterruptCh()); err != nil {
-		panic(fmt.Errorf("error running worker: %v", err))
-	}
+	err = w.Start()
 }
 
 func setActivityTimeout(ctx workflow.Context, d time.Duration) workflow.Context {

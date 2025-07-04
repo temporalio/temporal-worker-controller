@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		t.Fatalf("failed to start test environment: %v", err)
 	}
 
-	err = temporaliov1alpha1.AddToScheme(scheme.Scheme) // is this installing CRDs?
+	err = temporaliov1alpha1.AddToScheme(scheme.Scheme)
 	if err != nil {
 		t.Fatalf("failed to add scheme: %v", err)
 	}
@@ -102,16 +103,15 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		ReplaceAttr: nil,
 	}))), k8sClient)
 
-	// Setup controller
+	// Set up controller
 	reconciler := &controller.TemporalWorkerDeploymentReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
 		TemporalClientPool: clientPool,
 	}
-
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {
-		t.Fatalf("failed to setup controller: %v", err)
+		t.Fatalf("failed to set up controller: %v", err)
 	}
 
 	// Start manager
@@ -133,7 +133,21 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	return cfg, k8sClient, mgr, clientPool, cleanup
 }
 
-func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) {
+func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+	select {
+	case <-c:
+		return false // completed normally
+	case <-time.After(timeout):
+		return true // timed out
+	}
+}
+
+func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) []func() {
 	var deployment appsv1.Deployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{
 		Name:      deploymentName,
@@ -142,10 +156,42 @@ func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client,
 		t.Fatalf("failed to get deployment: %v", err)
 	}
 
-	// Set deployment status to Available to simulate a healthy deployment
-	// This is necessary because envtest doesn't actually start pods
+	var wg sync.WaitGroup
+	stopFuncs := make([]func(), *(deployment.Spec.Replicas))
+	workerErrors := make([]error, *(deployment.Spec.Replicas))
+	workerCallback := func(i int32) func(func(), error) {
+		return func(stopFunc func(), err error) {
+			if err == nil {
+				stopFuncs[i] = stopFunc
+				wg.Done()
+			} else {
+				workerErrors[i] = err
+			}
+		}
+	}
+
+	for i := int32(0); i < *(deployment.Spec.Replicas); i++ {
+		wg.Add(1)
+		go runHelloWorldWorker(ctx, deployment.Spec.Template, workerCallback(i))
+	}
+
+	// wait 10s for all expected workers to be healthy
+	timedOut := waitTimeout(&wg, 10*time.Second)
+
+	if timedOut {
+		t.Fatalf("could not start workers, errors were: %+v", workerErrors)
+	} else {
+		setHealthyDeploymentStatus(t, ctx, k8sClient, deployment)
+	}
+
+	return stopFuncs
+}
+
+// Set deployment status to `DeploymentAvailable` to simulate a healthy deployment
+// This is necessary because envtest doesn't actually start pods
+func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient client.Client, deployment appsv1.Deployment) {
 	now := metav1.Now()
-	deployment.Status = appsv1.DeploymentStatus{ // todo: only do this if workers come up successfully
+	deployment.Status = appsv1.DeploymentStatus{
 		Replicas:            *deployment.Spec.Replicas,
 		UpdatedReplicas:     *deployment.Spec.Replicas,
 		ReadyReplicas:       *deployment.Spec.Replicas,
@@ -170,13 +216,9 @@ func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client,
 			},
 		},
 	}
-
+	t.Logf("started %d healthy workers, updating deployment status", *deployment.Spec.Replicas)
 	if err := k8sClient.Status().Update(ctx, &deployment); err != nil {
 		t.Fatalf("failed to update deployment status: %v", err)
-	}
-
-	for i := int32(0); i < *(deployment.Spec.Replicas); i++ {
-		go runHelloWorldWorker(ctx, deployment.Spec.Template) // todo: cancel these appropriately
 	}
 }
 
