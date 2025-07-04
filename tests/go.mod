@@ -1,6 +1,8 @@
 module github.com/temporalio/temporal-worker-controller/tests
 
-go 1.24.3
+go 1.24.0
+
+toolchain go1.24.3
 
 require (
 	github.com/temporalio/temporal-worker-controller v0.0.0-20250701210615-ae0d5c997923

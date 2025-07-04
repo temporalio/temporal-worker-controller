@@ -11,6 +11,8 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,7 +45,7 @@ func TestIntegration(t *testing.T) {
 					"app": "test-worker",
 				},
 			},
-			Template: temporaliov1alpha1.MakePodSpec(
+			Template: testhelpers.MakePodSpec(
 				[]corev1.Container{{Name: "worker", Image: workerImage}},
 				map[string]string{"app": "test-worker"},
 				taskQueue,
