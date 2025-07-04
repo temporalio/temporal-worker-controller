@@ -6,14 +6,14 @@ package tests
 
 import (
 	"context"
-	corev1 "k8s.io/api/core/v1"
 	"testing"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
-
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/server/temporaltest"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -27,6 +27,9 @@ func TestIntegration(t *testing.T) {
 	// Create test namespace
 	testNamespace := createTestNamespace(t, k8sClient)
 	defer cleanupTestNamespace(t, cfg, k8sClient, testNamespace)
+
+	// Create test Temporal server and client
+	ts := temporaltest.NewServer(temporaltest.WithT(t))
 
 	replicas := int32(2)
 	workerImage := "v1"
@@ -56,7 +59,7 @@ func TestIntegration(t *testing.T) {
 			SunsetStrategy: temporaliov1alpha1.SunsetStrategy{},
 			WorkerOptions: temporaliov1alpha1.WorkerOptions{
 				TemporalConnection: "test-connection",
-				TemporalNamespace:  "default",
+				TemporalNamespace:  ts.GetDefaultNamespace(),
 			},
 		},
 	}
@@ -78,11 +81,11 @@ func TestIntegration(t *testing.T) {
 		LastModifierIdentity: "",
 	}
 
-	testTemporalWorkerDeploymentCreation(t, k8sClient, twd, expectedStatus)
+	testTemporalWorkerDeploymentCreation(t, k8sClient, ts, twd, expectedStatus)
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
-func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client, twd *temporaliov1alpha1.TemporalWorkerDeployment, expectedStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus) {
+func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, twd *temporaliov1alpha1.TemporalWorkerDeployment, expectedStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus) {
 	ctx := context.Background()
 
 	t.Log("Creating a TemporalConnection")
@@ -92,7 +95,7 @@ func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client,
 			Namespace: twd.Namespace,
 		},
 		Spec: temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort: "0.0.0.0:7233", // Temporal dev server
+			HostPort: ts.GetFrontendHostPort(),
 		},
 	}
 	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
