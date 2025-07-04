@@ -1,0 +1,124 @@
+// Unless explicitly stated otherwise all files in this repository are licensed under the MIT License.
+//
+// This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
+
+package tests
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/server/temporaltest"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+// TestIntegration runs integration tests for the Temporal Worker Controller
+func TestIntegration(t *testing.T) {
+	// Set up test environment
+	cfg, k8sClient, _, _, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	// Create test namespace
+	testNamespace := createTestNamespace(t, k8sClient)
+	defer cleanupTestNamespace(t, cfg, k8sClient, testNamespace)
+
+	// Create test Temporal server and client
+	ts := temporaltest.NewServer(temporaltest.WithT(t))
+
+	replicas := int32(2)
+	workerImage := "v1"
+	taskQueue := "hello_world"
+
+	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-worker",
+			Namespace: testNamespace.Name,
+			Labels:    map[string]string{"app": "test-worker"},
+		},
+		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "test-worker",
+				},
+			},
+			Template: testhelpers.MakePodSpec(
+				[]corev1.Container{{Name: "worker", Image: workerImage}},
+				map[string]string{"app": "test-worker"},
+				taskQueue,
+			),
+			RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+				Strategy: "AllAtOnce",
+			},
+			SunsetStrategy: temporaliov1alpha1.SunsetStrategy{},
+			WorkerOptions: temporaliov1alpha1.WorkerOptions{
+				TemporalConnection: "test-connection",
+				TemporalNamespace:  ts.GetDefaultNamespace(),
+			},
+		},
+	}
+
+	expectedStatus := &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+		TargetVersion: nil,
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+				VersionID: k8s.ComputeVersionID(twd),
+				Deployment: &corev1.ObjectReference{
+					Namespace: twd.Namespace,
+					Name:      k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd)),
+				},
+			},
+		},
+		RampingVersion:       nil,
+		DeprecatedVersions:   nil,
+		VersionConflictToken: nil,
+		LastModifierIdentity: "",
+	}
+
+	testTemporalWorkerDeploymentCreation(t, k8sClient, ts, twd, expectedStatus)
+}
+
+// testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
+func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, twd *temporaliov1alpha1.TemporalWorkerDeployment, expectedStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus) {
+	ctx := context.Background()
+
+	t.Log("Creating a TemporalConnection")
+	temporalConnection := &temporaliov1alpha1.TemporalConnection{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-connection",
+			Namespace: twd.Namespace,
+		},
+		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort: ts.GetFrontendHostPort(),
+		},
+	}
+	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
+		t.Fatalf("failed to create TemporalConnection: %v", err)
+	}
+
+	t.Log("Creating a TemporalWorkerDeployment")
+	if err := k8sClient.Create(ctx, twd); err != nil {
+		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+	}
+
+	t.Log("Waiting for the controller to reconcile")
+	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
+	waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
+	verifyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+	defer func() {
+		for _, f := range workerStopFuncs {
+			if f != nil {
+				f()
+			}
+		}
+	}()
+
+	verifyTemporalWorkerDeploymentStatusEventually(t, ctx, k8sClient, twd.Name, twd.Namespace, expectedStatus, 60*time.Second, 10*time.Second)
+}

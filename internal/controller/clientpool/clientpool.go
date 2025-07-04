@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -50,7 +49,7 @@ func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	}
 }
 
-func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
+func (cp *ClientPool) GetSDKClient(key ClientPoolKey, withMTLS bool) (sdkclient.Client, bool) {
 	cp.mux.RLock()
 	defer cp.mux.RUnlock()
 
@@ -59,15 +58,17 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 		return nil, false
 	}
 
-	// Check if any certificate is expired
-	expired, err := isCertificateExpired(info.expiryTime)
-	if err != nil {
-		cp.logger.Error("Error checking certificate expiration", "error", err)
-		return nil, false
-	}
-	if expired {
-		cp.logger.Warn("Certificate is expired or is going to expire soon")
-		return nil, false
+	if withMTLS {
+		// Check if any certificate is expired
+		expired, err := isCertificateExpired(info.expiryTime)
+		if err != nil {
+			cp.logger.Error("Error checking certificate expiration", "error", err)
+			return nil, false
+		}
+		if expired {
+			cp.logger.Warn("Certificate is expired or is going to expire soon")
+			return nil, false
+		}
 	}
 
 	return info.client, true
@@ -84,26 +85,7 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
-		// TODO(jlegrone): fix this
-		Credentials: sdkclient.NewAPIKeyStaticCredentials(os.Getenv("TEMPORAL_CLOUD_API_KEY")),
-		//Credentials: client.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
-		//	token, ok := os.LookupEnv("TEMPORAL_CLOUD_API_KEY")
-		//	if ok {
-		//		if token == "" {
-		//			return "", fmt.Errorf("empty token")
-		//		}
-		//		return token, nil
-		//	}
-		//	return "", fmt.Errorf("token not found")
-		//}),
-		//Credentials: client.NewMTLSCredentials(tls.Certificate{
-		//	Certificate:                  cert.Certificate,
-		//	PrivateKey:                   cert.PrivateKey,
-		//	SupportedSignatureAlgorithms: nil,
-		//	OCSPStaple:                   nil,
-		//	SignedCertificateTimestamps:  nil,
-		//	Leaf:                         nil,
-		//}),
+		// TODO(jlegrone): Make API Keys work
 	}
 
 	var pemCert []byte
