@@ -25,6 +25,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	temporalClient temporalClient.Client,
 	req ctrl.Request,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	temporalState *temporal.TemporalWorkerState,
 ) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
 	targetVersionID := k8s.ComputeVersionID(workerDeploy)
@@ -39,17 +40,6 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get Kubernetes deployment state: %w", err)
-	}
-
-	// Fetch Temporal worker deployment state
-	temporalState, err := temporal.GetWorkerDeploymentState(
-		ctx,
-		temporalClient,
-		workerDeploymentName,
-		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)
 	}
 
 	// Fetch test workflow status for the desired version
