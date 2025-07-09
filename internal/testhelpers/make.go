@@ -1,6 +1,7 @@
 package testhelpers
 
 import (
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -66,8 +67,52 @@ func MakePodSpec(containers []v1.Container, labels map[string]string, taskQueue 
 	}
 }
 
+// MakeHelloWorldPodSpec creates a pod spec with hello_world task queue and one container with the given image name.
+func MakeHelloWorldPodSpec(imageName string) v1.PodTemplateSpec {
+	return MakePodSpec([]v1.Container{{Name: "worker", Image: imageName}},
+		map[string]string{"app": "test-worker"},
+		"hello_world")
+}
+
 func MakeTWDWithImage(imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
 	return MakeTWD(1, MakePodSpec([]v1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
+}
+
+// MakeVersionId computes a version id based on the image, HelloWorldPodSpec, and k8s namespace.
+func MakeVersionId(k8sNamespace, twdName, imageName string) string {
+	return k8s.ComputeVersionID(
+		ModifyObj(
+			MakeTWDWithName(twdName),
+			func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.Template = MakeHelloWorldPodSpec(imageName)
+				obj.ObjectMeta = metav1.ObjectMeta{
+					Name:      twdName,
+					Namespace: k8sNamespace,
+					Labels:    map[string]string{"app": "test-worker"},
+				}
+				return obj
+			},
+		),
+	)
+}
+
+// MakeBuildId computes a build id based on the image and
+// If no podSpec is provided, defaults to HelloWorldPodSpec with the given image name.
+// If you provide your own podSpec, make sure to give the first container your desired image name if success is expected.
+func MakeBuildId(twdName, imageName string, podSpec *v1.PodTemplateSpec) string {
+	return k8s.ComputeBuildID(
+		ModifyObj(
+			MakeTWDWithName(twdName),
+			func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				if podSpec != nil {
+					obj.Spec.Template = *podSpec
+				} else {
+					obj.Spec.Template = MakeHelloWorldPodSpec(imageName)
+				}
+				return obj
+			},
+		),
+	)
 }
 
 func MakeTWDWithName(name string) *temporaliov1alpha1.TemporalWorkerDeployment {

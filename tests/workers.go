@@ -21,6 +21,7 @@ func getEnv(podTemplateSpec corev1.PodTemplateSpec, key string) (string, error) 
 	return "", fmt.Errorf("environment variable %q must be set", key)
 }
 
+// Errors returned by this function are passed back to test output and fail.
 func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec) (w worker.Worker, stopFunc func(), err error) {
 	temporalDeploymentName, err := getEnv(podTemplateSpec, "TEMPORAL_DEPLOYMENT_NAME")
 	if err != nil {

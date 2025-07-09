@@ -18,6 +18,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type testCase struct {
+	// If starting from a particular state, specify that in input.Status
+	input *temporaliov1alpha1.TemporalWorkerDeployment
+	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
+	// versions, so for test scenarios that start with existing deprecated version Deployments,
+	// specify the number of replicas for each deprecated build here.
+	deprecatedBuildReplicas map[string]int32
+	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+}
+
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
 	// Set up test environment
@@ -31,57 +41,69 @@ func TestIntegration(t *testing.T) {
 	// Create test Temporal server and client
 	ts := temporaltest.NewServer(temporaltest.WithT(t))
 
-	replicas := int32(2)
-	workerImage := "v1"
-	taskQueue := "hello_world"
+	// params:
 
-	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-worker",
-			Namespace: testNamespace.Name,
-			Labels:    map[string]string{"app": "test-worker"},
-		},
-		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-			Replicas: &replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "test-worker",
+	// example:
+	// - can we create a drained version? validate that it's scaled down
+	// - pollerTTL=0
+
+	tests := map[string]testCase{
+		"all-at-once-rollout-2-replicas": {
+			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("all-at-once-rollout-2-replicas"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateAllAtOnce
+				obj.Spec.Template = testhelpers.MakeHelloWorldPodSpec("v1")
+				replicas := int32(2)
+				obj.Spec.Replicas = &replicas
+				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
+					TemporalConnection: "test-connection",
+					TemporalNamespace:  ts.GetDefaultNamespace(),
+				}
+				obj.Spec.Selector = &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "test-worker",
+					},
+				}
+				obj.ObjectMeta = metav1.ObjectMeta{
+					Name:      "all-at-once-rollout-2-replicas",
+					Namespace: testNamespace.Name,
+					Labels:    map[string]string{"app": "test-worker"},
+				}
+				return obj
+			}),
+			deprecatedBuildReplicas: nil,
+			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: nil,
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1"),
+						Deployment: &corev1.ObjectReference{
+							Namespace: testNamespace.Name,
+							Name: k8s.ComputeVersionedDeploymentName(
+								"all-at-once-rollout-2-replicas",
+								testhelpers.MakeBuildId("all-at-once-rollout-2-replicas", "v1", nil),
+							),
+						},
+					},
 				},
-			},
-			Template: testhelpers.MakePodSpec(
-				[]corev1.Container{{Name: "worker", Image: workerImage}},
-				map[string]string{"app": "test-worker"},
-				taskQueue,
-			),
-			RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
-				Strategy: "AllAtOnce",
-			},
-			SunsetStrategy: temporaliov1alpha1.SunsetStrategy{},
-			WorkerOptions: temporaliov1alpha1.WorkerOptions{
-				TemporalConnection: "test-connection",
-				TemporalNamespace:  ts.GetDefaultNamespace(),
+				RampingVersion:       nil,
+				DeprecatedVersions:   nil,
+				VersionConflictToken: nil,
+				LastModifierIdentity: "",
 			},
 		},
 	}
 
-	expectedStatus := &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-		TargetVersion: nil,
-		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-				VersionID: k8s.ComputeVersionID(twd),
-				Deployment: &corev1.ObjectReference{
-					Namespace: twd.Namespace,
-					Name:      k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd)),
-				},
-			},
-		},
-		RampingVersion:       nil,
-		DeprecatedVersions:   nil,
-		VersionConflictToken: nil,
-		LastModifierIdentity: "",
+	for testName, tc := range tests {
+		t.Run(testName, func(t *testing.T) {
+			// TODO(carlydf): create starting test env
+			// - Use input.Status + deprecatedBuildReplicas to create (and maybe kill) pollers for deprecated versions in temporal
+			// - also get routing config of the deployment into the starting state before running the test
+
+			testTemporalWorkerDeploymentCreation(t, k8sClient, ts, tc.input, tc.expectedStatus)
+		})
+
 	}
 
-	testTemporalWorkerDeploymentCreation(t, k8sClient, ts, twd, expectedStatus)
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
