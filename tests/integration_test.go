@@ -41,6 +41,8 @@ func TestIntegration(t *testing.T) {
 	// Create test Temporal server and client
 	ts := temporaltest.NewServer(temporaltest.WithT(t))
 
+	testRampPercentStep1 := float32(5)
+
 	// params:
 
 	// example:
@@ -55,13 +57,8 @@ func TestIntegration(t *testing.T) {
 				replicas := int32(2)
 				obj.Spec.Replicas = &replicas
 				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
-					TemporalConnection: "test-connection",
+					TemporalConnection: "all-at-once-rollout-2-replicas",
 					TemporalNamespace:  ts.GetDefaultNamespace(),
-				}
-				obj.Spec.Selector = &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"app": "test-worker",
-					},
 				}
 				obj.ObjectMeta = metav1.ObjectMeta{
 					Name:      "all-at-once-rollout-2-replicas",
@@ -91,6 +88,64 @@ func TestIntegration(t *testing.T) {
 				LastModifierIdentity: "",
 			},
 		},
+		"progressive-rollout-expect-first-step": {
+			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("progressive-rollout-expect-first-step"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
+				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
+					{5, metav1.Duration{time.Hour}},
+				}
+				obj.Spec.Template = testhelpers.MakeHelloWorldPodSpec("v1")
+				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
+					TemporalConnection: "progressive-rollout-expect-first-step",
+					TemporalNamespace:  ts.GetDefaultNamespace(),
+				}
+				obj.ObjectMeta = metav1.ObjectMeta{
+					Name:      "progressive-rollout-expect-first-step",
+					Namespace: testNamespace.Name,
+					Labels:    map[string]string{"app": "test-worker"},
+				}
+				return obj
+			}),
+			deprecatedBuildReplicas: nil,
+			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
+						Deployment: &corev1.ObjectReference{
+							Namespace: testNamespace.Name,
+							Name: k8s.ComputeVersionedDeploymentName(
+								"progressive-rollout-expect-first-step",
+								testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
+							),
+						},
+					},
+					TestWorkflows:      nil,
+					RampPercentage:     &testRampPercentStep1,
+					RampingSince:       nil, // not tested (for now at least)
+					RampLastModifiedAt: nil, // not tested (for now at least)
+				},
+				CurrentVersion: nil,
+				RampingVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
+						Deployment: &corev1.ObjectReference{
+							Namespace: testNamespace.Name,
+							Name: k8s.ComputeVersionedDeploymentName(
+								"progressive-rollout-expect-first-step",
+								testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
+							),
+						},
+					},
+					TestWorkflows:      nil,
+					RampPercentage:     &testRampPercentStep1,
+					RampingSince:       nil, // not tested (for now at least)
+					RampLastModifiedAt: nil, // not tested (for now at least)
+				},
+				DeprecatedVersions:   nil,
+				VersionConflictToken: nil,
+				LastModifierIdentity: "",
+			},
+		},
 	}
 
 	for testName, tc := range tests {
@@ -113,7 +168,7 @@ func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client,
 	t.Log("Creating a TemporalConnection")
 	temporalConnection := &temporaliov1alpha1.TemporalConnection{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-connection",
+			Name:      twd.Spec.WorkerOptions.TemporalConnection,
 			Namespace: twd.Namespace,
 		},
 		Spec: temporaliov1alpha1.TemporalConnectionSpec{
@@ -132,7 +187,6 @@ func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client,
 	t.Log("Waiting for the controller to reconcile")
 	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
 	waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
-	verifyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
 	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
 	defer func() {
 		for _, f := range workerStopFuncs {

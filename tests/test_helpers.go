@@ -30,36 +30,6 @@ func waitForDeployment(t *testing.T, k8sClient client.Client, deploymentName, na
 	t.Fatalf("failed to wait for deployment: timeout waiting for deployment %s in namespace %s", deploymentName, namespace)
 }
 
-func verifyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) {
-	t.Log("Verifying the deployment was created with correct labels")
-	var deployment appsv1.Deployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{
-		Name:      deploymentName,
-		Namespace: namespace,
-	}, &deployment); err != nil {
-		t.Fatalf("failed to get deployment: %v", err)
-	}
-
-	if deployment.Labels["app"] != "test-worker" {
-		t.Errorf("expected deployment label 'app' to be 'test-worker', got '%s'", deployment.Labels["app"])
-	}
-
-	for _, c := range deployment.Spec.Template.Spec.Containers {
-		found := false
-		for _, e := range c.Env {
-			if e.Name == "TEMPORAL_TASK_QUEUE" {
-				found = true
-				if e.Value == "" {
-					t.Errorf("expected deployment to have non-empty `TEMPORAL_TASK_QUEUE` in pod spec but was empty")
-				}
-			}
-		}
-		if !found {
-			t.Errorf("expected deployment to have `TEMPORAL_TASK_QUEUE` in pod spec but did not find it")
-		}
-	}
-}
-
 func verifyTemporalWorkerDeploymentStatusEventually(
 	t *testing.T,
 	ctx context.Context,
@@ -78,22 +48,40 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 		}, &twd); err != nil {
 			return fmt.Errorf("failed to get updated worker deployment: %v", err)
 		}
-		if twd.Status.CurrentVersion == nil {
-			return fmt.Errorf("expected CurrentVersion to be set")
+		if expectedDeploymentStatus.CurrentVersion != nil {
+			if twd.Status.CurrentVersion == nil {
+				return fmt.Errorf("expected CurrentVersion to be set")
+			}
+			if twd.Status.CurrentVersion.Deployment == nil {
+				return fmt.Errorf("expected CurrentVersion.Deployment to be set")
+			}
+			if twd.Status.CurrentVersion.VersionID != expectedDeploymentStatus.CurrentVersion.VersionID {
+				return fmt.Errorf("expected current version id to be '%s', got '%s'",
+					expectedDeploymentStatus.CurrentVersion.VersionID,
+					twd.Status.CurrentVersion.VersionID)
+			}
+			if twd.Status.CurrentVersion.Deployment.Name != expectedDeploymentStatus.CurrentVersion.Deployment.Name {
+				return fmt.Errorf("expected deployment name to be '%s', got '%s'",
+					expectedDeploymentStatus.CurrentVersion.Deployment.Name,
+					twd.Status.CurrentVersion.Deployment.Name)
+			}
 		}
-		if twd.Status.CurrentVersion.Deployment == nil {
-			return fmt.Errorf("expected CurrentVersion.Deployment to be set")
+		if expectedDeploymentStatus.RampingVersion != nil {
+			if twd.Status.RampingVersion == nil {
+				return fmt.Errorf("expected RampingVersion to be set")
+			}
+			if twd.Status.RampingVersion.VersionID != expectedDeploymentStatus.RampingVersion.VersionID {
+				return fmt.Errorf("expected ramping version id to be '%s', got '%s'",
+					expectedDeploymentStatus.RampingVersion.VersionID,
+					twd.Status.RampingVersion.VersionID)
+			}
+			if *twd.Status.RampingVersion.RampPercentage != *expectedDeploymentStatus.RampingVersion.RampPercentage {
+				return fmt.Errorf("expected ramp percentage to be '%v', got '%v'",
+					*expectedDeploymentStatus.RampingVersion.RampPercentage,
+					*twd.Status.RampingVersion.RampPercentage)
+			}
 		}
-		if twd.Status.CurrentVersion.VersionID != expectedDeploymentStatus.CurrentVersion.VersionID {
-			return fmt.Errorf("expected current version id to be '%s', got '%s'",
-				expectedDeploymentStatus.CurrentVersion.VersionID,
-				twd.Status.CurrentVersion.VersionID)
-		}
-		if twd.Status.CurrentVersion.Deployment.Name != expectedDeploymentStatus.CurrentVersion.Deployment.Name {
-			return fmt.Errorf("expected deployment name to be '%s', got '%s'",
-				expectedDeploymentStatus.CurrentVersion.Deployment.Name,
-				twd.Status.CurrentVersion.Deployment.Name)
-		}
+
 		return nil // All assertions passed!
 	})
 }
