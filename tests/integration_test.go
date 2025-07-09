@@ -6,12 +6,15 @@ package tests
 
 import (
 	"context"
+	"path"
 	"testing"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/server/common/config"
+	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +31,18 @@ type testCase struct {
 	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 }
 
+// loadSQLiteConfig loads the config for the sqlite persistence store. We use sqlite because it doesn't require any
+// external dependencies, so it's easy to run this test in isolation.
+func loadConfig(t *testing.T) *config.Config {
+	configDir := path.Join("../", "config")
+	cfg, err := config.LoadConfig("development-sqlite", configDir, "")
+	if err != nil {
+		t.Fatalf("error loading test server config: %v", err)
+	}
+	cfg.DynamicConfigClient.Filepath = path.Join(configDir, "dynamicconfig", "development-sql.yaml")
+	return cfg
+}
+
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
 	// Set up test environment
@@ -39,13 +54,15 @@ func TestIntegration(t *testing.T) {
 	defer cleanupTestNamespace(t, cfg, k8sClient, testNamespace)
 
 	// Create test Temporal server and client
-	ts := temporaltest.NewServer(temporaltest.WithT(t))
+	dynamicCfg := loadConfig(t)
+	ts := temporaltest.NewServer(
+		temporaltest.WithT(t),
+		temporaltest.WithBaseServerOptions(temporal.WithConfig(dynamicCfg)),
+	)
 
 	testRampPercentStep1 := float32(5)
 
-	// params:
-
-	// example:
+	// TODO(carlydf): add a test case that requires pre-reconcile-loop state creation
 	// - can we create a drained version? validate that it's scaled down
 	// - pollerTTL=0
 
