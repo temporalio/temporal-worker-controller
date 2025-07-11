@@ -75,6 +75,22 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: `spec.cutover.steps[1].pauseDuration: Invalid value: "10s": pause duration must be at least 30s`,
 		},
+		"maxVersions below minimum": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("max-versions-too-low"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				maxVersions := int32(0)
+				obj.Spec.MaxVersions = &maxVersions
+				return obj
+			}),
+			errorMsg: "spec.maxVersions: Invalid value: 0: maxVersions must be at least 1",
+		},
+		"maxVersions above maximum": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("max-versions-too-high"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				maxVersions := int32(501)
+				obj.Spec.MaxVersions = &maxVersions
+				return obj
+			}),
+			errorMsg: "spec.maxVersions: Invalid value: 501: maxVersions cannot exceed 500",
+		},
 	}
 
 	for name, tc := range tests {
@@ -153,4 +169,54 @@ func TestTemporalWorkerDeployment_ValidateDelete(t *testing.T) {
 	// ValidateDelete should always return nil, nil
 	assert.NoError(t, err)
 	assert.Nil(t, warnings)
+}
+
+func TestTemporalWorkerDeployment_Default(t *testing.T) {
+	tests := map[string]struct {
+		obj      runtime.Object
+		expected func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment)
+	}{
+		"sets default maxVersions": {
+			obj: testhelpers.MakeTWDWithName("default-max-versions"),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.MaxVersions)
+				assert.Equal(t, int32(75), *obj.Spec.MaxVersions)
+			},
+		},
+		"preserves existing maxVersions": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("preserve-max-versions"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				maxVersions := int32(100)
+				obj.Spec.MaxVersions = &maxVersions
+				return obj
+			}),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.MaxVersions)
+				assert.Equal(t, int32(100), *obj.Spec.MaxVersions)
+			},
+		},
+		"sets default sunset strategy delays": {
+			obj: testhelpers.MakeTWDWithName("default-sunset-delays"),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.SunsetStrategy.ScaledownDelay)
+				assert.Equal(t, time.Hour, obj.Spec.SunsetStrategy.ScaledownDelay.Duration)
+				require.NotNil(t, obj.Spec.SunsetStrategy.DeleteDelay)
+				assert.Equal(t, 24*time.Hour, obj.Spec.SunsetStrategy.DeleteDelay.Duration)
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
+
+			err := webhook.Default(ctx, tc.obj)
+			require.NoError(t, err)
+
+			obj, ok := tc.obj.(*temporaliov1alpha1.TemporalWorkerDeployment)
+			require.True(t, ok)
+
+			tc.expected(t, obj)
+		})
+	}
 }

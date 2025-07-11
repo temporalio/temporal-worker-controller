@@ -68,6 +68,9 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 	}
 	status.DeprecatedVersions = deprecatedVersions
 
+	// Set version count from temporal state (directly from VersionSummaries via Versions map)
+	status.VersionCount = int32(len(m.temporalState.Versions))
+
 	return status
 }
 
