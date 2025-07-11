@@ -79,7 +79,12 @@ func TestGeneratePlan(t *testing.T) {
 						},
 					},
 				},
-				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+					SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+						ScaledownDelay: &metav1.Duration{Duration: 0},
+						DeleteDelay:    &metav1.Duration{Duration: 0},
+					},
+				},
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 				Replicas:        1,
 				ConflictToken:   []byte{},
@@ -190,6 +195,27 @@ func TestGeneratePlan(t *testing.T) {
 			expectConfigSetCurrent:  func() *bool { b := false; return &b }(),         // Should NOT set current (already current)
 			expectConfigRampPercent: func() *float32 { f := float32(0); return &f }(), // Should reset ramp to 0
 		},
+		{
+			name: "should not create deployment when version limit is reached",
+			k8sState: &k8s.DeploymentState{
+				Deployments:       map[string]*appsv1.Deployment{},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*v1.ObjectReference{},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.new",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					VersionCount: 5,
+				},
+				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+					MaxVersions: func() *int32 { i := int32(5); return &i }(),
+				},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        1,
+				ConflictToken:   []byte{},
+			},
+			expectCreate: false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -246,7 +272,12 @@ func TestGetDeleteDeployments(t *testing.T) {
 						},
 					},
 				},
-				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{}, // Uses default sunset strategy: ScaledownDelay=0, DeleteDelay=0
+				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+					SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+						ScaledownDelay: &metav1.Duration{Duration: 0},
+						DeleteDelay:    &metav1.Duration{Duration: 0},
+					},
+				},
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 				Replicas:        1,
 				ConflictToken:   []byte{},
@@ -401,7 +432,7 @@ func TestGetScaleDeployments(t *testing.T) {
 								Deployment: &v1.ObjectReference{Name: "test-123"},
 							},
 							DrainedSince: &metav1.Time{
-								Time: time.Now().Add(-24 * time.Hour),
+								Time: time.Now().Add(-2 * time.Hour), // Long enough past the default 1 hour scaledown delay
 							},
 						},
 					},
@@ -623,6 +654,61 @@ func TestShouldCreateDeployment(t *testing.T) {
 					},
 				},
 				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        1,
+				ConflictToken:   []byte{},
+			},
+			expectCreates: true,
+		},
+		{
+			name: "should not create when version limit is reached (default limit)",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.new",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					VersionCount: 75,
+				},
+				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        1,
+				ConflictToken:   []byte{},
+			},
+			expectCreates: false,
+		},
+		{
+			name: "should not create when version limit is reached (custom limit)",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.new",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					VersionCount: 5,
+				},
+				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+					MaxVersions: func() *int32 { i := int32(5); return &i }(),
+				},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        1,
+				ConflictToken:   []byte{},
+			},
+			expectCreates: false,
+		},
+		{
+			name: "should create when below version limit",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.new",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					VersionCount: 4,
+				},
+				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+					MaxVersions: func() *int32 { i := int32(5); return &i }(),
+				},
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 				Replicas:        1,
 				ConflictToken:   []byte{},
@@ -1460,15 +1546,15 @@ func TestSunsetStrategyDefaults(t *testing.T) {
 		expectDelete time.Duration
 	}{
 		{
-			name: "nil delays return zero",
+			name: "nil delays return defaults",
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: nil,
 					DeleteDelay:    nil,
 				},
 			},
-			expectScale:  0,
-			expectDelete: 0,
+			expectScale:  temporaliov1alpha1.DefaultScaledownDelay,
+			expectDelete: temporaliov1alpha1.DefaultDeleteDelay,
 		},
 		{
 			name: "specified delays are returned",

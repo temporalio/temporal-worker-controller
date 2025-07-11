@@ -19,8 +19,6 @@ import (
 )
 
 const (
-	defaultScaledownDelay              = 1 * time.Hour
-	defaultDeleteDelay                 = 24 * time.Hour
 	maxTemporalWorkerDeploymentNameLen = 63
 )
 
@@ -43,11 +41,16 @@ func (r *TemporalWorkerDeployment) Default(ctx context.Context, obj runtime.Obje
 	}
 
 	if dep.Spec.SunsetStrategy.ScaledownDelay == nil {
-		dep.Spec.SunsetStrategy.ScaledownDelay = &v1.Duration{Duration: defaultScaledownDelay}
+		dep.Spec.SunsetStrategy.ScaledownDelay = &v1.Duration{Duration: DefaultScaledownDelay}
 	}
 
 	if dep.Spec.SunsetStrategy.DeleteDelay == nil {
-		dep.Spec.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaultDeleteDelay}
+		dep.Spec.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: DefaultDeleteDelay}
+	}
+
+	if dep.Spec.MaxVersions == nil {
+		maxVersions := int32(DefaultMaxVersions)
+		dep.Spec.MaxVersions = &maxVersions
 	}
 	return nil
 }
@@ -86,6 +89,7 @@ func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Wa
 	}
 
 	allErrs = append(allErrs, validateRolloutStrategy(new.Spec.RolloutStrategy)...)
+	allErrs = append(allErrs, validateMaxVersions(new.Spec.MaxVersions)...)
 
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(new, allErrs)
@@ -120,6 +124,25 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 				)
 			}
 			lastRamp = s.RampPercentage
+		}
+	}
+
+	return allErrs
+}
+
+func validateMaxVersions(maxVersions *int32) []*field.Error {
+	var allErrs []*field.Error
+
+	if maxVersions != nil {
+		if *maxVersions < 1 {
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.maxVersions"), *maxVersions, "maxVersions must be at least 1"),
+			)
+		}
+		if *maxVersions > 500 {
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.maxVersions"), *maxVersions, "maxVersions cannot exceed 500"),
+			)
 		}
 	}
 

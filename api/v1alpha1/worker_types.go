@@ -5,8 +5,17 @@
 package v1alpha1
 
 import (
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// Default values for TemporalWorkerDeploymentSpec fields
+const (
+	DefaultScaledownDelay = 1 * time.Hour
+	DefaultDeleteDelay    = 24 * time.Hour
+	DefaultMaxVersions    = 75
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -60,6 +69,12 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
+
+	// MaxVersions specifies the maximum number of versions that can exist in the worker deployment
+	// before blocking new deployments. When this limit is reached, new deployments will be blocked
+	// to prevent hitting Temporal's assignment rule limit. Defaults to 75.
+	// +optional
+	MaxVersions *int32 `json:"maxVersions,omitempty"`
 }
 
 // VersionStatus indicates the status of a version.
@@ -130,6 +145,11 @@ type TemporalWorkerDeploymentStatus struct {
 	// LastModifierIdentity is the identity of the client that most recently modified the worker deployment.
 	// +optional
 	LastModifierIdentity string `json:"lastModifierIdentity,omitempty"`
+
+	// VersionCount is the total number of versions currently known by the worker deployment.
+	// This includes current, target, ramping, and deprecated versions.
+	// +optional
+	VersionCount int32 `json:"versionCount,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
