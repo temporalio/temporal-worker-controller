@@ -6,19 +6,25 @@ package tests
 
 import (
 	"context"
-	"path"
+	"os"
 	"testing"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
-	"go.temporal.io/server/common/config"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	testPollerHistoryTTL              = time.Second
+	testDrainageVisibilityGracePeriod = time.Second
+	testDrainageRefreshInterval       = time.Second
 )
 
 type testCase struct {
@@ -31,20 +37,11 @@ type testCase struct {
 	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 }
 
-// loadSQLiteConfig loads the config for the sqlite persistence store. We use sqlite because it doesn't require any
-// external dependencies, so it's easy to run this test in isolation.
-func loadConfig(t *testing.T) *config.Config {
-	configDir := path.Join("../", "config")
-	cfg, err := config.LoadConfig("development-sqlite", configDir, "")
-	if err != nil {
-		t.Fatalf("error loading test server config: %v", err)
-	}
-	cfg.DynamicConfigClient.Filepath = path.Join(configDir, "dynamicconfig", "development-sql.yaml")
-	return cfg
-}
-
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
+	// Set faster reconcile interval for testing
+	os.Setenv("RECONCILE_INTERVAL", "1s")
+
 	// Set up test environment
 	cfg, k8sClient, _, _, cleanup := setupTestEnvironment(t)
 	defer cleanup()
@@ -54,10 +51,15 @@ func TestIntegration(t *testing.T) {
 	defer cleanupTestNamespace(t, cfg, k8sClient, testNamespace)
 
 	// Create test Temporal server and client
-	dynamicCfg := loadConfig(t)
+	dc := dynamicconfig.NewMemoryClient()
+	// make versions eligible for deletion faster
+	dc.OverrideValue("matching.PollerHistoryTTL", testPollerHistoryTTL)
+	// make versions drain faster
+	dc.OverrideValue("matching.wv.VersionDrainageStatusVisibilityGracePeriod", testDrainageVisibilityGracePeriod)
+	dc.OverrideValue("matching.wv.VersionDrainageStatusRefreshInterval", testDrainageRefreshInterval)
 	ts := temporaltest.NewServer(
 		temporaltest.WithT(t),
-		temporaltest.WithBaseServerOptions(temporal.WithConfig(dynamicCfg)),
+		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dc)),
 	)
 
 	testRampPercentStep1 := float32(5)
