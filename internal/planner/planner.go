@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -103,7 +104,7 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, config)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, config)
-	plan.ShouldCreateDeployment = shouldCreateDeployment(k8sState, config)
+	plan.ShouldCreateDeployment = shouldCreateDeployment(l, k8sState, config)
 
 	// Determine if we need to start any test workflows
 	plan.TestWorkflows = getTestWorkflows(config)
@@ -227,11 +228,13 @@ func getScaleDeployments(
 
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
+	l logr.Logger,
 	k8sState *k8s.DeploymentState,
 	config *Config,
 ) bool {
 	// Check if we're at the version limit - if so, don't create new deployments
 	if config.Status.VersionCount >= getMaxVersions(config.Spec) {
+		l.Error(errors.New("max versions reached"), "Max versions reached, skipping deployment creation", "versionCount", config.Status.VersionCount, "maxVersions", getMaxVersions(config.Spec))
 		return false
 	}
 

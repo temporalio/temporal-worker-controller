@@ -719,7 +719,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			creates := shouldCreateDeployment(tc.k8sState, tc.config)
+			creates := shouldCreateDeployment(testlogr.New(t), tc.k8sState, tc.config)
 			assert.Equal(t, tc.expectCreates, creates, "unexpected create decision")
 		})
 	}

@@ -85,11 +85,11 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 		},
 		"maxVersions above maximum": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("max-versions-too-high"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				maxVersions := int32(501)
+				maxVersions := int32(101)
 				obj.Spec.MaxVersions = &maxVersions
 				return obj
 			}),
-			errorMsg: "spec.maxVersions: Invalid value: 501: maxVersions cannot exceed 500",
+			errorMsg: "spec.maxVersions: Invalid value: 101: maxVersions cannot exceed 100",
 		},
 	}
 
