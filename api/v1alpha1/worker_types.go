@@ -13,9 +13,10 @@ import (
 
 // Default values for TemporalWorkerDeploymentSpec fields
 const (
-	DefaultScaledownDelay = 1 * time.Hour
-	DefaultDeleteDelay    = 24 * time.Hour
-	DefaultMaxVersions    = 75
+	DefaultScaledownDelay    = 1 * time.Hour
+	DefaultDeleteDelay       = 24 * time.Hour
+	DefaultServerMaxVersions = 100
+	DefaultMaxVersions       = int32(DefaultServerMaxVersions * 0.75)
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -70,13 +71,13 @@ type TemporalWorkerDeploymentSpec struct {
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 
-          // MaxVersions defines the maximum number of worker deployment versions allowed. 
-          // This helps prevent hitting Temporal's default limit of 100 versions per deployment. 
-          // Defaults to 75. Users can override this by explicitly setting a higher value in 
-          // the CRD, but should exercise caution: once the 100-version limit is reached, 
-          // Temporal attempts to delete an eligible version. If no version is eligible for 
-          // deletion, new deployments get blocked which prevents
-          // the controller from making progress.
+	// MaxVersions defines the maximum number of worker deployment versions allowed.
+	// This helps prevent hitting Temporal's default limit of 100 versions per deployment.
+	// Defaults to 75. Users can override this by explicitly setting a higher value in
+	// the CRD, but should exercise caution: once the 100-version limit is reached,
+	// Temporal attempts to delete an eligible version. If no version is eligible for
+	// deletion, new deployments get blocked which prevents
+	// the controller from making progress.
 
 	// +optional
 	MaxVersions *int32 `json:"maxVersions,omitempty"`

@@ -139,9 +139,9 @@ func validateMaxVersions(maxVersions *int32) []*field.Error {
 				field.Invalid(field.NewPath("spec.maxVersions"), *maxVersions, "maxVersions must be at least 1"),
 			)
 		}
-		if *maxVersions > 100 {
+		if *maxVersions > DefaultServerMaxVersions {
 			allErrs = append(allErrs,
-				field.Invalid(field.NewPath("spec.maxVersions"), *maxVersions, "maxVersions cannot exceed 100"),
+				field.Invalid(field.NewPath("spec.maxVersions"), *maxVersions, fmt.Sprintf("maxVersions cannot exceed %d", DefaultServerMaxVersions)),
 			)
 		}
 	}
