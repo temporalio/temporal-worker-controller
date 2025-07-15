@@ -2,10 +2,11 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package k8s
+package k8s_test
 
 import (
 	"context"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +77,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			healthy, healthySince := IsDeploymentHealthy(tt.deployment)
+			healthy, healthySince := k8s.IsDeploymentHealthy(tt.deployment)
 			assert.Equal(t, tt.expectedHealthy, healthy)
 			if tt.expectedTimeNil {
 				assert.Nil(t, healthySince)
@@ -109,7 +110,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v1",
 			Namespace: "default",
 			Labels: map[string]string{
-				BuildIDLabel: "v1",
+				k8s.BuildIDLabel: "v1",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
@@ -129,7 +130,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v2",
 			Namespace: "default",
 			Labels: map[string]string{
-				BuildIDLabel: "v2",
+				k8s.BuildIDLabel: "v2",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
@@ -170,7 +171,7 @@ func TestGetDeploymentState(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(owner, deploy1, deploy2, deployWithoutLabel).
-		WithIndex(&appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
+		WithIndex(&appsv1.Deployment{}, k8s.DeployOwnerKey, func(rawObj client.Object) []string {
 			deploy := rawObj.(*appsv1.Deployment)
 			owner := metav1.GetControllerOf(deploy)
 			if owner == nil {
@@ -184,7 +185,7 @@ func TestGetDeploymentState(t *testing.T) {
 		Build()
 
 	// Test the GetDeploymentState function
-	state, err := GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
+	state, err := k8s.GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
 	require.NoError(t, err)
 
 	// Verify the state is constructed correctly
@@ -292,7 +293,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage(digestedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -303,7 +304,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage(digestedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -336,7 +337,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage(longImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  cleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:maxBuildIdLen-5], -1),
+			expectedPrefix:  k8s.CleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIdLen-5], -1),
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -348,11 +349,11 @@ func TestGenerateBuildID(t *testing.T) {
 
 			var build1, build2 string
 			if twd1 != nil {
-				build1 = ComputeBuildID(twd1)
+				build1 = k8s.ComputeBuildID(twd1)
 				verifyBuildId(t, build1, tt.expectedPrefix, tt.expectedHashLen)
 			}
 			if twd2 != nil {
-				build2 = ComputeBuildID(twd2)
+				build2 = k8s.ComputeBuildID(twd2)
 				verifyBuildId(t, build2, tt.expectedPrefix, tt.expectedHashLen)
 			}
 
@@ -368,9 +369,9 @@ func TestGenerateBuildID(t *testing.T) {
 
 func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen int) {
 	assert.Truef(t, strings.HasPrefix(build, expectedPrefix), "expected prefix %s in build %s", expectedPrefix, build)
-	assert.LessOrEqual(t, len(build), maxBuildIdLen)
-	assert.Equalf(t, cleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
-	split := strings.Split(build, k8sResourceNameSeparator)
+	assert.LessOrEqual(t, len(build), k8s.MaxBuildIdLen)
+	assert.Equalf(t, k8s.CleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
+	split := strings.Split(build, k8s.K8sResourceNameSeparator)
 	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
 }
 

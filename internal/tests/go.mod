@@ -6,6 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/temporalio/temporal-worker-controller v0.0.0-20250701210615-ae0d5c997923
+	go.temporal.io/api v1.50.0
 	go.temporal.io/sdk v1.34.0
 	go.temporal.io/server v1.28.0
 	k8s.io/api v0.33.2
@@ -143,7 +144,6 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
-	go.temporal.io/api v1.50.0 // indirect
 	go.temporal.io/version v0.3.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.18.0 // indirect

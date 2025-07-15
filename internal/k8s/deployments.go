@@ -22,13 +22,13 @@ import (
 )
 
 const (
-	deployOwnerKey = ".metadata.controller"
+	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel             = "temporal.io/build-id"
 	deploymentNameSeparator  = "."
 	versionIDSeparator       = "."
-	k8sResourceNameSeparator = "-"
-	maxBuildIdLen            = 63
+	K8sResourceNameSeparator = "-"
+	MaxBuildIdLen            = 63
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -62,7 +62,7 @@ func GetDeploymentState(
 		ctx,
 		&childDeploys,
 		client.InNamespace(namespace),
-		client.MatchingFields{deployOwnerKey: ownerName},
+		client.MatchingFields{DeployOwnerKey: ownerName},
 	); err != nil {
 		return nil, fmt.Errorf("unable to list child deployments: %w", err)
 	}
@@ -117,8 +117,8 @@ func ComputeVersionID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
-			shortHashSuffix := k8sResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
-			maxImgLen := maxBuildIdLen - len(shortHashSuffix)
+			shortHashSuffix := K8sResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
+			maxImgLen := MaxBuildIdLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
 			return imagePrefix + shortHashSuffix
 		}
@@ -150,13 +150,13 @@ func computeImagePrefix(s string, maxLen int) string {
 		default:
 		}
 	}
-	return cleanAndTruncateString(s, maxLen)
+	return CleanAndTruncateString(s, maxLen)
 }
 
-// Truncates string to the first n characters, and then replaces characters that can't be in a
+// CleanAndTruncateString truncates string to the first n characters, and then replaces characters that can't be in a
 // kubernetes resource name with a `-` character which can be.
 // Pass n = -1 to skip truncation.
-func cleanAndTruncateString(s string, n int) string {
+func CleanAndTruncateString(s string, n int) string {
 	if len(s) > n && n > 0 {
 		s = s[:n]
 	}

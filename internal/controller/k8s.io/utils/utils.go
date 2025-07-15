@@ -68,7 +68,7 @@ func ComputeHash(template *v1.PodTemplateSpec, collisionCount *int32, short bool
 	if collisionCount != nil {
 		collisionCountBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint32(collisionCountBytes, uint32(*collisionCount))
-		podTemplateSpecHasher.Write(collisionCountBytes)
+		_, _ = podTemplateSpecHasher.Write(collisionCountBytes)
 	}
 
 	if short {
