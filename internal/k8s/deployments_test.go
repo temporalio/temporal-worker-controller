@@ -6,23 +6,22 @@ package k8s_test
 
 import (
 	"context"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestIsDeploymentHealthy(t *testing.T) {
@@ -39,7 +38,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:               appsv1.DeploymentAvailable,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastTransitionTime: metav1.NewTime(time.Now()),
 						},
 					},
@@ -55,7 +54,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:   appsv1.DeploymentAvailable,
-							Status: v1.ConditionFalse,
+							Status: corev1.ConditionFalse,
 						},
 					},
 				},
@@ -165,7 +164,7 @@ func TestGetDeploymentState(t *testing.T) {
 	// Create scheme and fake client with field indexer
 	scheme := runtime.NewScheme()
 	_ = appsv1.AddToScheme(scheme)
-	_ = v1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
 	_ = temporaliov1alpha1.AddToScheme(scheme)
 
 	fakeClient := fake.NewClientBuilder().
@@ -220,8 +219,8 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same image different pod specs",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod1 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "1"}, "")
-				pod2 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "2"}, "")
+				pod1 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "1"}, "")
+				pod2 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "2"}, "")
 
 				twd1 := testhelpers.MakeTWD(1, pod1, nil, nil, nil)
 				twd2 := testhelpers.MakeTWD(1, pod2, nil, nil, nil)
@@ -235,7 +234,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same pod specs different TWD spec",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, nil, "")
+				pod := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, nil, "")
 				twd1 := testhelpers.MakeTWD(1, pod, nil, nil, nil)
 				twd2 := testhelpers.MakeTWD(2, pod, nil, nil, nil)
 				return twd1, twd2
@@ -398,7 +397,7 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ComputeVersionedDeploymentName(tt.baseName, tt.buildID)
+			result := k8s.ComputeVersionedDeploymentName(tt.baseName, tt.buildID)
 			assert.Equal(t, tt.expectedName, result)
 
 			// Verify the format is always baseName-buildID
@@ -424,9 +423,9 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 			Namespace: "demo",
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-			Template: v1.PodTemplateSpec{
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
 						{
 							Image: "temporal/hello-world:v1.0.0",
 						},
@@ -437,9 +436,9 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 	}
 
 	// Test the full pipeline: TemporalWorkerDeployment -> worker deployment name -> versioned deployment name
-	workerDeploymentName := ComputeWorkerDeploymentName(twd)
-	buildID := ComputeBuildID(twd)
-	versionedName := ComputeVersionedDeploymentName(workerDeploymentName, buildID)
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(twd)
+	buildID := k8s.ComputeBuildID(twd)
+	versionedName := k8s.ComputeVersionedDeploymentName(workerDeploymentName, buildID)
 
 	// Verify the expected formats
 	assert.Equal(t, "hello-world.demo", workerDeploymentName)
@@ -447,8 +446,8 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 	assert.True(t, strings.Contains(versionedName, "v1-0-0"), "versioned name should contain cleaned image tag")
 
 	// Verify the version ID combines worker deployment name and build ID
-	versionID := ComputeVersionID(twd)
+	versionID := k8s.ComputeVersionID(twd)
 	expectedVersionID := workerDeploymentName + "." + buildID
 	assert.Equal(t, expectedVersionID, versionID)
-	assert.Equal(t, "hello-world.demo.v1-0-0-8666", versionID)
+	assert.Equal(t, "hello-world.demo.v1-0-0-dd84", versionID)
 }

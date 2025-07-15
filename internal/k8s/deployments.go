@@ -12,13 +12,12 @@ import (
 	"strings"
 
 	"github.com/distribution/reference"
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -38,7 +37,7 @@ type DeploymentState struct {
 	// Sorted deployments by creation time
 	DeploymentsByTime []*appsv1.Deployment
 	// Map of deployment references
-	DeploymentRefs map[string]*v1.ObjectReference
+	DeploymentRefs map[string]*corev1.ObjectReference
 }
 
 // GetDeploymentState queries Kubernetes to get the state of all deployments
@@ -53,7 +52,7 @@ func GetDeploymentState(
 	state := &DeploymentState{
 		Deployments:       make(map[string]*appsv1.Deployment),
 		DeploymentsByTime: []*appsv1.Deployment{},
-		DeploymentRefs:    make(map[string]*v1.ObjectReference),
+		DeploymentRefs:    make(map[string]*corev1.ObjectReference),
 	}
 
 	// List k8s deployments that correspond to managed worker deployment versions
@@ -91,7 +90,7 @@ func GetDeploymentState(
 func IsDeploymentHealthy(deployment *appsv1.Deployment) (bool, *metav1.Time) {
 	// TODO(jlegrone): do we need to sort conditions by timestamp to check only latest?
 	for _, c := range deployment.Status.Conditions {
-		if c.Type == appsv1.DeploymentAvailable && c.Status == v1.ConditionTrue {
+		if c.Type == appsv1.DeploymentAvailable && c.Status == corev1.ConditionTrue {
 			return true, &c.LastTransitionTime
 		}
 	}
@@ -99,8 +98,8 @@ func IsDeploymentHealthy(deployment *appsv1.Deployment) (bool, *metav1.Time) {
 }
 
 // NewObjectRef creates a reference to a Kubernetes object
-func NewObjectRef(obj client.Object) *v1.ObjectReference {
-	return &v1.ObjectReference{
+func NewObjectRef(obj client.Object) *corev1.ObjectReference {
+	return &corev1.ObjectReference{
 		APIVersion: obj.GetObjectKind().GroupVersionKind().GroupVersion().String(),
 		Kind:       obj.GetObjectKind().GroupVersionKind().Kind,
 		Name:       obj.GetName(),
@@ -206,19 +205,19 @@ func NewDeploymentWithOwnerRef(
 	// Add environment variables to containers
 	for i, container := range podSpec.Containers {
 		container.Env = append(container.Env,
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "TEMPORAL_HOST_PORT",
 				Value: connection.HostPort,
 			},
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "TEMPORAL_NAMESPACE",
 				Value: spec.WorkerOptions.TemporalNamespace,
 			},
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "TEMPORAL_DEPLOYMENT_NAME",
 				Value: workerDeploymentName,
 			},
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "WORKER_BUILD_ID",
 				Value: buildID,
 			},
@@ -230,25 +229,25 @@ func NewDeploymentWithOwnerRef(
 	if connection.MutualTLSSecret != "" {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
-				v1.EnvVar{
+				corev1.EnvVar{
 					Name:  "TEMPORAL_TLS_KEY_PATH",
 					Value: "/etc/temporal/tls/tls.key",
 				},
-				v1.EnvVar{
+				corev1.EnvVar{
 					Name:  "TEMPORAL_TLS_CERT_PATH",
 					Value: "/etc/temporal/tls/tls.crt",
 				},
 			)
-			container.VolumeMounts = append(container.VolumeMounts, v1.VolumeMount{
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 				Name:      "temporal-tls",
 				MountPath: "/etc/temporal/tls",
 			})
 			podSpec.Containers[i] = container
 		}
-		podSpec.Volumes = append(podSpec.Volumes, v1.Volume{
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 			Name: "temporal-tls",
-			VolumeSource: v1.VolumeSource{
-				Secret: &v1.SecretVolumeSource{
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
 					SecretName: connection.MutualTLSSecret,
 				},
 			},
@@ -280,7 +279,7 @@ func NewDeploymentWithOwnerRef(
 			Selector: &metav1.LabelSelector{
 				MatchLabels: selectorLabels,
 			},
-			Template: v1.PodTemplateSpec{
+			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      podLabels,
 					Annotations: spec.Template.Annotations,

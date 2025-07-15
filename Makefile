@@ -3,12 +3,117 @@ IMG ?= temporal-worker-controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.27.1
 
+MAIN_BRANCH = main
+ALL_TEST_TAGS = test_dep
+
+##### Variables ######
+
+ROOT := $(shell git rev-parse --show-toplevel)
+LOCALBIN := .bin
+STAMPDIR := .stamp
+export PATH := $(ROOT)/$(LOCALBIN):$(PATH)
+GOINSTALL := GOBIN=$(ROOT)/$(LOCALBIN) go install
+
+OTEL ?= false
+ifeq ($(OTEL),true)
+	export OTEL_BSP_SCHEDULE_DELAY=100 # in ms
+	export OTEL_EXPORTER_OTLP_TRACES_INSECURE=true
+	export OTEL_TRACES_EXPORTER=otlp
+	export TEMPORAL_OTEL_DEBUG=true
+endif
+
+MODULE_ROOT := $(lastword $(shell grep -e "^module " go.mod))
+
+## Tool Binaries
+KUBECTL ?= kubectl
+K8S_CONTEXT ?= minikube
+HELM ?= $(LOCALBIN)/helm
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+TEMPORAL ?= temporal
+
+## Tool Versions
+HELM_VERSION ?= v3.14.3
+CONTROLLER_TOOLS_VERSION ?= v0.16.2
+
+##### Tools #####
+print-go-version:
+	@go version
+
+clean-tools:
+	@printf $(COLOR) "Delete tools..."
+	@rm -rf $(STAMPDIR)
+	@rm -rf $(LOCALBIN)
+
+$(STAMPDIR):
+	@mkdir -p $(STAMPDIR)
+
+$(LOCALBIN):
+	@mkdir -p $(LOCALBIN)
+
+# When updating the version, update the golangci-lint GHA workflow as well.
+.PHONY: golangci-lint
+GOLANGCI_LINT_BASE_REV ?= $(MAIN_BRANCH)
+GOLANGCI_LINT_FIX ?= true
+GOLANGCI_LINT_VERSION := v1.64.8
+GOLANGCI_LINT := $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
+$(GOLANGCI_LINT): $(LOCALBIN)
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+# Don't get confused, there is a single linter called gci, which is a part of the mega linter we use is called golangci-lint.
+GCI_VERSION := v0.13.6
+GCI := $(LOCALBIN)/gci-$(GCI_VERSION)
+$(GCI): $(LOCALBIN)
+	$(call go-install-tool,$(GCI),github.com/daixiang0/gci,$(GCI_VERSION))
+
+GOTESTSUM_VER := v1.12.1
+GOTESTSUM := $(LOCALBIN)/gotestsum-$(GOTESTSUM_VER)
+$(GOTESTSUM): | $(LOCALBIN)
+	$(call go-install-tool,$(GOTESTSUM),gotest.tools/gotestsum,$(GOTESTSUM_VER))
+
+GO_API_VER = $(shell go list -m -f '{{.Version}}' go.temporal.io/api \
+	|| (echo "failed to fetch version for go.temporal.io/api" >&2))
+
+ACTIONLINT_VER := v1.7.7
+ACTIONLINT := $(LOCALBIN)/actionlint-$(ACTIONLINT_VER)
+$(ACTIONLINT): | $(LOCALBIN)
+	$(call go-install-tool,$(ACTIONLINT),github.com/rhysd/actionlint/cmd/actionlint,$(ACTIONLINT_VER))
+
+
+# The following tools need to have a consistent name, so we use a versioned stamp file to ensure the version we want is installed
+# while installing to an unversioned binary name.
+GOIMPORTS_VER := v0.31.0
+GOIMPORTS := $(LOCALBIN)/goimports
+$(STAMPDIR)/goimports-$(GOIMPORTS_VER): | $(STAMPDIR) $(LOCALBIN)
+	$(call go-install-tool,$(GOIMPORTS),golang.org/x/tools/cmd/goimports,$(GOIMPORTS_VER))
+	@touch $@
+$(GOIMPORTS): $(STAMPDIR)/goimports-$(GOIMPORTS_VER)
+
+COLOR := "\e[1;36m%s\e[0m\n"
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
 else
 GOBIN=$(shell go env GOBIN)
 endif
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary (ideally with version)
+# $2 - package url which can be installed
+# $3 - specific version of package
+# This is courtesy of https://github.com/kubernetes-sigs/kubebuilder/pull/3718
+define go-install-tool
+@[ -f $(1) ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+printf $(COLOR) "Downloading $${package}" ;\
+tmpdir=$$(mktemp -d) ;\
+GOBIN=$${tmpdir} go install $${package} ;\
+mv $${tmpdir}/$$(basename "$$(echo "$(1)" | sed "s/-$(3)$$//")") $(1) ;\
+rm -rf $${tmpdir} ;\
+}
+endef
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
@@ -89,14 +194,6 @@ start-temporal-server: ## Start an ephemeral Temporal server with versioning API
 		--dynamic-config-value frontend.workerVersioningWorkflowAPIs=true \
 		--dynamic-config-value system.enableDeploymentVersions=true
 
-.PHONY: fmt
-fmt: ## Run go fmt against code.
-	go fmt ./...
-
-.PHONY: vet
-vet: ## Run go vet against code.
-	go vet ./...
-
 .PHONY: test-all
 test-all: manifests generate envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags test_dep ./... -coverprofile cover.out
@@ -149,7 +246,7 @@ docker-buildx: test ## Build and push docker image for the manager for cross-pla
 	rm Dockerfile.cross
 
 ##@ Deployment
-
+# ignore-not-found is used in the uninstall target
 ifndef ignore-not-found
   ignore-not-found = false
 endif
@@ -171,23 +268,6 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 	helm uninstall temporal-worker-controller --namespace temporal-system
 
 ##@ Build Dependencies
-
-## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
-	mkdir -p $(LOCALBIN)
-
-## Tool Binaries
-KUBECTL ?= kubectl
-K8S_CONTEXT ?= minikube
-HELM ?= $(LOCALBIN)/helm
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-ENVTEST ?= $(LOCALBIN)/setup-envtest
-TEMPORAL ?= temporal
-
-## Tool Versions
-HELM_VERSION ?= v3.14.3
-CONTROLLER_TOOLS_VERSION ?= v0.16.2
 
 .PHONY: helm
 helm: $(HELM) ## Download helm locally if necessary. If wrong version is installed, it will be removed before downloading.
@@ -213,24 +293,6 @@ envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
-DD_SITE ?= datadoghq.com
-
-# Add an entry in secret.env and then run this target via the following command:
-#  source secret.env && make install-datadog-agent DD_API_KEY=$DD_API_KEY
-#
-# A DD_API_KEY can be found in the Datadog setup commands or on the API Keys page https://us1.datadoghq.com/organization-settings/api-keys
-.PHONY: install-datadog-agent
-install-datadog-agent:
-	helm repo add datadog https://helm.datadoghq.com
-	helm repo update
-	kubectl delete secret datadog-api-key --namespace datadog-agent || true
-	@helm upgrade --install --create-namespace datadog-agent datadog/datadog \
-		--kube-context minikube \
-		--namespace datadog-agent \
-		-f hack/datadog-values.yaml \
-		--set datadog.site='$(DD_SITE)'
-	@kubectl create secret generic datadog-api-key --from-literal api-key=$(DD_API_KEY) --namespace datadog-agent
-
 # Create an mTLS secret in k8s
 .PHONY: create-cloud-mtls-secret
 create-cloud-mtls-secret:
@@ -238,5 +300,32 @@ create-cloud-mtls-secret:
       --cert=certs/client.pem \
       --key=certs/client.key
 
-# View workflows filtered by Build ID
-# http://0.0.0.0:8233/namespaces/default/workflows?query=BuildIds+IN+%28%22versioned%3A5578f87d9c%22%29
+##### Checks #####
+goimports: fmt-imports $(GOIMPORTS)
+	@printf $(COLOR) "Run goimports for all files..."
+	@UNGENERATED_FILES=$$(find . -type f -name '*.go' -print0 | xargs -0 grep -L -e "Code generated by .* DO NOT EDIT." || true) && \
+		$(GOIMPORTS) -w $$UNGENERATED_FILES
+
+
+lint-actions: $(ACTIONLINT)
+	@printf $(COLOR) "Linting GitHub actions..."
+	@$(ACTIONLINT)
+
+lint-code: $(GOLANGCI_LINT)
+	@printf $(COLOR) "Linting code..."
+	@$(GOLANGCI_LINT) run --verbose --build-tags $(ALL_TEST_TAGS) --timeout 10m --fix=$(GOLANGCI_LINT_FIX) --new-from-rev=$(GOLANGCI_LINT_BASE_REV) --config=.github/.golangci.yml
+
+fmt-imports: $(GCI) # Don't get confused, there is a single linter called gci, which is a part of the mega linter we use is called golangci-lint.
+	@printf $(COLOR) "Formatting imports..."
+	@$(GCI) write --skip-generated -s standard -s default ./api ./cmd ./internal
+
+lint: lint-code lint-actions
+	@printf $(COLOR) "Run linters..."
+
+.PHONY: fmt
+fmt: ## Run go fmt against code.
+	go fmt ./...
+
+.PHONY: vet
+vet: ## Run go vet against code.
+	go vet ./...

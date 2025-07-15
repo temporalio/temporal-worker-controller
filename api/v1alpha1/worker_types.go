@@ -5,7 +5,7 @@
 package v1alpha1
 
 import (
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -37,7 +37,7 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
-	Template v1.PodTemplateSpec `json:"template"`
+	Template corev1.PodTemplateSpec `json:"template"`
 
 	// Minimum number of seconds for which a newly created pod should be ready
 	// without any of its container crashing, for it to be considered available.
@@ -190,7 +190,7 @@ type BaseWorkerDeploymentVersion struct {
 
 	// A pointer to the version's managed k8s deployment.
 	// +optional
-	Deployment *v1.ObjectReference `json:"deployment"`
+	Deployment *corev1.ObjectReference `json:"deployment"`
 
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`

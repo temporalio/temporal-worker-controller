@@ -9,15 +9,13 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -29,7 +27,7 @@ type plan struct {
 	// Which actions to take
 	DeleteDeployments []*appsv1.Deployment
 	CreateDeployment  *appsv1.Deployment
-	ScaleDeployments  map[*v1.ObjectReference]uint32
+	ScaleDeployments  map[*corev1.ObjectReference]uint32
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
@@ -72,7 +70,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan := &plan{
 		TemporalNamespace:    w.Spec.WorkerOptions.TemporalNamespace,
 		WorkerDeploymentName: workerDeploymentName,
-		ScaleDeployments:     make(map[*v1.ObjectReference]uint32),
+		ScaleDeployments:     make(map[*corev1.ObjectReference]uint32),
 	}
 
 	// Check if we need to force manual strategy due to external modification

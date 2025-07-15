@@ -1,17 +1,16 @@
 package testhelpers
 
 import (
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 func MakeTWD(
 	replicas int32,
-	podSpec v1.PodTemplateSpec,
+	podSpec corev1.PodTemplateSpec,
 	rolloutStrategy *temporaliov1alpha1.RolloutStrategy,
 	sunsetStrategy *temporaliov1alpha1.SunsetStrategy,
 	workerOpts *temporaliov1alpha1.WorkerOptions,
@@ -52,30 +51,30 @@ func MakeTWD(
 }
 
 // MakePodSpec creates a pod spec. Feel free to add parameters as needed.
-func MakePodSpec(containers []v1.Container, labels map[string]string, taskQueue string) v1.PodTemplateSpec {
+func MakePodSpec(containers []corev1.Container, labels map[string]string, taskQueue string) corev1.PodTemplateSpec {
 	for i := range containers {
-		containers[i].Env = append(containers[i].Env, v1.EnvVar{Name: "TEMPORAL_TASK_QUEUE", Value: taskQueue})
+		containers[i].Env = append(containers[i].Env, corev1.EnvVar{Name: "TEMPORAL_TASK_QUEUE", Value: taskQueue})
 	}
 
-	return v1.PodTemplateSpec{
+	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: labels,
 		},
-		Spec: v1.PodSpec{
+		Spec: corev1.PodSpec{
 			Containers: containers,
 		},
 	}
 }
 
 // MakeHelloWorldPodSpec creates a pod spec with hello_world task queue and one container with the given image name.
-func MakeHelloWorldPodSpec(imageName string) v1.PodTemplateSpec {
-	return MakePodSpec([]v1.Container{{Name: "worker", Image: imageName}},
+func MakeHelloWorldPodSpec(imageName string) corev1.PodTemplateSpec {
+	return MakePodSpec([]corev1.Container{{Name: "worker", Image: imageName}},
 		map[string]string{"app": "test-worker"},
 		"hello_world")
 }
 
 func MakeTWDWithImage(imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
-	return MakeTWD(1, MakePodSpec([]v1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
+	return MakeTWD(1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
 }
 
 // MakeVersionId computes a version id based on the image, HelloWorldPodSpec, and k8s namespace.
@@ -99,7 +98,7 @@ func MakeVersionId(k8sNamespace, twdName, imageName string) string {
 // MakeBuildId computes a build id based on the image and
 // If no podSpec is provided, defaults to HelloWorldPodSpec with the given image name.
 // If you provide your own podSpec, make sure to give the first container your desired image name if success is expected.
-func MakeBuildId(twdName, imageName string, podSpec *v1.PodTemplateSpec) string {
+func MakeBuildId(twdName, imageName string, podSpec *corev1.PodTemplateSpec) string {
 	return k8s.ComputeBuildID(
 		ModifyObj(
 			MakeTWDWithName(twdName),

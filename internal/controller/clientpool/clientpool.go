@@ -7,20 +7,18 @@ package clientpool
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"sync"
 	"time"
 
-	"crypto/x509"
-	"encoding/pem"
-
+	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 type ClientPoolKey struct {

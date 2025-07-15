@@ -8,21 +8,19 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Plan holds the actions to execute during reconciliation
 type Plan struct {
 	// Which actions to take
 	DeleteDeployments      []*appsv1.Deployment
-	ScaleDeployments       map[*v1.ObjectReference]uint32
+	ScaleDeployments       map[*corev1.ObjectReference]uint32
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
@@ -67,7 +65,7 @@ func GeneratePlan(
 	config *Config,
 ) (*Plan, error) {
 	plan := &Plan{
-		ScaleDeployments: make(map[*v1.ObjectReference]uint32),
+		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
 	}
 
 	// Add delete/scale operations based on version status
@@ -132,8 +130,8 @@ func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
-) map[*v1.ObjectReference]uint32 {
-	scaleDeployments := make(map[*v1.ObjectReference]uint32)
+) map[*corev1.ObjectReference]uint32 {
+	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
 	replicas := *spec.Replicas
 
 	// Scale the current version if needed

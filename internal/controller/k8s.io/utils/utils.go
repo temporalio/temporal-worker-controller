@@ -27,7 +27,7 @@ import (
 	"hash/fnv"
 
 	"github.com/davecgh/go-spew/spew"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 )
 
@@ -60,7 +60,7 @@ func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
 // If `short` is true, the hash is truncated to 4 digits
 //
 // Copied from https://github.com/kubernetes/kubernetes/blob/86fec81606b579cc478a30656c29ddb400a72dc6/pkg/controller/controller_utils.go#L1174
-func ComputeHash(template *v1.PodTemplateSpec, collisionCount *int32, short bool) string {
+func ComputeHash(template *corev1.PodTemplateSpec, collisionCount *int32, short bool) string {
 	podTemplateSpecHasher := fnv.New32a()
 	deepHashObject(podTemplateSpecHasher, *template)
 
