@@ -106,6 +106,7 @@ type TemporalWorkerDeploymentStatus struct {
 	// then the controller should create it. If not nil, the controller should
 	// wait for it to become healthy and then move it to the CurrentVersion.
 	// This must never be nil.
+	// +kubebuilder:validation:Required
 	TargetVersion *TargetWorkerDeploymentVersion `json:"targetVersion"`
 
 	// CurrentVersion is the version that is currently registered with
