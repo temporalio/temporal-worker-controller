@@ -69,9 +69,9 @@ func TestIntegration(t *testing.T) {
 
 	tests := map[string]testCase{
 		"all-at-once-rollout-2-replicas": {
-			input: testhelpers.ModifyObj(common.MakeTWDWithName("all-at-once-rollout-2-replicas"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("all-at-once-rollout-2-replicas"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateAllAtOnce
-				obj.Spec.Template = common.MakeHelloWorldPodSpec("v1")
+				obj.Spec.Template = testhelpers.MakeHelloWorldPodSpec("v1")
 				replicas := int32(2)
 				obj.Spec.Replicas = &replicas
 				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
@@ -90,12 +90,12 @@ func TestIntegration(t *testing.T) {
 				TargetVersion: nil,
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: common.MakeVersionId(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1"),
+						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1"),
 						Deployment: &corev1.ObjectReference{
 							Namespace: testNamespace.Name,
 							Name: k8s.ComputeVersionedDeploymentName(
 								"all-at-once-rollout-2-replicas",
-								common.MakeBuildId("all-at-once-rollout-2-replicas", "v1", nil),
+								testhelpers.MakeBuildId("all-at-once-rollout-2-replicas", "v1", nil),
 							),
 						},
 					},
@@ -107,12 +107,12 @@ func TestIntegration(t *testing.T) {
 			},
 		},
 		"progressive-rollout-expect-first-step": {
-			input: testhelpers.ModifyObj(common.MakeTWDWithName("progressive-rollout-expect-first-step"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("progressive-rollout-expect-first-step"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
-					{5, metav1.Duration{time.Hour}},
+					{RampPercentage: 5, PauseDuration: metav1.Duration{Duration: time.Hour}},
 				}
-				obj.Spec.Template = common.MakeHelloWorldPodSpec("v1")
+				obj.Spec.Template = testhelpers.MakeHelloWorldPodSpec("v1")
 				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
 					TemporalConnection: "progressive-rollout-expect-first-step",
 					TemporalNamespace:  ts.GetDefaultNamespace(),
@@ -128,12 +128,12 @@ func TestIntegration(t *testing.T) {
 			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: common.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
+						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
 						Deployment: &corev1.ObjectReference{
 							Namespace: testNamespace.Name,
 							Name: k8s.ComputeVersionedDeploymentName(
 								"progressive-rollout-expect-first-step",
-								common.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
+								testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
 							),
 						},
 					},
@@ -145,12 +145,12 @@ func TestIntegration(t *testing.T) {
 				CurrentVersion: nil,
 				RampingVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: common.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
+						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
 						Deployment: &corev1.ObjectReference{
 							Namespace: testNamespace.Name,
 							Name: k8s.ComputeVersionedDeploymentName(
 								"progressive-rollout-expect-first-step",
-								common.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
+								testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
 							),
 						},
 					},

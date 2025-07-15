@@ -40,6 +40,9 @@ type TemporalWorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
+
+	// Disables panic recovery if true
+	DisableRecoverPanic bool
 }
 
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
@@ -206,11 +209,13 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
+	recoverPanic := !r.DisableRecoverPanic
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
+			RecoverPanic:            &recoverPanic,
 		}).
 		Complete(r)
 }

@@ -9,7 +9,10 @@ ALL_TEST_TAGS = test_dep
 ##### Variables ######
 
 ROOT := $(shell git rev-parse --show-toplevel)
-LOCALBIN := .bin
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
 STAMPDIR := .stamp
 export PATH := $(ROOT)/$(LOCALBIN):$(PATH)
 GOINSTALL := GOBIN=$(ROOT)/$(LOCALBIN) go install
@@ -109,7 +112,6 @@ set -e; \
 package=$(2)@$(3) ;\
 printf $(COLOR) "Downloading $${package}" ;\
 tmpdir=$$(mktemp -d) ;\
-GOBIN=$${tmpdir} go install $${package} ;\
 mv $${tmpdir}/$$(basename "$$(echo "$(1)" | sed "s/-$(3)$$//")") $(1) ;\
 rm -rf $${tmpdir} ;\
 }

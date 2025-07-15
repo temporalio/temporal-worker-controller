@@ -122,9 +122,10 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 
 	// Set up controller
 	reconciler := &controller.TemporalWorkerDeploymentReconciler{
-		Client:             mgr.GetClient(),
-		Scheme:             mgr.GetScheme(),
-		TemporalClientPool: clientPool,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		TemporalClientPool:  clientPool,
+		DisableRecoverPanic: true,
 	}
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {

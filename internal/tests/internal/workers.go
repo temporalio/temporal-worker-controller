@@ -92,6 +92,7 @@ func newClient(ctx context.Context, hostPort, namespace string) (client.Client, 
 	return c, nil
 }
 
+// callback is a function that can be called multiple times.
 func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec, callback func(stopFunc func(), err error)) {
 	w, stopFunc, err := newVersionedWorker(ctx, podTemplateSpec)
 	defer func() {
@@ -108,7 +109,6 @@ func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplate
 	sleep := func(ctx context.Context, seconds uint) error {
 		time.Sleep(time.Duration(seconds) * time.Second)
 		return nil
-		//return temporal.NewNonRetryableApplicationError("oops", "", nil)
 	}
 
 	helloWorld := func(ctx workflow.Context) (string, error) {
@@ -134,7 +134,14 @@ func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplate
 	w.RegisterWorkflow(helloWorld)
 	w.RegisterActivity(getSubject)
 	w.RegisterActivity(sleep)
-	err = w.Start()
+
+	// Start the worker in a separate goroutine so that the stopFunc can be passed back to the caller via callback
+	go func() {
+		err = w.Start()
+		if err != nil {
+			callback(nil, err)
+		}
+	}()
 }
 
 func setActivityTimeout(ctx workflow.Context, d time.Duration) workflow.Context {
