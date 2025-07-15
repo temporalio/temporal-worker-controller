@@ -1,4 +1,7 @@
-package tests
+//go:build test_dep
+// +build test_dep
+
+package internal
 
 import (
 	"context"
@@ -6,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -54,6 +58,20 @@ func setupKubebuilderAssets() error {
 	return nil
 }
 
+func getRepoRoot(t *testing.T) string {
+	// Get the current file's directory
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("failed to get current file path")
+	}
+
+	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(currentFile), "../../.."))
+	if err != nil {
+		t.Fatalf("failed to get repository root: %v", err)
+	}
+	return repoRoot
+}
+
 // setupTestEnvironment sets up the test environment with envtest
 func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Manager, *clientpool.ClientPool, func()) {
 	// Setup kubebuilder assets for IDE testing
@@ -65,10 +83,9 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	logf.SetLogger(zap.New(zap.WriteTo(os.Stdout), zap.UseDevMode(true)))
 
 	t.Log("bootstrapping test environment")
-	//startDevServer(t)
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			filepath.Join("..", "helm", "temporal-worker-controller", "templates", "crds"),
+			filepath.Join(getRepoRoot(t), "helm", "temporal-worker-controller", "templates", "crds"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}

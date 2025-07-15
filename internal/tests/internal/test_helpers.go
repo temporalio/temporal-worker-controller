@@ -1,4 +1,7 @@
-package tests
+//go:build test_dep
+// +build test_dep
+
+package internal
 
 import (
 	"context"
