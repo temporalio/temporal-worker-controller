@@ -3790,6 +3790,7 @@ spec:
                     - containers
                     type: object
                 type: object
+                x-kubernetes-preserve-unknown-fields: true
               workerOptions:
                 properties:
                   connection:
