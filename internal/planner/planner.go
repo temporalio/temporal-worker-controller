@@ -8,20 +8,18 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Plan represents the actions to be taken to move the system to the desired state
 type Plan struct {
 	// Which actions to take
 	DeleteDeployments      []*appsv1.Deployment
-	ScaleDeployments       map[*v1.ObjectReference]uint32
+	ScaleDeployments       map[*corev1.ObjectReference]uint32
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
@@ -89,7 +87,7 @@ func GeneratePlan(
 	config *Config,
 ) (*Plan, error) {
 	plan := &Plan{
-		ScaleDeployments: make(map[*v1.ObjectReference]uint32),
+		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
 	}
 
 	// Add delete/scale operations based on version status
@@ -160,8 +158,8 @@ func getDeleteDeployments(
 func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
 	config *Config,
-) map[*v1.ObjectReference]uint32 {
-	scaleDeployments := make(map[*v1.ObjectReference]uint32)
+) map[*corev1.ObjectReference]uint32 {
+	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
 
 	// Scale the current version if needed
 	if config.Status.CurrentVersion != nil && config.Status.CurrentVersion.Deployment != nil {
@@ -383,13 +381,15 @@ func handleProgressiveRollout(
 	}
 
 	// Move to the next step if it has been long enough since the last update
-	if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
-		if i < len(steps)-1 {
-			vcfg.RampPercentage = steps[i+1].RampPercentage
-			return vcfg
-		} else {
-			vcfg.SetCurrent = true
-			return vcfg
+	if rampLastModifiedAt != nil {
+		if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
+			if i < len(steps)-1 {
+				vcfg.RampPercentage = steps[i+1].RampPercentage
+				return vcfg
+			} else {
+				vcfg.SetCurrent = true
+				return vcfg
+			}
 		}
 	}
 

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"time"
 
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,9 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 )
 
 var (
@@ -38,6 +37,9 @@ type TemporalWorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
+
+	// Disables panic recovery if true
+	DisableRecoverPanic bool
 }
 
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
@@ -110,7 +112,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
 		HostPort:  temporalConnection.Spec.HostPort,
 		Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-	})
+	}, temporalConnection.Spec.MutualTLSSecret != "")
 	if !ok {
 		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
@@ -192,11 +194,13 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
+	recoverPanic := !r.DisableRecoverPanic
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
+			RecoverPanic:            &recoverPanic,
 		}).
 		Complete(r)
 }

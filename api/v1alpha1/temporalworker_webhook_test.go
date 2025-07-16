@@ -11,13 +11,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	v1 "k8s.io/api/core/v1"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
@@ -33,7 +32,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "cannot be more than 63 characters",
 		},
 		"invalid object type": {
-			obj: &v1.Pod{
+			obj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test",
 				},

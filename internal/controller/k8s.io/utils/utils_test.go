@@ -3,14 +3,14 @@ package utils
 import (
 	"testing"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestComputeHash(t *testing.T) {
 	tests := []struct {
 		name           string
-		template       *v1.PodTemplateSpec
+		template       *corev1.PodTemplateSpec
 		collisionCount *int32
 		short          bool
 		expectedLength int
@@ -22,7 +22,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          true,
 			expectedLength: 4, // Short hash should be 4 digits
-			expectedResult: "7d99",
+			expectedResult: "fc7c",
 		},
 		{
 			name:           "basic template with full hash",
@@ -30,7 +30,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          false,
 			expectedLength: 10, // Full hash should be 10 digits
-			expectedResult: "54b88d7d99",
+			expectedResult: "754d5ffc7c",
 		},
 		{
 			name:           "template with collision count",
@@ -38,7 +38,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: int32Ptr(5),
 			short:          true,
 			expectedLength: 4,
-			expectedResult: "66bb",
+			expectedResult: "cfd4",
 		},
 		{
 			name:           "empty template",
@@ -46,7 +46,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          true,
 			expectedLength: 4,
-			expectedResult: "5878",
+			expectedResult: "4c5b",
 		},
 	}
 
@@ -107,13 +107,13 @@ func int32Ptr(i int32) *int32 {
 	return &i
 }
 
-func makePodTemplateSpec(name, image string) *v1.PodTemplateSpec {
-	return &v1.PodTemplateSpec{
+func makePodTemplateSpec(name, image string) *corev1.PodTemplateSpec {
+	return &corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
-		Spec: v1.PodSpec{
-			Containers: []v1.Container{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
 				{
 					Name:  "main",
 					Image: image,

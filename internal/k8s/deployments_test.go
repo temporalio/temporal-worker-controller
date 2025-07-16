@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package k8s
+package k8s_test
 
 import (
 	"context"
@@ -12,16 +12,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestIsDeploymentHealthy(t *testing.T) {
@@ -38,7 +38,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:               appsv1.DeploymentAvailable,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastTransitionTime: metav1.NewTime(time.Now()),
 						},
 					},
@@ -54,7 +54,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:   appsv1.DeploymentAvailable,
-							Status: v1.ConditionFalse,
+							Status: corev1.ConditionFalse,
 						},
 					},
 				},
@@ -76,7 +76,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			healthy, healthySince := IsDeploymentHealthy(tt.deployment)
+			healthy, healthySince := k8s.IsDeploymentHealthy(tt.deployment)
 			assert.Equal(t, tt.expectedHealthy, healthy)
 			if tt.expectedTimeNil {
 				assert.Nil(t, healthySince)
@@ -109,7 +109,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v1",
 			Namespace: "default",
 			Labels: map[string]string{
-				BuildIDLabel: "v1",
+				k8s.BuildIDLabel: "v1",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
@@ -129,7 +129,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v2",
 			Namespace: "default",
 			Labels: map[string]string{
-				BuildIDLabel: "v2",
+				k8s.BuildIDLabel: "v2",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
@@ -164,13 +164,13 @@ func TestGetDeploymentState(t *testing.T) {
 	// Create scheme and fake client with field indexer
 	scheme := runtime.NewScheme()
 	_ = appsv1.AddToScheme(scheme)
-	_ = v1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
 	_ = temporaliov1alpha1.AddToScheme(scheme)
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(owner, deploy1, deploy2, deployWithoutLabel).
-		WithIndex(&appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
+		WithIndex(&appsv1.Deployment{}, k8s.DeployOwnerKey, func(rawObj client.Object) []string {
 			deploy := rawObj.(*appsv1.Deployment)
 			owner := metav1.GetControllerOf(deploy)
 			if owner == nil {
@@ -184,7 +184,7 @@ func TestGetDeploymentState(t *testing.T) {
 		Build()
 
 	// Test the GetDeploymentState function
-	state, err := GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
+	state, err := k8s.GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
 	require.NoError(t, err)
 
 	// Verify the state is constructed correctly
@@ -219,8 +219,8 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same image different pod specs",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod1 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "1"})
-				pod2 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "2"})
+				pod1 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "1"}, "")
+				pod2 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "2"}, "")
 
 				twd1 := testhelpers.MakeTWD(1, pod1, nil, nil, nil)
 				twd2 := testhelpers.MakeTWD(1, pod2, nil, nil, nil)
@@ -234,8 +234,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same pod specs different TWD spec",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, nil)
-
+				pod := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, nil, "")
 				twd1 := testhelpers.MakeTWD(1, pod, nil, nil, nil)
 				twd2 := testhelpers.MakeTWD(2, pod, nil, nil, nil)
 				return twd1, twd2
@@ -247,7 +246,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "no containers",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
-				twd := testhelpers.MakeTWD(1, testhelpers.MakePodSpec(nil, nil), nil, nil, nil)
+				twd := testhelpers.MakeTWD(1, testhelpers.MakePodSpec(nil, nil, ""), nil, nil, nil)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",
@@ -293,7 +292,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage(digestedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -304,7 +303,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage(digestedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -337,7 +336,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage(longImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  cleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:maxBuildIdLen-5], -1),
+			expectedPrefix:  k8s.CleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIdLen-5], -1),
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -349,11 +348,11 @@ func TestGenerateBuildID(t *testing.T) {
 
 			var build1, build2 string
 			if twd1 != nil {
-				build1 = ComputeBuildID(twd1)
+				build1 = k8s.ComputeBuildID(twd1)
 				verifyBuildId(t, build1, tt.expectedPrefix, tt.expectedHashLen)
 			}
 			if twd2 != nil {
-				build2 = ComputeBuildID(twd2)
+				build2 = k8s.ComputeBuildID(twd2)
 				verifyBuildId(t, build2, tt.expectedPrefix, tt.expectedHashLen)
 			}
 
@@ -369,8 +368,8 @@ func TestGenerateBuildID(t *testing.T) {
 
 func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen int) {
 	assert.Truef(t, strings.HasPrefix(build, expectedPrefix), "expected prefix %s in build %s", expectedPrefix, build)
-	assert.LessOrEqual(t, len(build), maxBuildIdLen)
-	assert.Equalf(t, cleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
-	split := strings.Split(build, k8sResourceNameSeparator)
+	assert.LessOrEqual(t, len(build), k8s.MaxBuildIdLen)
+	assert.Equalf(t, k8s.CleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
+	split := strings.Split(build, k8s.K8sResourceNameSeparator)
 	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
 }

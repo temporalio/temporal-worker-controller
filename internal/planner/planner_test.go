@@ -11,13 +11,12 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -38,7 +37,7 @@ func TestGeneratePlan(t *testing.T) {
 			k8sState: &k8s.DeploymentState{
 				Deployments:       map[string]*appsv1.Deployment{},
 				DeploymentsByTime: []*appsv1.Deployment{},
-				DeploymentRefs:    map[string]*v1.ObjectReference{},
+				DeploymentRefs:    map[string]*corev1.ObjectReference{},
 			},
 			config: &Config{
 				TargetVersionID: "test/namespace.123",
@@ -59,7 +58,7 @@ func TestGeneratePlan(t *testing.T) {
 				DeploymentsByTime: []*appsv1.Deployment{
 					createDeploymentWithReplicas(0),
 				},
-				DeploymentRefs: map[string]*v1.ObjectReference{
+				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
 				},
 			},
@@ -71,7 +70,7 @@ func TestGeneratePlan(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.123",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-123"},
+								Deployment: &corev1.ObjectReference{Name: "test-123"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-24 * time.Hour),
@@ -96,7 +95,7 @@ func TestGeneratePlan(t *testing.T) {
 				DeploymentsByTime: []*appsv1.Deployment{
 					createDeploymentWithReplicas(1),
 				},
-				DeploymentRefs: map[string]*v1.ObjectReference{
+				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
 				},
 			},
@@ -107,14 +106,14 @@ func TestGeneratePlan(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.123",
 							Status:     temporaliov1alpha1.VersionStatusCurrent,
-							Deployment: &v1.ObjectReference{Name: "test-123"},
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
 						},
 					},
 					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.123",
 							Status:     temporaliov1alpha1.VersionStatusCurrent,
-							Deployment: &v1.ObjectReference{Name: "test-123"},
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
 						},
 					},
 				},
@@ -137,7 +136,7 @@ func TestGeneratePlan(t *testing.T) {
 					createDeploymentWithReplicas(3),
 					createDeploymentWithReplicas(3),
 				},
-				DeploymentRefs: map[string]*v1.ObjectReference{
+				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
 					"test/namespace.456": {Name: "test-456"},
 				},
@@ -149,7 +148,7 @@ func TestGeneratePlan(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.123",
 							Status:     temporaliov1alpha1.VersionStatusCurrent,
-							Deployment: &v1.ObjectReference{Name: "test-123"},
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
 							HealthySince: &metav1.Time{
 								Time: time.Now().Add(-2 * time.Hour),
 							},
@@ -159,7 +158,7 @@ func TestGeneratePlan(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.123",
 							Status:     temporaliov1alpha1.VersionStatusCurrent,
-							Deployment: &v1.ObjectReference{Name: "test-123"},
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
 							HealthySince: &metav1.Time{
 								Time: time.Now().Add(-2 * time.Hour),
 							},
@@ -169,7 +168,7 @@ func TestGeneratePlan(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.456",
 							Status:     temporaliov1alpha1.VersionStatusRamping,
-							Deployment: &v1.ObjectReference{Name: "test-456"},
+							Deployment: &corev1.ObjectReference{Name: "test-456"},
 							HealthySince: &metav1.Time{
 								Time: time.Now().Add(-30 * time.Minute),
 							},
@@ -238,7 +237,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.123",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-123"},
+								Deployment: &corev1.ObjectReference{Name: "test-123"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-24 * time.Hour),
@@ -268,7 +267,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.123",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-123"},
+								Deployment: &corev1.ObjectReference{Name: "test-123"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-1 * time.Hour),
@@ -304,7 +303,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.123",
 								Status:     temporaliov1alpha1.VersionStatusNotRegistered,
-								Deployment: &v1.ObjectReference{Name: "test-123"},
+								Deployment: &corev1.ObjectReference{Name: "test-123"},
 							},
 						},
 					},
@@ -330,7 +329,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.b",
 							Status:     temporaliov1alpha1.VersionStatusInactive,
-							Deployment: &v1.ObjectReference{Name: "test-b"},
+							Deployment: &corev1.ObjectReference{Name: "test-b"},
 						},
 					},
 				},
@@ -372,7 +371,7 @@ func TestGetScaleDeployments(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.123",
 							Status:     temporaliov1alpha1.VersionStatusCurrent,
-							Deployment: &v1.ObjectReference{Name: "test-123"},
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
 						},
 					},
 				},
@@ -398,7 +397,7 @@ func TestGetScaleDeployments(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.123",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-123"},
+								Deployment: &corev1.ObjectReference{Name: "test-123"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-24 * time.Hour),
@@ -419,7 +418,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				Deployments: map[string]*appsv1.Deployment{
 					"test/namespace.a": createDeploymentWithReplicas(0),
 				},
-				DeploymentRefs: map[string]*v1.ObjectReference{
+				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.a": {Name: "test-a"},
 				},
 			},
@@ -431,7 +430,7 @@ func TestGetScaleDeployments(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.a",
 								Status:     temporaliov1alpha1.VersionStatusInactive,
-								Deployment: &v1.ObjectReference{Name: "test-a"},
+								Deployment: &corev1.ObjectReference{Name: "test-a"},
 							},
 						},
 					},
@@ -449,7 +448,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				Deployments: map[string]*appsv1.Deployment{
 					"test/namespace.b": createDeploymentWithReplicas(0),
 				},
-				DeploymentRefs: map[string]*v1.ObjectReference{
+				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.b": {Name: "test-b"},
 				},
 			},
@@ -460,7 +459,7 @@ func TestGetScaleDeployments(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.b",
 							Status:     temporaliov1alpha1.VersionStatusRamping,
-							Deployment: &v1.ObjectReference{Name: "test-b"},
+							Deployment: &corev1.ObjectReference{Name: "test-b"},
 						},
 					},
 				},
@@ -477,7 +476,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				Deployments: map[string]*appsv1.Deployment{
 					"test/namespace.a": createDeploymentWithReplicas(0),
 				},
-				DeploymentRefs: map[string]*v1.ObjectReference{
+				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.a": {Name: "test-a"},
 				},
 			},
@@ -489,7 +488,7 @@ func TestGetScaleDeployments(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.a",
 								Status:     temporaliov1alpha1.VersionStatusInactive,
-								Deployment: &v1.ObjectReference{Name: "test-a"},
+								Deployment: &corev1.ObjectReference{Name: "test-a"},
 							},
 						},
 					},
@@ -507,7 +506,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				Deployments: map[string]*appsv1.Deployment{
 					"test/namespace.b": createDeploymentWithReplicas(3),
 				},
-				DeploymentRefs: map[string]*v1.ObjectReference{
+				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.b": {Name: "test-b"},
 				},
 			},
@@ -518,7 +517,7 @@ func TestGetScaleDeployments(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.a",
 							Status:     temporaliov1alpha1.VersionStatusCurrent,
-							Deployment: &v1.ObjectReference{Name: "test-a"},
+							Deployment: &corev1.ObjectReference{Name: "test-a"},
 						},
 					},
 					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
@@ -526,7 +525,7 @@ func TestGetScaleDeployments(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.b",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-b"},
+								Deployment: &corev1.ObjectReference{Name: "test-b"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-1 * time.Hour), // Recently drained
@@ -595,7 +594,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 							VersionID:  "test/namespace.123",
 							Status:     temporaliov1alpha1.VersionStatusInactive,
-							Deployment: &v1.ObjectReference{Name: "test-123"},
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
 						},
 					},
 				},
@@ -1518,21 +1517,21 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.a",
 								Status:     temporaliov1alpha1.VersionStatusInactive,
-								Deployment: &v1.ObjectReference{Name: "test-a"},
+								Deployment: &corev1.ObjectReference{Name: "test-a"},
 							},
 						},
 						{
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.b",
 								Status:     temporaliov1alpha1.VersionStatusDraining,
-								Deployment: &v1.ObjectReference{Name: "test-b"},
+								Deployment: &corev1.ObjectReference{Name: "test-b"},
 							},
 						},
 						{
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.c",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-c"},
+								Deployment: &corev1.ObjectReference{Name: "test-c"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-2 * time.Hour), // Recently drained
@@ -1542,7 +1541,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.d",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-d"},
+								Deployment: &corev1.ObjectReference{Name: "test-d"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-48 * time.Hour), // Long time drained
@@ -1579,7 +1578,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 								VersionID:  "test/namespace.a",
 								Status:     temporaliov1alpha1.VersionStatusDrained,
-								Deployment: &v1.ObjectReference{Name: "test-a"},
+								Deployment: &corev1.ObjectReference{Name: "test-a"},
 							},
 							DrainedSince: &metav1.Time{
 								Time: time.Now().Add(-30 * time.Minute), // Not long enough

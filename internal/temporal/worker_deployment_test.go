@@ -8,55 +8,54 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/api/enums/v1"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	enumspb "go.temporal.io/api/enums/v1"
 )
 
 func TestMapWorkflowStatus(t *testing.T) {
 	tests := []struct {
 		name           string
-		status         enums.WorkflowExecutionStatus
+		status         enumspb.WorkflowExecutionStatus
 		expectedStatus temporaliov1alpha1.WorkflowExecutionStatus
 	}{
 		{
 			name:           "running",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_RUNNING,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusRunning,
 		},
 		{
 			name:           "continued as new",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusRunning,
 		},
 		{
 			name:           "completed",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusCompleted,
 		},
 		{
 			name:           "failed",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_FAILED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_FAILED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusFailed,
 		},
 		{
 			name:           "canceled",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_CANCELED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusCanceled,
 		},
 		{
 			name:           "terminated",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_TERMINATED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusTerminated,
 		},
 		{
 			name:           "timed out",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusTimedOut,
 		},
 		{
 			name:           "unspecified",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_UNSPECIFIED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_UNSPECIFIED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusRunning,
 		},
 	}
