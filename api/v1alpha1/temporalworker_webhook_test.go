@@ -75,22 +75,6 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: `spec.cutover.steps[1].pauseDuration: Invalid value: "10s": pause duration must be at least 30s`,
 		},
-		"maxVersions below minimum": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("max-versions-too-low"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				maxVersions := int32(0)
-				obj.Spec.MaxVersions = &maxVersions
-				return obj
-			}),
-			errorMsg: "spec.maxVersions: Invalid value: 0: maxVersions must be at least 1",
-		},
-		"maxVersions above maximum": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("max-versions-too-high"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				maxVersions := int32(101)
-				obj.Spec.MaxVersions = &maxVersions
-				return obj
-			}),
-			errorMsg: "spec.maxVersions: Invalid value: 101: maxVersions cannot exceed 100",
-		},
 	}
 
 	for name, tc := range tests {

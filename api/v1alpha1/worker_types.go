@@ -80,6 +80,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// This limit can be adjusted server-side by setting `matching.maxVersionsInDeployment`
 	// in dynamicconfig.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	MaxVersions *int32 `json:"maxVersions,omitempty"`
 }
 

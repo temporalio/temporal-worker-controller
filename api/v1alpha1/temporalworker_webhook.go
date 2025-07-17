@@ -89,7 +89,6 @@ func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Wa
 	}
 
 	allErrs = append(allErrs, validateRolloutStrategy(new.Spec.RolloutStrategy)...)
-	allErrs = append(allErrs, validateMaxVersions(new.Spec.MaxVersions)...)
 
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(new, allErrs)
@@ -124,25 +123,6 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 				)
 			}
 			lastRamp = s.RampPercentage
-		}
-	}
-
-	return allErrs
-}
-
-func validateMaxVersions(maxVersions *int32) []*field.Error {
-	var allErrs []*field.Error
-
-	if maxVersions != nil {
-		if *maxVersions < 1 {
-			allErrs = append(allErrs,
-				field.Invalid(field.NewPath("spec.maxVersions"), *maxVersions, "maxVersions must be at least 1"),
-			)
-		}
-		if *maxVersions > DefaultServerMaxVersions {
-			allErrs = append(allErrs,
-				field.Invalid(field.NewPath("spec.maxVersions"), *maxVersions, fmt.Sprintf("maxVersions cannot exceed %d", DefaultServerMaxVersions)),
-			)
 		}
 	}
 
