@@ -74,11 +74,11 @@ type TemporalWorkerDeploymentSpec struct {
 	// MaxVersions defines the maximum number of worker deployment versions allowed.
 	// This helps prevent hitting Temporal's default limit of 100 versions per deployment.
 	// Defaults to 75. Users can override this by explicitly setting a higher value in
-	// the CRD, but should exercise caution: once the 100-version limit is reached,
-	// Temporal attempts to delete an eligible version. If no version is eligible for
-	// deletion, new deployments get blocked which prevents
-	// the controller from making progress.
-
+	// the CRD, but should exercise caution: once the server's version limit is reached,
+	// Temporal attempts to delete an eligible version. If no version is eligible for deletion,
+	// new deployments get blocked which prevents the controller from making progress.
+	// This limit can be adjusted server-side by setting `matching.maxVersionsInDeployment`
+	// in dynamicconfig.
 	// +optional
 	MaxVersions *int32 `json:"maxVersions,omitempty"`
 }
