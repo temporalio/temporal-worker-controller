@@ -67,30 +67,6 @@ type Config struct {
 	ConflictToken []byte
 }
 
-// ScaledownDelay returns the scaledown delay from the sunset strategy
-func getScaledownDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
-	if spec.SunsetStrategy.ScaledownDelay == nil {
-		return temporaliov1alpha1.DefaultScaledownDelay
-	}
-	return spec.SunsetStrategy.ScaledownDelay.Duration
-}
-
-// DeleteDelay returns the delete delay from the sunset strategy
-func getDeleteDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
-	if spec.SunsetStrategy.DeleteDelay == nil {
-		return temporaliov1alpha1.DefaultDeleteDelay
-	}
-	return spec.SunsetStrategy.DeleteDelay.Duration
-}
-
-// getMaxVersions returns the max versions limit from the spec with safe fallback
-func getMaxVersions(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) int32 {
-	if spec.MaxVersions == nil {
-		return temporaliov1alpha1.DefaultMaxVersions
-	}
-	return *spec.MaxVersions
-}
-
 // GeneratePlan creates a plan for updating the worker deployment
 func GeneratePlan(
 	l logr.Logger,
@@ -141,7 +117,7 @@ func getDeleteDeployments(
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
 			// 2. The deployment is scaled to 0 replicas.
-			if (time.Since(version.DrainedSince.Time) > getDeleteDelay(config.Spec)+getScaledownDelay(config.Spec)) &&
+			if (time.Since(version.DrainedSince.Time) > config.Spec.SunsetStrategy.DeleteDelay.Duration+config.Spec.SunsetStrategy.ScaledownDelay.Duration) &&
 				*d.Spec.Replicas == 0 {
 				deleteDeployments = append(deleteDeployments, d)
 			}
@@ -203,7 +179,7 @@ func getScaleDeployments(
 				scaleDeployments[version.Deployment] = uint32(config.Replicas)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
-			if time.Since(version.DrainedSince.Time) > getScaledownDelay(config.Spec) {
+			if time.Since(version.DrainedSince.Time) > config.Spec.SunsetStrategy.ScaledownDelay.Duration {
 				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
 				// Scale down drained deployments after delay
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
@@ -233,8 +209,8 @@ func shouldCreateDeployment(
 	config *Config,
 ) bool {
 	// Check if we're at the version limit - if so, don't create new deployments
-	if config.Status.VersionCount >= getMaxVersions(config.Spec) {
-		l.Error(errors.New("max versions reached"), "Max versions reached, skipping deployment creation", "versionCount", config.Status.VersionCount, "maxVersions", getMaxVersions(config.Spec))
+	if config.Status.VersionCount >= int32(*config.Spec.MaxVersions) {
+		l.Error(errors.New("max versions reached"), "Max versions reached, skipping deployment creation", "versionCount", config.Status.VersionCount, "maxVersions", *config.Spec.MaxVersions)
 		return false
 	}
 

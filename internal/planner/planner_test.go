@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -220,6 +221,8 @@ func TestGeneratePlan(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Spec.Default(context.Background())
+			require.NoError(t, err)
 			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config)
 			require.NoError(t, err)
 
@@ -376,6 +379,8 @@ func TestGetDeleteDeployments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Spec.Default(context.Background())
+			require.NoError(t, err)
 			deletes := getDeleteDeployments(tc.k8sState, tc.config)
 			assert.Equal(t, tc.expectDeletes, len(deletes), "unexpected number of deletes")
 		})
@@ -582,6 +587,8 @@ func TestGetScaleDeployments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Spec.Default(context.Background())
+			require.NoError(t, err)
 			scales := getScaleDeployments(tc.k8sState, tc.config)
 			assert.Equal(t, tc.expectScales, len(scales), "unexpected number of scales")
 		})
@@ -719,6 +726,8 @@ func TestShouldCreateDeployment(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Spec.Default(context.Background())
+			require.NoError(t, err)
 			creates := shouldCreateDeployment(testlogr.New(t), tc.k8sState, tc.config)
 			assert.Equal(t, tc.expectCreates, creates, "unexpected create decision")
 		})
@@ -1538,45 +1547,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 	}
 }
 
-func TestSunsetStrategyDefaults(t *testing.T) {
-	testCases := []struct {
-		name         string
-		spec         *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		expectScale  time.Duration
-		expectDelete time.Duration
-	}{
-		{
-			name: "nil delays return defaults",
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
-					ScaledownDelay: nil,
-					DeleteDelay:    nil,
-				},
-			},
-			expectScale:  temporaliov1alpha1.DefaultScaledownDelay,
-			expectDelete: temporaliov1alpha1.DefaultDeleteDelay,
-		},
-		{
-			name: "specified delays are returned",
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
-					ScaledownDelay: &metav1.Duration{Duration: 2 * time.Hour},
-					DeleteDelay:    &metav1.Duration{Duration: 48 * time.Hour},
-				},
-			},
-			expectScale:  2 * time.Hour,
-			expectDelete: 48 * time.Hour,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expectScale, getScaledownDelay(tc.spec))
-			assert.Equal(t, tc.expectDelete, getDeleteDelay(tc.spec))
-		})
-	}
-}
-
 func TestComplexVersionStateScenarios(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -1689,6 +1659,8 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Spec.Default(context.Background())
+			require.NoError(t, err)
 			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config)
 			require.NoError(t, err)
 

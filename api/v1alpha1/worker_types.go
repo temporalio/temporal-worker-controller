@@ -5,18 +5,8 @@
 package v1alpha1
 
 import (
-	"time"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-// Default values for TemporalWorkerDeploymentSpec fields
-const (
-	DefaultScaledownDelay    = 1 * time.Hour
-	DefaultDeleteDelay       = 24 * time.Hour
-	DefaultServerMaxVersions = 100
-	DefaultMaxVersions       = int32(DefaultServerMaxVersions * 0.75)
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -345,8 +335,6 @@ type QueueStatistics struct {
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
-//
-// TODO(jlegrone): Implement default/validate interface https://book.kubebuilder.io/cronjob-tutorial/webhook-implementation.html
 type TemporalWorkerDeployment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
