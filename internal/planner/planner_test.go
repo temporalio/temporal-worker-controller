@@ -1703,3 +1703,196 @@ func rolloutStep(ramp float32, d time.Duration) temporaliov1alpha1.RolloutStep {
 		PauseDuration:  metav1Duration(d),
 	}
 }
+
+// Helper function to ensure a config has an empty version patches map
+func ensureVersionPatches(config *Config) {
+	if config.VersionPatches == nil {
+		config.VersionPatches = make(map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec)
+	}
+}
+
+func TestVersionPatches(t *testing.T) {
+	testCases := []struct {
+		name           string
+		k8sState       *k8s.DeploymentState
+		config         *Config
+		expectScales   int
+		expectReplicas map[string]uint32 // version ID -> expected replicas
+		expectDeletes  int
+	}{
+		{
+			name: "patch overrides replicas for deprecated version",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.v1": createDeploymentWithReplicas(5), // Current version already at desired replicas
+					"test/namespace.v2": createDeploymentWithReplicas(1), // Deprecated version with 1 replica
+				},
+				DeploymentRefs: map[string]*v1.ObjectReference{
+					"test/namespace.v1": {Name: "test-v1"},
+					"test/namespace.v2": {Name: "test-v2"},
+				},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.v1",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.v1",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-v1"},
+						},
+					},
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+						{
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.v2",
+								Status:     temporaliov1alpha1.VersionStatusInactive,
+								Deployment: &v1.ObjectReference{Name: "test-v2"},
+							},
+						},
+					},
+				},
+				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        5, // Base desired replicas
+				ConflictToken:   []byte{},
+				VersionPatches: map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec{
+					"test/namespace.v2": {
+						VersionID: "test/namespace.v2",
+						Replicas:  func() *int32 { r := int32(10); return &r }(), // Patch overrides to 10 replicas
+					},
+				},
+			},
+			expectScales: 1, // Only deprecated version needs scaling
+			expectReplicas: map[string]uint32{
+				"test/namespace.v2": 10, // Should use patched value, not base replicas
+			},
+		},
+		{
+			name: "patch overrides sunset delay for drained version",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.v1": createDeploymentWithReplicas(3),
+					"test/namespace.v2": createDeploymentWithReplicas(2), // Drained version still has replicas
+				},
+				DeploymentRefs: map[string]*v1.ObjectReference{
+					"test/namespace.v1": {Name: "test-v1"},
+					"test/namespace.v2": {Name: "test-v2"},
+				},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.v1",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.v1",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-v1"},
+						},
+					},
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+						{
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.v2",
+								Status:     temporaliov1alpha1.VersionStatusDrained,
+								Deployment: &v1.ObjectReference{Name: "test-v2"},
+							},
+							DrainedSince: &metav1.Time{
+								Time: time.Now().Add(-30 * time.Minute), // Drained 30 minutes ago
+							},
+						},
+					},
+				},
+				Spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+					SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+						ScaledownDelay: &metav1.Duration{Duration: 2 * time.Hour}, // Base delay: 2 hours
+					},
+				},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        3,
+				ConflictToken:   []byte{},
+				VersionPatches: map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec{
+					"test/namespace.v2": {
+						VersionID: "test/namespace.v2",
+						SunsetStrategy: &temporaliov1alpha1.SunsetStrategy{
+							ScaledownDelay: &metav1.Duration{Duration: 15 * time.Minute}, // Patch: much shorter delay
+						},
+					},
+				},
+			},
+			expectScales: 1, // Should scale down because patched delay is shorter
+			expectReplicas: map[string]uint32{
+				"test/namespace.v2": 0, // Should scale to 0 due to patch override
+			},
+		},
+		{
+			name: "no patches applied when none exist",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.v1": createDeploymentWithReplicas(5), // Already at desired replicas
+					"test/namespace.v2": createDeploymentWithReplicas(1),
+				},
+				DeploymentRefs: map[string]*v1.ObjectReference{
+					"test/namespace.v1": {Name: "test-v1"},
+					"test/namespace.v2": {Name: "test-v2"},
+				},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.v1",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.v1",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &v1.ObjectReference{Name: "test-v1"},
+						},
+					},
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+						{
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								VersionID:  "test/namespace.v2",
+								Status:     temporaliov1alpha1.VersionStatusInactive,
+								Deployment: &v1.ObjectReference{Name: "test-v2"},
+							},
+						},
+					},
+				},
+				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        5,
+				ConflictToken:   []byte{},
+				VersionPatches:  make(map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec), // No patches
+			},
+			expectScales: 1, // Only deprecated version needs scaling
+			expectReplicas: map[string]uint32{
+				"test/namespace.v2": 5, // Should use base replicas (no patch)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectScales, len(plan.ScaleDeployments), "unexpected number of scales")
+			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
+
+			// Verify the specific replicas for each deployment
+			for versionID, expectedReplicas := range tc.expectReplicas {
+				found := false
+				for objRef, actualReplicas := range plan.ScaleDeployments {
+					// Find the deployment reference that matches this version
+					if tc.k8sState.DeploymentRefs[versionID] != nil &&
+						tc.k8sState.DeploymentRefs[versionID].Name == objRef.Name {
+						assert.Equal(t, expectedReplicas, actualReplicas,
+							"unexpected replicas for version %s", versionID)
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "expected scaling operation for version %s not found", versionID)
+			}
+		})
+	}
+}

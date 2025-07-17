@@ -337,6 +337,87 @@ type TemporalWorkerDeploymentList struct {
 	Items           []TemporalWorkerDeployment `json:"items"`
 }
 
+// TemporalWorkerDeploymentPatchSpec defines version-specific overrides for a TemporalWorkerDeployment
+type TemporalWorkerDeploymentPatchSpec struct {
+	// TemporalWorkerDeploymentName is the name of the TemporalWorkerDeployment this patch applies to.
+	// The patch must be in the same namespace as the target deployment.
+	TemporalWorkerDeploymentName string `json:"temporalWorkerDeploymentName"`
+
+	// VersionID specifies which version this patch applies to
+	VersionID string `json:"versionID"`
+
+	// Replicas overrides the number of desired pods for this specific version.
+	// If not specified, the version will use the replicas from the main TemporalWorkerDeployment spec.
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// SunsetStrategy overrides how to manage sunsetting this specific version.
+	// If not specified, the version will use the sunset strategy from the main TemporalWorkerDeployment spec.
+	// +optional
+	SunsetStrategy *SunsetStrategy `json:"sunsetStrategy,omitempty"`
+}
+
+// PatchStatus indicates the current state of the patch
+// +enum
+type PatchStatus string
+
+const (
+	// PatchStatusActive indicates the patch is currently applied to an existing version
+	PatchStatusActive PatchStatus = "Active"
+
+	// PatchStatusOrphaned indicates the referenced version no longer exists
+	PatchStatusOrphaned PatchStatus = "Orphaned"
+
+	// PatchStatusInvalid indicates the patch references a TemporalWorkerDeployment that doesn't exist
+	PatchStatusInvalid PatchStatus = "Invalid"
+)
+
+// TemporalWorkerDeploymentPatchStatus defines the observed state of TemporalWorkerDeploymentPatch
+type TemporalWorkerDeploymentPatchStatus struct {
+	// Status indicates the current state of this patch
+	Status PatchStatus `json:"status"`
+
+	// AppliedAt indicates when this patch was last successfully applied
+	// +optional
+	AppliedAt *metav1.Time `json:"appliedAt,omitempty"`
+
+	// Message provides additional information about the patch status
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// ObservedGeneration reflects the generation of the most recently observed patch spec
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+//+kubebuilder:object:root=true
+//+kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=twdpatch;twd-patch;temporalworkerpatch
+//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".spec.temporalWorkerDeploymentName",description="Target TemporalWorkerDeployment"
+//+kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.versionID",description="Target Version ID"
+//+kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".spec.replicas",description="Override Replicas"
+//+kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.status",description="Patch Status"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+
+// TemporalWorkerDeploymentPatch is the Schema for the temporalworkerdeploymentpatches API
+type TemporalWorkerDeploymentPatch struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   TemporalWorkerDeploymentPatchSpec   `json:"spec,omitempty"`
+	Status TemporalWorkerDeploymentPatchStatus `json:"status,omitempty"`
+}
+
+//+kubebuilder:object:root=true
+
+// TemporalWorkerDeploymentPatchList contains a list of TemporalWorkerDeploymentPatch
+type TemporalWorkerDeploymentPatchList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []TemporalWorkerDeploymentPatch `json:"items"`
+}
+
 func init() {
 	SchemeBuilder.Register(&TemporalWorkerDeployment{}, &TemporalWorkerDeploymentList{})
+	SchemeBuilder.Register(&TemporalWorkerDeploymentPatch{}, &TemporalWorkerDeploymentPatchList{})
 }

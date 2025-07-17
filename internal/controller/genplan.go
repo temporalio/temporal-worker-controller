@@ -66,6 +66,19 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		return nil, fmt.Errorf("unable to get Kubernetes deployment state: %w", err)
 	}
 
+	// Gather version-specific patches
+	versionPatches := make(map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec)
+	if r.PatchApplier != nil {
+		patches, err := r.PatchApplier.getPatches(ctx, w)
+		if err != nil {
+			l.Error(err, "failed to get patches, continuing without them")
+		} else {
+			for _, patch := range patches {
+				versionPatches[patch.Spec.VersionID] = &patch.Spec
+			}
+		}
+	}
+
 	// Create a simple plan structure
 	plan := &plan{
 		TemporalNamespace:    w.Spec.WorkerOptions.TemporalNamespace,
@@ -88,6 +101,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		TargetVersionID: targetVersionID,
 		Replicas:        *w.Spec.Replicas,
 		ConflictToken:   w.Status.VersionConflictToken,
+		VersionPatches:  versionPatches,
 	}
 
 	planResult, err := planner.GeneratePlan(
@@ -119,7 +133,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	// Handle deployment creation if needed
 	if planResult.ShouldCreateDeployment {
 		_, buildID, _ := k8s.SplitVersionID(targetVersionID)
-		d, err := r.newDeployment(w, buildID, connection)
+		d, err := r.newDeployment(ctx, w, buildID, connection)
 		if err != nil {
 			return nil, err
 		}
@@ -131,6 +145,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 // Create a new deployment with owner reference
 func (r *TemporalWorkerDeploymentReconciler) newDeployment(
+	ctx context.Context,
 	w *temporaliov1alpha1.TemporalWorkerDeployment,
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,

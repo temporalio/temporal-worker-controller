@@ -28,9 +28,7 @@ var (
 )
 
 const (
-	// TODO(jlegrone): add this everywhere
-	deployOwnerKey = ".metadata.controller"
-	buildIDLabel   = "temporal.io/build-id"
+	buildIDLabel = "temporal.io/build-id"
 )
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
@@ -38,11 +36,15 @@ type TemporalWorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
+	PatchApplier       *PatchApplier
 }
 
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
+//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeploymentpatches,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeploymentpatches/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeploymentpatches/finalizers,verbs=update
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
@@ -143,6 +145,11 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
+	// Initialize PatchApplier if not already set
+	if r.PatchApplier == nil {
+		r.PatchApplier = NewPatchApplier(r.Client, l)
+	}
+
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	//                 (defaults were already set above, but have to be set again after status update)
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
@@ -161,6 +168,12 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
+	// Update patch statuses after successful plan execution
+	if err := r.PatchApplier.UpdatePatchStatuses(ctx, &workerDeploy); err != nil {
+		l.Error(err, "failed to update patch statuses")
+		// Don't fail reconciliation if patch status update fails
+	}
+
 	return ctrl.Result{
 		Requeue: true,
 		// TODO(jlegrone): Consider increasing this value if the only thing we need to check for is unreachable versions.
@@ -169,6 +182,13 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		//RequeueAfter: 1 * time.Second,
 	}, nil
 }
+
+const (
+	// Index key for deployments owned by TemporalWorkerDeployment
+	deployOwnerKey = ".metadata.controller"
+	// Index key for patches targeting a TemporalWorkerDeployment (for future use)
+	patchTargetKey = ".spec.temporalWorkerDeploymentName"
+)
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -192,9 +212,18 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
+	// Index patches by their target TemporalWorkerDeployment
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.TemporalWorkerDeploymentPatch{}, patchTargetKey, func(rawObj client.Object) []string {
+		patch := rawObj.(*temporaliov1alpha1.TemporalWorkerDeploymentPatch)
+		return []string{patch.Spec.TemporalWorkerDeploymentName}
+	}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
+		Watches(&temporaliov1alpha1.TemporalWorkerDeploymentPatch{}, &enqueuePatchHandler{client: mgr.GetClient()}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 		}).
