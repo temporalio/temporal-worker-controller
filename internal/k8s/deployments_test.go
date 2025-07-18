@@ -374,3 +374,81 @@ func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen i
 	split := strings.Split(build, k8sResourceNameSeparator)
 	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
 }
+
+func TestComputeVersionedDeploymentName(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseName     string
+		buildID      string
+		expectedName string
+	}{
+		{
+			name:         "simple base and build ID",
+			baseName:     "worker-name.default",
+			buildID:      "abc123",
+			expectedName: "worker-name.default-abc123",
+		},
+		{
+			name:         "build ID with dots/dashes",
+			baseName:     "worker-name.production",
+			buildID:      "image-v2.1.0-a1b2c3d4",
+			expectedName: "worker-name.production-image-v2.1.0-a1b2c3d4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ComputeVersionedDeploymentName(tt.baseName, tt.buildID)
+			assert.Equal(t, tt.expectedName, result)
+
+			// Verify the format is always baseName-buildID
+			expectedSeparator := tt.baseName + "-" + tt.buildID
+			assert.Equal(t, expectedSeparator, result)
+
+			// Verify it ends with the build ID
+			assert.True(t, strings.HasSuffix(result, "-"+tt.buildID),
+				"versioned deployment name should end with '-buildID'")
+
+			// Verify it starts with the base name
+			assert.True(t, strings.HasPrefix(result, tt.baseName),
+				"versioned deployment name should start with baseName")
+		})
+	}
+}
+
+func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T) {
+	// Integration test showing the naming pipeline from TemporalWorkerDeployment to final K8s Deployment name
+	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "hello-world",
+			Namespace: "demo",
+		},
+		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			Template: v1.PodTemplateSpec{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Image: "temporal/hello-world:v1.0.0",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Test the full pipeline: TemporalWorkerDeployment -> worker deployment name -> versioned deployment name
+	workerDeploymentName := ComputeWorkerDeploymentName(twd)
+	buildID := ComputeBuildID(twd)
+	versionedName := ComputeVersionedDeploymentName(workerDeploymentName, buildID)
+
+	// Verify the expected formats
+	assert.Equal(t, "hello-world.demo", workerDeploymentName)
+	assert.True(t, strings.HasPrefix(versionedName, "hello-world.demo-"))
+	assert.True(t, strings.Contains(versionedName, "v1-0-0"), "versioned name should contain cleaned image tag")
+
+	// Verify the version ID combines worker deployment name and build ID
+	versionID := ComputeVersionID(twd)
+	expectedVersionID := workerDeploymentName + "." + buildID
+	assert.Equal(t, expectedVersionID, versionID)
+	assert.Equal(t, "hello-world.demo.v1-0-0-8666", versionID)
+}
