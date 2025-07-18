@@ -57,22 +57,6 @@ type Config struct {
 	RolloutStrategy temporaliov1alpha1.RolloutStrategy
 }
 
-// ScaledownDelay returns the scaledown delay from the sunset strategy
-func getScaledownDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
-	if spec.SunsetStrategy.ScaledownDelay == nil {
-		return 0
-	}
-	return spec.SunsetStrategy.ScaledownDelay.Duration
-}
-
-// DeleteDelay returns the delete delay from the sunset strategy
-func getDeleteDelay(spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) time.Duration {
-	if spec.SunsetStrategy.DeleteDelay == nil {
-		return 0
-	}
-	return spec.SunsetStrategy.DeleteDelay.Duration
-}
-
 // GeneratePlan creates a plan for updating the worker deployment
 func GeneratePlan(
 	l logr.Logger,
@@ -89,7 +73,7 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
-	plan.ShouldCreateDeployment = shouldCreateDeployment(status)
+	plan.ShouldCreateDeployment = shouldCreateDeployment(status, spec)
 
 	// Determine if we need to start any test workflows
 	plan.TestWorkflows = getTestWorkflows(status, config)
@@ -127,7 +111,7 @@ func getDeleteDeployments(
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
 			// 2. The deployment is scaled to 0 replicas.
-			if (time.Since(version.DrainedSince.Time) > getDeleteDelay(spec)+getScaledownDelay(spec)) &&
+			if (time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
 				*d.Spec.Replicas == 0 {
 				deleteDeployments = append(deleteDeployments, d)
 			}
@@ -193,7 +177,7 @@ func getScaleDeployments(
 				scaleDeployments[version.Deployment] = uint32(replicas)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
-			if time.Since(version.DrainedSince.Time) > getScaledownDelay(spec) {
+			if time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
 				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
 				// Scale down drained deployments after delay
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
@@ -209,8 +193,24 @@ func getScaleDeployments(
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
 ) bool {
-	return status.TargetVersion.Deployment == nil
+	// Check if target version already has a deployment
+	if status.TargetVersion.Deployment != nil {
+		return false
+	}
+
+	// Check if we're at the version limit
+	maxVersions := int32(75) // Default from defaults.MaxVersions
+	if spec.MaxVersions != nil {
+		maxVersions = *spec.MaxVersions
+	}
+
+	if status.VersionCount >= maxVersions {
+		return false
+	}
+
+	return true
 }
 
 // getTestWorkflows determines which test workflows should be started

@@ -16,11 +16,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 )
 
 const (
-	defaultScaledownDelay              = 1 * time.Hour
-	defaultDeleteDelay                 = 24 * time.Hour
 	maxTemporalWorkerDeploymentNameLen = 63
 )
 
@@ -42,13 +42,27 @@ func (r *TemporalWorkerDeployment) Default(ctx context.Context, obj runtime.Obje
 		return apierrors.NewBadRequest("expected a TemporalWorkerDeployment")
 	}
 
-	if dep.Spec.SunsetStrategy.ScaledownDelay == nil {
-		dep.Spec.SunsetStrategy.ScaledownDelay = &v1.Duration{Duration: defaultScaledownDelay}
+	if err := dep.Spec.Default(ctx); err != nil {
+		return err
 	}
 
-	if dep.Spec.SunsetStrategy.DeleteDelay == nil {
-		dep.Spec.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaultDeleteDelay}
+	return nil
+}
+
+func (s *TemporalWorkerDeploymentSpec) Default(ctx context.Context) error {
+	if s.SunsetStrategy.ScaledownDelay == nil {
+		s.SunsetStrategy.ScaledownDelay = &v1.Duration{Duration: defaults.ScaledownDelay}
 	}
+
+	if s.SunsetStrategy.DeleteDelay == nil {
+		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
+	}
+
+	if s.MaxVersions == nil {
+		maxVersions := int32(defaults.MaxVersions)
+		s.MaxVersions = &maxVersions
+	}
+
 	return nil
 }
 

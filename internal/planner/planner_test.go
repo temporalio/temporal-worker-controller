@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -98,6 +99,10 @@ func TestGeneratePlan(t *testing.T) {
 				},
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: 0},
+					DeleteDelay:    &metav1.Duration{Duration: 0},
+				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -205,6 +210,33 @@ func TestGeneratePlan(t *testing.T) {
 			expectConfigSetCurrent:  func() *bool { b := false; return &b }(),         // Should NOT set current (already current)
 			expectConfigRampPercent: func() *float32 { f := float32(0); return &f }(), // Should reset ramp to 0
 		},
+		{
+			name: "should not create deployment when version limit is reached",
+			k8sState: &k8s.DeploymentState{
+				Deployments:       map[string]*appsv1.Deployment{},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*v1.ObjectReference{},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				VersionCount: 5,
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.new",
+						Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+						Deployment: nil,
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				MaxVersions: func() *int32 { i := int32(5); return &i }(),
+				Replicas:    func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectCreate: false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -263,11 +295,12 @@ func TestGetDeleteDeployments(t *testing.T) {
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
-					DeleteDelay: &metav1.Duration{
-						Duration: 4 * time.Hour,
-					},
+					DeleteDelay: &metav1.Duration{Duration: 4 * time.Hour},
 				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			expectDeletes: 1,
 		},
@@ -294,9 +327,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
-					DeleteDelay: &metav1.Duration{
-						Duration: 4 * time.Hour,
-					},
+					DeleteDelay: &metav1.Duration{Duration: 4 * time.Hour},
 				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
@@ -337,6 +368,8 @@ func TestGetDeleteDeployments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			err := tc.spec.Default(context.Background())
+			require.NoError(t, err)
 			deletes := getDeleteDeployments(tc.k8sState, tc.status, tc.spec)
 			assert.Equal(t, tc.expectDeletes, len(deletes), "unexpected number of deletes")
 		})
@@ -410,6 +443,9 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: 0},
+				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectScales: 1,
@@ -562,6 +598,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 	testCases := []struct {
 		name          string
 		status        *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		spec          *temporaliov1alpha1.TemporalWorkerDeploymentSpec
 		expectCreates bool
 	}{
 		{
@@ -574,6 +611,9 @@ func TestShouldCreateDeployment(t *testing.T) {
 						Deployment: &v1.ObjectReference{Name: "test-123"},
 					},
 				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates: false,
 		},
@@ -588,13 +628,70 @@ func TestShouldCreateDeployment(t *testing.T) {
 					},
 				},
 			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			expectCreates: true,
+		},
+		{
+			name: "should not create when version limit is reached (default limit)",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				VersionCount: 75, // Default limit is 75
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.new",
+						Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+						Deployment: nil,
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				// MaxVersions is nil, so uses default of 75
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			expectCreates: false,
+		},
+		{
+			name: "should not create when version limit is reached (custom limit)",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				VersionCount: 5,
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.new",
+						Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+						Deployment: nil,
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				MaxVersions: func() *int32 { i := int32(5); return &i }(),
+				Replicas:    func() *int32 { r := int32(1); return &r }(),
+			},
+			expectCreates: false,
+		},
+		{
+			name: "should create when below version limit",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				VersionCount: 4,
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.new",
+						Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+						Deployment: nil,
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				MaxVersions: func() *int32 { i := int32(5); return &i }(),
+				Replicas:    func() *int32 { r := int32(1); return &r }(),
+			},
 			expectCreates: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			creates := shouldCreateDeployment(tc.status)
+			creates := shouldCreateDeployment(tc.status, tc.spec)
 			assert.Equal(t, tc.expectCreates, creates, "unexpected create decision")
 		})
 	}
@@ -668,7 +765,7 @@ func TestGetTestWorkflows(t *testing.T) {
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
-						TaskQueues: []temporaliov1alpha1.TaskQueue{}, // Empty
+						TaskQueues: []temporaliov1alpha1.TaskQueue{},
 					},
 				},
 			},
@@ -679,7 +776,7 @@ func TestGetTestWorkflows(t *testing.T) {
 					},
 				},
 			},
-			expectWorkflows: 0, // No task queues, no workflows
+			expectWorkflows: 0,
 		},
 		{
 			name: "all test workflows already running",
@@ -712,7 +809,7 @@ func TestGetTestWorkflows(t *testing.T) {
 					},
 				},
 			},
-			expectWorkflows: 0, // All queues have workflows
+			expectWorkflows: 0,
 		},
 	}
 
@@ -733,7 +830,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 		state             *temporal.TemporalWorkerState
 		expectConfig      bool
 		expectSetCurrent  bool
-		expectRampPercent *float32 // Made pointer to handle nil case
+		expectRampPercent *float32
 	}{
 		{
 			name: "all at once strategy",
@@ -934,7 +1031,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			expectConfig:     true,
-			expectSetCurrent: true, // Should become current after all steps
+			expectSetCurrent: true,
 		},
 		"progressive rollout with nil RampingSince": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
@@ -956,7 +1053,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Status:       temporaliov1alpha1.VersionStatusInactive,
 						HealthySince: &metav1.Time{Time: time.Now()},
 					},
-					RampingSince:       nil, // Not ramping yet
+					RampingSince:       nil,
 					RampLastModifiedAt: nil,
 				},
 			},
@@ -995,15 +1092,15 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			expectConfig:      true,
-			expectRampPercent: 50,    // When set as current, ramp is 0
-			expectSetCurrent:  false, // At exactly 2 hours, it sets as current
+			expectRampPercent: 50, // When set as current, ramp is 0
+			expectSetCurrent:  false,
 		},
 		"progressive rollout with zero ramp percentage step": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
 					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
-					{RampPercentage: 0, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}}, // Zero ramp
+					{RampPercentage: 0, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
 					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
 				},
 			},
@@ -1064,7 +1161,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			},
 			expectConfig:      true,
 			expectRampPercent: 0,
-			expectSetCurrent:  true, // Past all steps, should be default
+			expectSetCurrent:  true,
 		},
 	}
 
@@ -1395,45 +1492,6 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 	}
 }
 
-func TestSunsetStrategyDefaults(t *testing.T) {
-	testCases := []struct {
-		name         string
-		spec         *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		expectScale  time.Duration
-		expectDelete time.Duration
-	}{
-		{
-			name: "nil delays return zero",
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
-					ScaledownDelay: nil,
-					DeleteDelay:    nil,
-				},
-			},
-			expectScale:  0,
-			expectDelete: 0,
-		},
-		{
-			name: "specified delays are returned",
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
-					ScaledownDelay: &metav1.Duration{Duration: 2 * time.Hour},
-					DeleteDelay:    &metav1.Duration{Duration: 48 * time.Hour},
-				},
-			},
-			expectScale:  2 * time.Hour,
-			expectDelete: 48 * time.Hour,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expectScale, getScaledownDelay(tc.spec))
-			assert.Equal(t, tc.expectDelete, getDeleteDelay(tc.spec))
-		})
-	}
-}
-
 func TestComplexVersionStateScenarios(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -1444,7 +1502,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 		state          *temporal.TemporalWorkerState
 		expectDeletes  int
 		expectScales   int
-		expectVersions []string // Expected version IDs for scaling
+		expectVersions []string
 	}{
 		{
 			name: "multiple deprecated versions in different states",
@@ -1550,11 +1608,12 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: &metav1.Duration{Duration: 2 * time.Hour},
+					DeleteDelay:    &metav1.Duration{Duration: 24 * time.Hour},
 				},
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
 			expectDeletes: 0,
-			expectScales:  0, // Should not scale down yet
+			expectScales:  0,
 		},
 	}
 
