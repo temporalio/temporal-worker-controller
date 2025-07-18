@@ -7,14 +7,15 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+
 	"github.com/distribution/reference"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"regexp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sort"
-	"strings"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -24,7 +25,7 @@ const (
 	deployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel             = "temporal.io/build-id"
-	deploymentNameSeparator  = "/"
+	deploymentNameSeparator  = "."
 	versionIDSeparator       = "."
 	k8sResourceNameSeparator = "-"
 	maxBuildIdLen            = 63
