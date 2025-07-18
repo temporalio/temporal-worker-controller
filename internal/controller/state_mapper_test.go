@@ -239,7 +239,6 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 
 	// Test target version mapping
 	targetVersion := mapper.mapTargetWorkerDeploymentVersion("worker.v1")
-	assert.NotNil(t, targetVersion)
 	assert.Equal(t, "worker.v1", targetVersion.VersionID)
 	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, targetVersion.Status)
 	assert.NotNil(t, targetVersion.HealthySince)
