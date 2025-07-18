@@ -41,7 +41,7 @@ func TestGeneratePlan(t *testing.T) {
 			name:     "empty state creates new deployment",
 			k8sState: &k8s.DeploymentState{},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
 						Status:    temporaliov1alpha1.VersionStatusNotRegistered,
@@ -70,7 +70,7 @@ func TestGeneratePlan(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.456",
 						Status:     temporaliov1alpha1.VersionStatusCurrent,
@@ -117,7 +117,7 @@ func TestGeneratePlan(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusCurrent,
@@ -168,7 +168,7 @@ func TestGeneratePlan(t *testing.T) {
 						},
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusCurrent,
@@ -311,7 +311,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusCurrent,
@@ -360,7 +360,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusCurrent,
@@ -389,7 +389,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusCurrent,
@@ -425,7 +425,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
@@ -458,7 +458,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.b",
 						Status:     temporaliov1alpha1.VersionStatusRamping,
@@ -485,7 +485,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.a",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
@@ -518,7 +518,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.a",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
@@ -567,7 +567,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 		{
 			name: "existing deployment should not create",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
@@ -580,7 +580,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 		{
 			name: "target version without deployment should create",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.b",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
@@ -610,7 +610,7 @@ func TestGetTestWorkflows(t *testing.T) {
 		{
 			name: "gate workflow needed",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
 						Status:    temporaliov1alpha1.VersionStatusInactive,
@@ -645,7 +645,7 @@ func TestGetTestWorkflows(t *testing.T) {
 		{
 			name: "no gate workflow",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
 						Status:    temporaliov1alpha1.VersionStatusInactive,
@@ -664,7 +664,7 @@ func TestGetTestWorkflows(t *testing.T) {
 		{
 			name: "gate workflow with empty task queues",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.123",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
@@ -684,7 +684,7 @@ func TestGetTestWorkflows(t *testing.T) {
 		{
 			name: "all test workflows already running",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
 						Status:    temporaliov1alpha1.VersionStatusInactive,
@@ -741,7 +741,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.123",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
@@ -773,7 +773,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
 						Status:    temporaliov1alpha1.VersionStatusInactive,
@@ -804,7 +804,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.123",
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
@@ -842,7 +842,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.789",
 						Status:    temporaliov1alpha1.VersionStatusInactive,
@@ -916,7 +916,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: "test/namespace.456",
 						Status:    temporaliov1alpha1.VersionStatusRamping,
@@ -950,7 +950,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
@@ -979,7 +979,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusRamping,
@@ -1014,7 +1014,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusRamping,
@@ -1047,7 +1047,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusRamping,
@@ -1229,7 +1229,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
@@ -1263,7 +1263,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
@@ -1297,7 +1297,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
@@ -1331,7 +1331,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
@@ -1367,7 +1367,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 						Status:    temporaliov1alpha1.VersionStatusCurrent,
 					},
 				},
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:    "test/namespace.456",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
@@ -1461,7 +1461,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.a",
 						Status:     temporaliov1alpha1.VersionStatusInactive,
@@ -1527,7 +1527,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID:  "test/namespace.a",
 						Status:     temporaliov1alpha1.VersionStatusInactive,

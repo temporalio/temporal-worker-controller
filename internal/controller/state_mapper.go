@@ -98,8 +98,8 @@ func (m *stateMapper) mapCurrentWorkerDeploymentVersion(versionID string) *v1alp
 }
 
 // mapTargetWorkerDeploymentVersion creates a target version status from the states
-func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) *v1alpha1.TargetWorkerDeploymentVersion {
-	version := &v1alpha1.TargetWorkerDeploymentVersion{
+func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) v1alpha1.TargetWorkerDeploymentVersion {
+	version := v1alpha1.TargetWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
 			VersionID: versionID,
 			Status:    v1alpha1.VersionStatusNotRegistered,

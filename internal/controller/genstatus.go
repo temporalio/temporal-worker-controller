@@ -66,10 +66,5 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	stateMapper := newStateMapper(k8sState, temporalState)
 	status := stateMapper.mapToStatus(targetVersionID)
 
-	// Validate that TargetVersion is never nil (defensive programming)
-	if status.TargetVersion == nil {
-		return nil, fmt.Errorf("generated status has nil TargetVersion for target version %s, this should never happen", targetVersionID)
-	}
-
 	return status, nil
 }
