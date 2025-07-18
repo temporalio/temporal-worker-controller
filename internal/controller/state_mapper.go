@@ -33,34 +33,25 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 
 	// Set current version
 	currentVersionID := m.temporalState.CurrentVersionID
-	if currentVersionID != "" {
-		status.CurrentVersion = m.mapCurrentWorkerDeploymentVersion(currentVersionID)
-	}
+	status.CurrentVersion = m.mapCurrentWorkerDeploymentVersion(currentVersionID)
 
 	// Set target version (desired version)
 	status.TargetVersion = m.mapTargetWorkerDeploymentVersion(targetVersionID)
-	if status.TargetVersion != nil && m.temporalState.RampingVersionID == targetVersionID {
+	if m.temporalState.RampingVersionID == targetVersionID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
 		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt
 		rampPercentage := m.temporalState.RampPercentage
 		status.TargetVersion.RampPercentage = &rampPercentage
 	}
 
-	rampingVersionID := m.temporalState.RampingVersionID
-	// Set ramping version if it exists
-	if rampingVersionID != "" {
-		status.RampingVersion = m.mapTargetWorkerDeploymentVersion(rampingVersionID)
-	}
-
 	// Add deprecated versions
 	var deprecatedVersions []*v1alpha1.DeprecatedWorkerDeploymentVersion
 	for versionID := range m.k8sState.Deployments {
 		// Skip current and target versions
-		if versionID == currentVersionID || versionID == targetVersionID || versionID == rampingVersionID {
+		if versionID == currentVersionID || versionID == targetVersionID {
 			continue
 		}
 
-		// TODO(rob): We should never see a version here that has VersionStatusCurrent, but should we check?
 		versionStatus := m.mapDeprecatedWorkerDeploymentVersion(versionID)
 		if versionStatus != nil {
 			deprecatedVersions = append(deprecatedVersions, versionStatus)
@@ -107,12 +98,8 @@ func (m *stateMapper) mapCurrentWorkerDeploymentVersion(versionID string) *v1alp
 }
 
 // mapTargetWorkerDeploymentVersion creates a target version status from the states
-func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) *v1alpha1.TargetWorkerDeploymentVersion {
-	if versionID == "" {
-		return nil
-	}
-
-	version := &v1alpha1.TargetWorkerDeploymentVersion{
+func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) v1alpha1.TargetWorkerDeploymentVersion {
+	version := v1alpha1.TargetWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
 			VersionID: versionID,
 			Status:    v1alpha1.VersionStatusNotRegistered,

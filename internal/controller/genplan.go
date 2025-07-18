@@ -17,6 +17,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -50,6 +51,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	l logr.Logger,
 	w *temporaliov1alpha1.TemporalWorkerDeployment,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
+	temporalState *temporal.TemporalWorkerState,
 ) (*plan, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(w)
 	targetVersionID := k8s.ComputeVersionID(w)
@@ -82,17 +84,15 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
-		Status:          &w.Status,
-		Spec:            &w.Spec,
 		RolloutStrategy: rolloutStrategy,
-		TargetVersionID: targetVersionID,
-		Replicas:        *w.Spec.Replicas,
-		ConflictToken:   w.Status.VersionConflictToken,
 	}
 
 	planResult, err := planner.GeneratePlan(
 		l,
 		k8sState,
+		&w.Status,
+		&w.Spec,
+		temporalState,
 		plannerConfig,
 	)
 	if err != nil {
