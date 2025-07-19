@@ -94,6 +94,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		l,
 		k8sState,
 		plannerConfig,
+		connection,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)

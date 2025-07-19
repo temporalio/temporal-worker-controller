@@ -17,7 +17,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
@@ -74,21 +76,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// TODO(jlegrone): Set defaults via webhook rather than manually
-	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
-		l.Error(err, "TemporalWorkerDeployment defaulter failed")
-		return ctrl.Result{}, err
-	}
-
-	// TODO(carlydf): Handle warnings once we have some, handle ValidateUpdate once it is different from ValidateCreate
-	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
-		l.Error(err, "invalid TemporalWorkerDeployment")
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: 5 * time.Minute, // user needs time to fix this, if it changes, it will be re-queued immediately
-		}, nil
-	}
-
 	// Verify that a connection is configured
 	if workerDeploy.Spec.WorkerOptions.TemporalConnection == "" {
 		err := fmt.Errorf("TemporalConnection must be set")
@@ -104,6 +91,21 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}, &temporalConnection); err != nil {
 		l.Error(err, "unable to fetch TemporalConnection")
 		return ctrl.Result{}, err
+	}
+
+	// TODO(jlegrone): Set defaults via webhook rather than manually
+	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
+		l.Error(err, "TemporalWorkerDeployment defaulter failed")
+		return ctrl.Result{}, err
+	}
+
+	// TODO(carlydf): Handle warnings once we have some, handle ValidateUpdate once it is different from ValidateCreate
+	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
+		l.Error(err, "invalid TemporalWorkerDeployment")
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: 5 * time.Minute, // user needs time to fix this, if it changes, it will be re-queued immediately
+		}, nil
 	}
 
 	// Get or update temporal client for connection
@@ -172,6 +174,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// creates an index so that we can search for TWD deployments that are indexed by the deployment owner
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
 		// grab the job object, extract the owner...
 		deploy := rawObj.(*appsv1.Deployment)
@@ -192,11 +195,38 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
+	// Step 1: Watch the TemporalConnection resources as well.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
+		Watches(&temporaliov1alpha1.TemporalConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 		}).
 		Complete(r)
+}
+
+func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {
+	var requests []reconcile.Request
+
+	// Find all TWDs in same namespace that reference this TC
+	var workers temporaliov1alpha1.TemporalWorkerDeploymentList
+	if err := r.List(ctx, &workers, client.InNamespace(tc.GetNamespace())); err != nil {
+		return requests
+	}
+
+	// Filter to ones using this connection
+	for _, worker := range workers.Items {
+		if worker.Spec.WorkerOptions.TemporalConnection == tc.GetName() {
+			// Add the TWD object as a reconcile request
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      worker.Name,
+					Namespace: worker.Namespace,
+				},
+			})
+		}
+	}
+
+	return requests
 }

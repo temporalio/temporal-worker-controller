@@ -87,6 +87,7 @@ func GeneratePlan(
 	l logr.Logger,
 	k8sState *k8s.DeploymentState,
 	config *Config,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*v1.ObjectReference]uint32),
@@ -95,7 +96,7 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, config)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, config)
-	plan.ShouldCreateDeployment = shouldCreateDeployment(k8sState, config)
+	plan.ShouldCreateDeployment = shouldCreateOrUpdateDeployment(k8sState, config, connection)
 
 	// Determine if we need to start any test workflows
 	plan.TestWorkflows = getTestWorkflows(config)
@@ -218,9 +219,10 @@ func getScaleDeployments(
 }
 
 // shouldCreateDeployment determines if a new deployment needs to be created
-func shouldCreateDeployment(
+func shouldCreateOrUpdateDeployment(
 	k8sState *k8s.DeploymentState,
 	config *Config,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) bool {
 	if config.Status.TargetVersion == nil {
 		return true
@@ -232,7 +234,12 @@ func shouldCreateDeployment(
 
 	// If the target version already has a deployment, we don't need to create another one
 	if config.Status.TargetVersion.VersionID == config.TargetVersionID {
-		if _, exists := k8sState.Deployments[config.TargetVersionID]; exists {
+		if d, exists := k8sState.Deployments[config.TargetVersionID]; exists {
+			// If the deployment already exists, we need to check if the secret hash has changed
+			connectionSpecHash := k8s.ComputeConnectionSpecHash(connection)
+			if connectionSpecHash != d.Spec.Template.Annotations[temporaliov1alpha1.ConnectionSpecHashAnnotation] {
+				return true
+			}
 			return false
 		}
 	}

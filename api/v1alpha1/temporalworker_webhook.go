@@ -22,6 +22,7 @@ const (
 	defaultScaledownDelay              = 1 * time.Hour
 	defaultDeleteDelay                 = 24 * time.Hour
 	maxTemporalWorkerDeploymentNameLen = 63
+	ConnectionSpecHashAnnotation       = "temporal.io/connection-spec-hash"
 )
 
 func (r *TemporalWorkerDeployment) SetupWebhookWithManager(mgr ctrl.Manager) error {

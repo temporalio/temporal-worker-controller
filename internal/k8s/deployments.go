@@ -6,15 +6,18 @@ package k8s
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+
 	"github.com/distribution/reference"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"regexp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sort"
-	"strings"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -254,6 +257,13 @@ func NewDeploymentWithOwnerRef(
 		})
 	}
 
+	// Build pod annotations
+	podAnnotations := make(map[string]string)
+	for k, v := range spec.Template.Annotations {
+		podAnnotations[k] = v
+	}
+	podAnnotations[temporaliov1alpha1.ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
+
 	blockOwnerDeletion := true
 
 	return &appsv1.Deployment{
@@ -282,11 +292,22 @@ func NewDeploymentWithOwnerRef(
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      podLabels,
-					Annotations: spec.Template.Annotations,
+					Annotations: podAnnotations,
 				},
 				Spec: *podSpec,
 			},
 			MinReadySeconds: spec.MinReadySeconds,
 		},
 	}
+}
+
+// Do we wanna put this in a util file?
+func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionSpec) string {
+	hasher := sha256.New()
+
+	// Hash connection spec fields in deterministic order
+	hasher.Write([]byte(connection.HostPort))
+	hasher.Write([]byte(connection.MutualTLSSecret))
+
+	return hex.EncodeToString(hasher.Sum(nil)) // Full 64 characters - no collision risk
 }

@@ -194,7 +194,7 @@ func TestGeneratePlan(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config, temporaliov1alpha1.TemporalConnectionSpec{}) // TODO (Shivam): Come back to this
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -633,7 +633,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			creates := shouldCreateDeployment(tc.k8sState, tc.config)
+			creates := shouldCreateOrUpdateDeployment(tc.k8sState, tc.config, temporaliov1alpha1.TemporalConnectionSpec{}) // TODO (Shivam): Come back to this
 			assert.Equal(t, tc.expectCreates, creates, "unexpected create decision")
 		})
 	}
@@ -1603,7 +1603,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config, temporaliov1alpha1.TemporalConnectionSpec{}) // TODO (Shivam): Come back to this
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
