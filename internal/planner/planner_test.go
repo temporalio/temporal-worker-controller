@@ -32,6 +32,7 @@ func TestGeneratePlan(t *testing.T) {
 		expectConfig            bool
 		expectConfigSetCurrent  *bool // pointer to distinguish between false and not set
 		expectConfigRampPercent *float32
+		connectionSpec          temporaliov1alpha1.TemporalConnectionSpec
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -48,16 +49,17 @@ func TestGeneratePlan(t *testing.T) {
 				Replicas:        1,
 				ConflictToken:   []byte{},
 			},
-			expectCreate: true,
+			expectCreate:   true,
+			connectionSpec: createDefaultConnectionSpec(),
 		},
 		{
 			name: "drained version gets deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(0),
+					"test/namespace.123": createDeployment(0, createDefaultConnectionSpec()),
 				},
 				DeploymentsByTime: []*appsv1.Deployment{
-					createDeploymentWithReplicas(0),
+					createDeployment(0, createDefaultConnectionSpec()),
 				},
 				DeploymentRefs: map[string]*v1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
@@ -84,17 +86,18 @@ func TestGeneratePlan(t *testing.T) {
 				Replicas:        1,
 				ConflictToken:   []byte{},
 			},
-			expectDelete: 1,
-			expectCreate: true,
+			expectDelete:   1,
+			expectCreate:   true,
+			connectionSpec: createDefaultConnectionSpec(),
 		},
 		{
 			name: "deployment needs to be scaled",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeployment(1, createDefaultConnectionSpec()),
 				},
 				DeploymentsByTime: []*appsv1.Deployment{
-					createDeploymentWithReplicas(1),
+					createDeployment(1, createDefaultConnectionSpec()),
 				},
 				DeploymentRefs: map[string]*v1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
@@ -123,19 +126,20 @@ func TestGeneratePlan(t *testing.T) {
 				Replicas:        2,
 				ConflictToken:   []byte{},
 			},
-			expectScale:  2,
-			expectCreate: false,
+			expectScale:    2,
+			expectCreate:   false,
+			connectionSpec: createDefaultConnectionSpec(),
 		},
 		{
 			name: "rollback scenario - target equals current but deprecated version is ramping",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(3),
-					"test/namespace.456": createDeploymentWithReplicas(3),
+					"test/namespace.123": createDeployment(3, createDefaultConnectionSpec()),
+					"test/namespace.456": createDeployment(3, createDefaultConnectionSpec()),
 				},
 				DeploymentsByTime: []*appsv1.Deployment{
-					createDeploymentWithReplicas(3),
-					createDeploymentWithReplicas(3),
+					createDeployment(3, createDefaultConnectionSpec()),
+					createDeployment(3, createDefaultConnectionSpec()),
 				},
 				DeploymentRefs: map[string]*v1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
@@ -189,12 +193,13 @@ func TestGeneratePlan(t *testing.T) {
 			expectConfig:            true,                                             // Should generate config to reset ramp
 			expectConfigSetCurrent:  func() *bool { b := false; return &b }(),         // Should NOT set current (already current)
 			expectConfigRampPercent: func() *float32 { f := float32(0); return &f }(), // Should reset ramp to 0
+			connectionSpec:          createDefaultConnectionSpec(),
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config, temporaliov1alpha1.TemporalConnectionSpec{}) // TODO (Shivam): Come back to this
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.config, tc.connectionSpec)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -227,7 +232,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "drained version should be deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(0),
+					"test/namespace.123": createDeployment(0, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -257,7 +262,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "not yet drained long enough",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(0),
+					"test/namespace.123": createDeployment(0, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -293,7 +298,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "not registered version should be deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeployment(1, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -320,7 +325,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "delete target deployment when version ID has changed",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.b": createDeploymentWithReplicas(3),
+					"test/namespace.b": createDeployment(3, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -362,7 +367,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "default version needs scaling",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeployment(1, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -387,7 +392,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "drained version needs scaling down",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeployment(1, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -417,7 +422,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "inactive version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(0),
+					"test/namespace.a": createDeployment(0, createDefaultConnectionSpec()),
 				},
 				DeploymentRefs: map[string]*v1.ObjectReference{
 					"test/namespace.a": {Name: "test-a"},
@@ -447,7 +452,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "ramping version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.b": createDeploymentWithReplicas(0),
+					"test/namespace.b": createDeployment(0, createDefaultConnectionSpec()),
 				},
 				DeploymentRefs: map[string]*v1.ObjectReference{
 					"test/namespace.b": {Name: "test-b"},
@@ -475,7 +480,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "current version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(0),
+					"test/namespace.a": createDeployment(0, createDefaultConnectionSpec()),
 				},
 				DeploymentRefs: map[string]*v1.ObjectReference{
 					"test/namespace.a": {Name: "test-a"},
@@ -505,7 +510,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "don't scale down drained deployment before delay",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.b": createDeploymentWithReplicas(3),
+					"test/namespace.b": createDeployment(3, createDefaultConnectionSpec()),
 				},
 				DeploymentRefs: map[string]*v1.ObjectReference{
 					"test/namespace.b": {Name: "test-b"},
@@ -559,10 +564,11 @@ func TestGetScaleDeployments(t *testing.T) {
 
 func TestShouldCreateDeployment(t *testing.T) {
 	testCases := []struct {
-		name          string
-		k8sState      *k8s.DeploymentState
-		config        *Config
-		expectCreates bool
+		name           string
+		k8sState       *k8s.DeploymentState
+		config         *Config
+		expectCreates  bool
+		connectionSpec temporaliov1alpha1.TemporalConnectionSpec
 	}{
 		{
 			name: "no target version should create",
@@ -579,13 +585,14 @@ func TestShouldCreateDeployment(t *testing.T) {
 				Replicas:        1,
 				ConflictToken:   []byte{},
 			},
-			expectCreates: true,
+			expectCreates:  true,
+			connectionSpec: createDefaultConnectionSpec(),
 		},
 		{
-			name: "existing deployment should not create",
+			name: "existing deployment, with a non-outdated connection spec, should not result in the creation of a new deployment",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeployment(1, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -604,7 +611,34 @@ func TestShouldCreateDeployment(t *testing.T) {
 				Replicas:        1,
 				ConflictToken:   []byte{},
 			},
-			expectCreates: false,
+			expectCreates:  false,
+			connectionSpec: createDefaultConnectionSpec(),
+		},
+		{
+			name: "existing deployment, with an outdated connection spec, should result in the creation of a new deployment",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.123": createDeployment(1, createOutdatedConnectionSpec()),
+				},
+			},
+			config: &Config{
+				TargetVersionID: "test/namespace.123",
+				Status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.123",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							Deployment: &v1.ObjectReference{Name: "test-123"},
+						},
+					},
+				},
+				Spec:            &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				Replicas:        1,
+				ConflictToken:   []byte{},
+			},
+			expectCreates:  true,
+			connectionSpec: createDefaultConnectionSpec(),
 		},
 		{
 			name: "target version without deployment should create",
@@ -627,13 +661,14 @@ func TestShouldCreateDeployment(t *testing.T) {
 				Replicas:        1,
 				ConflictToken:   []byte{},
 			},
-			expectCreates: true,
+			expectCreates:  true,
+			connectionSpec: createDefaultConnectionSpec(),
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			creates := shouldCreateOrUpdateDeployment(tc.k8sState, tc.config, temporaliov1alpha1.TemporalConnectionSpec{}) // TODO (Shivam): Come back to this
+			creates := shouldCreateOrUpdateDeployment(tc.k8sState, tc.config, tc.connectionSpec)
 			assert.Equal(t, tc.expectCreates, creates, "unexpected create decision")
 		})
 	}
@@ -1504,10 +1539,10 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			name: "multiple deprecated versions in different states",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(3),
-					"test/namespace.b": createDeploymentWithReplicas(3),
-					"test/namespace.c": createDeploymentWithReplicas(1),
-					"test/namespace.d": createDeploymentWithReplicas(0),
+					"test/namespace.a": createDeployment(3, createDefaultConnectionSpec()),
+					"test/namespace.b": createDeployment(3, createDefaultConnectionSpec()),
+					"test/namespace.c": createDeployment(1, createDefaultConnectionSpec()),
+					"test/namespace.d": createDeployment(0, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -1568,7 +1603,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			name: "draining version not scaled down before delay",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(3),
+					"test/namespace.a": createDeployment(3, createDefaultConnectionSpec()),
 				},
 			},
 			config: &Config{
@@ -1678,13 +1713,20 @@ func TestGetTestWorkflowID(t *testing.T) {
 }
 
 // Helper function to create a deployment with specified replicas
-func createDeploymentWithReplicas(replicas int32) *appsv1.Deployment {
+func createDeployment(replicas int32, connectionSpec temporaliov1alpha1.TemporalConnectionSpec) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-deployment",
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						temporaliov1alpha1.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(connectionSpec),
+					},
+				},
+			},
 		},
 	}
 }
@@ -1702,4 +1744,28 @@ func rolloutStep(ramp float32, d time.Duration) temporaliov1alpha1.RolloutStep {
 		RampPercentage: ramp,
 		PauseDuration:  metav1Duration(d),
 	}
+}
+
+// Helper function to create a default TemporalConnectionSpec used for testing purposes
+func createDefaultConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
+	return temporaliov1alpha1.TemporalConnectionSpec{
+		HostPort:        defaultHostPort(),
+		MutualTLSSecret: defaultMutualTLSSecret(),
+	}
+}
+
+// Helper function to create a TemporalConnectionSpec with an outdated secret
+func createOutdatedConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
+	return temporaliov1alpha1.TemporalConnectionSpec{
+		HostPort:        defaultHostPort(),
+		MutualTLSSecret: "outdated-secret",
+	}
+}
+
+func defaultHostPort() string {
+	return "default-host:7233"
+}
+
+func defaultMutualTLSSecret() string {
+	return "default-secret"
 }

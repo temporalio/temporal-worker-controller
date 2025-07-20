@@ -237,10 +237,7 @@ func shouldCreateOrUpdateDeployment(
 		if d, exists := k8sState.Deployments[config.TargetVersionID]; exists {
 			// If the deployment already exists, we need to check if the secret hash has changed
 			connectionSpecHash := k8s.ComputeConnectionSpecHash(connection)
-			if connectionSpecHash != d.Spec.Template.Annotations[temporaliov1alpha1.ConnectionSpecHashAnnotation] {
-				return true
-			}
-			return false
+			return connectionSpecHash != d.Spec.Template.Annotations[temporaliov1alpha1.ConnectionSpecHashAnnotation]
 		}
 	}
 

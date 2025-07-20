@@ -93,6 +93,8 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
+	// TODO (Shivam): Do we validate TemporalConnection here as well?
+
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
 		l.Error(err, "TemporalWorkerDeployment defaulter failed")

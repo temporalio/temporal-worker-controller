@@ -303,11 +303,16 @@ func NewDeploymentWithOwnerRef(
 
 // Do we wanna put this in a util file?
 func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionSpec) string {
+	// should not happen
+	if connection.MutualTLSSecret == "" || connection.HostPort == "" {
+		return ""
+	}
+
 	hasher := sha256.New()
 
 	// Hash connection spec fields in deterministic order
 	hasher.Write([]byte(connection.HostPort))
 	hasher.Write([]byte(connection.MutualTLSSecret))
 
-	return hex.EncodeToString(hasher.Sum(nil)) // Full 64 characters - no collision risk
+	return hex.EncodeToString(hasher.Sum(nil))
 }
