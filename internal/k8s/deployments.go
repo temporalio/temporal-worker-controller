@@ -301,7 +301,6 @@ func NewDeploymentWithOwnerRef(
 	}
 }
 
-// Do we wanna put this in a util file?
 func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionSpec) string {
 	// should not happen
 	if connection.MutualTLSSecret == "" || connection.HostPort == "" {

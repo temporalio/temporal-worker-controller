@@ -176,7 +176,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// creates an index so that we can search for TWD deployments that are indexed by the deployment owner
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
 		// grab the job object, extract the owner...
 		deploy := rawObj.(*appsv1.Deployment)
@@ -197,7 +196,6 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
-	// Step 1: Watch the TemporalConnection resources as well.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
