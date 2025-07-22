@@ -118,16 +118,10 @@ func (pa *PatchApplier) getActiveVersionIDs(
 ) map[string]bool {
 	versions := make(map[string]bool)
 
+	versions[workerDeployment.Status.TargetVersion.VersionID] = true
+
 	if workerDeployment.Status.CurrentVersion != nil {
 		versions[workerDeployment.Status.CurrentVersion.VersionID] = true
-	}
-
-	if workerDeployment.Status.TargetVersion != nil {
-		versions[workerDeployment.Status.TargetVersion.VersionID] = true
-	}
-
-	if workerDeployment.Status.RampingVersion != nil {
-		versions[workerDeployment.Status.RampingVersion.VersionID] = true
 	}
 
 	for _, deprecatedVersion := range workerDeployment.Status.DeprecatedVersions {

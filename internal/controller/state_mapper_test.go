@@ -179,6 +179,10 @@ func TestMapToStatus(t *testing.T) {
 
 	assert.NotNil(t, status.DeprecatedVersions[0].DrainedSince)
 	assert.Equal(t, drainedSince.Unix(), status.DeprecatedVersions[0].DrainedSince.Time.Unix())
+
+	// Verify version count is set correctly from VersionSummaries (via Versions map)
+	// Should count: worker.v1, worker.v2, worker.v3 (3 versions total)
+	assert.Equal(t, int32(3), status.VersionCount)
 }
 
 func TestMapWorkerDeploymentVersion(t *testing.T) {
@@ -235,7 +239,6 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 
 	// Test target version mapping
 	targetVersion := mapper.mapTargetWorkerDeploymentVersion("worker.v1")
-	assert.NotNil(t, targetVersion)
 	assert.Equal(t, "worker.v1", targetVersion.VersionID)
 	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, targetVersion.Status)
 	assert.NotNil(t, targetVersion.HealthySince)

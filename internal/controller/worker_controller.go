@@ -21,6 +21,8 @@ import (
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 )
 
 var (
@@ -28,7 +30,10 @@ var (
 )
 
 const (
-	buildIDLabel = "temporal.io/build-id"
+	// TODO(jlegrone): add this everywhere
+	// Index key for deployments owned by TemporalWorkerDeployment
+	deployOwnerKey = ".metadata.controller"
+	buildIDLabel   = "temporal.io/build-id"
 )
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
@@ -126,8 +131,20 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		temporalClient = c
 	}
 
+	// Fetch Temporal worker deployment state
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(&workerDeploy)
+	temporalState, err := temporal.GetWorkerDeploymentState(
+		ctx,
+		temporalClient,
+		workerDeploymentName,
+		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+	)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)
+	}
+
 	// Compute a new status from k8s and temporal state
-	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy)
+	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy, temporalState)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -158,7 +175,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Generate a plan to get to desired spec from current status
-	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec)
+	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec, temporalState)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -184,8 +201,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 }
 
 const (
-	// Index key for deployments owned by TemporalWorkerDeployment
-	deployOwnerKey = ".metadata.controller"
 	// Index key for patches targeting a TemporalWorkerDeployment (for future use)
 	patchTargetKey = ".spec.temporalWorkerDeploymentName"
 )

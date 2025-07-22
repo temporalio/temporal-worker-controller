@@ -60,6 +60,18 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
+
+	// MaxVersions defines the maximum number of worker deployment versions allowed.
+	// This helps prevent hitting Temporal's default limit of 100 versions per deployment.
+	// Defaults to 75. Users can override this by explicitly setting a higher value in
+	// the CRD, but should exercise caution: once the server's version limit is reached,
+	// Temporal attempts to delete an eligible version. If no version is eligible for deletion,
+	// new deployments get blocked which prevents the controller from making progress.
+	// This limit can be adjusted server-side by setting `matching.maxVersionsInDeployment`
+	// in dynamicconfig.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxVersions *int32 `json:"maxVersions,omitempty"`
 }
 
 // VersionStatus indicates the status of a version.
@@ -105,18 +117,12 @@ type TemporalWorkerDeploymentStatus struct {
 	// TargetVersion is the desired next version. If TargetVersion.Deployment is nil,
 	// then the controller should create it. If not nil, the controller should
 	// wait for it to become healthy and then move it to the CurrentVersion.
-	TargetVersion *TargetWorkerDeploymentVersion `json:"targetVersion"`
+	TargetVersion TargetWorkerDeploymentVersion `json:"targetVersion"`
 
 	// CurrentVersion is the version that is currently registered with
 	// Temporal as the current version of its worker deployment. This will be nil
 	// during initial bootstrap until a version is registered and set as current.
 	CurrentVersion *CurrentWorkerDeploymentVersion `json:"currentVersion,omitempty"`
-
-	// RampingVersion is the version that is currently registered with
-	// Temporal as the ramping version of its worker deployment. The controller
-	// should ensure that this is always equal to the TargetVersion, or, if the
-	// TargetVersion has been promoted to the current version, this should be nil.
-	RampingVersion *TargetWorkerDeploymentVersion `json:"rampingVersion,omitempty"`
 
 	// DeprecatedVersions are deployment versions that are no longer the default. Any
 	// deployment versions that are unreachable should be deleted by the controller.
@@ -130,6 +136,11 @@ type TemporalWorkerDeploymentStatus struct {
 	// LastModifierIdentity is the identity of the client that most recently modified the worker deployment.
 	// +optional
 	LastModifierIdentity string `json:"lastModifierIdentity,omitempty"`
+
+	// VersionCount is the total number of versions currently known by the worker deployment.
+	// This includes current, target, ramping, and deprecated versions.
+	// +optional
+	VersionCount int32 `json:"versionCount,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
@@ -318,8 +329,6 @@ type QueueStatistics struct {
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
-//
-// TODO(jlegrone): Implement default/validate interface https://book.kubebuilder.io/cronjob-tutorial/webhook-implementation.html
 type TemporalWorkerDeployment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
