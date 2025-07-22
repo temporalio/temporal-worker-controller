@@ -48,8 +48,6 @@ spec:
     deleteDelay: 7d      # Preserve for a week
 ```
 
-
-
 ## Patch Status
 
 The controller automatically updates patch status to indicate whether patches are successfully applied:
@@ -66,7 +64,6 @@ The controller automatically updates patch status to indicate whether patches ar
 status:
   status: Active
   appliedAt: "2024-01-15T10:30:00Z"
-  message: "Patch successfully applied to active version"
   observedGeneration: 1
 ```
 
@@ -76,8 +73,18 @@ status:
 
 1. **Patch Discovery**: The controller watches for changes to `TemporalWorkerDeploymentPatch` resources
 2. **Status Updates**: Patch statuses are updated during each reconciliation loop
-3. **Spec Application**: When creating or updating deployments, patches are applied to compute the effective configuration
+3. **Continuous Application**: During every reconciliation, patches are applied to compute effective configuration for all operations
 4. **Event Propagation**: Changes to patches trigger reconciliation of the target `TemporalWorkerDeployment`
+
+### How Patches Are Applied
+
+Patches are applied **continuously during each reconciliation loop**, affecting:
+
+- **Scaling Operations**: Existing deployments are scaled immediately when patch replica counts differ from current state
+- **Sunset Decisions**: Patch sunset strategies are used to determine when to scale down and delete deployments
+- **New Deployment Creation**: When new deployments are created, they use the effective configuration including patches
+
+The controller actively monitors the difference between current deployment state and the effective configuration (including patches) and takes action to reconcile any differences.
 
 ### Conflict Resolution
 
@@ -120,9 +127,9 @@ metadata:
 ## Limitations
 
 1. **Namespace Scope**: Patches must be in the same namespace as their target `TemporalWorkerDeployment`
-2. **Supported Fields**: Currently only `replicas` and `sunsetStrategy` can be overridden
+2. **Supported Fields**: Currently only `replicas` and `sunsetStrategy` fields can be overridden
 3. **Version Scope**: Patches apply to specific version IDs, not version patterns
-4. **Runtime Changes**: Patches are applied during deployment creation/update, not to existing deployments
+4. **Immediate Effect**: Patch changes take effect during the next reconciliation loop (typically within 10 seconds)
 
 ## Monitoring
 
