@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
@@ -70,14 +71,15 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Gather version-specific patches
 	versionPatches := make(map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec)
-	if r.PatchApplier != nil {
-		patches, err := r.PatchApplier.getPatches(ctx, w)
-		if err != nil {
-			l.Error(err, "failed to get patches, continuing without them")
-		} else {
-			for _, patch := range patches {
-				versionPatches[patch.Spec.VersionID] = &patch.Spec
-			}
+	patchList := &temporaliov1alpha1.TemporalWorkerDeploymentPatchList{}
+	err = r.Client.List(ctx, patchList, client.MatchingFields{
+		patchTargetKey: w.Name,
+	}, client.InNamespace(w.Namespace))
+	if err != nil {
+		l.Error(err, "failed to get patches, continuing without them")
+	} else {
+		for _, patch := range patchList.Items {
+			versionPatches[patch.Spec.VersionID] = &patch.Spec
 		}
 	}
 

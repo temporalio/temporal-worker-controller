@@ -390,10 +390,6 @@ type TemporalWorkerDeploymentPatchStatus struct {
 	// +optional
 	AppliedAt *metav1.Time `json:"appliedAt,omitempty"`
 
-	// Message provides additional information about the patch status
-	// +optional
-	Message string `json:"message,omitempty"`
-
 	// ObservedGeneration reflects the generation of the most recently observed patch spec
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -404,7 +400,6 @@ type TemporalWorkerDeploymentPatchStatus struct {
 // +kubebuilder:resource:shortName=twdpatch;twd-patch;temporalworkerpatch
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".spec.temporalWorkerDeploymentName",description="Target TemporalWorkerDeployment"
 //+kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.versionID",description="Target Version ID"
-//+kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".spec.replicas",description="Override Replicas"
 //+kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.status",description="Patch Status"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

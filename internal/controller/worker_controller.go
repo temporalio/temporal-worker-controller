@@ -41,7 +41,6 @@ type TemporalWorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
-	PatchApplier       *PatchApplier
 }
 
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
@@ -162,11 +161,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// Initialize PatchApplier if not already set
-	if r.PatchApplier == nil {
-		r.PatchApplier = NewPatchApplier(r.Client, l)
-	}
-
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	//                 (defaults were already set above, but have to be set again after status update)
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
@@ -186,7 +180,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Update patch statuses after successful plan execution
-	if err := r.PatchApplier.UpdatePatchStatuses(ctx, &workerDeploy); err != nil {
+	if err := updatePatchStatuses(ctx, r.Client, l, &workerDeploy); err != nil {
 		l.Error(err, "failed to update patch statuses")
 		// Don't fail reconciliation if patch status update fails
 	}
@@ -201,7 +195,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 }
 
 const (
-	// Index key for patches targeting a TemporalWorkerDeployment (for future use)
+	// Index key for patches targeting a TemporalWorkerDeployment
 	patchTargetKey = ".spec.temporalWorkerDeploymentName"
 )
 

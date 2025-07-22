@@ -9,82 +9,44 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
-// PatchApplier contains the logic for applying version-specific overrides
-type PatchApplier struct {
-	client client.Client
-	logger logr.Logger
-}
-
-// NewPatchApplier creates a new PatchApplier
-func NewPatchApplier(client client.Client, logger logr.Logger) *PatchApplier {
-	return &PatchApplier{
-		client: client,
-		logger: logger,
-	}
-}
-
-// getPatches retrieves all patches targeting the given TemporalWorkerDeployment
-func (pa *PatchApplier) getPatches(
+// updatePatchStatuses updates the status of patches based on the current state of versions
+func updatePatchStatuses(
 	ctx context.Context,
+	k8sClient client.Client,
+	logger logr.Logger,
 	workerDeployment *temporaliov1alpha1.TemporalWorkerDeployment,
-) ([]temporaliov1alpha1.TemporalWorkerDeploymentPatch, error) {
+) error {
+	// List all patches targeting this worker deployment
 	patchList := &temporaliov1alpha1.TemporalWorkerDeploymentPatchList{}
-
-	// List all patches in the same namespace targeting this worker deployment
-	err := pa.client.List(ctx, patchList, client.MatchingFields{
+	err := k8sClient.List(ctx, patchList, client.MatchingFields{
 		patchTargetKey: workerDeployment.Name,
 	}, client.InNamespace(workerDeployment.Namespace))
 	if err != nil {
-		return nil, fmt.Errorf("failed to list patches: %w", err)
-	}
-
-	return patchList.Items, nil
-}
-
-// UpdatePatchStatuses updates the status of patches based on the current state of versions
-func (pa *PatchApplier) UpdatePatchStatuses(
-	ctx context.Context,
-	workerDeployment *temporaliov1alpha1.TemporalWorkerDeployment,
-) error {
-	patches, err := pa.getPatches(ctx, workerDeployment)
-	if err != nil {
-		return fmt.Errorf("failed to get patches: %w", err)
+		return fmt.Errorf("failed to list patches: %w", err)
 	}
 
 	// Get current version IDs from the worker deployment status
-	activeVersions := pa.getActiveVersionIDs(workerDeployment)
+	activeVersions := getActiveVersionIDs(workerDeployment)
 
-	for _, patch := range patches {
-		newStatus := pa.determinePatchStatus(patch, workerDeployment, activeVersions)
+	for _, patch := range patchList.Items {
+		newStatus := determinePatchStatus(patch, workerDeployment, activeVersions)
 
 		if patch.Status.Status != newStatus {
 			patch.Status.Status = newStatus
 			patch.Status.ObservedGeneration = patch.Generation
 
-			switch newStatus {
-			case temporaliov1alpha1.PatchStatusActive:
-				now := metav1.Now()
-				patch.Status.AppliedAt = &now
-				patch.Status.Message = "Patch successfully applied to active version"
-			case temporaliov1alpha1.PatchStatusOrphaned:
-				patch.Status.Message = "Referenced version no longer exists"
-			case temporaliov1alpha1.PatchStatusInvalid:
-				patch.Status.Message = "Referenced TemporalWorkerDeployment not found"
-			}
-
-			if err := pa.client.Status().Update(ctx, &patch); err != nil {
-				pa.logger.Error(err, "Failed to update patch status", "patch", patch.Name)
+			if err := k8sClient.Status().Update(ctx, &patch); err != nil {
+				logger.Error(err, "Failed to update patch status", "patch", patch.Name)
 				continue
 			}
 		}
@@ -94,7 +56,7 @@ func (pa *PatchApplier) UpdatePatchStatuses(
 }
 
 // determinePatchStatus determines the appropriate status for a patch
-func (pa *PatchApplier) determinePatchStatus(
+func determinePatchStatus(
 	patch temporaliov1alpha1.TemporalWorkerDeploymentPatch,
 	workerDeployment *temporaliov1alpha1.TemporalWorkerDeployment,
 	activeVersions map[string]bool,
@@ -113,7 +75,7 @@ func (pa *PatchApplier) determinePatchStatus(
 }
 
 // getActiveVersionIDs extracts all active version IDs from the worker deployment status
-func (pa *PatchApplier) getActiveVersionIDs(
+func getActiveVersionIDs(
 	workerDeployment *temporaliov1alpha1.TemporalWorkerDeployment,
 ) map[string]bool {
 	versions := make(map[string]bool)
