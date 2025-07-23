@@ -118,14 +118,14 @@ flowchart TD
 
 When a new worker deployment version is deployed, the worker controller detects it and automatically begins the process
 of making that version the new **current** (aka default) version of the worker deployment it is a part of. This could happen
-immediately if `cutover.strategy = AllAtOnce`, or gradually if `cutover.strategy = Progressive`.
+immediately if `rollout.strategy = AllAtOnce`, or gradually if `rollout.strategy = Progressive`.
 
 As older pinned workflows finish executing and deprecated deployment versions become drained, the worker controller also
 frees up resources by sunsetting the `Deployment` resources polling those versions.
 
 Here is an example of a progressive cut-over strategy gated on the success of the `HelloWorld` workflow:
 ```yaml
-  cutover:
+  rollout:
     strategy: Progressive
     steps:
       - rampPercentage: 1

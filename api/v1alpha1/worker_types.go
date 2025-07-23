@@ -52,8 +52,8 @@ type TemporalWorkerDeploymentSpec struct {
 	// not be estimated during the time a deployment is paused. Defaults to 600s.
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
 
-	// How to cut over new workflow executions to the target version.
-	RolloutStrategy RolloutStrategy `json:"cutover"`
+	// How to rollout new workflow executions to the target version.
+	RolloutStrategy RolloutStrategy `json:"rollout"`
 
 	// How to manage sunsetting drained versions.
 	SunsetStrategy SunsetStrategy `json:"sunset"`

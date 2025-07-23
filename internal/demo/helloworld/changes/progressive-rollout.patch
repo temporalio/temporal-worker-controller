@@ -4,8 +4,8 @@ index 926fc27..3e1fd51 100644
 +++ b/internal/demo/helloworld/temporal_worker.yaml
 @@ -12,9 +12,20 @@ spec:
      temporalNamespace: "replay-2025.ktasd"
-   # How to cut over new workflow executions to the latest worker version
-   cutover:
+   # How to rollout new workflow executions to the latest worker version
+   rollout:
 -    strategy: AllAtOnce
 +    strategy: Progressive
      gate:
