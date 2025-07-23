@@ -5,11 +5,13 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,20 +40,28 @@ func setupKubebuilderAssets() error {
 		return nil // Already set
 	}
 
-	// Try to find the assets using setup-envtest
-	cmd := exec.Command("setup-envtest", "use", "1.28.0", "--bin-dir", "bin")
-	output, err := cmd.Output()
+	// Get the repository root to find the setup-envtest binary
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return fmt.Errorf("failed to get current file path")
+	}
+	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(currentFile), "../../.."))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get repository root: %v", err)
 	}
 
-	// Parse the output to get the path
-	// The output format is typically: "export KUBEBUILDER_ASSETS=/path/to/assets"
-	// We need to extract just the path
-	assetsPath := string(output)
+	// Use the correct version and path that matches the Makefile
+	setupEnvtestPath := filepath.Join(repoRoot, "bin", "setup-envtest")
+	binDir := filepath.Join(repoRoot, "bin")
+	cmd := exec.Command(setupEnvtestPath, "use", "1.27.1", "--bin-dir", binDir, "-p", "path")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to run setup-envtest: %v", err)
+	}
+
+	// The output with -p path flag is just the path, no need to parse
+	assetsPath := strings.TrimSpace(string(output))
 	if len(assetsPath) > 0 {
-		// Remove any trailing newlines
-		assetsPath = assetsPath[:len(assetsPath)-1]
 		os.Setenv("KUBEBUILDER_ASSETS", assetsPath)
 	}
 

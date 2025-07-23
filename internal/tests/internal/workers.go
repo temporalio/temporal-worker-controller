@@ -6,6 +6,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"time"
 
 	"go.temporal.io/api/workflowservice/v1"
@@ -50,7 +51,7 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	opts := worker.Options{
 		DeploymentOptions: worker.DeploymentOptions{
 			UseVersioning:             true,
-			Version:                   temporalDeploymentName + "." + workerBuildId,
+			Version:                   temporalDeploymentName + k8s.VersionIDSeparator + workerBuildId,
 			DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 		},
 	}
@@ -72,7 +73,7 @@ func newClient(ctx context.Context, hostPort, namespace string) (client.Client, 
 		Identity:  "integration-tests",
 		HostPort:  hostPort,
 		Namespace: namespace,
-		Logger:    nil, // todo: do we want to pass a test-related logger?
+		Logger:    nil,
 	}
 	c, err := client.Dial(opts)
 	if err != nil {

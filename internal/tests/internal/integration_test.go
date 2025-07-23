@@ -33,6 +33,7 @@ type testCase struct {
 	// versions, so for test scenarios that start with existing deprecated version Deployments,
 	// specify the number of replicas for each deprecated build here.
 	deprecatedBuildReplicas map[string]int32
+	deprecatedBuildImages   map[string]string
 	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 }
 
@@ -87,19 +88,8 @@ func TestIntegration(t *testing.T) {
 			}),
 			deprecatedBuildReplicas: nil,
 			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: nil,
-				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1"),
-						Deployment: &corev1.ObjectReference{
-							Namespace: testNamespace.Name,
-							Name: k8s.ComputeVersionedDeploymentName(
-								"all-at-once-rollout-2-replicas",
-								testhelpers.MakeBuildId("all-at-once-rollout-2-replicas", "v1", nil),
-							),
-						},
-					},
-				},
+				TargetVersion:        nil,
+				CurrentVersion:       testhelpers.MakeCurrentVersion(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1", true, false),
 				RampingVersion:       nil,
 				DeprecatedVersions:   nil,
 				VersionConflictToken: nil,
@@ -122,9 +112,18 @@ func TestIntegration(t *testing.T) {
 					Namespace: testNamespace.Name,
 					Labels:    map[string]string{"app": "test-worker"},
 				}
+				obj.Status = temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+					TargetVersion:        nil,
+					CurrentVersion:       testhelpers.MakeCurrentVersion(testNamespace.Name, "progressive-rollout-expect-first-step", "v0", true, true),
+					RampingVersion:       nil,
+					DeprecatedVersions:   nil,
+					VersionConflictToken: nil,
+					LastModifierIdentity: "",
+				}
 				return obj
 			}),
-			deprecatedBuildReplicas: nil,
+			deprecatedBuildReplicas: map[string]int32{testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v0", nil): 1},
+			deprecatedBuildImages:   map[string]string{testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v0", nil): "v0"},
 			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -168,20 +167,129 @@ func TestIntegration(t *testing.T) {
 
 	for testName, tc := range tests {
 		t.Run(testName, func(t *testing.T) {
-			// TODO(carlydf): create starting test env
-			// - Use input.Status + deprecatedBuildReplicas to create (and maybe kill) pollers for deprecated versions in temporal
-			// - also get routing config of the deployment into the starting state before running the test
-
-			testTemporalWorkerDeploymentCreation(t, k8sClient, ts, tc.input, tc.expectedStatus)
+			ctx := context.Background()
+			// TODO(carlydf): populate all fields in tc that are set to testName, so that the user does not need to specify
+			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, ts, tc)
 		})
 
 	}
 
 }
 
+// Uses input.Status + deprecatedBuildReplicas to create (and maybe kill) pollers for deprecated versions in temporal
+// also gets routing config of the deployment into the starting state before running the test.
+// Does not set Status.VersionConflictToken, since that is only set internally by the server.
+func makePreliminaryStatusTrue(
+	ctx context.Context,
+	t *testing.T,
+	k8sClient client.Client,
+	ts *temporaltest.TestServer,
+	twd *temporaliov1alpha1.TemporalWorkerDeployment,
+	connection *temporaliov1alpha1.TemporalConnection,
+	replicas map[string]int32,
+	images map[string]string,
+) {
+	t.Logf("Creating starting test env based on input.Status")
+	for _, dv := range twd.Status.DeprecatedVersions {
+		t.Logf("Handling deprecated version %v", dv.VersionID)
+		switch dv.Status {
+		case temporaliov1alpha1.VersionStatusInactive:
+			// start a poller -- is this included in deprecated versions list?
+		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
+			// these won't be in deprecated versions
+		case temporaliov1alpha1.VersionStatusDraining:
+			// TODO(carlydf): start a poller, set ramp, start a wf on that version, then unset
+		case temporaliov1alpha1.VersionStatusDrained:
+			// TODO(carlydf): start a poller, set ramp, unset, wait for drainage status visibility grace period
+		case temporaliov1alpha1.VersionStatusNotRegistered:
+			// no-op, although I think this won't occur in deprecated versions either
+		}
+	}
+	// TODO(carlydf): handle Status.LastModifierIdentity
+	if cv := twd.Status.CurrentVersion; cv != nil {
+		t.Logf("Handling current version %v", cv.VersionID)
+		if cv.Status != temporaliov1alpha1.VersionStatusCurrent {
+			t.Errorf("Current Version's status must be Current")
+		}
+		if cv.Deployment != nil {
+			t.Logf("Creating Deployment %s for Current Version", cv.Deployment.Name)
+			createWorkerDeployment(ctx, t, k8sClient, twd, cv.VersionID, connection.Spec, replicas, images)
+			expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
+			waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
+			workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+			defer func() {
+				for _, f := range workerStopFuncs {
+					if f != nil {
+						f()
+					}
+				}
+			}()
+		}
+	}
+
+	if rv := twd.Status.RampingVersion; rv != nil {
+		t.Logf("Handling ramping version %v", rv.VersionID)
+		if rv.Status != temporaliov1alpha1.VersionStatusRamping {
+			t.Errorf("Ramping Version's status must be Ramping")
+		}
+		if rv.Deployment != nil {
+			t.Logf("Creating Deployment %s for Ramping Version", rv.Deployment.Name)
+		}
+		// TODO(carlydf): do this
+	}
+}
+
+func createWorkerDeployment(
+	ctx context.Context,
+	t *testing.T,
+	k8sClient client.Client,
+	twd *temporaliov1alpha1.TemporalWorkerDeployment,
+	versionID string,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+	replicas map[string]int32,
+	images map[string]string,
+) {
+	t.Log("Creating a Deployment")
+	_, buildId, err := k8s.SplitVersionID(versionID)
+	if err != nil {
+		t.Error(err)
+	}
+
+	prevImageName := twd.Spec.Template.Spec.Containers[0].Image
+	prevReplicas := twd.Spec.Replicas
+	// temporarily replace it
+	twd.Spec.Template.Spec.Containers[0].Image = images[buildId]
+	newReplicas := replicas[buildId]
+	twd.Spec.Replicas = &newReplicas
+	defer func() {
+		twd.Spec.Template.Spec.Containers[0].Image = prevImageName
+		twd.Spec.Replicas = prevReplicas
+	}()
+
+	dep := k8s.NewDeploymentWithOwnerRef(
+		&twd.TypeMeta,
+		&twd.ObjectMeta,
+		&twd.Spec,
+		k8s.ComputeWorkerDeploymentName(twd),
+		buildId,
+		connection,
+	)
+
+	if err := k8sClient.Create(ctx, dep); err != nil {
+		t.Fatalf("failed to create Deployment: %v", err)
+	}
+}
+
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
-func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, twd *temporaliov1alpha1.TemporalWorkerDeployment, expectedStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus) {
-	ctx := context.Background()
+func testTemporalWorkerDeploymentCreation(
+	ctx context.Context,
+	t *testing.T,
+	k8sClient client.Client,
+	ts *temporaltest.TestServer,
+	tc testCase,
+) {
+	twd := tc.input
+	expectedStatus := tc.expectedStatus
 
 	t.Log("Creating a TemporalConnection")
 	temporalConnection := &temporaliov1alpha1.TemporalConnection{
@@ -196,6 +304,8 @@ func testTemporalWorkerDeploymentCreation(t *testing.T, k8sClient client.Client,
 	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
 		t.Fatalf("failed to create TemporalConnection: %v", err)
 	}
+
+	makePreliminaryStatusTrue(ctx, t, k8sClient, ts, twd, temporalConnection, tc.deprecatedBuildReplicas, tc.deprecatedBuildImages)
 
 	t.Log("Creating a TemporalWorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {

@@ -6,6 +6,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"time"
+)
+
+const (
+	testTaskQueue = "hello_world"
 )
 
 func MakeTWD(
@@ -70,7 +75,7 @@ func MakePodSpec(containers []corev1.Container, labels map[string]string, taskQu
 func MakeHelloWorldPodSpec(imageName string) corev1.PodTemplateSpec {
 	return MakePodSpec([]corev1.Container{{Name: "worker", Image: imageName}},
 		map[string]string{"app": "test-worker"},
-		"hello_world")
+		testTaskQueue)
 }
 
 func MakeTWDWithImage(imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -119,6 +124,37 @@ func MakeTWDWithName(name string) *temporaliov1alpha1.TemporalWorkerDeployment {
 	twd.ObjectMeta.Name = name
 	twd.Name = name
 	return twd
+}
+
+func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDeployment bool) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
+	ret := &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+		BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+			VersionID:    MakeVersionId(namespace, twdName, imageName),
+			Status:       temporaliov1alpha1.VersionStatusCurrent,
+			HealthySince: nil,
+			Deployment:   nil,
+			TaskQueues: []temporaliov1alpha1.TaskQueue{
+				{Name: testTaskQueue},
+			},
+			ManagedBy: "",
+		},
+	}
+
+	if healthy {
+		h := metav1.NewTime(time.Now())
+		ret.HealthySince = &h
+	}
+
+	if createDeployment {
+		ret.Deployment = &corev1.ObjectReference{
+			Namespace: namespace,
+			Name: k8s.ComputeVersionedDeploymentName(
+				twdName,
+				MakeBuildId(twdName, imageName, nil),
+			),
+		}
+	}
+	return ret
 }
 
 func ModifyObj[T any](obj T, callback func(obj T) T) T {

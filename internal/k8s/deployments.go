@@ -24,8 +24,8 @@ const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel             = "temporal.io/build-id"
-	deploymentNameSeparator  = "."
-	versionIDSeparator       = "."
+	deploymentNameSeparator  = "/"
+	VersionIDSeparator       = "." // TODO(carlydf): change this to ":"
 	K8sResourceNameSeparator = "-"
 	MaxBuildIdLen            = 63
 )
@@ -75,7 +75,7 @@ func GetDeploymentState(
 	for i := range childDeploys.Items {
 		deploy := &childDeploys.Items[i]
 		if buildID, ok := deploy.GetLabels()[BuildIDLabel]; ok {
-			versionID := workerDeploymentName + "." + buildID
+			versionID := workerDeploymentName + VersionIDSeparator + buildID
 			state.Deployments[versionID] = deploy
 			state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
 			state.DeploymentRefs[versionID] = NewObjectRef(deploy)
@@ -110,7 +110,7 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 
 // ComputeVersionID generates a version ID from the worker deployment spec
 func ComputeVersionID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return ComputeWorkerDeploymentName(w) + versionIDSeparator + ComputeBuildID(w)
+	return ComputeWorkerDeploymentName(w) + VersionIDSeparator + ComputeBuildID(w)
 }
 
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
@@ -161,12 +161,12 @@ func CleanAndTruncateString(s string, n int) string {
 	}
 	// Keep only letters, numbers, and dashes
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
-	return re.ReplaceAllString(s, "-")
+	return re.ReplaceAllString(s, K8sResourceNameSeparator)
 }
 
 // SplitVersionID splits a version ID into its components
 func SplitVersionID(versionID string) (deploymentName, buildID string, err error) {
-	parts := strings.Split(versionID, ".")
+	parts := strings.Split(versionID, VersionIDSeparator)
 	if len(parts) < 2 {
 		return "", "", fmt.Errorf("invalid version ID format: %s", versionID)
 	}
