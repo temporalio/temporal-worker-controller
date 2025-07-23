@@ -5,8 +5,6 @@
 package controller
 
 import (
-	"fmt"
-
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -41,9 +39,7 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 	status.TargetVersion = m.mapTargetWorkerDeploymentVersion(targetVersionID)
 	if m.temporalState.RampingVersionID == targetVersionID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
-		fmt.Println("Ramping since is", m.temporalState.RampingSince)
-		fmt.Println("Ramp last modified at is", m.temporalState.RampLastModifiedAt)
-		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt // This is showing to be an outdated value of Ramp last modified at is 0001-01-01 00:00:00 +0000 UTC
+		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt // Server bug! Fixing it....
 		rampPercentage := m.temporalState.RampPercentage
 		status.TargetVersion.RampPercentage = &rampPercentage
 	}

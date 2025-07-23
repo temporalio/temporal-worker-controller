@@ -61,7 +61,6 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 		if versionInfo, exists := temporalState.Versions[targetVersionID]; exists {
 			versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, testWorkflows...)
 		}
-		fmt.Println("genstatus:testWorkflows", testWorkflows, "with length", len(testWorkflows))
 	}
 
 	// Use the state mapper to convert state objects to CRD status
