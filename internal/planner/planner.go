@@ -240,7 +240,7 @@ func getTestWorkflows(
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
 				WorkflowType: config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:   k8s.GetTestWorkflowID(targetVersion.VersionID, tq.Name),
+				WorkflowID:   temporal.GetTestWorkflowID(targetVersion.VersionID, tq.Name),
 				VersionID:    targetVersion.VersionID,
 				TaskQueue:    tq.Name,
 			})

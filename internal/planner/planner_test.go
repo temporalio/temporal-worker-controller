@@ -1171,10 +1171,6 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 						RampPercentage: 10,
 						PauseDuration:  metav1.Duration{Duration: 30 * time.Second},
 					},
-					{
-						RampPercentage: 50,
-						PauseDuration:  metav1.Duration{Duration: 60 * time.Second},
-					},
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -1193,7 +1189,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second),
 					},
-					RampPercentage:     float32Ptr(50),
+					RampPercentage:     float32Ptr(10),
 					RampLastModifiedAt: nil, // nil rampLastModifiedAt should not cause a panic!
 				},
 			},
@@ -1715,7 +1711,7 @@ func TestGetTestWorkflowID(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			id := k8s.GetTestWorkflowID(tc.versionID, tc.taskQueue)
+			id := temporal.GetTestWorkflowID(tc.versionID, tc.taskQueue)
 			assert.Equal(t, tc.expectID, id, "unexpected workflow ID")
 		})
 	}

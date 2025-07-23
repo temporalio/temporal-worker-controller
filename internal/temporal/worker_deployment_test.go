@@ -11,7 +11,6 @@ import (
 	"go.temporal.io/api/enums/v1"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 )
 
 func TestMapWorkflowStatus(t *testing.T) {
@@ -96,7 +95,7 @@ func TestGetTestWorkflowID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := k8s.GetTestWorkflowID(tt.versionID, tt.taskQueue)
+			id := GetTestWorkflowID(tt.versionID, tt.taskQueue)
 			assert.Equal(t, tt.expected, id)
 		})
 	}

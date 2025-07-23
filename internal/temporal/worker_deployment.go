@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 )
 
 // VersionInfo contains information about a specific version
@@ -156,13 +155,13 @@ func GetTestWorkflowStatus(
 			continue
 		}
 
-		//Adding task queue information to the current temporal state
+		// Adding task queue information to the current temporal state
 		temporalState.Versions[versionID].TaskQueues = append(temporalState.Versions[versionID].TaskQueues, temporaliov1alpha1.TaskQueue{
 			Name: tq.Name,
 		})
 
 		// Check if there is a test workflow for this task queue
-		testWorkflowID := k8s.GetTestWorkflowID(versionID, tq.Name)
+		testWorkflowID := GetTestWorkflowID(versionID, tq.Name)
 		wf, err := client.DescribeWorkflowExecution(
 			ctx,
 			testWorkflowID,
@@ -211,4 +210,9 @@ func mapWorkflowStatus(status enums.WorkflowExecutionStatus) temporaliov1alpha1.
 		// Default to running for unspecified or any other status
 		return temporaliov1alpha1.WorkflowExecutionStatusRunning
 	}
+}
+
+// GetTestWorkflowID generates a workflowID for test workflows
+func GetTestWorkflowID(versionID, taskQueue string) string {
+	return fmt.Sprintf("test-%s-%s", versionID, taskQueue)
 }
