@@ -1163,6 +1163,40 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			expectRampPercent: 0,
 			expectSetCurrent:  true,
 		},
+		"nil rampLastModifiedAt should not cause a panic": {
+			strategy: temporaliov1alpha1.RolloutStrategy{
+				Strategy: temporaliov1alpha1.UpdateProgressive,
+				Steps: []temporaliov1alpha1.RolloutStep{
+					{
+						RampPercentage: 10,
+						PauseDuration:  metav1.Duration{Duration: 30 * time.Second},
+					},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID: "test/namespace.123",
+						Status:    temporaliov1alpha1.VersionStatusCurrent,
+					},
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:    "test/namespace.456",
+						Status:       temporaliov1alpha1.VersionStatusRamping,
+						HealthySince: &metav1.Time{Time: time.Now()},
+					},
+					RampingSince: &metav1.Time{
+						Time: time.Now().Add(-2*time.Hour - 1*time.Second),
+					},
+					RampPercentage:     float32Ptr(10),
+					RampLastModifiedAt: nil, // nil rampLastModifiedAt should not cause a panic!
+				},
+			},
+			expectConfig:      false,
+			expectRampPercent: 0,
+			expectSetCurrent:  false,
+		},
 	}
 
 	for name, tc := range testCases {
@@ -1677,7 +1711,7 @@ func TestGetTestWorkflowID(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			id := getTestWorkflowID(tc.taskQueue, tc.versionID)
+			id := temporal.GetTestWorkflowID(tc.versionID, tc.taskQueue)
 			assert.Equal(t, tc.expectID, id, "unexpected workflow ID")
 		})
 	}

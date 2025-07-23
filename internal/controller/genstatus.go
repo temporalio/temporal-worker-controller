@@ -50,6 +50,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 			workerDeploymentName,
 			targetVersionID,
 			workerDeploy,
+			temporalState,
 		)
 		if err != nil {
 			l.Error(err, "error getting test workflow status")

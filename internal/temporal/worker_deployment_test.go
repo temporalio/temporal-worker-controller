@@ -82,20 +82,20 @@ func TestGetTestWorkflowID(t *testing.T) {
 			deploymentName: "worker",
 			taskQueue:      "queue1",
 			versionID:      "worker.v1",
-			expected:       "test-worker-queue1-worker.v1",
+			expected:       "test-worker.v1-queue1",
 		},
 		{
 			name:           "with dots",
 			deploymentName: "worker.app",
 			taskQueue:      "queue.main",
 			versionID:      "worker.app.v2",
-			expected:       "test-worker.app-queue.main-worker.app.v2",
+			expected:       "test-worker.app.v2-queue.main",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := getTestWorkflowID(tt.deploymentName, tt.taskQueue, tt.versionID)
+			id := GetTestWorkflowID(tt.versionID, tt.taskQueue)
 			assert.Equal(t, tt.expected, id)
 		})
 	}

@@ -17,14 +17,14 @@ spec:
     strategy: Progressive
     steps:
       - rampPercentage: 1
-        pauseDuration: 5s
+        pauseDuration: 30s
       - rampPercentage: 5
-        pauseDuration: 5s
+        pauseDuration: 30s
       - rampPercentage: 10
-        pauseDuration: 5s
+        pauseDuration: 30s
       # Increase traffic to 50% and wait 1 minute
       - rampPercentage: 50
-        pauseDuration: 1m
+        pauseDuration: 30s
     gate:
       workflowType: "HelloWorld"
   sunset:

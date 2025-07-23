@@ -39,6 +39,8 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 	status.TargetVersion = m.mapTargetWorkerDeploymentVersion(targetVersionID)
 	if m.temporalState.RampingVersionID == targetVersionID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
+		// TODO(Shivam): Temporal server is not emitting the right value for RampLastModifiedAt.
+		// This is going to be fixed by https://github.com/temporalio/temporal/pull/8089.
 		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt
 		rampPercentage := m.temporalState.RampPercentage
 		status.TargetVersion.RampPercentage = &rampPercentage

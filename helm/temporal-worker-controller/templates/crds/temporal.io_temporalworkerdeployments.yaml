@@ -76,6 +76,10 @@ spec:
                 required:
                 - strategy
                 type: object
+              maxVersions:
+                format: int32
+                minimum: 1
+                type: integer
               minReadySeconds:
                 format: int32
                 type: integer
@@ -3925,6 +3929,9 @@ spec:
               versionConflictToken:
                 format: byte
                 type: string
+              versionCount:
+                format: int32
+                type: integer
             required:
             - targetVersion
             type: object
