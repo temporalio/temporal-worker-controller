@@ -1677,7 +1677,7 @@ func TestGetTestWorkflowID(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			id := getTestWorkflowID(tc.taskQueue, tc.versionID)
+			id := k8s.GetTestWorkflowID(tc.versionID, tc.taskQueue)
 			assert.Equal(t, tc.expectID, id, "unexpected workflow ID")
 		})
 	}

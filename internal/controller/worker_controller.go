@@ -157,13 +157,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// TODO(jlegrone): Set defaults via webhook rather than manually
-	//                 (defaults were already set above, but have to be set again after status update)
-	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
-		l.Error(err, "TemporalWorkerDeployment defaulter failed")
-		return ctrl.Result{}, err
-	}
-
 	// Generate a plan to get to desired spec from current status
 	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec, temporalState)
 	if err != nil {

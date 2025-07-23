@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 )
 
 // VersionInfo contains information about a specific version
@@ -82,8 +83,12 @@ func GetWorkerDeploymentState(
 	if routingConfig.RampingVersion != "" {
 		var (
 			rampingSinceTime   = metav1.NewTime(routingConfig.RampingVersionChangedTime)
-			lastRampUpdateTime = metav1.NewTime(workerDeploymentInfo.RoutingConfig.RampingVersionPercentageChangedTime)
+			lastRampUpdateTime = metav1.NewTime(routingConfig.RampingVersionPercentageChangedTime)
 		)
+		fmt.Println("--------------------------------")
+		fmt.Println("Ramping version changed time is", routingConfig.RampingVersionChangedTime)
+		fmt.Println("Ramping version percentage changed time is", routingConfig.RampingVersionPercentageChangedTime)
+		fmt.Println("--------------------------------")
 		state.RampingSince = &rampingSinceTime
 		state.RampLastModifiedAt = &lastRampUpdateTime
 	}
@@ -130,6 +135,7 @@ func GetTestWorkflowStatus(
 	workerDeploymentName string,
 	versionID string,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	temporalState *TemporalWorkerState,
 ) ([]temporaliov1alpha1.WorkflowExecution, error) {
 	var results []temporaliov1alpha1.WorkflowExecution
 
@@ -154,8 +160,13 @@ func GetTestWorkflowStatus(
 			continue
 		}
 
+		//Adding task queue information to the current temporal state
+		temporalState.Versions[versionID].TaskQueues = append(temporalState.Versions[versionID].TaskQueues, temporaliov1alpha1.TaskQueue{
+			Name: tq.Name,
+		})
+
 		// Check if there is a test workflow for this task queue
-		testWorkflowID := getTestWorkflowID(workerDeploymentName, tq.Name, versionID)
+		testWorkflowID := k8s.GetTestWorkflowID(versionID, tq.Name)
 		wf, err := client.DescribeWorkflowExecution(
 			ctx,
 			testWorkflowID,
@@ -204,9 +215,4 @@ func mapWorkflowStatus(status enums.WorkflowExecutionStatus) temporaliov1alpha1.
 		// Default to running for unspecified or any other status
 		return temporaliov1alpha1.WorkflowExecutionStatusRunning
 	}
-}
-
-// getTestWorkflowID generates a consistent ID for test workflows
-func getTestWorkflowID(deploymentName, taskQueue, versionID string) string {
-	return fmt.Sprintf("test-%s-%s-%s", deploymentName, taskQueue, versionID)
 }

@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -232,6 +233,7 @@ func getTestWorkflows(
 	// Create a map of task queues that already have running test workflows
 	taskQueuesWithWorkflows := make(map[string]struct{})
 	for _, wf := range targetVersion.TestWorkflows {
+		fmt.Println("creating test workflow for task queue", wf.TaskQueue)
 		taskQueuesWithWorkflows[wf.TaskQueue] = struct{}{}
 	}
 
@@ -240,19 +242,15 @@ func getTestWorkflows(
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
 				WorkflowType: config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:   getTestWorkflowID(tq.Name, targetVersion.VersionID),
+				WorkflowID:   k8s.GetTestWorkflowID(targetVersion.VersionID, tq.Name),
 				VersionID:    targetVersion.VersionID,
 				TaskQueue:    tq.Name,
 			})
 		}
 	}
+	// TODO maybe (Shivam): Need to attach the test workflows to the target version
 
 	return testWorkflows
-}
-
-// getTestWorkflowID generates an ID for a test workflow
-func getTestWorkflowID(taskQueue, versionID string) string {
-	return "test-" + versionID + "-" + taskQueue
 }
 
 // getVersionConfigDiff determines the version configuration based on the rollout strategy
@@ -267,19 +265,25 @@ func getVersionConfigDiff(
 
 	// Do nothing if target version's deployment is not healthy yet
 	if status.TargetVersion.HealthySince == nil {
+		fmt.Println("Target version is not healthy yet")
 		return nil
 	}
 
 	// Do nothing if the test workflows have not completed successfully
 	if strategy.Gate != nil {
 		if len(status.TargetVersion.TaskQueues) == 0 {
+			fmt.Println("No task queues defined on the target version")
 			return nil
 		}
+
 		if len(status.TargetVersion.TestWorkflows) < len(status.TargetVersion.TaskQueues) {
+			fmt.Println("Not enough test workflows defined on the target version")
 			return nil
 		}
+
 		for _, wf := range status.TargetVersion.TestWorkflows {
 			if wf.Status != temporaliov1alpha1.WorkflowExecutionStatusCompleted {
+				fmt.Println("Test workflow", wf.WorkflowID, "is not completed")
 				return nil
 			}
 		}
@@ -360,13 +364,15 @@ func handleProgressiveRollout(
 	}
 
 	// Move to the next step if it has been long enough since the last update
-	if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
-		if i < len(steps)-1 {
-			vcfg.RampPercentage = steps[i+1].RampPercentage
-			return vcfg
-		} else {
-			vcfg.SetCurrent = true
-			return vcfg
+	if rampLastModifiedAt != nil {
+		if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
+			if i < len(steps)-1 {
+				vcfg.RampPercentage = steps[i+1].RampPercentage
+				return vcfg
+			} else {
+				vcfg.SetCurrent = true
+				return vcfg
+			}
 		}
 	}
 
