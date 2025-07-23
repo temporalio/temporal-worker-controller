@@ -5,7 +5,6 @@
 package planner
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -263,7 +262,6 @@ func getVersionConfigDiff(
 
 	// Do nothing if target version's deployment is not healthy yet
 	if status.TargetVersion.HealthySince == nil {
-		fmt.Println("Target version is not healthy yet")
 		return nil
 	}
 
@@ -272,11 +270,9 @@ func getVersionConfigDiff(
 		if len(status.TargetVersion.TaskQueues) == 0 {
 			return nil
 		}
-
 		if len(status.TargetVersion.TestWorkflows) < len(status.TargetVersion.TaskQueues) {
 			return nil
 		}
-
 		for _, wf := range status.TargetVersion.TestWorkflows {
 			if wf.Status != temporaliov1alpha1.WorkflowExecutionStatusCompleted {
 				return nil
