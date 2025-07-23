@@ -85,10 +85,6 @@ func GetWorkerDeploymentState(
 			rampingSinceTime   = metav1.NewTime(routingConfig.RampingVersionChangedTime)
 			lastRampUpdateTime = metav1.NewTime(routingConfig.RampingVersionPercentageChangedTime)
 		)
-		fmt.Println("--------------------------------")
-		fmt.Println("Ramping version changed time is", routingConfig.RampingVersionChangedTime)
-		fmt.Println("Ramping version percentage changed time is", routingConfig.RampingVersionPercentageChangedTime)
-		fmt.Println("--------------------------------")
 		state.RampingSince = &rampingSinceTime
 		state.RampLastModifiedAt = &lastRampUpdateTime
 	}

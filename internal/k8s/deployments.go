@@ -294,8 +294,5 @@ func NewDeploymentWithOwnerRef(
 
 // getTestWorkflowID generates a consistent ID for test workflows
 func GetTestWorkflowID(versionID, taskQueue string) string {
-	fmt.Println("versionID", versionID)
-	fmt.Println("taskQueue", taskQueue)
-
 	return fmt.Sprintf("test-%s-%s", versionID, taskQueue)
 }

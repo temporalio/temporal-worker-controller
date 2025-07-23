@@ -1,7 +1,7 @@
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
-  name: superman
+  name: helloworld
   labels:
     app.kubernetes.io/name: hello-world-worker
     app.kubernetes.io/instance: demo
@@ -14,7 +14,7 @@ spec:
 
   # How to cut over new workflow executions to the latest worker version
   cutover:
-    strategy: "Progressive"
+    strategy: Progressive
     steps:
       - rampPercentage: 1
         pauseDuration: 30s

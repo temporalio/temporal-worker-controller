@@ -233,7 +233,6 @@ func getTestWorkflows(
 	// Create a map of task queues that already have running test workflows
 	taskQueuesWithWorkflows := make(map[string]struct{})
 	for _, wf := range targetVersion.TestWorkflows {
-		fmt.Println("creating test workflow for task queue", wf.TaskQueue)
 		taskQueuesWithWorkflows[wf.TaskQueue] = struct{}{}
 	}
 
@@ -248,7 +247,6 @@ func getTestWorkflows(
 			})
 		}
 	}
-	// TODO maybe (Shivam): Need to attach the test workflows to the target version
 
 	return testWorkflows
 }
@@ -272,18 +270,15 @@ func getVersionConfigDiff(
 	// Do nothing if the test workflows have not completed successfully
 	if strategy.Gate != nil {
 		if len(status.TargetVersion.TaskQueues) == 0 {
-			fmt.Println("No task queues defined on the target version")
 			return nil
 		}
 
 		if len(status.TargetVersion.TestWorkflows) < len(status.TargetVersion.TaskQueues) {
-			fmt.Println("Not enough test workflows defined on the target version")
 			return nil
 		}
 
 		for _, wf := range status.TargetVersion.TestWorkflows {
 			if wf.Status != temporaliov1alpha1.WorkflowExecutionStatusCompleted {
-				fmt.Println("Test workflow", wf.WorkflowID, "is not completed")
 				return nil
 			}
 		}
