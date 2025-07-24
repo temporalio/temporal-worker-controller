@@ -82,7 +82,7 @@ func GetWorkerDeploymentState(
 	if routingConfig.RampingVersion != "" {
 		var (
 			rampingSinceTime   = metav1.NewTime(routingConfig.RampingVersionChangedTime)
-			lastRampUpdateTime = metav1.NewTime(workerDeploymentInfo.RoutingConfig.RampingVersionPercentageChangedTime)
+			lastRampUpdateTime = metav1.NewTime(routingConfig.RampingVersionPercentageChangedTime)
 		)
 		state.RampingSince = &rampingSinceTime
 		state.RampLastModifiedAt = &lastRampUpdateTime
@@ -130,6 +130,7 @@ func GetTestWorkflowStatus(
 	workerDeploymentName string,
 	versionID string,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	temporalState *TemporalWorkerState,
 ) ([]temporaliov1alpha1.WorkflowExecution, error) {
 	var results []temporaliov1alpha1.WorkflowExecution
 
@@ -154,8 +155,13 @@ func GetTestWorkflowStatus(
 			continue
 		}
 
+		// Adding task queue information to the current temporal state
+		temporalState.Versions[versionID].TaskQueues = append(temporalState.Versions[versionID].TaskQueues, temporaliov1alpha1.TaskQueue{
+			Name: tq.Name,
+		})
+
 		// Check if there is a test workflow for this task queue
-		testWorkflowID := getTestWorkflowID(workerDeploymentName, tq.Name, versionID)
+		testWorkflowID := GetTestWorkflowID(versionID, tq.Name)
 		wf, err := client.DescribeWorkflowExecution(
 			ctx,
 			testWorkflowID,
@@ -206,7 +212,7 @@ func mapWorkflowStatus(status enums.WorkflowExecutionStatus) temporaliov1alpha1.
 	}
 }
 
-// getTestWorkflowID generates a consistent ID for test workflows
-func getTestWorkflowID(deploymentName, taskQueue, versionID string) string {
-	return fmt.Sprintf("test-%s-%s-%s", deploymentName, taskQueue, versionID)
+// GetTestWorkflowID generates a workflowID for test workflows
+func GetTestWorkflowID(versionID, taskQueue string) string {
+	return fmt.Sprintf("test-%s-%s", versionID, taskQueue)
 }

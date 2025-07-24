@@ -240,7 +240,7 @@ func getTestWorkflows(
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
 				WorkflowType: config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:   getTestWorkflowID(tq.Name, targetVersion.VersionID),
+				WorkflowID:   temporal.GetTestWorkflowID(targetVersion.VersionID, tq.Name),
 				VersionID:    targetVersion.VersionID,
 				TaskQueue:    tq.Name,
 			})
@@ -248,11 +248,6 @@ func getTestWorkflows(
 	}
 
 	return testWorkflows
-}
-
-// getTestWorkflowID generates an ID for a test workflow
-func getTestWorkflowID(taskQueue, versionID string) string {
-	return "test-" + versionID + "-" + taskQueue
 }
 
 // getVersionConfigDiff determines the version configuration based on the rollout strategy
@@ -360,13 +355,15 @@ func handleProgressiveRollout(
 	}
 
 	// Move to the next step if it has been long enough since the last update
-	if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
-		if i < len(steps)-1 {
-			vcfg.RampPercentage = steps[i+1].RampPercentage
-			return vcfg
-		} else {
-			vcfg.SetCurrent = true
-			return vcfg
+	if rampLastModifiedAt != nil {
+		if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
+			if i < len(steps)-1 {
+				vcfg.RampPercentage = steps[i+1].RampPercentage
+				return vcfg
+			} else {
+				vcfg.SetCurrent = true
+				return vcfg
+			}
 		}
 	}
 
