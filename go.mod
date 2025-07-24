@@ -11,6 +11,7 @@ require (
 	github.com/go-logr/logr v1.4.2
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
+	github.com/pborman/uuid v1.2.1
 	github.com/stretchr/testify v1.10.0
 	go.temporal.io/api v1.50.0
 	go.temporal.io/sdk v1.34.0
