@@ -358,6 +358,8 @@ github.com/temporalio/tchannel-go v1.22.1-0.20240528171429-1db37fdea938 h1:sEJGh
 github.com/temporalio/tchannel-go v1.22.1-0.20240528171429-1db37fdea938/go.mod h1:ezRQRwu9KQXy8Wuuv1aaFFxoCNz5CeNbVOOkh3xctbY=
 github.com/temporalio/temporal-worker-controller v0.0.0-20250701210615-ae0d5c997923 h1:XpdP61KDCNWYnnu9ptsd752Ij4j1r7TIwlqfWdox7Ys=
 github.com/temporalio/temporal-worker-controller v0.0.0-20250701210615-ae0d5c997923/go.mod h1:7yxW5VE8azh31Ow4NlT2fSk767JInkIxvDwlOXV+0YI=
+github.com/temporalio/temporal-worker-controller v0.0.0-20250724125328-fc3f6320f88d h1:/xu8R/uIB0kPys9vjSGvKPNE0+eFleGjXZJPnhkdwNs=
+github.com/temporalio/temporal-worker-controller v0.0.0-20250724125328-fc3f6320f88d/go.mod h1:AySSWnfBc2XW2dfHpoV6e0emb+3qq87QkpDYR2reR18=
 github.com/twmb/murmur3 v1.1.8 h1:8Yt9taO/WN3l08xErzjeschgZU2QSrwm1kclYq+0aRg=
 github.com/twmb/murmur3 v1.1.8/go.mod h1:Qq/R7NUyOfr65zD+6Q5IHKsJLwP7exErjN6lyyq3OSQ=
 github.com/uber-common/bark v1.0.0/go.mod h1:g0ZuPcD7XiExKHynr93Q742G/sbrdVQkghrqLGOoFuY=

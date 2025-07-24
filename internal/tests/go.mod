@@ -5,7 +5,7 @@ go 1.24.1
 toolchain go1.24.3
 
 require (
-	github.com/temporalio/temporal-worker-controller v0.0.0-20250701210615-ae0d5c997923
+	github.com/temporalio/temporal-worker-controller v0.0.0-20250724125328-fc3f6320f88d
 	go.temporal.io/api v1.50.0
 	go.temporal.io/sdk v1.34.0
 	go.temporal.io/server v1.28.0
