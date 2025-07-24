@@ -441,13 +441,13 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 	versionedName := k8s.ComputeVersionedDeploymentName(workerDeploymentName, buildID)
 
 	// Verify the expected formats
-	assert.Equal(t, "hello-world.demo", workerDeploymentName)
-	assert.True(t, strings.HasPrefix(versionedName, "hello-world.demo-"))
+	assert.Equal(t, "hello-world"+k8s.DeploymentNameSeparator+"demo", workerDeploymentName)
+	assert.True(t, strings.HasPrefix(versionedName, "hello-world"+k8s.DeploymentNameSeparator+"demo-"))
 	assert.True(t, strings.Contains(versionedName, "v1-0-0"), "versioned name should contain cleaned image tag")
 
 	// Verify the version ID combines worker deployment name and build ID
 	versionID := k8s.ComputeVersionID(twd)
-	expectedVersionID := workerDeploymentName + "." + buildID
+	expectedVersionID := workerDeploymentName + k8s.VersionIDSeparator + buildID
 	assert.Equal(t, expectedVersionID, versionID)
-	assert.Equal(t, "hello-world.demo.v1-0-0-dd84", versionID)
+	assert.Equal(t, "hello-world"+k8s.DeploymentNameSeparator+"demo"+k8s.VersionIDSeparator+"v1-0-0-dd84", versionID)
 }

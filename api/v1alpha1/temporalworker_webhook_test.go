@@ -25,10 +25,10 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 		errorMsg string
 	}{
 		"valid temporal worker deployment": {
-			obj: testhelpers.MakeTWDWithName("valid-worker"),
+			obj: testhelpers.MakeTWDWithName("valid-worker", ""),
 		},
 		"temporal worker deployment with name too long": {
-			obj:      testhelpers.MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters"),
+			obj:      testhelpers.MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters", ""),
 			errorMsg: "cannot be more than 63 characters",
 		},
 		"invalid object type": {
@@ -40,7 +40,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "expected a TemporalWorkerDeployment",
 		},
 		"missing rollout steps": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-missing-steps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-missing-steps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = nil
 				return obj
@@ -48,7 +48,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "spec.rollout.steps: Invalid value: []v1alpha1.RolloutStep(nil): steps are required for Progressive rollout",
 		},
 		"ramp value for step <= previous step": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
 					{5, metav1.Duration{Duration: time.Minute}},
@@ -63,7 +63,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "[spec.rollout.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.rollout.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
 		},
 		"pause duration < 30s": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
 					{10, metav1.Duration{Duration: time.Minute}},
@@ -108,11 +108,11 @@ func TestTemporalWorkerDeployment_ValidateUpdate(t *testing.T) {
 	}{
 		"valid update": {
 			oldObj: nil,
-			newObj: testhelpers.MakeTWDWithName("valid-worker"),
+			newObj: testhelpers.MakeTWDWithName("valid-worker", ""),
 		},
 		"update with name too long": {
 			oldObj:   nil,
-			newObj:   testhelpers.MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters"),
+			newObj:   testhelpers.MakeTWDWithName("this-is-a-very-long-temporal-worker-deployment-name-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters", ""),
 			errorMsg: "cannot be more than 63 characters",
 		},
 	}
@@ -160,14 +160,14 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 		expected func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment)
 	}{
 		"sets default maxVersions": {
-			obj: testhelpers.MakeTWDWithName("default-max-versions"),
+			obj: testhelpers.MakeTWDWithName("default-max-versions", ""),
 			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
 				require.NotNil(t, obj.Spec.MaxVersions)
 				assert.Equal(t, int32(75), *obj.Spec.MaxVersions)
 			},
 		},
 		"preserves existing maxVersions": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("preserve-max-versions"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("preserve-max-versions", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				maxVersions := int32(100)
 				obj.Spec.MaxVersions = &maxVersions
 				return obj
@@ -178,7 +178,7 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 			},
 		},
 		"sets default sunset strategy delays": {
-			obj: testhelpers.MakeTWDWithName("default-sunset-delays"),
+			obj: testhelpers.MakeTWDWithName("default-sunset-delays", ""),
 			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
 				require.NotNil(t, obj.Spec.SunsetStrategy.ScaledownDelay)
 				assert.Equal(t, time.Hour, obj.Spec.SunsetStrategy.ScaledownDelay.Duration)

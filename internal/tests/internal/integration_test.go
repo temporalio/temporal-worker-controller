@@ -74,9 +74,8 @@ func TestIntegration(t *testing.T) {
 			deprecatedBuildReplicas: nil,
 			deprecatedBuildImages:   nil,
 			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion:        nil,
+				TargetVersion:        *testhelpers.MakeTargetVersion(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1", true, false),
 				CurrentVersion:       testhelpers.MakeCurrentVersion(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1", true, false),
-				RampingVersion:       nil,
 				DeprecatedVersions:   nil,
 				VersionConflictToken: nil,
 				LastModifierIdentity: "",
@@ -94,9 +93,8 @@ func TestIntegration(t *testing.T) {
 					TemporalNamespace:  ts.GetDefaultNamespace(),
 				}
 				obj.Status = temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion:        nil,
+					TargetVersion:        *testhelpers.MakeTargetVersion(testNamespace.Name, "progressive-rollout-expect-first-step", "v0", true, true),
 					CurrentVersion:       testhelpers.MakeCurrentVersion(testNamespace.Name, "progressive-rollout-expect-first-step", "v0", true, true),
-					RampingVersion:       nil,
 					DeprecatedVersions:   nil,
 					VersionConflictToken: nil,
 					LastModifierIdentity: "",
@@ -106,7 +104,7 @@ func TestIntegration(t *testing.T) {
 			deprecatedBuildReplicas: map[string]int32{testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v0", nil): 1},
 			deprecatedBuildImages:   map[string]string{testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v0", nil): "v0"},
 			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
 						Deployment: &corev1.ObjectReference{
@@ -122,23 +120,7 @@ func TestIntegration(t *testing.T) {
 					RampingSince:       nil, // not tested (for now at least)
 					RampLastModifiedAt: nil, // not tested (for now at least)
 				},
-				CurrentVersion: nil,
-				RampingVersion: &temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
-						Deployment: &corev1.ObjectReference{
-							Namespace: testNamespace.Name,
-							Name: k8s.ComputeVersionedDeploymentName(
-								"progressive-rollout-expect-first-step",
-								testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
-							),
-						},
-					},
-					TestWorkflows:      nil,
-					RampPercentage:     &testRampPercent5,
-					RampingSince:       nil, // not tested (for now at least)
-					RampLastModifiedAt: nil, // not tested (for now at least)
-				},
+				CurrentVersion:       nil,
 				DeprecatedVersions:   nil,
 				VersionConflictToken: nil,
 				LastModifierIdentity: "",
@@ -186,39 +168,32 @@ func makePreliminaryStatusTrue(
 			// no-op, although I think this won't occur in deprecated versions either
 		}
 	}
-	// TODO(carlydf): handle Status.LastModifierIdentity
-	if cv := twd.Status.CurrentVersion; cv != nil {
-		t.Logf("Setting up current version %v", cv.VersionID)
-		if cv.Status != temporaliov1alpha1.VersionStatusCurrent {
-			t.Errorf("Current Version's status must be Current")
-		}
-		if cv.Deployment != nil && cv.Deployment.FieldPath == "create" {
-			v := getVersion(t, cv.VersionID)
-			cvTWD := recreateTWD(twd, images[v.BuildId], replicas[v.BuildId])
-			createWorkerDeployment(ctx, t, k8sClient, cvTWD, v.BuildId, connection.Spec)
-			expectedDeploymentName := k8s.ComputeVersionedDeploymentName(cvTWD.Name, k8s.ComputeBuildID(cvTWD))
-			waitForDeployment(t, k8sClient, expectedDeploymentName, cvTWD.Namespace, 30*time.Second)
-			workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, cvTWD.Namespace)
-			defer func() {
-				for _, f := range workerStopFuncs {
-					if f != nil {
-						f()
+	if tv := twd.Status.TargetVersion; tv.VersionID != "" {
+		switch tv.Status {
+		case temporaliov1alpha1.VersionStatusInactive:
+		case temporaliov1alpha1.VersionStatusRamping:
+		case temporaliov1alpha1.VersionStatusCurrent:
+			t.Logf("Setting up current version %v", tv.VersionID)
+			if tv.Deployment != nil && tv.Deployment.FieldPath == "create" {
+				v := getVersion(t, tv.VersionID)
+				cvTWD := recreateTWD(twd, images[v.BuildId], replicas[v.BuildId])
+				createWorkerDeployment(ctx, t, k8sClient, cvTWD, v.BuildId, connection.Spec)
+				expectedDeploymentName := k8s.ComputeVersionedDeploymentName(cvTWD.Name, k8s.ComputeBuildID(cvTWD))
+				waitForDeployment(t, k8sClient, expectedDeploymentName, cvTWD.Namespace, 30*time.Second)
+				workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, cvTWD.Namespace)
+				defer func() {
+					for _, f := range workerStopFuncs {
+						if f != nil {
+							f()
+						}
 					}
-				}
-			}()
-			setCurrentVersion(t, ctx, ts, v)
+				}()
+				setCurrentVersion(t, ctx, ts, v)
+			}
+		case temporaliov1alpha1.VersionStatusDraining:
+		case temporaliov1alpha1.VersionStatusDrained:
+		case temporaliov1alpha1.VersionStatusNotRegistered:
 		}
-	}
-
-	if rv := twd.Status.RampingVersion; rv != nil {
-		t.Logf("Handling ramping version %v", rv.VersionID)
-		if rv.Status != temporaliov1alpha1.VersionStatusRamping {
-			t.Errorf("Ramping Version's status must be Ramping")
-		}
-		if rv.Deployment != nil {
-			t.Logf("Creating Deployment %s for Ramping Version", rv.Deployment.Name)
-		}
-		// TODO(carlydf): do this
 	}
 }
 

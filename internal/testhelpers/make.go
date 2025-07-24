@@ -157,6 +157,37 @@ func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDep
 	return ret
 }
 
+func MakeTargetVersion(namespace, twdName, imageName string, healthy, createDeployment bool) *temporaliov1alpha1.TargetWorkerDeploymentVersion {
+	ret := &temporaliov1alpha1.TargetWorkerDeploymentVersion{
+		BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+			VersionID:    MakeVersionId(namespace, twdName, imageName),
+			Status:       temporaliov1alpha1.VersionStatusCurrent,
+			HealthySince: nil,
+			Deployment: &corev1.ObjectReference{
+				Namespace: namespace,
+				Name: k8s.ComputeVersionedDeploymentName(
+					twdName,
+					MakeBuildId(twdName, imageName, nil),
+				),
+			},
+			TaskQueues: []temporaliov1alpha1.TaskQueue{
+				{Name: testTaskQueue},
+			},
+			ManagedBy: "",
+		},
+	}
+
+	if healthy {
+		h := metav1.NewTime(time.Now())
+		ret.HealthySince = &h
+	}
+
+	if createDeployment {
+		ret.Deployment.FieldPath = "create"
+	}
+	return ret
+}
+
 func ModifyObj[T any](obj T, callback func(obj T) T) T {
 	return callback(obj)
 }

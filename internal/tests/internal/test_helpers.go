@@ -16,6 +16,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+var (
+	EmptyTargetVersion = temporaliov1alpha1.TargetWorkerDeploymentVersion{}
+)
+
 // waitForDeployment waits for a deployment to be created
 func waitForDeployment(t *testing.T, k8sClient client.Client, deploymentName, namespace string, timeout time.Duration) {
 	ctx := context.Background()
@@ -112,22 +116,35 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 					twd.Status.CurrentVersion.Deployment.Name)
 			}
 		}
-		if expectedDeploymentStatus.RampingVersion != nil {
-			if twd.Status.RampingVersion == nil {
-				return fmt.Errorf("expected RampingVersion to be set")
+		if expectedDeploymentStatus.TargetVersion.VersionID != "" {
+			if twd.Status.TargetVersion.VersionID == "" {
+				return fmt.Errorf("expected TargetVersion to be set")
 			}
-			if twd.Status.RampingVersion.VersionID != expectedDeploymentStatus.RampingVersion.VersionID {
+			if twd.Status.TargetVersion.VersionID != expectedDeploymentStatus.TargetVersion.VersionID {
 				return fmt.Errorf("expected ramping version id to be '%s', got '%s'",
-					expectedDeploymentStatus.RampingVersion.VersionID,
-					twd.Status.RampingVersion.VersionID)
+					expectedDeploymentStatus.TargetVersion.VersionID,
+					twd.Status.TargetVersion.VersionID)
 			}
-			if *twd.Status.RampingVersion.RampPercentage != *expectedDeploymentStatus.RampingVersion.RampPercentage {
-				return fmt.Errorf("expected ramp percentage to be '%v', got '%v'",
-					*expectedDeploymentStatus.RampingVersion.RampPercentage,
-					*twd.Status.RampingVersion.RampPercentage)
+			if (twd.Status.TargetVersion.RampPercentage == nil) != (expectedDeploymentStatus.TargetVersion.RampPercentage != nil) {
+
+			}
+			if expectedDeploymentStatus.TargetVersion.RampPercentage != nil {
+				if twd.Status.TargetVersion.RampPercentage == nil {
+					return fmt.Errorf("expected ramp percentage to be '%v', got nil",
+						*expectedDeploymentStatus.TargetVersion.RampPercentage)
+				}
+				if *twd.Status.TargetVersion.RampPercentage != *expectedDeploymentStatus.TargetVersion.RampPercentage {
+					return fmt.Errorf("expected ramp percentage to be '%v', got '%v'",
+						*expectedDeploymentStatus.TargetVersion.RampPercentage,
+						*twd.Status.TargetVersion.RampPercentage)
+				}
+			} else {
+				if twd.Status.TargetVersion.RampPercentage != nil {
+					return fmt.Errorf("expected ramp percentage to be nil, got '%v",
+						*twd.Status.TargetVersion.RampPercentage)
+				}
 			}
 		}
-
 		return nil // All assertions passed!
 	})
 }

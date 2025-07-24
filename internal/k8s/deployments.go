@@ -24,7 +24,7 @@ const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel             = "temporal.io/build-id"
-	deploymentNameSeparator  = "/"
+	DeploymentNameSeparator  = "/"
 	VersionIDSeparator       = "." // TODO(carlydf): change this to ":"
 	K8sResourceNameSeparator = "-"
 	MaxBuildIdLen            = 63
@@ -128,7 +128,7 @@ func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 // ComputeWorkerDeploymentName generates the base worker deployment name
 func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	// Use the name and namespace to form the worker deployment name
-	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
+	return w.GetName() + DeploymentNameSeparator + w.GetNamespace()
 }
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
