@@ -1,11 +1,12 @@
-//go:build test_dep
-// +build test_dep
-
 package internal
 
 import (
 	"context"
 	"fmt"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/server/api/deployment/v1"
+	"go.temporal.io/server/temporaltest"
 	"testing"
 	"time"
 
@@ -31,6 +32,48 @@ func waitForDeployment(t *testing.T, k8sClient client.Client, deploymentName, na
 		time.Sleep(1 * time.Second)
 	}
 	t.Fatalf("failed to wait for deployment: timeout waiting for deployment %s in namespace %s", deploymentName, namespace)
+}
+
+func waitForVersionRegistrationInDeployment(
+	t *testing.T,
+	ctx context.Context,
+	ts *temporaltest.TestServer,
+	version *deployment.WorkerDeploymentVersion) {
+
+	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
+
+	eventually(t, 30*time.Second, time.Second, func() error {
+		resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+		if err != nil {
+			return fmt.Errorf("unable to describe worker deployment %s: %w", version.DeploymentName, err)
+		}
+		for _, vs := range resp.Info.VersionSummaries {
+			if vs.Version == version.DeploymentName+k8s.VersionIDSeparator+version.BuildId {
+				return nil
+			}
+		}
+		return fmt.Errorf("could not find version with build %s in worker deployment %s", version.BuildId, version.DeploymentName)
+	})
+	return
+}
+
+func setCurrentVersion(
+	t *testing.T,
+	ctx context.Context,
+	ts *temporaltest.TestServer,
+	version *deployment.WorkerDeploymentVersion) {
+	waitForVersionRegistrationInDeployment(t, ctx, ts, version)
+	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
+	eventually(t, 30*time.Second, time.Second, func() error {
+		_, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
+			Version: version.DeploymentName + k8s.VersionIDSeparator + version.BuildId,
+		})
+		if err != nil {
+			return fmt.Errorf("unable to set current version %v: %w", version, err)
+		}
+		return nil
+	})
+	return
 }
 
 func verifyTemporalWorkerDeploymentStatusEventually(

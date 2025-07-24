@@ -1,6 +1,3 @@
-//go:build test_dep
-// +build test_dep
-
 package internal
 
 import (
@@ -84,6 +81,12 @@ func getRepoRoot(t *testing.T) string {
 
 // setupTestEnvironment sets up the test environment with envtest
 func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Manager, *clientpool.ClientPool, func()) {
+	// Set faster reconcile interval for testing
+	t.Setenv("RECONCILE_INTERVAL", "1s")
+	if kubeAssets := os.Getenv("KUBEBUILDER_ASSETS"); kubeAssets == "" {
+		t.Skip("Skipping because KUBEBUILDER_ASSETS not set")
+	}
+
 	// Setup kubebuilder assets for IDE testing
 	if err := setupKubebuilderAssets(); err != nil {
 		t.Logf("Warning: Could not setup kubebuilder assets automatically: %v", err)

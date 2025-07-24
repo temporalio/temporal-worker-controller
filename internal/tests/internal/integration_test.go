@@ -1,11 +1,8 @@
-//go:build test_dep
-// +build test_dep
-
 package internal
 
 import (
 	"context"
-	"os"
+	"go.temporal.io/server/api/deployment/v1"
 	"testing"
 	"time"
 
@@ -39,9 +36,6 @@ type testCase struct {
 
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
-	// Set faster reconcile interval for testing
-	os.Setenv("RECONCILE_INTERVAL", "1s")
-
 	// Set up test environment
 	cfg, k8sClient, _, _, cleanup := setupTestEnvironment(t)
 	defer cleanup()
@@ -62,15 +56,11 @@ func TestIntegration(t *testing.T) {
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dc)),
 	)
 
-	testRampPercentStep1 := float32(5)
-
-	// TODO(carlydf): add a test case that requires pre-reconcile-loop state creation
-	// - can we create a drained version? validate that it's scaled down
-	// - pollerTTL=0
+	testRampPercent5 := float32(5)
 
 	tests := map[string]testCase{
 		"all-at-once-rollout-2-replicas": {
-			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("all-at-once-rollout-2-replicas"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("all-at-once-rollout-2-replicas", testNamespace.Name), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateAllAtOnce
 				obj.Spec.Template = testhelpers.MakeHelloWorldPodSpec("v1")
 				replicas := int32(2)
@@ -79,14 +69,10 @@ func TestIntegration(t *testing.T) {
 					TemporalConnection: "all-at-once-rollout-2-replicas",
 					TemporalNamespace:  ts.GetDefaultNamespace(),
 				}
-				obj.ObjectMeta = metav1.ObjectMeta{
-					Name:      "all-at-once-rollout-2-replicas",
-					Namespace: testNamespace.Name,
-					Labels:    map[string]string{"app": "test-worker"},
-				}
 				return obj
 			}),
 			deprecatedBuildReplicas: nil,
+			deprecatedBuildImages:   nil,
 			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				TargetVersion:        nil,
 				CurrentVersion:       testhelpers.MakeCurrentVersion(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1", true, false),
@@ -97,7 +83,7 @@ func TestIntegration(t *testing.T) {
 			},
 		},
 		"progressive-rollout-expect-first-step": {
-			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("progressive-rollout-expect-first-step"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("progressive-rollout-expect-first-step", testNamespace.Name), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
 					{RampPercentage: 5, PauseDuration: metav1.Duration{Duration: time.Hour}},
@@ -106,11 +92,6 @@ func TestIntegration(t *testing.T) {
 				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
 					TemporalConnection: "progressive-rollout-expect-first-step",
 					TemporalNamespace:  ts.GetDefaultNamespace(),
-				}
-				obj.ObjectMeta = metav1.ObjectMeta{
-					Name:      "progressive-rollout-expect-first-step",
-					Namespace: testNamespace.Name,
-					Labels:    map[string]string{"app": "test-worker"},
 				}
 				obj.Status = temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 					TargetVersion:        nil,
@@ -137,7 +118,7 @@ func TestIntegration(t *testing.T) {
 						},
 					},
 					TestWorkflows:      nil,
-					RampPercentage:     &testRampPercentStep1,
+					RampPercentage:     &testRampPercent5,
 					RampingSince:       nil, // not tested (for now at least)
 					RampLastModifiedAt: nil, // not tested (for now at least)
 				},
@@ -154,7 +135,7 @@ func TestIntegration(t *testing.T) {
 						},
 					},
 					TestWorkflows:      nil,
-					RampPercentage:     &testRampPercentStep1,
+					RampPercentage:     &testRampPercent5,
 					RampingSince:       nil, // not tested (for now at least)
 					RampLastModifiedAt: nil, // not tested (for now at least)
 				},
@@ -207,16 +188,17 @@ func makePreliminaryStatusTrue(
 	}
 	// TODO(carlydf): handle Status.LastModifierIdentity
 	if cv := twd.Status.CurrentVersion; cv != nil {
-		t.Logf("Handling current version %v", cv.VersionID)
+		t.Logf("Setting up current version %v", cv.VersionID)
 		if cv.Status != temporaliov1alpha1.VersionStatusCurrent {
 			t.Errorf("Current Version's status must be Current")
 		}
-		if cv.Deployment != nil {
-			t.Logf("Creating Deployment %s for Current Version", cv.Deployment.Name)
-			createWorkerDeployment(ctx, t, k8sClient, twd, cv.VersionID, connection.Spec, replicas, images)
-			expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
-			waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
-			workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+		if cv.Deployment != nil && cv.Deployment.FieldPath == "create" {
+			v := getVersion(t, cv.VersionID)
+			cvTWD := recreateTWD(twd, images[v.BuildId], replicas[v.BuildId])
+			createWorkerDeployment(ctx, t, k8sClient, cvTWD, v.BuildId, connection.Spec)
+			expectedDeploymentName := k8s.ComputeVersionedDeploymentName(cvTWD.Name, k8s.ComputeBuildID(cvTWD))
+			waitForDeployment(t, k8sClient, expectedDeploymentName, cvTWD.Namespace, 30*time.Second)
+			workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, cvTWD.Namespace)
 			defer func() {
 				for _, f := range workerStopFuncs {
 					if f != nil {
@@ -224,6 +206,7 @@ func makePreliminaryStatusTrue(
 					}
 				}
 			}()
+			setCurrentVersion(t, ctx, ts, v)
 		}
 	}
 
@@ -239,33 +222,36 @@ func makePreliminaryStatusTrue(
 	}
 }
 
+// Helper to handle unlikely error caused by invalid string split.
+func getVersion(t *testing.T, versionId string) *deployment.WorkerDeploymentVersion {
+	deploymentName, buildId, err := k8s.SplitVersionID(versionId)
+	if err != nil {
+		t.Error(err)
+	}
+	return &deployment.WorkerDeploymentVersion{
+		DeploymentName: deploymentName,
+		BuildId:        buildId,
+	}
+}
+
+// recreateTWD returns a copy of the given TWD, but replaces the build-id-generating image name with the given one,
+// and the Spec.Replicas with the given replica count.
+// Panics if the twd spec is nil, or if it has no containers, but that should never be true for these integration tests.
+func recreateTWD(twd *temporaliov1alpha1.TemporalWorkerDeployment, imageName string, replicas int32) *temporaliov1alpha1.TemporalWorkerDeployment {
+	ret := twd.DeepCopy()
+	ret.Spec.Template.Spec.Containers[0].Image = imageName
+	ret.Spec.Replicas = &replicas
+	return ret
+}
+
 func createWorkerDeployment(
 	ctx context.Context,
 	t *testing.T,
 	k8sClient client.Client,
 	twd *temporaliov1alpha1.TemporalWorkerDeployment,
-	versionID string,
+	buildId string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
-	replicas map[string]int32,
-	images map[string]string,
 ) {
-	t.Log("Creating a Deployment")
-	_, buildId, err := k8s.SplitVersionID(versionID)
-	if err != nil {
-		t.Error(err)
-	}
-
-	prevImageName := twd.Spec.Template.Spec.Containers[0].Image
-	prevReplicas := twd.Spec.Replicas
-	// temporarily replace it
-	twd.Spec.Template.Spec.Containers[0].Image = images[buildId]
-	newReplicas := replicas[buildId]
-	twd.Spec.Replicas = &newReplicas
-	defer func() {
-		twd.Spec.Template.Spec.Containers[0].Image = prevImageName
-		twd.Spec.Replicas = prevReplicas
-	}()
-
 	dep := k8s.NewDeploymentWithOwnerRef(
 		&twd.TypeMeta,
 		&twd.ObjectMeta,
@@ -274,6 +260,7 @@ func createWorkerDeployment(
 		buildId,
 		connection,
 	)
+	t.Logf("Creating Deployment %s in namespace %s", dep.Name, dep.Namespace)
 
 	if err := k8sClient.Create(ctx, dep); err != nil {
 		t.Fatalf("failed to create Deployment: %v", err)
