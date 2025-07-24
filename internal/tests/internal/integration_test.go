@@ -2,13 +2,13 @@ package internal
 
 import (
 	"context"
-	"go.temporal.io/server/api/deployment/v1"
 	"testing"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/server/api/deployment/v1"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"

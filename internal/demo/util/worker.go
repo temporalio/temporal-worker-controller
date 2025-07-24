@@ -5,10 +5,10 @@
 package util
 
 import (
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"net/http"
 	"time"
 
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )

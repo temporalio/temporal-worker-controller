@@ -8,12 +8,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
 )

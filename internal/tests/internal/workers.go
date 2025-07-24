@@ -3,9 +3,9 @@ package internal
 import (
 	"context"
 	"fmt"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"time"
 
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"

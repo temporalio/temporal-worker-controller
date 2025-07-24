@@ -3,14 +3,14 @@ package internal
 import (
 	"context"
 	"fmt"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
-	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/server/api/deployment/v1"
-	"go.temporal.io/server/temporaltest"
 	"testing"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/server/api/deployment/v1"
+	"go.temporal.io/server/temporaltest"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
