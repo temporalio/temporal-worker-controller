@@ -55,6 +55,32 @@ type WorkflowConfig struct {
 type Config struct {
 	// RolloutStrategy to use
 	RolloutStrategy temporaliov1alpha1.RolloutStrategy
+	// Version-specific patches that override replicas and sunset strategies
+	VersionPatches map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec
+}
+
+// getEffectiveReplicas returns the effective replicas for a version, considering patches
+func getEffectiveReplicas(versionID string, spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec, patches map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec) int32 {
+	if patch, exists := patches[versionID]; exists && patch.Replicas != nil {
+		return *patch.Replicas
+	}
+	return *spec.Replicas
+}
+
+// getEffectiveScaledownDelay returns the effective scaledown delay for a version, considering patches
+func getEffectiveScaledownDelay(versionID string, spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec, patches map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec) time.Duration {
+	if patch, exists := patches[versionID]; exists && patch.SunsetStrategy != nil && patch.SunsetStrategy.ScaledownDelay != nil {
+		return patch.SunsetStrategy.ScaledownDelay.Duration
+	}
+	return spec.SunsetStrategy.ScaledownDelay.Duration
+}
+
+// getEffectiveDeleteDelay returns the effective delete delay for a version, considering patches
+func getEffectiveDeleteDelay(versionID string, spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec, patches map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec) time.Duration {
+	if patch, exists := patches[versionID]; exists && patch.SunsetStrategy != nil && patch.SunsetStrategy.DeleteDelay != nil {
+		return patch.SunsetStrategy.DeleteDelay.Duration
+	}
+	return spec.SunsetStrategy.DeleteDelay.Duration
 }
 
 // GeneratePlan creates a plan for updating the worker deployment
@@ -71,8 +97,8 @@ func GeneratePlan(
 	}
 
 	// Add delete/scale operations based on version status
-	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec)
-	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
+	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, config)
+	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec, config)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, spec)
 
 	// Determine if we need to start any test workflows
@@ -92,6 +118,7 @@ func getDeleteDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	config *Config,
 ) []*appsv1.Deployment {
 	var deleteDeployments []*appsv1.Deployment
 
@@ -111,7 +138,7 @@ func getDeleteDeployments(
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
 			// 2. The deployment is scaled to 0 replicas.
-			if (time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
+			if (time.Since(version.DrainedSince.Time) > getEffectiveDeleteDelay(version.VersionID, spec, config.VersionPatches)+getEffectiveScaledownDelay(version.VersionID, spec, config.VersionPatches)) &&
 				*d.Spec.Replicas == 0 {
 				deleteDeployments = append(deleteDeployments, d)
 			}
@@ -132,26 +159,17 @@ func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	config *Config,
 ) map[*v1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*v1.ObjectReference]uint32)
-	replicas := *spec.Replicas
 
 	// Scale the current version if needed
 	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
 		ref := status.CurrentVersion.Deployment
 		if d, exists := k8sState.Deployments[status.CurrentVersion.VersionID]; exists {
-			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-				scaleDeployments[ref] = uint32(replicas)
-			}
-		}
-	}
-
-	// Scale the target version if it exists, and isn't current
-	if (status.CurrentVersion == nil || status.CurrentVersion.VersionID != status.TargetVersion.VersionID) &&
-		status.TargetVersion.Deployment != nil {
-		if d, exists := k8sState.Deployments[status.TargetVersion.VersionID]; exists {
-			if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
-				scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
+			effectiveReplicas := getEffectiveReplicas(status.CurrentVersion.VersionID, spec, config.VersionPatches)
+			if d.Spec.Replicas != nil && *d.Spec.Replicas != effectiveReplicas {
+				scaleDeployments[ref] = uint32(effectiveReplicas)
 			}
 		}
 	}
@@ -173,16 +191,28 @@ func getScaleDeployments(
 			temporaliov1alpha1.VersionStatusCurrent:
 			// TODO(carlydf): Consolidate scale up cases and verify that scale up is the correct action for inactive versions
 			// Scale up these deployments
-			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-				scaleDeployments[version.Deployment] = uint32(replicas)
+			effectiveReplicas := getEffectiveReplicas(version.VersionID, spec, config.VersionPatches)
+			if d.Spec.Replicas != nil && *d.Spec.Replicas != effectiveReplicas {
+				scaleDeployments[version.Deployment] = uint32(effectiveReplicas)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
-			if time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
+			if time.Since(version.DrainedSince.Time) > getEffectiveScaledownDelay(version.VersionID, spec, config.VersionPatches) {
 				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
 				// Scale down drained deployments after delay
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
 					scaleDeployments[version.Deployment] = 0
 				}
+			}
+		}
+	}
+
+	// Scale the target version if it exists and is different from current version
+	if status.TargetVersion.Deployment != nil &&
+		(status.CurrentVersion == nil || status.TargetVersion.VersionID != status.CurrentVersion.VersionID) {
+		if d, exists := k8sState.Deployments[status.TargetVersion.VersionID]; exists {
+			effectiveReplicas := getEffectiveReplicas(status.TargetVersion.VersionID, spec, config.VersionPatches)
+			if d.Spec.Replicas == nil || *d.Spec.Replicas != effectiveReplicas {
+				scaleDeployments[status.TargetVersion.Deployment] = uint32(effectiveReplicas)
 			}
 		}
 	}

@@ -331,6 +331,9 @@ func TestGetDeleteDeployments(t *testing.T) {
 				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
 			expectDeletes: 0,
 		},
 		{
@@ -362,6 +365,9 @@ func TestGetDeleteDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
 			expectDeletes: 1,
 		},
 	}
@@ -370,7 +376,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.spec.Default(context.Background())
 			require.NoError(t, err)
-			deletes := getDeleteDeployments(tc.k8sState, tc.status, tc.spec)
+			deletes := getDeleteDeployments(tc.k8sState, tc.status, tc.spec, tc.config)
 			assert.Equal(t, tc.expectDeletes, len(deletes), "unexpected number of deletes")
 		})
 	}
@@ -383,6 +389,7 @@ func TestGetScaleDeployments(t *testing.T) {
 		status       *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 		spec         *temporaliov1alpha1.TemporalWorkerDeploymentSpec
 		state        *temporal.TemporalWorkerState
+		config       *Config
 		expectScales int
 	}{
 		{
@@ -410,6 +417,9 @@ func TestGetScaleDeployments(t *testing.T) {
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(2); return &r }(),
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			expectScales: 1,
 		},
@@ -448,6 +458,9 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
 			expectScales: 1,
 		},
 		{
@@ -481,6 +494,9 @@ func TestGetScaleDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
 			expectScales: 1,
 		},
 		{
@@ -507,6 +523,9 @@ func TestGetScaleDeployments(t *testing.T) {
 			},
 			state: &temporal.TemporalWorkerState{
 				RampingVersionID: "test/namespace.b",
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			expectScales: 1,
 		},
@@ -540,6 +559,9 @@ func TestGetScaleDeployments(t *testing.T) {
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			expectScales: 1,
 		},
@@ -582,13 +604,16 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
 			expectScales: 0, // No scaling yet because not enough time passed
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec)
+			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec, tc.config)
 			assert.Equal(t, tc.expectScales, len(scales), "unexpected number of scales")
 		})
 	}
@@ -1741,5 +1766,216 @@ func rolloutStep(ramp float32, d time.Duration) temporaliov1alpha1.RolloutStep {
 	return temporaliov1alpha1.RolloutStep{
 		RampPercentage: ramp,
 		PauseDuration:  metav1Duration(d),
+	}
+}
+
+func TestVersionPatches(t *testing.T) {
+	testCases := []struct {
+		name           string
+		k8sState       *k8s.DeploymentState
+		config         *Config
+		status         *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		spec           *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		state          *temporal.TemporalWorkerState
+		expectScales   int
+		expectReplicas map[string]uint32 // version ID -> expected replicas
+		expectDeletes  int
+	}{
+		{
+			name: "patch overrides replicas for deprecated version",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.v1": createDeploymentWithReplicas(5), // Current version already at desired replicas
+					"test/namespace.v2": createDeploymentWithReplicas(1), // Deprecated version with 1 replica
+				},
+				DeploymentRefs: map[string]*v1.ObjectReference{
+					"test/namespace.v1": {Name: "test-v1"},
+					"test/namespace.v2": {Name: "test-v2"},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				VersionPatches: map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec{
+					"test/namespace.v2": {
+						VersionID: "test/namespace.v2",
+						Replicas:  func() *int32 { r := int32(10); return &r }(), // Patch overrides to 10 replicas
+					},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.v1",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &v1.ObjectReference{Name: "test-v1"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.v1",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &v1.ObjectReference{Name: "test-v1"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.v2",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							Deployment: &v1.ObjectReference{Name: "test-v2"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(5); return &r }(),
+			},
+			state:        &temporal.TemporalWorkerState{},
+			expectScales: 1, // Only deprecated version needs scaling
+			expectReplicas: map[string]uint32{
+				"test/namespace.v2": 10, // Should use patched value, not base replicas
+			},
+		},
+		{
+			name: "patch overrides sunset delay for drained version",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.v1": createDeploymentWithReplicas(3),
+					"test/namespace.v2": createDeploymentWithReplicas(2), // Drained version still has replicas
+				},
+				DeploymentRefs: map[string]*v1.ObjectReference{
+					"test/namespace.v1": {Name: "test-v1"},
+					"test/namespace.v2": {Name: "test-v2"},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.v1",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &v1.ObjectReference{Name: "test-v1"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.v1",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &v1.ObjectReference{Name: "test-v1"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.v2",
+							Status:     temporaliov1alpha1.VersionStatusDrained,
+							Deployment: &v1.ObjectReference{Name: "test-v2"},
+						},
+						DrainedSince: &metav1.Time{
+							Time: time.Now().Add(-30 * time.Minute), // Drained 30 minutes ago
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: 2 * time.Hour}, // Base delay: 2 hours
+				},
+				Replicas: func() *int32 { r := int32(3); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				VersionPatches: map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec{
+					"test/namespace.v2": {
+						VersionID: "test/namespace.v2",
+						SunsetStrategy: &temporaliov1alpha1.SunsetStrategy{
+							ScaledownDelay: &metav1.Duration{Duration: 15 * time.Minute}, // Patch: much shorter delay
+						},
+					},
+				},
+			},
+			expectScales: 1, // Should scale down because patched delay is shorter
+			expectReplicas: map[string]uint32{
+				"test/namespace.v2": 0, // Should scale to 0 due to patch override
+			},
+		},
+		{
+			name: "no patches applied when none exist",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.v1": createDeploymentWithReplicas(5), // Already at desired replicas
+					"test/namespace.v2": createDeploymentWithReplicas(1),
+				},
+				DeploymentRefs: map[string]*v1.ObjectReference{
+					"test/namespace.v1": {Name: "test-v1"},
+					"test/namespace.v2": {Name: "test-v2"},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.v1",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &v1.ObjectReference{Name: "test-v1"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.v1",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &v1.ObjectReference{Name: "test-v1"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.v2",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							Deployment: &v1.ObjectReference{Name: "test-v2"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(5); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+				VersionPatches:  make(map[string]*temporaliov1alpha1.TemporalWorkerDeploymentPatchSpec), // No patches
+			},
+			expectScales: 1, // Only deprecated version needs scaling
+			expectReplicas: map[string]uint32{
+				"test/namespace.v2": 5, // Should use base replicas (no patch)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.spec.Default(context.Background())
+			require.NoError(t, err)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, tc.config)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectScales, len(plan.ScaleDeployments), "unexpected number of scales")
+			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
+
+			// Verify the specific replicas for each deployment
+			for versionID, expectedReplicas := range tc.expectReplicas {
+				found := false
+				for objRef, actualReplicas := range plan.ScaleDeployments {
+					// Find the deployment reference that matches this version
+					if tc.k8sState.DeploymentRefs[versionID] != nil &&
+						tc.k8sState.DeploymentRefs[versionID].Name == objRef.Name {
+						assert.Equal(t, expectedReplicas, actualReplicas,
+							"unexpected replicas for version %s", versionID)
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "expected scaling operation for version %s not found", versionID)
+			}
+		})
 	}
 }
