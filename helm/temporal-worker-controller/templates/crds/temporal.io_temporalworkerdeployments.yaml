@@ -46,7 +46,20 @@ spec:
             type: object
           spec:
             properties:
-              cutover:
+              maxVersions:
+                format: int32
+                minimum: 1
+                type: integer
+              minReadySeconds:
+                format: int32
+                type: integer
+              progressDeadlineSeconds:
+                format: int32
+                type: integer
+              replicas:
+                format: int32
+                type: integer
+              rollout:
                 properties:
                   gate:
                     properties:
@@ -76,19 +89,6 @@ spec:
                 required:
                 - strategy
                 type: object
-              maxVersions:
-                format: int32
-                minimum: 1
-                type: integer
-              minReadySeconds:
-                format: int32
-                type: integer
-              progressDeadlineSeconds:
-                format: int32
-                type: integer
-              replicas:
-                format: int32
-                type: integer
               selector:
                 properties:
                   matchExpressions:
@@ -3760,7 +3760,7 @@ spec:
                 - temporalNamespace
                 type: object
             required:
-            - cutover
+            - rollout
             - sunset
             - template
             - workerOptions

@@ -12,8 +12,8 @@ spec:
     #    temporalNamespace: "replay-2025.ktasd"
     temporalNamespace: "worker-controller-test.a2dd6"
 
-  # How to cut over new workflow executions to the latest worker version
-  cutover:
+  # How to rollout new workflow executions to the latest worker version
+  rollout:
     strategy: Progressive
     steps:
       - rampPercentage: 1

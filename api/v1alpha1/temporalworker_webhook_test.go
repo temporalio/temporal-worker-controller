@@ -46,7 +46,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 				obj.Spec.RolloutStrategy.Steps = nil
 				return obj
 			}),
-			errorMsg: "spec.cutover.steps: Invalid value: []v1alpha1.RolloutStep(nil): steps are required for Progressive cutover",
+			errorMsg: "spec.rollout.steps: Invalid value: []v1alpha1.RolloutStep(nil): steps are required for Progressive rollout",
 		},
 		"ramp value for step <= previous step": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -61,7 +61,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 				}
 				return obj
 			}),
-			errorMsg: "[spec.cutover.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.cutover.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
+			errorMsg: "[spec.rollout.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.rollout.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
 		},
 		"pause duration < 30s": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps"), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -73,7 +73,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 				}
 				return obj
 			}),
-			errorMsg: `spec.cutover.steps[1].pauseDuration: Invalid value: "10s": pause duration must be at least 30s`,
+			errorMsg: `spec.rollout.steps[1].pauseDuration: Invalid value: "10s": pause duration must be at least 30s`,
 		},
 	}
 
