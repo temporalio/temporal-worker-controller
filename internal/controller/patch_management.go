@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // updatePatchStatuses updates the status of patches based on the current state of versions
@@ -39,12 +40,33 @@ func updatePatchStatuses(
 	activeVersions := getActiveVersionIDs(workerDeployment)
 
 	for _, patch := range patchList.Items {
+		patchNeedsUpdate := false
+		statusNeedsUpdate := false
+
+		// Check if we need to set OwnerReference
+		if !hasOwnerReference(&patch, workerDeployment) {
+			setOwnerReference(&patch, workerDeployment)
+			patchNeedsUpdate = true
+		}
+
 		newStatus := determinePatchStatus(patch, workerDeployment, activeVersions)
 
 		if patch.Status.Status != newStatus {
 			patch.Status.Status = newStatus
 			patch.Status.ObservedGeneration = patch.Generation
+			statusNeedsUpdate = true
+		}
 
+		// Update the patch object if OwnerReference was added
+		if patchNeedsUpdate {
+			if err := k8sClient.Update(ctx, &patch); err != nil {
+				logger.Error(err, "Failed to update patch", "patch", patch.Name)
+				continue
+			}
+		}
+
+		// Update status separately if status was changed
+		if statusNeedsUpdate {
 			if err := k8sClient.Status().Update(ctx, &patch); err != nil {
 				logger.Error(err, "Failed to update patch status", "patch", patch.Name)
 				continue
@@ -139,3 +161,37 @@ func (h *enqueuePatchHandler) enqueuePatch(obj client.Object, q workqueue.TypedR
 
 // Ensure enqueuePatchHandler implements the correct event handler interface
 var _ handler.TypedEventHandler[client.Object, reconcile.Request] = &enqueuePatchHandler{}
+
+// hasOwnerReference checks if the patch already has an OwnerReference to the specified TemporalWorkerDeployment
+func hasOwnerReference(
+	patch *temporaliov1alpha1.TemporalWorkerDeploymentPatch,
+	workerDeployment *temporaliov1alpha1.TemporalWorkerDeployment,
+) bool {
+	for _, ownerRef := range patch.GetOwnerReferences() {
+		if ownerRef.UID == workerDeployment.GetUID() &&
+			ownerRef.Kind == "TemporalWorkerDeployment" &&
+			ownerRef.APIVersion == temporaliov1alpha1.GroupVersion.String() {
+			return true
+		}
+	}
+	return false
+}
+
+// setOwnerReference sets the OwnerReference on the patch to point to the TemporalWorkerDeployment
+func setOwnerReference(
+	patch *temporaliov1alpha1.TemporalWorkerDeploymentPatch,
+	workerDeployment *temporaliov1alpha1.TemporalWorkerDeployment,
+) {
+	blockOwnerDeletion := true
+
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         temporaliov1alpha1.GroupVersion.String(),
+		Kind:               "TemporalWorkerDeployment",
+		Name:               workerDeployment.GetName(),
+		UID:                workerDeployment.GetUID(),
+		BlockOwnerDeletion: &blockOwnerDeletion,
+		Controller:         nil,
+	}
+
+	patch.SetOwnerReferences(append(patch.GetOwnerReferences(), ownerRef))
+}
