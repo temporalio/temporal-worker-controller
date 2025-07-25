@@ -37,7 +37,6 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
-	// +kubebuilder:validation:XPreserveUnknownFields
 	Template corev1.PodTemplateSpec `json:"template"`
 
 	// Minimum number of seconds for which a newly created pod should be ready
