@@ -1,9 +1,10 @@
 package testhelpers
 
 import (
+	"time"
+
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"time"
 )
 
 // TemporalWorkerDeploymentBuilder provides a fluent interface for building test TWD objects
