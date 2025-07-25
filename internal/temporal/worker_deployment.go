@@ -11,12 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"go.temporal.io/api/enums/v1"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	temporalClient "go.temporal.io/sdk/client"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 // VersionInfo contains information about a specific version
@@ -192,19 +191,19 @@ func GetTestWorkflowStatus(
 // Helper functions
 
 // mapWorkflowStatus converts Temporal workflow status to our CRD status
-func mapWorkflowStatus(status enums.WorkflowExecutionStatus) temporaliov1alpha1.WorkflowExecutionStatus {
+func mapWorkflowStatus(status enumspb.WorkflowExecutionStatus) temporaliov1alpha1.WorkflowExecutionStatus {
 	switch status {
-	case enums.WORKFLOW_EXECUTION_STATUS_RUNNING, enums.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
+	case enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING, enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
 		return temporaliov1alpha1.WorkflowExecutionStatusRunning
-	case enums.WORKFLOW_EXECUTION_STATUS_COMPLETED:
+	case enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED:
 		return temporaliov1alpha1.WorkflowExecutionStatusCompleted
-	case enums.WORKFLOW_EXECUTION_STATUS_FAILED:
+	case enumspb.WORKFLOW_EXECUTION_STATUS_FAILED:
 		return temporaliov1alpha1.WorkflowExecutionStatusFailed
-	case enums.WORKFLOW_EXECUTION_STATUS_CANCELED:
+	case enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED:
 		return temporaliov1alpha1.WorkflowExecutionStatusCanceled
-	case enums.WORKFLOW_EXECUTION_STATUS_TERMINATED:
+	case enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED:
 		return temporaliov1alpha1.WorkflowExecutionStatusTerminated
-	case enums.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
+	case enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
 		return temporaliov1alpha1.WorkflowExecutionStatusTimedOut
 	default:
 		// Default to running for unspecified or any other status

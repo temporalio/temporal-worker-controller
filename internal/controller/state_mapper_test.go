@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestMapToStatus(t *testing.T) {
@@ -38,7 +37,7 @@ func TestMapToStatus(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:               appsv1.DeploymentAvailable,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastTransitionTime: healthySince,
 						},
 					},
@@ -53,7 +52,7 @@ func TestMapToStatus(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:               appsv1.DeploymentAvailable,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastTransitionTime: healthySince,
 						},
 					},
@@ -69,7 +68,7 @@ func TestMapToStatus(t *testing.T) {
 				},
 			},
 		},
-		DeploymentRefs: map[string]*v1.ObjectReference{
+		DeploymentRefs: map[string]*corev1.ObjectReference{
 			"worker.v1": {
 				Kind:      "Deployment",
 				Name:      "worker-v1",
@@ -198,14 +197,14 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:               appsv1.DeploymentAvailable,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastTransitionTime: healthySince,
 						},
 					},
 				},
 			},
 		},
-		DeploymentRefs: map[string]*v1.ObjectReference{
+		DeploymentRefs: map[string]*corev1.ObjectReference{
 			"worker.v1": {
 				Kind:      "Deployment",
 				Name:      "worker-v1",
