@@ -14,17 +14,7 @@ spec:
 
   # How to rollout new workflow executions to the latest worker version
   rollout:
-    strategy: Progressive
-    steps:
-      - rampPercentage: 1
-        pauseDuration: 30s
-      - rampPercentage: 5
-        pauseDuration: 30s
-      - rampPercentage: 10
-        pauseDuration: 30s
-      # Increase traffic to 50% and wait 1 minute
-      - rampPercentage: 50
-        pauseDuration: 30s
+    strategy: AllAtOnce
     gate:
       workflowType: "HelloWorld"
   sunset:
