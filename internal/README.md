@@ -27,15 +27,14 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      make create-cloud-mtls-secret
      ```
 
-3. Install the Helm chart:
+3. Build and deploy the Controller image to the local k8s cluster:
    ```bash
-   cd helm/temporal-worker-controller
-   helm install temporal-worker-controller . --namespace temporal-system
+   skaffold dev --profile worker-controller
    ```
 
 4. Deploy a sample TemporalWorkerDeployment and TemporalConnection:
    ```bash
-   skaffold dev --profile helloworld
+   skaffold dev --profile helloworld-worker
    ```
 
 5. Watch the deployment status:
@@ -45,17 +44,23 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 
 ### Understanding the Demo
 
-The demo will:
-1. Create a TemporalConnection to your Temporal Cloud namespace
-2. Deploy a TemporalWorkerDeployment that runs a sample worker
-3. The controller will manage the worker's lifecycle in Kubernetes
+TODO (Shivam): complete this section so that we also speak about what happens after we introduce some patch work into it.
+
+
+
+
+
+### Monitoring 
 
 You can monitor the controller's logs and the worker's status using:
 ```bash
-# View controller logs
-kubectl logs -n temporal-system deployment/temporal-worker-controller
+# Fetch the controller pod name
+minikube kubectl -- get pods -n temporal-worker-controller -w
 
-# View worker deployment status
+# Describe the controller pod's status
+minikube kubectl -- describe pod <pod-name> -n temporal-worker-controller
+
+# View TemporalWorkerDeployment status
 kubectl get twd
 ```
 
@@ -68,4 +73,18 @@ helm uninstall temporal-worker-controller -n temporal-system
 
 # Stop Minikube
 minikube stop
-``` 
+```
+
+### Additional Operational commands
+
+Complete cleanup (removes all clusters, cached images, and config):
+```
+minikube delete --all --purge
+```
+
+**What `minikube delete --all --purge` does:**
+- `--all`: Deletes ALL minikube clusters (not just the default one)
+- `--purge`: Completely removes all minikube data, cached images, and configuration files from your machine
+
+This gives you a completely fresh start and frees up disk space used by minikube. 
+
