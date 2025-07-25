@@ -8,9 +8,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
+)
+
+const (
+	// VersionIDSeparator is used to separate the deployment name from the build ID in version strings
+	VersionIDSeparator = "."
 )
 
 func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) {
@@ -29,7 +33,7 @@ func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) 
 
 	opts.DeploymentOptions = worker.DeploymentOptions{
 		UseVersioning:             true,
-		Version:                   mustGetEnv("TEMPORAL_DEPLOYMENT_NAME") + k8s.VersionIDSeparator + mustGetEnv("WORKER_BUILD_ID"),
+		Version:                   mustGetEnv("TEMPORAL_DEPLOYMENT_NAME") + VersionIDSeparator + mustGetEnv("WORKER_BUILD_ID"),
 		DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 	}
 

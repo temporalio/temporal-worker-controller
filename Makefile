@@ -51,9 +51,6 @@ clean-tools:
 $(STAMPDIR):
 	@mkdir -p $(STAMPDIR)
 
-$(LOCALBIN):
-	@mkdir -p $(LOCALBIN)
-
 # When updating the version, update the golangci-lint GHA workflow as well.
 .PHONY: golangci-lint
 GOLANGCI_LINT_BASE_REV ?= $(MAIN_BRANCH)
@@ -112,6 +109,7 @@ set -e; \
 package=$(2)@$(3) ;\
 printf $(COLOR) "Downloading $${package}" ;\
 tmpdir=$$(mktemp -d) ;\
+GOBIN=$${tmpdir} go install $${package} ;\
 mv $${tmpdir}/$$(basename "$$(echo "$(1)" | sed "s/-$(3)$$//")") $(1) ;\
 rm -rf $${tmpdir} ;\
 }
