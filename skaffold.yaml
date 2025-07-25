@@ -34,7 +34,7 @@ profiles:
             valuesFiles:
               - helm/temporal-worker-controller/values.yaml
 
-  # Build and deploy the worker to the local k8s cluster  
+  # Build and deploy the helloworld Custom Resource to the local k8s cluster  
   - name: helloworld-worker
     build:
       artifacts:
