@@ -12,7 +12,6 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -22,17 +21,6 @@ const (
 	testDrainageVisibilityGracePeriod = time.Second
 	testDrainageRefreshInterval       = time.Second
 )
-
-type testCase struct {
-	// If starting from a particular state, specify that in input.Status
-	input *temporaliov1alpha1.TemporalWorkerDeployment
-	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
-	// versions, so for test scenarios that start with existing deprecated version Deployments,
-	// specify the number of replicas for each deprecated build here.
-	deprecatedBuildReplicas map[string]int32
-	deprecatedBuildImages   map[string]string
-	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-}
 
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
@@ -56,83 +44,40 @@ func TestIntegration(t *testing.T) {
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dc)),
 	)
 
-	testRampPercent5 := float32(5)
-
-	tests := map[string]testCase{
-		"all-at-once-rollout-2-replicas": {
-			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("all-at-once-rollout-2-replicas", testNamespace.Name), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateAllAtOnce
-				obj.Spec.Template = testhelpers.MakeHelloWorldPodSpec("v1")
-				replicas := int32(2)
-				obj.Spec.Replicas = &replicas
-				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
-					TemporalConnection: "all-at-once-rollout-2-replicas",
-					TemporalNamespace:  ts.GetDefaultNamespace(),
-				}
-				return obj
-			}),
-			deprecatedBuildReplicas: nil,
-			deprecatedBuildImages:   nil,
-			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion:        *testhelpers.MakeTargetVersion(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1", true, false),
-				CurrentVersion:       testhelpers.MakeCurrentVersion(testNamespace.Name, "all-at-once-rollout-2-replicas", "v1", true, false),
-				DeprecatedVersions:   nil,
-				VersionConflictToken: nil,
-				LastModifierIdentity: "",
-			},
-		},
-		"progressive-rollout-expect-first-step": {
-			input: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("progressive-rollout-expect-first-step", testNamespace.Name), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
-				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
-					{RampPercentage: 5, PauseDuration: metav1.Duration{Duration: time.Hour}},
-				}
-				obj.Spec.Template = testhelpers.MakeHelloWorldPodSpec("v1")
-				obj.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
-					TemporalConnection: "progressive-rollout-expect-first-step",
-					TemporalNamespace:  ts.GetDefaultNamespace(),
-				}
-				obj.Status = temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-					TargetVersion:        *testhelpers.MakeTargetVersion(testNamespace.Name, "progressive-rollout-expect-first-step", "v0", true, true),
-					CurrentVersion:       testhelpers.MakeCurrentVersion(testNamespace.Name, "progressive-rollout-expect-first-step", "v0", true, true),
-					DeprecatedVersions:   nil,
-					VersionConflictToken: nil,
-					LastModifierIdentity: "",
-				}
-				return obj
-			}),
-			deprecatedBuildReplicas: map[string]int32{testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v0", nil): 1},
-			deprecatedBuildImages:   map[string]string{testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v0", nil): "v0"},
-			expectedStatus: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						VersionID: testhelpers.MakeVersionId(testNamespace.Name, "progressive-rollout-expect-first-step", "v1"),
-						Deployment: &corev1.ObjectReference{
-							Namespace: testNamespace.Name,
-							Name: k8s.ComputeVersionedDeploymentName(
-								"progressive-rollout-expect-first-step",
-								testhelpers.MakeBuildId("progressive-rollout-expect-first-step", "v1", nil),
-							),
-						},
-					},
-					TestWorkflows:      nil,
-					RampPercentage:     &testRampPercent5,
-					RampingSince:       nil, // not tested (for now at least)
-					RampLastModifiedAt: nil, // not tested (for now at least)
-				},
-				CurrentVersion:       nil,
-				DeprecatedVersions:   nil,
-				VersionConflictToken: nil,
-				LastModifierIdentity: "",
-			},
-		},
+	tests := map[string]*testhelpers.TestCaseBuilder{
+		"all-at-once-rollout-2-replicas": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithReplicas(2).
+					WithVersion("v1"),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", -1, true, false).
+					WithCurrentVersion("v1", true, false),
+			),
+		"progressive-rollout-expect-first-step": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+					WithVersion("v1").
+					WithTargetVersionStatus("v0", -1, true, true).
+					WithCurrentVersionStatus("v0", true, true),
+			).
+			WithDeprecatedBuilds(
+				testhelpers.NewDeprecatedVersionInfo("v0", 1),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", 5, true, true),
+			),
 	}
 
 	for testName, tc := range tests {
 		t.Run(testName, func(t *testing.T) {
 			ctx := context.Background()
-			// TODO(carlydf): populate all fields in tc that are set to testName, so that the user does not need to specify
-			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, ts, tc)
+			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, ts, tc.BuildWithValues(testName, testNamespace.Name, ts.GetDefaultNamespace()))
 		})
 
 	}
@@ -248,10 +193,10 @@ func testTemporalWorkerDeploymentCreation(
 	t *testing.T,
 	k8sClient client.Client,
 	ts *temporaltest.TestServer,
-	tc testCase,
+	tc testhelpers.TestCase,
 ) {
-	twd := tc.input
-	expectedStatus := tc.expectedStatus
+	twd := tc.GetTWD()
+	expectedStatus := tc.GetExpectedStatus()
 
 	t.Log("Creating a TemporalConnection")
 	temporalConnection := &temporaliov1alpha1.TemporalConnection{
@@ -267,7 +212,7 @@ func testTemporalWorkerDeploymentCreation(
 		t.Fatalf("failed to create TemporalConnection: %v", err)
 	}
 
-	makePreliminaryStatusTrue(ctx, t, k8sClient, ts, twd, temporalConnection, tc.deprecatedBuildReplicas, tc.deprecatedBuildImages)
+	makePreliminaryStatusTrue(ctx, t, k8sClient, ts, twd, temporalConnection, tc.GetDeprecatedBuildReplicas(), tc.GetDeprecatedBuildImages())
 
 	t.Log("Creating a TemporalWorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
