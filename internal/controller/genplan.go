@@ -75,7 +75,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Check if we need to force manual strategy due to external modification
 	rolloutStrategy := w.Spec.RolloutStrategy
-	if w.Status.LastModifierIdentity != controllerIdentity && w.Status.LastModifierIdentity != "" {
+	if w.Status.LastModifierIdentity != ControllerIdentity && w.Status.LastModifierIdentity != "" {
 		l.Info("Forcing manual rollout strategy since deployment was modified externally")
 		rolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
 	}

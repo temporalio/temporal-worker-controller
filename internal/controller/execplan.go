@@ -90,7 +90,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 				Version:       vcfg.VersionID,
 				ConflictToken: vcfg.ConflictToken,
-				Identity:      controllerIdentity,
+				Identity:      ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
@@ -112,7 +112,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				Version:       vcfg.VersionID,
 				Percentage:    vcfg.RampPercentage,
 				ConflictToken: vcfg.ConflictToken,
-				Identity:      controllerIdentity,
+				Identity:      ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}

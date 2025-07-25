@@ -7,6 +7,7 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/server/api/deployment/v1"
@@ -65,12 +66,42 @@ func setCurrentVersion(
 	t *testing.T,
 	ctx context.Context,
 	ts *temporaltest.TestServer,
-	version *deployment.WorkerDeploymentVersion) {
+	version *deployment.WorkerDeploymentVersion,
+) {
 	waitForVersionRegistrationInDeployment(t, ctx, ts, version)
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
 	eventually(t, 30*time.Second, time.Second, func() error {
 		_, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-			Version: version.DeploymentName + k8s.VersionIDSeparator + version.BuildId,
+			Version:  version.DeploymentName + k8s.VersionIDSeparator + version.BuildId,
+			Identity: controller.ControllerIdentity,
+		})
+		if err != nil {
+			return fmt.Errorf("unable to set current version %v: %w", version, err)
+		}
+		return nil
+	})
+	return
+}
+
+func setRampingVersion(
+	t *testing.T,
+	ctx context.Context,
+	ts *temporaltest.TestServer,
+	version *deployment.WorkerDeploymentVersion,
+	rampPercentage float32,
+) {
+	waitForVersionRegistrationInDeployment(t, ctx, ts, version)
+	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
+	eventually(t, 30*time.Second, time.Second, func() error {
+		var versionStr string
+		if version != nil {
+			versionStr = version.DeploymentName + k8s.VersionIDSeparator + version.BuildId
+		}
+
+		_, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+			Version:    versionStr,
+			Percentage: rampPercentage,
+			Identity:   controller.ControllerIdentity,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to set current version %v: %w", version, err)

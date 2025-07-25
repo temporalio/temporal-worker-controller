@@ -22,6 +22,14 @@ const (
 	testDrainageRefreshInterval       = time.Second
 )
 
+type testEnv struct {
+	k8sClient  client.Client
+	ts         *temporaltest.TestServer
+	connection *temporaliov1alpha1.TemporalConnection
+	replicas   map[string]int32
+	images     map[string]string
+}
+
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
 	// Set up test environment
@@ -90,56 +98,72 @@ func TestIntegration(t *testing.T) {
 func makePreliminaryStatusTrue(
 	ctx context.Context,
 	t *testing.T,
-	k8sClient client.Client,
-	ts *temporaltest.TestServer,
+	env testEnv,
 	twd *temporaliov1alpha1.TemporalWorkerDeployment,
-	connection *temporaliov1alpha1.TemporalConnection,
-	replicas map[string]int32,
-	images map[string]string,
 ) {
 	t.Logf("Creating starting test env based on input.Status")
+
+	// Make a separate list of deferred functions, because calling defer in a for loop is not allowed.
+	loopDefers := make([]func(), 0)
+	defer handleStopFuncs(loopDefers)
 	for _, dv := range twd.Status.DeprecatedVersions {
-		t.Logf("Handling deprecated version %v", dv.VersionID)
-		switch dv.Status {
-		case temporaliov1alpha1.VersionStatusInactive:
-			// start a poller -- is this included in deprecated versions list?
-		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
-			// these won't be in deprecated versions
-		case temporaliov1alpha1.VersionStatusDraining:
-			// TODO(carlydf): start a poller, set ramp, start a wf on that version, then unset
-		case temporaliov1alpha1.VersionStatusDrained:
-			// TODO(carlydf): start a poller, set ramp, unset, wait for drainage status visibility grace period
-		case temporaliov1alpha1.VersionStatusNotRegistered:
-			// no-op, although I think this won't occur in deprecated versions either
-		}
+		t.Logf("Setting up deprecated version %v with status %v", dv.VersionID, dv.Status)
+		workerStopFuncs := createStatus(ctx, t, env, twd, dv.BaseWorkerDeploymentVersion, nil)
+		loopDefers = append(loopDefers, func() { handleStopFuncs(workerStopFuncs) })
 	}
+
 	if tv := twd.Status.TargetVersion; tv.VersionID != "" {
-		switch tv.Status {
-		case temporaliov1alpha1.VersionStatusInactive:
-		case temporaliov1alpha1.VersionStatusRamping:
-		case temporaliov1alpha1.VersionStatusCurrent:
-			t.Logf("Setting up current version %v", tv.VersionID)
-			if tv.Deployment != nil && tv.Deployment.FieldPath == "create" {
-				v := getVersion(t, tv.VersionID)
-				cvTWD := recreateTWD(twd, images[v.BuildId], replicas[v.BuildId])
-				createWorkerDeployment(ctx, t, k8sClient, cvTWD, v.BuildId, connection.Spec)
-				expectedDeploymentName := k8s.ComputeVersionedDeploymentName(cvTWD.Name, k8s.ComputeBuildID(cvTWD))
-				waitForDeployment(t, k8sClient, expectedDeploymentName, cvTWD.Namespace, 30*time.Second)
-				workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, cvTWD.Namespace)
-				defer func() {
-					for _, f := range workerStopFuncs {
-						if f != nil {
-							f()
-						}
-					}
-				}()
-				setCurrentVersion(t, ctx, ts, v)
-			}
-		case temporaliov1alpha1.VersionStatusDraining:
-		case temporaliov1alpha1.VersionStatusDrained:
-		case temporaliov1alpha1.VersionStatusNotRegistered:
+		t.Logf("Setting up target version %v with status %v", tv.VersionID, tv.Status)
+		workerStopFuncs := createStatus(ctx, t, env, twd, tv.BaseWorkerDeploymentVersion, tv.RampPercentage)
+		defer handleStopFuncs(workerStopFuncs)
+	}
+}
+
+func handleStopFuncs(funcs []func()) {
+	for _, f := range funcs {
+		if f != nil {
+			f()
 		}
 	}
+}
+
+// creates k8s deployment, pollers, and routing config state as needed.
+func createStatus(
+	ctx context.Context,
+	t *testing.T,
+	env testEnv,
+	newTWD *temporaliov1alpha1.TemporalWorkerDeployment,
+	prevVersion temporaliov1alpha1.BaseWorkerDeploymentVersion,
+	rampPercentage *float32,
+) (workerStopFuncs []func()) {
+	if prevVersion.Deployment != nil && prevVersion.Deployment.FieldPath == "create" {
+		v := getVersion(t, prevVersion.VersionID)
+		prevTWD := recreateTWD(newTWD, env.images[v.BuildId], env.replicas[v.BuildId])
+		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
+		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
+		waitForDeployment(t, env.k8sClient, expectedDeploymentName, prevTWD.Namespace, 30*time.Second)
+		if prevVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
+			workerStopFuncs = applyDeployment(t, ctx, env.k8sClient, expectedDeploymentName, prevTWD.Namespace)
+		}
+
+		switch prevVersion.Status {
+		case temporaliov1alpha1.VersionStatusInactive, temporaliov1alpha1.VersionStatusNotRegistered:
+			// no-op
+		case temporaliov1alpha1.VersionStatusRamping:
+			setRampingVersion(t, ctx, env.ts, v, *rampPercentage) // rampPercentage won't be nil if the version is ramping
+		case temporaliov1alpha1.VersionStatusCurrent:
+			setCurrentVersion(t, ctx, env.ts, v)
+		case temporaliov1alpha1.VersionStatusDraining:
+			setRampingVersion(t, ctx, env.ts, v, 1)
+			// TODO(carlydf): start a workflow on v that does not complete -> will never drain
+			setRampingVersion(t, ctx, env.ts, nil, 0)
+		case temporaliov1alpha1.VersionStatusDrained:
+			setRampingVersion(t, ctx, env.ts, v, 1)
+			setRampingVersion(t, ctx, env.ts, nil, 0)
+		}
+	}
+
+	return workerStopFuncs
 }
 
 // Helper to handle unlikely error caused by invalid string split.
@@ -167,10 +191,9 @@ func recreateTWD(twd *temporaliov1alpha1.TemporalWorkerDeployment, imageName str
 func createWorkerDeployment(
 	ctx context.Context,
 	t *testing.T,
-	k8sClient client.Client,
+	env testEnv,
 	twd *temporaliov1alpha1.TemporalWorkerDeployment,
 	buildId string,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) {
 	dep := k8s.NewDeploymentWithOwnerRef(
 		&twd.TypeMeta,
@@ -178,11 +201,11 @@ func createWorkerDeployment(
 		&twd.Spec,
 		k8s.ComputeWorkerDeploymentName(twd),
 		buildId,
-		connection,
+		env.connection.Spec,
 	)
 	t.Logf("Creating Deployment %s in namespace %s", dep.Name, dep.Namespace)
 
-	if err := k8sClient.Create(ctx, dep); err != nil {
+	if err := env.k8sClient.Create(ctx, dep); err != nil {
 		t.Fatalf("failed to create Deployment: %v", err)
 	}
 }
@@ -212,7 +235,15 @@ func testTemporalWorkerDeploymentCreation(
 		t.Fatalf("failed to create TemporalConnection: %v", err)
 	}
 
-	makePreliminaryStatusTrue(ctx, t, k8sClient, ts, twd, temporalConnection, tc.GetDeprecatedBuildReplicas(), tc.GetDeprecatedBuildImages())
+	env := testEnv{
+		k8sClient:  k8sClient,
+		ts:         ts,
+		connection: temporalConnection,
+		replicas:   tc.GetDeprecatedBuildReplicas(),
+		images:     tc.GetDeprecatedBuildImages(),
+	}
+
+	makePreliminaryStatusTrue(ctx, t, env, twd)
 
 	t.Log("Creating a TemporalWorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
@@ -223,13 +254,7 @@ func testTemporalWorkerDeploymentCreation(
 	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
 	waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
 	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
-	defer func() {
-		for _, f := range workerStopFuncs {
-			if f != nil {
-				f()
-			}
-		}
-	}()
+	defer handleStopFuncs(workerStopFuncs)
 
 	verifyTemporalWorkerDeploymentStatusEventually(t, ctx, k8sClient, twd.Name, twd.Namespace, expectedStatus, 60*time.Second, 10*time.Second)
 }
