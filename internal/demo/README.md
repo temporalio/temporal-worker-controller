@@ -35,6 +35,26 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    skaffold dev --profile worker-controller
    ```
 
+### Available Rollout Strategies
+
+The controller supports three deployment strategies:
+
+🚀 **ALL-AT-ONCE**: Immediately routes all new workflows to the latest version
+- Ideal for initial deployments when no traffic exists
+- Faster deployment, appropriate when risk is minimal
+- Used by default in our demo for the unversioned → v1 transition
+
+📈 **PROGRESSIVE**: Gradually shifts traffic using defined percentage steps
+- Best for production with existing traffic: minimizes risk by allowing observation at each step
+- Configured with `rampPercentage` and `pauseDuration` steps:
+  - `rampPercentage`: What percentage of new workflows go to the new version (e.g., 10% to v2, 90% to v1)
+  - `pauseDuration`: How long to wait at each percentage before moving to the next step
+- Demonstrated in our demo for the v1 → v2 transition with live traffic
+
+⚙️ **MANUAL**: Requires operator intervention to control version ramping
+- Maximum control for critical deployments
+- Use [Temporal CLI commands](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#rolling-out-changes-with-the-cli) to manually promote versions
+
 ### Testing Deployment Strategies
 
 #### 🚀 **ALL-AT-ONCE** Strategy: Unversioned → v1
@@ -43,7 +63,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    ```bash
    skaffold dev --profile helloworld-worker
    ```
-   This deploys a TemporalWorkerDeployment and TemporalConnection Custom Resource using **All-At-Once strategy**. Since there's no existing traffic, v1 immediately becomes the current version for this worker deployment.
+   This deploys a TemporalWorkerDeployment and TemporalConnection Custom Resource using the **All-At-Once strategy**. Since there's no existing traffic, v1 immediately becomes the current version for this worker deployment.
    This would mean that all new workflow executions, that are scheduled to run on workers part of this version, will start on v1.
    
 5. Watch the deployment status:
@@ -77,25 +97,6 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    - v1 workers continue serving existing workflows (which would fail to replay on v2)
    - v2 workers handle new workflow executions which has the updated code
    - This demonstrates how **Progressive rollout** safely handles breaking changes when you have existing traffic
-
-### Available Rollout Strategies
-
-The controller supports three deployment strategies:
-
-🚀 **ALL-AT-ONCE**: Immediately routes all new workflows to the latest version
-- Ideal for initial deployments when no traffic exists
-- Faster deployment, appropriate when risk is minimal
-- Used by default in our demo for the unversioned → v1 transition
-
-📈 **PROGRESSIVE**: Gradually shifts traffic using defined percentage steps
-- Best for production with existing traffic: minimizes risk by allowing observation at each step
-- Configured with `rampPercentage` and `pauseDuration` steps
-- Demonstrated in our demo for the v1 → v2 transition with live traffic
-
-⚙️ **MANUAL**: Requires operator intervention to control version ramping
-- Maximum control for critical deployments
-- Use [Temporal CLI commands](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#rolling-out-changes-with-the-cli) to manually promote versions
-
 
 ### Monitoring 
 
