@@ -16,15 +16,16 @@ spec:
   rollout:
     strategy: Progressive
     steps:
+      # Increase traffic from 1% to 10% over 15 seconds
       - rampPercentage: 1
-        pauseDuration: 30s
+        pauseDuration: 5s
       - rampPercentage: 5
-        pauseDuration: 30s
+        pauseDuration: 5s
       - rampPercentage: 10
-        pauseDuration: 30s
+        pauseDuration: 5s
       # Increase traffic to 50% and wait 1 minute
       - rampPercentage: 50
-        pauseDuration: 30s
+        pauseDuration: 1m
     gate:
       workflowType: "HelloWorld"
   sunset:

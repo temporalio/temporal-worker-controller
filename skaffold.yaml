@@ -8,7 +8,34 @@ build:
       variant: CommitSha
       ignoreChanges: true
 profiles:
-  - name: helloworld
+  # Build and deploy the controller to the local k8s cluster  
+  - name: worker-controller
+    build:
+      tagPolicy:
+        envTemplate:
+          template: "latest"
+      artifacts:
+        - image: temporal-worker-controller
+          context: .
+          docker:
+            dockerfile: Dockerfile
+    manifests:
+      helm:
+        releases:
+          - name: temporal-worker-controller
+            chartPath: helm/temporal-worker-controller
+            namespace: temporal-worker-controller
+            createNamespace: true
+            setValues:
+              image.repository: temporal-worker-controller
+              image.tag: latest
+              image.pullPolicy: IfNotPresent
+              namespace.create: true
+            valuesFiles:
+              - helm/temporal-worker-controller/values.yaml
+
+  # Build and deploy the helloworld Custom Resource to the local k8s cluster  
+  - name: helloworld-worker
     build:
       artifacts:
         - image: helloworld
