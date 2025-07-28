@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"go.temporal.io/api/enums/v1"
+	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/workflow"
 	appsv1 "k8s.io/api/apps/v1"
@@ -66,8 +66,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
 			WorkflowExecutionTimeout: time.Hour,
-			WorkflowIDReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
-			WorkflowIDConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
+			WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+			WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
 			VersioningOverride: sdkclient.VersioningOverride{
 				Behavior:      workflow.VersioningBehaviorPinned,
 				PinnedVersion: wf.versionID,
@@ -90,7 +90,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 				Version:       vcfg.VersionID,
 				ConflictToken: vcfg.ConflictToken,
-				Identity:      controllerIdentity,
+				Identity:      ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
@@ -112,7 +112,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				Version:       vcfg.VersionID,
 				Percentage:    vcfg.RampPercentage,
 				ConflictToken: vcfg.ConflictToken,
-				Identity:      controllerIdentity,
+				Identity:      ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}

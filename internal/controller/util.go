@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
 )
@@ -61,7 +62,7 @@ func awaitVersionRegistrationInDeployment(
 	l logr.Logger,
 	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	namespace, versionID string) error {
-	deploymentName, _, _ := strings.Cut(versionID, ".")
+	deploymentName, _, _ := strings.Cut(versionID, k8s.VersionIDSeparator)
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		l.Info(fmt.Sprintf("checking if version %s exists in worker deployment", versionID))

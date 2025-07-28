@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,8 +17,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
-	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 )
 
 const (

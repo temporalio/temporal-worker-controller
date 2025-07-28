@@ -12,23 +12,22 @@ import (
 	"strings"
 
 	"github.com/distribution/reference"
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	deployOwnerKey = ".metadata.controller"
+	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel             = "temporal.io/build-id"
-	deploymentNameSeparator  = "."
-	versionIDSeparator       = "."
-	k8sResourceNameSeparator = "-"
-	maxBuildIdLen            = 63
+	DeploymentNameSeparator  = "/" // TODO(carlydf): change this to "." once the server accepts `.` in deployment names
+	VersionIDSeparator       = "." // TODO(carlydf): change this to ":"
+	K8sResourceNameSeparator = "-"
+	MaxBuildIdLen            = 63
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -38,7 +37,7 @@ type DeploymentState struct {
 	// Sorted deployments by creation time
 	DeploymentsByTime []*appsv1.Deployment
 	// Map of deployment references
-	DeploymentRefs map[string]*v1.ObjectReference
+	DeploymentRefs map[string]*corev1.ObjectReference
 }
 
 // GetDeploymentState queries Kubernetes to get the state of all deployments
@@ -53,7 +52,7 @@ func GetDeploymentState(
 	state := &DeploymentState{
 		Deployments:       make(map[string]*appsv1.Deployment),
 		DeploymentsByTime: []*appsv1.Deployment{},
-		DeploymentRefs:    make(map[string]*v1.ObjectReference),
+		DeploymentRefs:    make(map[string]*corev1.ObjectReference),
 	}
 
 	// List k8s deployments that correspond to managed worker deployment versions
@@ -62,7 +61,7 @@ func GetDeploymentState(
 		ctx,
 		&childDeploys,
 		client.InNamespace(namespace),
-		client.MatchingFields{deployOwnerKey: ownerName},
+		client.MatchingFields{DeployOwnerKey: ownerName},
 	); err != nil {
 		return nil, fmt.Errorf("unable to list child deployments: %w", err)
 	}
@@ -76,7 +75,7 @@ func GetDeploymentState(
 	for i := range childDeploys.Items {
 		deploy := &childDeploys.Items[i]
 		if buildID, ok := deploy.GetLabels()[BuildIDLabel]; ok {
-			versionID := workerDeploymentName + "." + buildID
+			versionID := workerDeploymentName + VersionIDSeparator + buildID
 			state.Deployments[versionID] = deploy
 			state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
 			state.DeploymentRefs[versionID] = NewObjectRef(deploy)
@@ -91,7 +90,7 @@ func GetDeploymentState(
 func IsDeploymentHealthy(deployment *appsv1.Deployment) (bool, *metav1.Time) {
 	// TODO(jlegrone): do we need to sort conditions by timestamp to check only latest?
 	for _, c := range deployment.Status.Conditions {
-		if c.Type == appsv1.DeploymentAvailable && c.Status == v1.ConditionTrue {
+		if c.Type == appsv1.DeploymentAvailable && c.Status == corev1.ConditionTrue {
 			return true, &c.LastTransitionTime
 		}
 	}
@@ -99,8 +98,8 @@ func IsDeploymentHealthy(deployment *appsv1.Deployment) (bool, *metav1.Time) {
 }
 
 // NewObjectRef creates a reference to a Kubernetes object
-func NewObjectRef(obj client.Object) *v1.ObjectReference {
-	return &v1.ObjectReference{
+func NewObjectRef(obj client.Object) *corev1.ObjectReference {
+	return &corev1.ObjectReference{
 		APIVersion: obj.GetObjectKind().GroupVersionKind().GroupVersion().String(),
 		Kind:       obj.GetObjectKind().GroupVersionKind().Kind,
 		Name:       obj.GetName(),
@@ -111,14 +110,14 @@ func NewObjectRef(obj client.Object) *v1.ObjectReference {
 
 // ComputeVersionID generates a version ID from the worker deployment spec
 func ComputeVersionID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return ComputeWorkerDeploymentName(w) + versionIDSeparator + ComputeBuildID(w)
+	return ComputeWorkerDeploymentName(w) + VersionIDSeparator + ComputeBuildID(w)
 }
 
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
-			shortHashSuffix := k8sResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
-			maxImgLen := maxBuildIdLen - len(shortHashSuffix)
+			shortHashSuffix := K8sResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
+			maxImgLen := MaxBuildIdLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
 			return imagePrefix + shortHashSuffix
 		}
@@ -129,7 +128,7 @@ func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 // ComputeWorkerDeploymentName generates the base worker deployment name
 func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	// Use the name and namespace to form the worker deployment name
-	return w.GetName() + deploymentNameSeparator + w.GetNamespace()
+	return w.GetName() + DeploymentNameSeparator + w.GetNamespace()
 }
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
@@ -150,24 +149,24 @@ func computeImagePrefix(s string, maxLen int) string {
 		default:
 		}
 	}
-	return cleanAndTruncateString(s, maxLen)
+	return CleanAndTruncateString(s, maxLen)
 }
 
-// Truncates string to the first n characters, and then replaces characters that can't be in a
+// CleanAndTruncateString truncates string to the first n characters, and then replaces characters that can't be in a
 // kubernetes resource name with a `-` character which can be.
 // Pass n = -1 to skip truncation.
-func cleanAndTruncateString(s string, n int) string {
+func CleanAndTruncateString(s string, n int) string {
 	if len(s) > n && n > 0 {
 		s = s[:n]
 	}
 	// Keep only letters, numbers, and dashes
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
-	return re.ReplaceAllString(s, "-")
+	return re.ReplaceAllString(s, K8sResourceNameSeparator)
 }
 
 // SplitVersionID splits a version ID into its components
 func SplitVersionID(versionID string) (deploymentName, buildID string, err error) {
-	parts := strings.Split(versionID, ".")
+	parts := strings.Split(versionID, VersionIDSeparator)
 	if len(parts) < 2 {
 		return "", "", fmt.Errorf("invalid version ID format: %s", versionID)
 	}
@@ -206,19 +205,19 @@ func NewDeploymentWithOwnerRef(
 	// Add environment variables to containers
 	for i, container := range podSpec.Containers {
 		container.Env = append(container.Env,
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "TEMPORAL_HOST_PORT",
 				Value: connection.HostPort,
 			},
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "TEMPORAL_NAMESPACE",
 				Value: spec.WorkerOptions.TemporalNamespace,
 			},
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "TEMPORAL_DEPLOYMENT_NAME",
 				Value: workerDeploymentName,
 			},
-			v1.EnvVar{
+			corev1.EnvVar{
 				Name:  "WORKER_BUILD_ID",
 				Value: buildID,
 			},
@@ -230,25 +229,25 @@ func NewDeploymentWithOwnerRef(
 	if connection.MutualTLSSecret != "" {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
-				v1.EnvVar{
+				corev1.EnvVar{
 					Name:  "TEMPORAL_TLS_KEY_PATH",
 					Value: "/etc/temporal/tls/tls.key",
 				},
-				v1.EnvVar{
+				corev1.EnvVar{
 					Name:  "TEMPORAL_TLS_CERT_PATH",
 					Value: "/etc/temporal/tls/tls.crt",
 				},
 			)
-			container.VolumeMounts = append(container.VolumeMounts, v1.VolumeMount{
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 				Name:      "temporal-tls",
 				MountPath: "/etc/temporal/tls",
 			})
 			podSpec.Containers[i] = container
 		}
-		podSpec.Volumes = append(podSpec.Volumes, v1.Volume{
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 			Name: "temporal-tls",
-			VolumeSource: v1.VolumeSource{
-				Secret: &v1.SecretVolumeSource{
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
 					SecretName: connection.MutualTLSSecret,
 				},
 			},
@@ -280,7 +279,7 @@ func NewDeploymentWithOwnerRef(
 			Selector: &metav1.LabelSelector{
 				MatchLabels: selectorLabels,
 			},
-			Template: v1.PodTemplateSpec{
+			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      podLabels,
 					Annotations: spec.Template.Annotations,

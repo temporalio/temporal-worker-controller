@@ -9,20 +9,20 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	temporalClient "go.temporal.io/sdk/client"
-	ctrl "sigs.k8s.io/controller-runtime"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	temporalclient "go.temporal.io/sdk/client"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-const controllerIdentity = "temporal-worker-controller"
+// ControllerIdentity is the identity the controller passes to all write calls.
+const ControllerIdentity = "temporal-worker-controller"
 
 func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	ctx context.Context,
 	l logr.Logger,
-	temporalClient temporalClient.Client,
+	temporalClient temporalclient.Client,
 	req ctrl.Request,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
 	temporalState *temporal.TemporalWorkerState,
