@@ -35,36 +35,13 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    skaffold dev --profile worker-controller
    ```
 
-### Available Rollout Strategies
+### Testing Progressive Deployments
 
-The controller supports three deployment strategies:
-
-🚀 **ALL-AT-ONCE**: Immediately routes all new workflows to the latest version
-- Ideal for initial deployments when no traffic exists
-- Faster deployment, appropriate when risk is minimal
-- Used by default in our demo for the unversioned → v1 transition
-
-📈 **PROGRESSIVE**: Gradually shifts traffic using defined percentage steps
-- Best for production with existing traffic: minimizes risk by allowing observation at each step
-- Configured with `rampPercentage` and `pauseDuration` steps:
-  - `rampPercentage`: What percentage of new workflows go to the new version (e.g., 10% to v2, 90% to v1)
-  - `pauseDuration`: How long to wait at each percentage before moving to the next step
-- Demonstrated in our demo for the v1 → v2 transition with live traffic
-
-⚙️ **MANUAL**: Requires operator intervention to control version ramping
-- Maximum control for critical deployments
-- Use [Temporal CLI commands](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#rolling-out-changes-with-the-cli) to manually promote versions
-
-### Testing Deployment Strategies
-
-#### 🚀 **ALL-AT-ONCE** Strategy: Unversioned → v1
-
-4. **Deploy the v1 worker** using the **All-At-Once rollout strategy**:
+4. **Deploy the v1 worker**:
    ```bash
    skaffold dev --profile helloworld-worker
    ```
-   This deploys a TemporalWorkerDeployment and TemporalConnection Custom Resource using the **All-At-Once strategy**. Since there's no existing traffic, v1 immediately becomes the current version for this worker deployment.
-   This would mean that all new workflow executions, that are scheduled to run on workers part of this version, will start on v1.
+   This deploys a TemporalWorkerDeployment and TemporalConnection Custom Resource using the **Progressive strategy**. Note that when there is no current version (as in an initial versioned worker deployment), the progressive steps are skipped and v1 becomes the current version immediately. All new workflow executions will now start on v1.
    
 5. Watch the deployment status:
    ```bash
@@ -76,26 +53,20 @@ The controller supports three deployment strategies:
     make apply-load-sample-workflow
     ```
 
-#### 📈 **PROGRESSIVE** Strategy: v1 → v2 (Non-Replay-Safe Change)
+#### **Progressive Rollout: v1 → v2** (Non-Replay-Safe Change)
 
-7. **Switch to the Progressive rollout strategy** for safer deployments:
-   ```bash
-   git apply internal/demo/helloworld/changes/progressive-rollout.patch
-   ```
-   This changes the strategy from **All-At-Once** to **Progressive** with ramping steps (1% → 5% → 10% → 50% → 100%).
-
-8. **Deploy a non-replay-safe workflow change**:
+7. **Deploy a non-replay-safe workflow change**:
    ```bash
    git apply internal/demo/helloworld/changes/no-version-gate.patch
    ```
    This applies a **non-replay-safe change** (switching from custom Sleep activity to built-in `workflow.Sleep`). 
    Skaffold automatically detects the change and deploys worker v2.
 
-9. **Observe the progressive rollout managing incompatible versions**:
-   - New workflow executions gradually shift from v1 to v2 following the rollout steps (1% → 5% → 10% → 50% → 100%)
+8. **Observe the progressive rollout managing incompatible versions**:
+   - New workflow executions gradually shift from v1 to v2 following the configured rollout steps (1% → 5% → 10% → 50% → 100%)
    - **Both worker versions run simultaneously** - this is critical since the code changes are incompatible
    - v1 workers continue serving existing workflows (which would fail to replay on v2)
-   - v2 workers handle new workflow executions which has the updated code
+   - v2 workers handle new workflow executions with the updated code
    - This demonstrates how **Progressive rollout** safely handles breaking changes when you have existing traffic
 
 ### Monitoring 
