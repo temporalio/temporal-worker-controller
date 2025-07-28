@@ -8,15 +8,14 @@ import (
 	"context"
 	"testing"
 
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
 )
 
 func TestFinalizerAddition(t *testing.T) {
@@ -231,7 +230,7 @@ func TestHandleDeletion(t *testing.T) {
 		t.Fatalf("handleDeletion should succeed: %v", err)
 	}
 
-	if result.Requeue {
+	if result.RequeueAfter > 0 {
 		t.Error("Result should not indicate requeue")
 	}
 
