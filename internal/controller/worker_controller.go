@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
@@ -21,6 +22,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -34,6 +36,8 @@ const (
 	// TODO(jlegrone): add this everywhere
 	deployOwnerKey = ".metadata.controller"
 	buildIDLabel   = "temporal.io/build-id"
+	// TemporalWorkerDeploymentFinalizer is the finalizer used to ensure proper cleanup of resources
+	TemporalWorkerDeploymentFinalizer = "temporal.io/temporal-worker-deployment-finalizer"
 )
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
@@ -77,6 +81,22 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		// requeue (we'll need to wait for a new notification), and we can get them
 		// on deleted requests.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Handle deletion
+	if workerDeploy.ObjectMeta.DeletionTimestamp != nil {
+		return r.handleDeletion(ctx, l, &workerDeploy)
+	}
+
+	// Add finalizer if it doesn't exist
+	if !controllerutil.ContainsFinalizer(&workerDeploy, TemporalWorkerDeploymentFinalizer) {
+		controllerutil.AddFinalizer(&workerDeploy, TemporalWorkerDeploymentFinalizer)
+		if err := r.Update(ctx, &workerDeploy); err != nil {
+			l.Error(err, "unable to add finalizer")
+			return ctrl.Result{}, err
+		}
+		// Requeue to continue with normal reconciliation after adding finalizer
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
@@ -186,6 +206,94 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		// For demo purposes only!
 		//RequeueAfter: 1 * time.Second,
 	}, nil
+}
+
+// handleDeletion handles the deletion process for TemporalWorkerDeployment resources
+func (r *TemporalWorkerDeploymentReconciler) handleDeletion(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (ctrl.Result, error) {
+	l.Info("Handling deletion of TemporalWorkerDeployment")
+
+	if !controllerutil.ContainsFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer) {
+		// Finalizer has already been removed, allow deletion to proceed
+		return ctrl.Result{}, nil
+	}
+
+	// Clean up managed resources
+	if err := r.cleanupManagedResources(ctx, l, workerDeploy); err != nil {
+		l.Error(err, "Failed to cleanup managed resources")
+		return ctrl.Result{}, err
+	}
+
+	// Remove the finalizer to allow deletion
+	controllerutil.RemoveFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer)
+	if err := r.Update(ctx, workerDeploy); err != nil {
+		l.Error(err, "Failed to remove finalizer")
+		return ctrl.Result{}, err
+	}
+
+	l.Info("Successfully removed finalizer, resource will be deleted")
+	return ctrl.Result{}, nil
+}
+
+// cleanupManagedResources ensures all resources managed by this TemporalWorkerDeployment are properly cleaned up
+func (r *TemporalWorkerDeploymentReconciler) cleanupManagedResources(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) error {
+	l.Info("Cleaning up managed resources")
+
+	// List all deployments owned by this TemporalWorkerDeployment
+	deploymentList := &appsv1.DeploymentList{}
+	listOpts := &client.ListOptions{
+		Namespace: workerDeploy.Namespace,
+	}
+
+	if err := r.List(ctx, deploymentList, listOpts); err != nil {
+		return fmt.Errorf("failed to list deployments: %w", err)
+	}
+
+	// Filter deployments owned by this TemporalWorkerDeployment and delete them
+	for _, deployment := range deploymentList.Items {
+		if r.isOwnedByWorkerDeployment(&deployment, workerDeploy) {
+			l.Info("Deleting managed deployment", "deployment", deployment.Name)
+			if err := r.Delete(ctx, &deployment); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to delete deployment %s: %w", deployment.Name, err)
+			}
+		}
+	}
+
+	// Wait for all owned deployments to be deleted
+	for _, deployment := range deploymentList.Items {
+		if r.isOwnedByWorkerDeployment(&deployment, workerDeploy) {
+			// Check if deployment still exists
+			currentDeployment := &appsv1.Deployment{}
+			err := r.Get(ctx, types.NamespacedName{
+				Namespace: deployment.Namespace,
+				Name:      deployment.Name,
+			}, currentDeployment)
+
+			if err == nil {
+				// Deployment still exists, requeue to wait for deletion
+				l.Info("Waiting for deployment to be deleted", "deployment", deployment.Name)
+				return fmt.Errorf("still waiting for deployment %s to be deleted", deployment.Name)
+			} else if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to check deployment status %s: %w", deployment.Name, err)
+			}
+			// IsNotFound error means deployment was successfully deleted
+		}
+	}
+
+	l.Info("All managed resources have been cleaned up")
+	return nil
+}
+
+// isOwnedByWorkerDeployment checks if a deployment is owned by the given TemporalWorkerDeployment
+func (r *TemporalWorkerDeploymentReconciler) isOwnedByWorkerDeployment(deployment *appsv1.Deployment, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) bool {
+	for _, ownerRef := range deployment.OwnerReferences {
+		if ownerRef.Kind == "TemporalWorkerDeployment" &&
+			ownerRef.APIVersion == apiGVStr &&
+			ownerRef.Name == workerDeploy.Name &&
+			ownerRef.UID == workerDeploy.UID {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupWithManager sets up the controller with the Manager.
