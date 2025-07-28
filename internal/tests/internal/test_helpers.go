@@ -157,7 +157,8 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 					twd.Status.TargetVersion.VersionID)
 			}
 			if (twd.Status.TargetVersion.RampPercentage == nil) != (expectedDeploymentStatus.TargetVersion.RampPercentage != nil) {
-
+				return fmt.Errorf("expected RampPercentage nil state to match, got twd.Status.TargetVersion.RampPercentage: %v, expected: %v",
+					twd.Status.TargetVersion.RampPercentage == nil, expectedDeploymentStatus.TargetVersion.RampPercentage == nil)
 			}
 			if expectedDeploymentStatus.TargetVersion.RampPercentage != nil {
 				if twd.Status.TargetVersion.RampPercentage == nil {
