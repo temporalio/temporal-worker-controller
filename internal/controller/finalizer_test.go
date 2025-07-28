@@ -23,7 +23,7 @@ func TestFinalizerAddition(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a TemporalWorkerDeployment without finalizer using test helpers
-	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker", "default"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 		twd.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace:  "test-namespace",
 			TemporalConnection: "test-connection",
@@ -134,7 +134,7 @@ func TestCleanupManagedResources(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a TemporalWorkerDeployment using test helpers
-	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker", "default"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 		twd.UID = "worker-uid-123"
 		return twd
 	})
@@ -198,7 +198,7 @@ func TestHandleDeletion(t *testing.T) {
 
 	// Create a TemporalWorkerDeployment with finalizer and deletion timestamp using test helpers
 	now := metav1.Now()
-	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker", "default"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 		twd.UID = "worker-uid-123"
 		twd.DeletionTimestamp = &now
 		twd.Finalizers = []string{TemporalWorkerDeploymentFinalizer}

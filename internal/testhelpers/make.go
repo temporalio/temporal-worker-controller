@@ -7,9 +7,13 @@ import (
 	"github.com/pborman/uuid"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 const (
@@ -206,4 +210,22 @@ func MakeBaseVersion(namespace, twdName, imageName string, status temporaliov1al
 
 func ModifyObj[T any](obj T, callback func(obj T) T) T {
 	return callback(obj)
+}
+
+// SetupTestScheme creates a runtime scheme with all necessary types registered
+func SetupTestScheme() *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	_ = appsv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	_ = temporaliov1alpha1.AddToScheme(scheme)
+	return scheme
+}
+
+// SetupFakeClient creates a fake Kubernetes client with the given objects
+func SetupFakeClient(objects ...client.Object) client.Client {
+	scheme := SetupTestScheme()
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objects...).
+		Build()
 }
