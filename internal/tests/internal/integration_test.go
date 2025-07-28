@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -16,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
@@ -300,9 +300,8 @@ func testDeploymentDeletionProtection(t *testing.T, k8sClient client.Client, ts 
 	// Create test namespace
 	testNamespace := createTestNamespace(t, k8sClient)
 	defer func() {
-		if err := k8sClient.Delete(ctx, testNamespace); err != nil {
-			t.Errorf("failed to delete test namespace: %v", err)
-		}
+		err := k8sClient.Delete(ctx, testNamespace)
+		assert.NoError(t, err, "failed to delete test namespace")
 	}()
 
 	// Create TemporalConnection
@@ -315,9 +314,8 @@ func testDeploymentDeletionProtection(t *testing.T, k8sClient client.Client, ts 
 			HostPort: ts.GetFrontendHostPort(),
 		},
 	}
-	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to create TemporalConnection: %v", err)
-	}
+	err := k8sClient.Create(ctx, temporalConnection)
+	require.NoError(t, err, "failed to create TemporalConnection")
 
 	// Create TemporalWorkerDeployment
 	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
@@ -338,9 +336,8 @@ func testDeploymentDeletionProtection(t *testing.T, k8sClient client.Client, ts 
 		},
 	}
 
-	if err := k8sClient.Create(ctx, twd); err != nil {
-		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
-	}
+	err = k8sClient.Create(ctx, twd)
+	require.NoError(t, err, "failed to create TemporalWorkerDeployment")
 
 	// Wait for controller to create the deployment
 	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
@@ -348,77 +345,66 @@ func testDeploymentDeletionProtection(t *testing.T, k8sClient client.Client, ts 
 
 	// Get the created deployment
 	var deployment appsv1.Deployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{
+	err = k8sClient.Get(ctx, types.NamespacedName{
 		Name:      expectedDeploymentName,
 		Namespace: twd.Namespace,
-	}, &deployment); err != nil {
-		t.Fatalf("failed to get deployment: %v", err)
-	}
-
-	// Verify the deployment has the finalizer (this should be added by the controller)
-	t.Log("Verifying deployment has finalizer protection")
-	if !controllerutil.ContainsFinalizer(&deployment, controller.TemporalWorkerDeploymentFinalizer) {
-		// Since the deployment itself doesn't have the finalizer, let's verify it's owned by the TWD
-		// which should have the finalizer and prevent deletion
-		t.Log("Deployment doesn't have finalizer directly, checking owner reference protection")
-	}
+	}, &deployment)
+	require.NoError(t, err, "failed to get deployment")
 
 	// Verify the deployment has proper owner references
-	found := false
+	var ownerRefFound bool
+	var blockOwnerDeletion *bool
 	for _, ownerRef := range deployment.OwnerReferences {
 		if ownerRef.Kind == "TemporalWorkerDeployment" && ownerRef.Name == twd.Name {
-			found = true
-			if ownerRef.BlockOwnerDeletion == nil || !*ownerRef.BlockOwnerDeletion {
-				t.Error("Owner reference should have BlockOwnerDeletion set to true")
-			}
+			ownerRefFound = true
+			blockOwnerDeletion = ownerRef.BlockOwnerDeletion
 			break
 		}
 	}
-	if !found {
-		t.Error("Deployment should have TemporalWorkerDeployment as owner reference")
+	assert.True(t, ownerRefFound, "Deployment should have TemporalWorkerDeployment as owner reference")
+	assert.NotNil(t, blockOwnerDeletion, "Owner reference should have BlockOwnerDeletion field set")
+	if blockOwnerDeletion != nil {
+		assert.True(t, *blockOwnerDeletion, "Owner reference should have BlockOwnerDeletion set to true")
 	}
 
 	// Try to delete the deployment directly (this should fail or be recreated)
-	t.Log("Attempting to delete deployment directly")
 	originalUID := deployment.UID
-	if err := k8sClient.Delete(ctx, &deployment); err != nil {
+	err = k8sClient.Delete(ctx, &deployment)
+	if err != nil {
+		// Direct deletion failed as expected due to owner reference protection
 		t.Logf("Direct deletion failed as expected: %v", err)
 	} else {
 		// If deletion succeeded, verify the controller recreates it
-		t.Log("Deletion succeeded, verifying controller recreates deployment")
 		time.Sleep(5 * time.Second) // Give controller time to recreate
 
 		var recreatedDeployment appsv1.Deployment
-		if err := k8sClient.Get(ctx, types.NamespacedName{
+		err = k8sClient.Get(ctx, types.NamespacedName{
 			Name:      expectedDeploymentName,
 			Namespace: twd.Namespace,
-		}, &recreatedDeployment); err != nil {
-			t.Error("Controller should have recreated the deployment after direct deletion")
-		} else if recreatedDeployment.UID == originalUID {
-			t.Error("Deployment should have been recreated with new UID")
+		}, &recreatedDeployment)
+
+		if err != nil {
+			assert.Fail(t, "Controller should have recreated the deployment after direct deletion", "Error: %v", err)
 		} else {
-			t.Log("Controller successfully recreated the deployment")
+			assert.NotEqual(t, originalUID, recreatedDeployment.UID, "Deployment should have been recreated with new UID")
 		}
 	}
 
 	// Now test proper deletion through the controller by deleting the TWD
-	t.Log("Testing proper deletion through TemporalWorkerDeployment deletion")
-
 	// Delete the TemporalWorkerDeployment
-	if err := k8sClient.Delete(ctx, twd); err != nil {
-		t.Fatalf("failed to delete TemporalWorkerDeployment: %v", err)
-	}
+	err = k8sClient.Delete(ctx, twd)
+	require.NoError(t, err, "failed to delete TemporalWorkerDeployment")
 
 	// Wait for the deployment to be cleaned up
-	t.Log("Waiting for deployment to be cleaned up by controller")
 	deadline := time.Now().Add(30 * time.Second)
 	deploymentDeleted := false
 	for time.Now().Before(deadline) {
 		var checkDeployment appsv1.Deployment
-		if err := k8sClient.Get(ctx, types.NamespacedName{
+		err = k8sClient.Get(ctx, types.NamespacedName{
 			Name:      expectedDeploymentName,
 			Namespace: twd.Namespace,
-		}, &checkDeployment); err != nil {
+		}, &checkDeployment)
+		if err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				deploymentDeleted = true
 				break
@@ -427,9 +413,5 @@ func testDeploymentDeletionProtection(t *testing.T, k8sClient client.Client, ts 
 		time.Sleep(1 * time.Second)
 	}
 
-	if !deploymentDeleted {
-		t.Error("Controller should have cleaned up the deployment when TWD was deleted")
-	} else {
-		t.Log("Controller successfully cleaned up deployment when TWD was deleted")
-	}
+	assert.True(t, deploymentDeleted, "Controller should have cleaned up the deployment when TWD was deleted")
 }
