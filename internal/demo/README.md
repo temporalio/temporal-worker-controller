@@ -53,7 +53,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
     make apply-load-sample-workflow
     ```
 
-#### **Progressive Rollout: v1 → v2** (Non-Replay-Safe Change)
+#### **Progressive Rollout of v2** (Non-Replay-Safe Change)
 
 7. **Deploy a non-replay-safe workflow change**:
    ```bash
