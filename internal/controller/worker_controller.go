@@ -17,6 +17,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,6 +39,10 @@ const (
 	buildIDLabel   = "temporal.io/build-id"
 	// TemporalWorkerDeploymentFinalizer is the finalizer used to ensure proper cleanup of resources
 	TemporalWorkerDeploymentFinalizer = "temporal.io/temporal-worker-deployment-finalizer"
+
+	// Cleanup timeout and polling constants
+	cleanupTimeout      = 2 * time.Minute
+	cleanupPollInterval = 5 * time.Second
 )
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
@@ -238,18 +243,29 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(ctx context.Context,
 func (r *TemporalWorkerDeploymentReconciler) cleanupManagedResources(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) error {
 	l.Info("Cleaning up managed resources")
 
-	// List all deployments owned by this TemporalWorkerDeployment
-	deploymentList := &appsv1.DeploymentList{}
+	// Try to use field selector for efficient querying of owned deployments
+	// Fall back to listing all deployments if field selector is not available (e.g., in tests)
 	listOpts := &client.ListOptions{
-		Namespace: workerDeploy.Namespace,
+		Namespace:     workerDeploy.Namespace,
+		FieldSelector: fields.OneTermEqualSelector(deployOwnerKey, workerDeploy.Name),
 	}
 
-	if err := r.List(ctx, deploymentList, listOpts); err != nil {
-		return fmt.Errorf("failed to list deployments: %w", err)
+	deploymentList := &appsv1.DeploymentList{}
+	err := r.List(ctx, deploymentList, listOpts)
+	if err != nil {
+		// If field selector fails (common in tests), fall back to listing all deployments
+		l.Info("Field selector not available, falling back to listing all deployments", "error", err.Error())
+		listOpts = &client.ListOptions{
+			Namespace: workerDeploy.Namespace,
+		}
+		if err := r.List(ctx, deploymentList, listOpts); err != nil {
+			return fmt.Errorf("failed to list deployments: %w", err)
+		}
 	}
 
-	// Filter deployments owned by this TemporalWorkerDeployment and delete them
+	// Delete all owned deployments
 	for _, deployment := range deploymentList.Items {
+		// Check ownership for all deployments when not using field selector
 		if r.isOwnedByWorkerDeployment(&deployment, workerDeploy) {
 			l.Info("Deleting managed deployment", "deployment", deployment.Name)
 			if err := r.Delete(ctx, &deployment); err != nil && !apierrors.IsNotFound(err) {
@@ -258,29 +274,64 @@ func (r *TemporalWorkerDeploymentReconciler) cleanupManagedResources(ctx context
 		}
 	}
 
-	// Wait for all owned deployments to be deleted
-	for _, deployment := range deploymentList.Items {
-		if r.isOwnedByWorkerDeployment(&deployment, workerDeploy) {
-			// Check if deployment still exists
-			currentDeployment := &appsv1.Deployment{}
-			err := r.Get(ctx, types.NamespacedName{
-				Namespace: deployment.Namespace,
-				Name:      deployment.Name,
-			}, currentDeployment)
+	// Wait for all owned deployments to be deleted with proper polling
+	return r.waitForOwnedDeploymentsToBeDeleted(ctx, l, workerDeploy)
+}
 
-			if err == nil {
-				// Deployment still exists, requeue to wait for deletion
-				l.Info("Waiting for deployment to be deleted", "deployment", deployment.Name)
-				return fmt.Errorf("still waiting for deployment %s to be deleted", deployment.Name)
-			} else if !apierrors.IsNotFound(err) {
-				return fmt.Errorf("failed to check deployment status %s: %w", deployment.Name, err)
+// waitForOwnedDeploymentsToBeDeleted waits for all owned deployments to be deleted with proper polling and timeout
+func (r *TemporalWorkerDeploymentReconciler) waitForOwnedDeploymentsToBeDeleted(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) error {
+	// Create a timeout context for cleanup operations
+	cleanupCtx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+
+	ticker := time.NewTicker(cleanupPollInterval)
+	defer ticker.Stop()
+
+	l.Info("Waiting for owned deployments to be deleted", "timeout", cleanupTimeout)
+
+	for {
+		select {
+		case <-cleanupCtx.Done():
+			if cleanupCtx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("timeout waiting for deployments to be deleted after %v", cleanupTimeout)
 			}
-			// IsNotFound error means deployment was successfully deleted
+			return fmt.Errorf("context cancelled while waiting for deployments to be deleted: %w", cleanupCtx.Err())
+
+		case <-ticker.C:
+			// Try to use field selector for efficient querying, with fallback
+			listOpts := &client.ListOptions{
+				Namespace:     workerDeploy.Namespace,
+				FieldSelector: fields.OneTermEqualSelector(deployOwnerKey, workerDeploy.Name),
+			}
+
+			deploymentList := &appsv1.DeploymentList{}
+			err := r.List(cleanupCtx, deploymentList, listOpts)
+			if err != nil {
+				// If field selector fails (common in tests), fall back to listing all deployments
+				listOpts = &client.ListOptions{
+					Namespace: workerDeploy.Namespace,
+				}
+				if err := r.List(cleanupCtx, deploymentList, listOpts); err != nil {
+					return fmt.Errorf("failed to list deployments during cleanup: %w", err)
+				}
+			}
+
+			// Check if any owned deployments still exist
+			hasOwnedDeployments := false
+			for _, deployment := range deploymentList.Items {
+				if r.isOwnedByWorkerDeployment(&deployment, workerDeploy) {
+					hasOwnedDeployments = true
+					l.Info("Still waiting for deployment to be deleted", "deployment", deployment.Name)
+					break
+				}
+			}
+
+			if !hasOwnedDeployments {
+				l.Info("All owned deployments have been deleted")
+				return nil
+			}
 		}
 	}
-
-	l.Info("All managed resources have been cleaned up")
-	return nil
 }
 
 // isOwnedByWorkerDeployment checks if a deployment is owned by the given TemporalWorkerDeployment

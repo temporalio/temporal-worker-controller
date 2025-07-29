@@ -26,6 +26,33 @@ const (
 	testDrainageRefreshInterval       = time.Second
 )
 
+// waitForCondition polls a condition function until it returns true or timeout is reached
+func waitForCondition(condition func() bool, timeout, interval time.Duration) bool {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return false
+		case <-ticker.C:
+			if condition() {
+				return true
+			}
+		}
+	}
+}
+
+type testEnv struct {
+	k8sClient  client.Client
+	mgr        manager.Manager
+	ts         *temporaltest.TestServer
+	connection *temporaliov1alpha1.TemporalConnection
+	replicas   map[string]int32
+	images     map[string]string
+}
+
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
 	// Set up test environment
@@ -374,19 +401,24 @@ func testDeploymentDeletionProtection(t *testing.T, k8sClient client.Client, ts 
 		// Direct deletion failed as expected due to owner reference protection
 		t.Logf("Direct deletion failed as expected: %v", err)
 	} else {
-		// If deletion succeeded, verify the controller recreates it
-		time.Sleep(5 * time.Second) // Give controller time to recreate
+		// If deletion succeeded, verify the controller recreates it with proper polling
+		eventuallyRecreated := func() bool {
+			var recreatedDeployment appsv1.Deployment
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      expectedDeploymentName,
+				Namespace: twd.Namespace,
+			}, &recreatedDeployment)
 
-		var recreatedDeployment appsv1.Deployment
-		err = k8sClient.Get(ctx, types.NamespacedName{
-			Name:      expectedDeploymentName,
-			Namespace: twd.Namespace,
-		}, &recreatedDeployment)
+			if err != nil {
+				return false // Deployment not found yet
+			}
 
-		if err != nil {
-			assert.Fail(t, "Controller should have recreated the deployment after direct deletion", "Error: %v", err)
-		} else {
-			assert.NotEqual(t, originalUID, recreatedDeployment.UID, "Deployment should have been recreated with new UID")
+			// Check if it's a new deployment (different UID)
+			return recreatedDeployment.UID != originalUID
+		}
+
+		if !waitForCondition(eventuallyRecreated, 30*time.Second, 1*time.Second) {
+			assert.Fail(t, "Controller should have recreated the deployment after direct deletion within 30 seconds")
 		}
 	}
 
@@ -396,22 +428,15 @@ func testDeploymentDeletionProtection(t *testing.T, k8sClient client.Client, ts 
 	require.NoError(t, err, "failed to delete TemporalWorkerDeployment")
 
 	// Wait for the deployment to be cleaned up
-	deadline := time.Now().Add(30 * time.Second)
-	deploymentDeleted := false
-	for time.Now().Before(deadline) {
+	eventuallyDeleted := func() bool {
 		var checkDeployment appsv1.Deployment
-		err = k8sClient.Get(ctx, types.NamespacedName{
+		err := k8sClient.Get(ctx, types.NamespacedName{
 			Name:      expectedDeploymentName,
 			Namespace: twd.Namespace,
 		}, &checkDeployment)
-		if err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				deploymentDeleted = true
-				break
-			}
-		}
-		time.Sleep(1 * time.Second)
+		return client.IgnoreNotFound(err) == nil // Returns true if deployment is not found (deleted)
 	}
 
+	deploymentDeleted := waitForCondition(eventuallyDeleted, 30*time.Second, 1*time.Second)
 	assert.True(t, deploymentDeleted, "Controller should have cleaned up the deployment when TWD was deleted")
 }
