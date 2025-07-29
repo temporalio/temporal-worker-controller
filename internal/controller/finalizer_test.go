@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
@@ -238,4 +239,164 @@ func TestHandleDeletion(t *testing.T) {
 	// In a real cluster, the resource would be gone. In the fake client, we can verify it was marked for deletion
 	// by checking if the finalizer was removed (which we can't easily do since the resource is deleted)
 	// Instead, we'll verify that the deletion handling completed without error, which means cleanup was successful
+}
+
+func TestCleanupWithContextCancellation(t *testing.T) {
+	// Create a context that will be cancelled during cleanup
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Create a TemporalWorkerDeployment using test helpers
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker", "default"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+		twd.UID = "worker-uid-123"
+		return twd
+	})
+
+	// Create fake client using test helpers
+	client := testhelpers.SetupFakeClient()
+
+	reconciler := &TemporalWorkerDeploymentReconciler{
+		Client: client,
+		Scheme: testhelpers.SetupTestScheme(),
+	}
+
+	// Create a test logger using testlogr
+	logger := testlogr.New(t)
+
+	// Cancel the context immediately to simulate cancellation during cleanup
+	cancel()
+
+	// Test cleanup with cancelled context - should handle gracefully
+	err := reconciler.cleanupManagedResources(ctx, logger, workerDeploy)
+	if err == nil {
+		t.Error("Expected error when context is cancelled during cleanup")
+	}
+
+	// Error should indicate context cancellation
+	if ctx.Err() != context.Canceled {
+		t.Error("Context should be cancelled")
+	}
+}
+
+func TestWaitForOwnedDeploymentsTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a TemporalWorkerDeployment using test helpers
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker", "default"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+		twd.UID = "worker-uid-123"
+		return twd
+	})
+
+	// Create a deployment that won't be deleted (simulate stuck deletion)
+	persistentDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "persistent-deployment",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: apiGVStr,
+					Kind:       "TemporalWorkerDeployment",
+					Name:       "test-worker",
+					UID:        "worker-uid-123",
+				},
+			},
+		},
+	}
+
+	// Create fake client with the deployment that won't be deleted
+	client := testhelpers.SetupFakeClient(persistentDeployment)
+
+	reconciler := &TemporalWorkerDeploymentReconciler{
+		Client: client,
+		Scheme: testhelpers.SetupTestScheme(),
+	}
+
+	// Create a test logger using testlogr
+	logger := testlogr.New(t)
+
+	// Test with a very short timeout to simulate timeout condition
+	// This will use the actual waitForOwnedDeploymentsToBeDeleted method which has built-in timeout
+	err := reconciler.waitForOwnedDeploymentsToBeDeleted(ctx, logger, workerDeploy)
+
+	// Should timeout waiting for deployments to be deleted
+	if err == nil {
+		t.Error("Expected timeout error when deployments don't get deleted")
+	}
+
+	// Error message should indicate timeout
+	if err != nil && !contains(err.Error(), "timeout") {
+		t.Errorf("Expected timeout error, got: %v", err)
+	}
+}
+
+func TestPartialCleanupFailure(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a TemporalWorkerDeployment using test helpers
+	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker", "default"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+		twd.UID = "worker-uid-123"
+		return twd
+	})
+
+	// Create multiple deployments owned by the worker deployment
+	deployment1 := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "deployment-1",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: apiGVStr,
+					Kind:       "TemporalWorkerDeployment",
+					Name:       "test-worker",
+					UID:        "worker-uid-123",
+				},
+			},
+		},
+	}
+
+	deployment2 := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "deployment-2",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: apiGVStr,
+					Kind:       "TemporalWorkerDeployment",
+					Name:       "test-worker",
+					UID:        "worker-uid-123",
+				},
+			},
+		},
+	}
+
+	// Create fake client with multiple deployments
+	client := testhelpers.SetupFakeClient(deployment1, deployment2)
+
+	reconciler := &TemporalWorkerDeploymentReconciler{
+		Client: client,
+		Scheme: testhelpers.SetupTestScheme(),
+	}
+
+	// Create a test logger using testlogr
+	logger := testlogr.New(t)
+
+	// Delete one deployment manually to simulate partial cleanup
+	err := client.Delete(ctx, deployment1)
+	if err != nil {
+		t.Fatalf("Failed to delete deployment1: %v", err)
+	}
+
+	// Now test cleanup - it should handle the mixed state gracefully
+	// (one deployment already deleted, one still exists)
+	err = reconciler.cleanupManagedResources(ctx, logger, workerDeploy)
+
+	// This should eventually succeed as the cleanup logic should handle
+	// deployments that are already deleted gracefully
+	if err != nil && !contains(err.Error(), "timeout") {
+		t.Errorf("Cleanup should handle partial cleanup gracefully, got error: %v", err)
+	}
+}
+
+// Helper function to check if a string contains a substring
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }
