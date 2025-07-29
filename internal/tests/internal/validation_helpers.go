@@ -121,6 +121,9 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 	timeout time.Duration,
 	interval time.Duration,
 ) {
+	if expectedDeploymentStatus == nil {
+		t.Fatalf("expected deployment status cannot be nil")
+	}
 	eventually(t, timeout, interval, func() error {
 		var twd temporaliov1alpha1.TemporalWorkerDeployment
 		if err := k8sClient.Get(ctx, types.NamespacedName{
@@ -133,13 +136,13 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 			if twd.Status.CurrentVersion == nil {
 				return fmt.Errorf("expected CurrentVersion to be set")
 			}
-			if twd.Status.CurrentVersion.Deployment == nil {
-				return fmt.Errorf("expected CurrentVersion.Deployment to be set")
-			}
 			if twd.Status.CurrentVersion.VersionID != expectedDeploymentStatus.CurrentVersion.VersionID {
 				return fmt.Errorf("expected current version id to be '%s', got '%s'",
 					expectedDeploymentStatus.CurrentVersion.VersionID,
 					twd.Status.CurrentVersion.VersionID)
+			}
+			if twd.Status.CurrentVersion.Deployment == nil {
+				return fmt.Errorf("expected CurrentVersion.Deployment to be set")
 			}
 			if twd.Status.CurrentVersion.Deployment.Name != expectedDeploymentStatus.CurrentVersion.Deployment.Name {
 				return fmt.Errorf("expected deployment name to be '%s', got '%s'",
@@ -152,7 +155,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 				return fmt.Errorf("expected TargetVersion to be set")
 			}
 			if twd.Status.TargetVersion.VersionID != expectedDeploymentStatus.TargetVersion.VersionID {
-				return fmt.Errorf("expected ramping version id to be '%s', got '%s'",
+				return fmt.Errorf("expected target version id to be '%s', got '%s'",
 					expectedDeploymentStatus.TargetVersion.VersionID,
 					twd.Status.TargetVersion.VersionID)
 			}

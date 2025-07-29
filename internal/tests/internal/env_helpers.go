@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,10 +16,9 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"go.temporal.io/sdk/log"
-	appsv1 "k8s.io/api/apps/v1"
+	"go.temporal.io/server/temporaltest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -30,6 +28,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
+
+type testEnv struct {
+	k8sClient  client.Client
+	mgr        manager.Manager
+	ts         *temporaltest.TestServer
+	connection *temporaliov1alpha1.TemporalConnection
+	replicas   map[string]int32
+	images     map[string]string
+}
 
 // setupKubebuilderAssets sets up the KUBEBUILDER_ASSETS environment variable if not already set
 func setupKubebuilderAssets() error {
@@ -162,95 +169,6 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	}
 
 	return cfg, k8sClient, mgr, clientPool, cleanup
-}
-
-func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
-	c := make(chan struct{})
-	go func() {
-		defer close(c)
-		wg.Wait()
-	}()
-	select {
-	case <-c:
-		return false // completed normally
-	case <-time.After(timeout):
-		return true // timed out
-	}
-}
-
-func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) []func() {
-	var deployment appsv1.Deployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{
-		Name:      deploymentName,
-		Namespace: namespace,
-	}, &deployment); err != nil {
-		t.Fatalf("failed to get deployment: %v", err)
-	}
-
-	var wg sync.WaitGroup
-	stopFuncs := make([]func(), *(deployment.Spec.Replicas))
-	workerErrors := make([]error, *(deployment.Spec.Replicas))
-	workerCallback := func(i int32) func(func(), error) {
-		return func(stopFunc func(), err error) {
-			if err == nil {
-				stopFuncs[i] = stopFunc
-				wg.Done()
-			} else {
-				workerErrors[i] = err
-			}
-		}
-	}
-
-	for i := int32(0); i < *(deployment.Spec.Replicas); i++ {
-		wg.Add(1)
-		go runHelloWorldWorker(ctx, deployment.Spec.Template, workerCallback(i))
-	}
-
-	// wait 10s for all expected workers to be healthy
-	timedOut := waitTimeout(&wg, 10*time.Second)
-
-	if timedOut {
-		t.Fatalf("could not start workers, errors were: %+v", workerErrors)
-	} else {
-		setHealthyDeploymentStatus(t, ctx, k8sClient, deployment)
-	}
-
-	return stopFuncs
-}
-
-// Set deployment status to `DeploymentAvailable` to simulate a healthy deployment
-// This is necessary because envtest doesn't actually start pods
-func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient client.Client, deployment appsv1.Deployment) {
-	now := metav1.Now()
-	deployment.Status = appsv1.DeploymentStatus{
-		Replicas:            *deployment.Spec.Replicas,
-		UpdatedReplicas:     *deployment.Spec.Replicas,
-		ReadyReplicas:       *deployment.Spec.Replicas,
-		AvailableReplicas:   *deployment.Spec.Replicas,
-		UnavailableReplicas: 0,
-		Conditions: []appsv1.DeploymentCondition{
-			{
-				Type:               appsv1.DeploymentAvailable,
-				Status:             corev1.ConditionTrue,
-				LastUpdateTime:     now,
-				LastTransitionTime: now,
-				Reason:             "MinimumReplicasAvailable",
-				Message:            "Deployment has minimum availability.",
-			},
-			{
-				Type:               appsv1.DeploymentProgressing,
-				Status:             corev1.ConditionTrue,
-				LastUpdateTime:     now,
-				LastTransitionTime: now,
-				Reason:             "NewReplicaSetAvailable",
-				Message:            "ReplicaSet is available.",
-			},
-		},
-	}
-	t.Logf("started %d healthy workers, updating deployment status", *deployment.Spec.Replicas)
-	if err := k8sClient.Status().Update(ctx, &deployment); err != nil {
-		t.Fatalf("failed to update deployment status: %v", err)
-	}
 }
 
 // createTestNamespace creates a test namespace

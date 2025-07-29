@@ -218,10 +218,12 @@ func getTestWorkflows(
 ) []WorkflowConfig {
 	var testWorkflows []WorkflowConfig
 
-	// Skip if there's no gate workflow defined or if the target version is already the current
+	// Skip if there's no gate workflow defined, if the target version is already the current, or if the target
+	// version is not yet registered in temporal
 	if config.RolloutStrategy.Gate == nil ||
 		status.CurrentVersion == nil ||
-		status.CurrentVersion.VersionID == status.TargetVersion.VersionID {
+		status.CurrentVersion.VersionID == status.TargetVersion.VersionID ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
 		return nil
 	}
 
@@ -258,8 +260,9 @@ func getVersionConfigDiff(
 	strategy := config.RolloutStrategy
 	conflictToken := status.VersionConflictToken
 
-	// Do nothing if target version's deployment is not healthy yet
-	if status.TargetVersion.HealthySince == nil {
+	// Do nothing if target version's deployment is not healthy yet, or if the version is not yet registered in temporal
+	if status.TargetVersion.HealthySince == nil ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
 		return nil
 	}
 
