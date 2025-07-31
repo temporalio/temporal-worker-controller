@@ -24,8 +24,8 @@ const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel             = "temporal.io/build-id"
-	DeploymentNameSeparator  = "/" // TODO(carlydf): change this to "." once the server accepts `.` in deployment names
-	VersionIDSeparator       = "." // TODO(carlydf): change this to ":"
+	DeploymentNameSeparator  = "_"
+	VersionIDSeparator       = "."
 	K8sResourceNameSeparator = "-"
 	MaxBuildIdLen            = 63
 )
