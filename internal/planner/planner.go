@@ -21,6 +21,7 @@ type Plan struct {
 	// Which actions to take
 	DeleteDeployments      []*appsv1.Deployment
 	ScaleDeployments       map[*corev1.ObjectReference]uint32
+	UpdateDeployments      []*appsv1.Deployment
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
@@ -62,6 +63,7 @@ func GeneratePlan(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
 	temporalState *temporal.TemporalWorkerState,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
 	config *Config,
 ) (*Plan, error) {
 	plan := &Plan{
@@ -72,6 +74,7 @@ func GeneratePlan(
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, spec)
+	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, connection)
 
 	// Determine if we need to start any test workflows
 	plan.TestWorkflows = getTestWorkflows(status, config)
@@ -83,6 +86,56 @@ func GeneratePlan(
 	//                 but have no corresponding Deployment.
 
 	return plan, nil
+}
+
+// checkDeploymentForUpdate checks if a deployment needs to be updated based on connection spec hash changes
+func checkDeploymentForUpdate(
+	versionID string,
+	k8sState *k8s.DeploymentState,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[versionID]
+	if !exists {
+		return nil
+	}
+
+	// If the connection spec hash has changed, update the deployment
+	if k8s.ComputeConnectionSpecHash(connection) != existingDeployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
+		return existingDeployment
+	}
+
+	return nil
+}
+
+func getUpdateDeployments(
+	k8sState *k8s.DeploymentState,
+	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+) []*appsv1.Deployment {
+	var updateDeployments []*appsv1.Deployment
+
+	// Check target version deployment if it has an expired connection spec hash
+	if status.TargetVersion.VersionID != "" {
+		if deployment := checkDeploymentForUpdate(status.TargetVersion.VersionID, k8sState, connection); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+		}
+	}
+
+	// Check current version deployment if it has an expired connection spec hash
+	if status.CurrentVersion != nil && status.CurrentVersion.VersionID != "" {
+		if deployment := checkDeploymentForUpdate(status.CurrentVersion.VersionID, k8sState, connection); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+		}
+	}
+
+	// Check deprecated versions for expired connection spec hashes
+	for _, version := range status.DeprecatedVersions {
+		if deployment := checkDeploymentForUpdate(version.VersionID, k8sState, connection); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+		}
+	}
+
+	return updateDeployments
 }
 
 // getDeleteDeployments determines which deployments should be deleted

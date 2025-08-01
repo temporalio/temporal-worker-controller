@@ -6,6 +6,8 @@ package k8s
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"sort"
@@ -23,11 +25,12 @@ import (
 const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
-	BuildIDLabel             = "temporal.io/build-id"
-	DeploymentNameSeparator  = "/" // TODO(carlydf): change this to "." once the server accepts `.` in deployment names
-	VersionIDSeparator       = "." // TODO(carlydf): change this to ":"
-	K8sResourceNameSeparator = "-"
-	MaxBuildIdLen            = 63
+	BuildIDLabel                 = "temporal.io/build-id"
+	DeploymentNameSeparator      = "/" // TODO(carlydf): change this to "." once the server accepts `.` in deployment names
+	VersionIDSeparator           = "." // TODO(carlydf): change this to ":"
+	K8sResourceNameSeparator     = "-"
+	MaxBuildIdLen                = 63
+	ConnectionSpecHashAnnotation = "temporal.io/connection-spec-hash"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -254,6 +257,12 @@ func NewDeploymentWithOwnerRef(
 		})
 	}
 
+	// Build pod annotations
+	podAnnotations := make(map[string]string)
+	for k, v := range spec.Template.Annotations {
+		podAnnotations[k] = v
+	}
+	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
 	blockOwnerDeletion := true
 
 	return &appsv1.Deployment{
@@ -282,11 +291,26 @@ func NewDeploymentWithOwnerRef(
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      podLabels,
-					Annotations: spec.Template.Annotations,
+					Annotations: podAnnotations,
 				},
 				Spec: *podSpec,
 			},
 			MinReadySeconds: spec.MinReadySeconds,
 		},
 	}
+}
+
+func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionSpec) string {
+	// HostPort is required, but MutualTLSSecret can be empty for non-mTLS connections
+	if connection.HostPort == "" {
+		return ""
+	}
+
+	hasher := sha256.New()
+
+	// Hash connection spec fields in deterministic order
+	hasher.Write([]byte(connection.HostPort))
+	hasher.Write([]byte(connection.MutualTLSSecret))
+
+	return hex.EncodeToString(hasher.Sum(nil))
 }

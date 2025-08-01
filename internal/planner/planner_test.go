@@ -32,6 +32,7 @@ func TestGeneratePlan(t *testing.T) {
 		expectDelete            int
 		expectCreate            bool
 		expectScale             int
+		expectUpdate            int
 		expectWorkflow          int
 		expectConfig            bool
 		expectConfigSetCurrent  *bool    // pointer so we can test nil
@@ -57,12 +58,12 @@ func TestGeneratePlan(t *testing.T) {
 			name: "drained version gets deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(0),
-					"test/namespace.456": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(0),
+					"test/namespace.456": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 				DeploymentsByTime: []*appsv1.Deployment{
-					createDeploymentWithReplicas(0),
-					createDeploymentWithReplicas(1),
+					createDeploymentWithDefaultConnectionSpecHash(0),
+					createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -110,10 +111,10 @@ func TestGeneratePlan(t *testing.T) {
 			name: "deployment needs to be scaled",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 				DeploymentsByTime: []*appsv1.Deployment{
-					createDeploymentWithReplicas(1),
+					createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
@@ -148,12 +149,12 @@ func TestGeneratePlan(t *testing.T) {
 			name: "rollback scenario - target equals current but deprecated version is ramping",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(3),
-					"test/namespace.456": createDeploymentWithReplicas(3),
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(3),
+					"test/namespace.456": createDeploymentWithDefaultConnectionSpecHash(3),
 				},
 				DeploymentsByTime: []*appsv1.Deployment{
-					createDeploymentWithReplicas(3),
-					createDeploymentWithReplicas(3),
+					createDeploymentWithDefaultConnectionSpecHash(3),
+					createDeploymentWithDefaultConnectionSpecHash(3),
 				},
 				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.123": {Name: "test-123"},
@@ -235,6 +236,115 @@ func TestGeneratePlan(t *testing.T) {
 			},
 			expectCreate: false,
 		},
+		{
+			name: "update deployment when target version, with an existing deployment, has an expired connection spec hash",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.123": createDeploymentWithExpiredConnectionSpecHash(1),
+					"test/namespace.456": createDeploymentWithDefaultConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.123",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.456",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-456"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectUpdate: 1,
+		},
+		{
+			name: "update deployment when a deprecated version has an expired connection spec hash",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(1),
+					"test/namespace.456": createDeploymentWithDefaultConnectionSpecHash(1),
+					"test/namespace.789": createDeploymentWithExpiredConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.123",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.456",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-456"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							VersionID:  "test/namespace.789",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-789"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectUpdate: 1,
+		},
+		{
+			name: "update deployment when current version has an expired connection spec hash",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(1),
+					"test/namespace.456": createDeploymentWithExpiredConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.123",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						VersionID:  "test/namespace.456",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-456"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectUpdate: 1,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -242,12 +352,13 @@ func TestGeneratePlan(t *testing.T) {
 			if tc.status == nil {
 				tc.status = &temporaliov1alpha1.TemporalWorkerDeploymentStatus{}
 			}
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, tc.config)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
 			assert.Equal(t, tc.expectScale, len(plan.ScaleDeployments), "unexpected number of scales")
 			assert.Equal(t, tc.expectCreate, plan.ShouldCreateDeployment, "unexpected create flag")
+			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
 
@@ -277,7 +388,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "drained version should be deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(0),
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -309,7 +420,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "not yet drained long enough",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.456": createDeploymentWithReplicas(0),
+					"test/namespace.456": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -338,8 +449,8 @@ func TestGetDeleteDeployments(t *testing.T) {
 			name: "not registered version should be deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
-					"test/namespace.456": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(1),
+					"test/namespace.456": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -390,7 +501,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "current version needs scaling",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -418,8 +529,8 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "drained version needs scaling down",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.123": createDeploymentWithReplicas(1),
-					"test/namespace.456": createDeploymentWithReplicas(2),
+					"test/namespace.123": createDeploymentWithDefaultConnectionSpecHash(1),
+					"test/namespace.456": createDeploymentWithDefaultConnectionSpecHash(2),
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -455,7 +566,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "inactive version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(0),
+					"test/namespace.a": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.a": {Name: "test-a"},
@@ -488,7 +599,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "ramping version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.b": createDeploymentWithReplicas(0),
+					"test/namespace.b": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.b": {Name: "test-b"},
@@ -515,7 +626,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "target version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(0),
+					"test/namespace.a": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.a": {Name: "test-a"},
@@ -548,7 +659,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			name: "don't scale down drained deployment before delay",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.b": createDeploymentWithReplicas(3),
+					"test/namespace.b": createDeploymentWithDefaultConnectionSpecHash(3),
 				},
 				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"test/namespace.b": {Name: "test-b"},
@@ -1543,11 +1654,11 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			name: "multiple deprecated versions in different states",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(5),
-					"test/namespace.b": createDeploymentWithReplicas(3),
-					"test/namespace.c": createDeploymentWithReplicas(3),
-					"test/namespace.d": createDeploymentWithReplicas(1),
-					"test/namespace.e": createDeploymentWithReplicas(0),
+					"test/namespace.a": createDeploymentWithDefaultConnectionSpecHash(5),
+					"test/namespace.b": createDeploymentWithDefaultConnectionSpecHash(3),
+					"test/namespace.c": createDeploymentWithDefaultConnectionSpecHash(3),
+					"test/namespace.d": createDeploymentWithDefaultConnectionSpecHash(1),
+					"test/namespace.e": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 			},
 			config: &Config{
@@ -1613,7 +1724,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			name: "draining version not scaled down before delay",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"test/namespace.a": createDeploymentWithReplicas(3),
+					"test/namespace.a": createDeploymentWithDefaultConnectionSpecHash(3),
 				},
 			},
 			config: &Config{
@@ -1654,7 +1765,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, tc.config)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
@@ -1718,14 +1829,40 @@ func TestGetTestWorkflowID(t *testing.T) {
 	}
 }
 
-// Helper function to create a deployment with specified replicas
-func createDeploymentWithReplicas(replicas int32) *appsv1.Deployment {
+// Helper function to create a deployment with the specified replicas and the default connection spec hash
+func createDeploymentWithDefaultConnectionSpecHash(replicas int32) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-deployment",
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						k8s.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(createDefaultConnectionSpec()),
+					},
+				},
+			},
+		},
+	}
+}
+
+// Helper function to create a deployment with the specified replicas and with a non-default connection spec hash
+func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-deployment",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						k8s.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(createOutdatedConnectionSpec()),
+					},
+				},
+			},
 		},
 	}
 }
@@ -1743,4 +1880,28 @@ func rolloutStep(ramp float32, d time.Duration) temporaliov1alpha1.RolloutStep {
 		RampPercentage: ramp,
 		PauseDuration:  metav1Duration(d),
 	}
+}
+
+// Helper function to create a default TemporalConnectionSpec used for testing purposes
+func createDefaultConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
+	return temporaliov1alpha1.TemporalConnectionSpec{
+		HostPort:        defaultHostPort(),
+		MutualTLSSecret: defaultMutualTLSSecret(),
+	}
+}
+
+// Helper function to create a TemporalConnectionSpec with an outdated secret
+func createOutdatedConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
+	return temporaliov1alpha1.TemporalConnectionSpec{
+		HostPort:        defaultHostPort(),
+		MutualTLSSecret: "outdated-secret",
+	}
+}
+
+func defaultHostPort() string {
+	return "default-host:7233"
+}
+
+func defaultMutualTLSSecret() string {
+	return "default-secret"
 }
