@@ -309,8 +309,8 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 	hasher := sha256.New()
 
 	// Hash connection spec fields in deterministic order
-	hasher.Write([]byte(connection.HostPort))
-	hasher.Write([]byte(connection.MutualTLSSecret))
+	_, _ = hasher.Write([]byte(connection.HostPort))
+	_, _ = hasher.Write([]byte(connection.MutualTLSSecret))
 
 	return hex.EncodeToString(hasher.Sum(nil))
 }
