@@ -7,6 +7,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -80,7 +81,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 				Version:       vcfg.VersionID,
 				ConflictToken: vcfg.ConflictToken,
-				Identity:      ControllerIdentity,
+				Identity:      temporal.ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
@@ -95,7 +96,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				Version:       vcfg.VersionID,
 				Percentage:    vcfg.RampPercentage,
 				ConflictToken: vcfg.ConflictToken,
-				Identity:      ControllerIdentity,
+				Identity:      temporal.ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}
@@ -104,8 +105,9 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			Version: vcfg.VersionID,
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				UpsertEntries: map[string]interface{}{
-					controllerIdentityKey: getControllerIdentity(),
-					controllerVersionKey:  getControllerVersion(),
+					controllerIdentityKey:             getControllerIdentity(),
+					controllerVersionKey:              getControllerVersion(),
+					temporal.ManagedFieldsMetadataKey: p.managedFields,
 				},
 			},
 		}); err != nil { // would be cool to do this atomically with the update

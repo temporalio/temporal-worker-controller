@@ -3899,6 +3899,23 @@ spec:
                 type: array
               lastModifierIdentity:
                 type: string
+              managedFields:
+                items:
+                  properties:
+                    fieldsType:
+                      type: string
+                    manager:
+                      type: string
+                    v1:
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - fieldsType
+                  - manager
+                  - v1
+                  type: object
+                type: array
               targetVersion:
                 properties:
                   deployment:

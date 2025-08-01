@@ -6,8 +6,11 @@ package temporal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"go.temporal.io/api/common/v1"
+	"go.temporal.io/server/common/worker_versioning"
 	"strings"
 	"time"
 
@@ -16,6 +19,14 @@ import (
 	"go.temporal.io/api/serviceerror"
 	temporalClient "go.temporal.io/sdk/client"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// ControllerIdentity is the identity the controller passes to all write calls.
+const (
+	ControllerIdentity                             = "temporal-worker-controller"
+	ManagedFieldsMetadataKey                       = "managedFields"
+	ManagedFieldsManagerHandoverToWorkerController = "handover-to-worker-controller"
+	ManagedFieldsSchemaV1                          = "v1"
 )
 
 // VersionInfo contains information about a specific version
@@ -38,6 +49,7 @@ type TemporalWorkerState struct {
 	RampLastModifiedAt   *metav1.Time
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
+	ManagedFields        []*temporaliov1alpha1.ManagedField
 }
 
 // GetWorkerDeploymentState queries Temporal to get the state of a worker deployment
@@ -74,6 +86,35 @@ func GetWorkerDeploymentState(
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
 	state.VersionConflictToken = resp.ConflictToken
+
+	// TODO(carlydf): Get state.ManagedFields from Worker Deployment Metadata when available
+	if state.LastModifierIdentity != ControllerIdentity && state.LastModifierIdentity != "" {
+		var versionMetadata map[string]*common.Payload
+		if cv := workerDeploymentInfo.RoutingConfig.CurrentVersion; cv != worker_versioning.UnversionedVersionId {
+			currentResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+				Version: cv,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("unable to describe worker deployment version %s: %w", cv, err)
+			}
+			versionMetadata = currentResp.Info.Metadata
+		} else if rv := workerDeploymentInfo.RoutingConfig.CurrentVersion; rv != worker_versioning.UnversionedVersionId {
+			rampingResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+				Version: cv,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("unable to describe worker deployment version %s: %w", cv, err)
+			}
+			versionMetadata = rampingResp.Info.Metadata
+		}
+		if versionMetadata != nil {
+			if managedFieldsMetadata, ok := versionMetadata[ManagedFieldsMetadataKey]; ok {
+				if err := json.Unmarshal(managedFieldsMetadata.GetData(), &state.ManagedFields); err != nil {
+					return nil, fmt.Errorf("unable to unmarshal %s metadata: %w", ManagedFieldsMetadataKey, err)
+				}
+			}
+		}
+	}
 
 	// TODO(jlegrone): Re-enable stats once available in versioning v3.
 

@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -32,6 +33,10 @@ type plan struct {
 
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
+
+	// If not-empty, set managedFields metadata to this.
+	// managedFields is a JSON string of []*temporaliov1alpha1.ManagedField
+	managedFields string
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -74,9 +79,25 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Check if we need to force manual strategy due to external modification
 	rolloutStrategy := w.Spec.RolloutStrategy
-	if w.Status.LastModifierIdentity != ControllerIdentity && w.Status.LastModifierIdentity != "" {
-		l.Info("Forcing manual rollout strategy since deployment was modified externally")
-		rolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
+	var handoverRoutingConfig bool
+	if w.Status.LastModifierIdentity != temporal.ControllerIdentity && w.Status.LastModifierIdentity != "" {
+		l.Info(fmt.Sprintf("Detected that deployment %v was modified externally by %v", w.Name, w.Status.LastModifierIdentity))
+		for _, mf := range w.Status.ManagedFields {
+			if mf.Manager == temporal.ManagedFieldsManagerHandoverToWorkerController {
+				switch mf.FieldsType {
+				case temporal.ManagedFieldsSchemaV1:
+					for _, f := range mf.V1 {
+						if f == temporaliov1alpha1.RoutingConfigV1 {
+							handoverRoutingConfig = true
+						}
+					}
+				}
+			}
+		}
+		if !handoverRoutingConfig {
+			l.Info("Forcing manual rollout strategy since deployment was modified externally")
+			rolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
+		}
 	}
 
 	// Generate the plan using the planner package
@@ -123,6 +144,20 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		plan.CreateDeployment = d
 	}
 
+	// Clear the handover field manager from the metadata, because it's been used
+	if handoverRoutingConfig {
+		var newManagedFields []*temporaliov1alpha1.ManagedField
+		for _, mf := range w.Status.ManagedFields {
+			if mf.Manager != temporal.ManagedFieldsManagerHandoverToWorkerController {
+				newManagedFields = append(newManagedFields, mf)
+			}
+		}
+		plan.managedFields, err = getManagedFieldsJSON(newManagedFields)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return plan, nil
 }
 
@@ -133,4 +168,15 @@ func (r *TemporalWorkerDeploymentReconciler) newDeployment(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*appsv1.Deployment, error) {
 	return k8s.NewDeploymentWithControllerRef(w, buildID, connection, r.Scheme)
+}
+
+func getManagedFieldsJSON(managedFields []*temporaliov1alpha1.ManagedField) (string, error) {
+	if managedFields == nil {
+		return "", nil
+	}
+	jsonBytes, err := json.Marshal(managedFields)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal managed fields: %w", err)
+	}
+	return string(jsonBytes), nil
 }

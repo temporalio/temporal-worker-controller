@@ -141,7 +141,28 @@ type TemporalWorkerDeploymentStatus struct {
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional
 	VersionCount int32 `json:"versionCount,omitempty"`
+
+	// ManagedField indicates a manager for different fields of a TemporalWorkerDeployment.
+	ManagedFields []*ManagedField `json:"managedFields,omitempty"`
 }
+
+// ManagedField indicates a manager for different fields of a TemporalWorkerDeployment.
+type ManagedField struct {
+	// Manager indicates who is allowed to manage the fields.
+	// The value 'handover-to-worker-controller' tells the controller it is allowed to manage fields.
+	// Once the controller has taken control, it will erase this value since the handover is complete.
+	Manager string `json:"manager"`
+	// FieldsType indicates the schema used to describe the fields.
+	// 'v1' is the only valid value.
+	FieldsType string `json:"fieldsType"`
+	// V1 lists the fields managed by this manager, in the v1 schema.
+	V1 []V1Field `json:"v1"`
+}
+
+// V1Field is the name of a field that can have a manager in the v1 schema.
+type V1Field string
+
+const RoutingConfigV1 V1Field = "routingConfig"
 
 // WorkflowExecutionStatus describes the current state of a workflow.
 // +enum
