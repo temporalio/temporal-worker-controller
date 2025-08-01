@@ -15,7 +15,6 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -133,16 +132,5 @@ func (r *TemporalWorkerDeploymentReconciler) newDeployment(
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*appsv1.Deployment, error) {
-	d := k8s.NewDeploymentWithOwnerRef(
-		&w.TypeMeta,
-		&w.ObjectMeta,
-		&w.Spec,
-		k8s.ComputeWorkerDeploymentName(w),
-		buildID,
-		connection,
-	)
-	if err := ctrl.SetControllerReference(w, d, r.Scheme); err != nil {
-		return nil, err
-	}
-	return d, nil
+	return k8s.NewDeploymentWithControllerRef(w, buildID, connection, r.Scheme)
 }
