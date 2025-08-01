@@ -1,7 +1,8 @@
-package internal
+package testhelpers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,11 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	corev1 "k8s.io/api/core/v1"
+)
+
+const (
+	successTestWorkflowType = "successTestWorkflow"
+	failTestWorkflowType    = "failTestWorkflow"
 )
 
 func getEnv(podTemplateSpec corev1.PodTemplateSpec, key string) (string, error) {
@@ -90,8 +96,8 @@ func newClient(ctx context.Context, hostPort, namespace string) (client.Client, 
 	return c, nil
 }
 
-// callback is a function that can be called multiple times.
-func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec, callback func(stopFunc func(), err error)) {
+// RunHelloWorldWorker runs one worker per replica in the pod spec. callback is a function that can be called multiple times.
+func RunHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec, callback func(stopFunc func(), err error)) {
 	w, stopFunc, err := newVersionedWorker(ctx, podTemplateSpec)
 	defer func() {
 		callback(stopFunc, err)
@@ -100,38 +106,11 @@ func runHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplate
 		return
 	}
 
-	getSubject := func(ctx context.Context) (string, error) {
-		return "World10", nil
-	}
-
-	sleep := func(ctx context.Context, seconds uint) error {
-		time.Sleep(time.Duration(seconds) * time.Second)
-		return nil
-	}
-
-	helloWorld := func(ctx workflow.Context) (string, error) {
-		workflow.GetLogger(ctx).Info("HelloWorld workflow started")
-		ctx = setActivityTimeout(ctx, 5*time.Minute)
-
-		// Compute a subject
-		var subject string
-		if err := workflow.ExecuteActivity(ctx, getSubject).Get(ctx, &subject); err != nil {
-			return "", err
-		}
-
-		// Sleep for a while
-		if err := workflow.ExecuteActivity(ctx, sleep, 60).Get(ctx, nil); err != nil {
-			return "", err
-		}
-
-		// Return the greeting
-		return fmt.Sprintf("Hello %s", subject), nil
-	}
-
 	// Register activities and workflows
-	w.RegisterWorkflow(helloWorld)
-	w.RegisterActivity(getSubject)
-	w.RegisterActivity(sleep)
+	w.RegisterWorkflowWithOptions(successTestWorkflow, workflow.RegisterOptions{Name: successTestWorkflowType})
+	w.RegisterWorkflowWithOptions(failTestWorkflow, workflow.RegisterOptions{Name: failTestWorkflowType})
+	w.RegisterActivity(getSubjectTestActivity)
+	w.RegisterActivity(sleepTestActivity)
 
 	// Start the worker in a separate goroutine so that the stopFunc can be passed back to the caller via callback
 	go func() {
@@ -146,4 +125,51 @@ func setActivityTimeout(ctx workflow.Context, d time.Duration) workflow.Context 
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		ScheduleToCloseTimeout: d,
 	})
+}
+
+func successTestWorkflow(ctx workflow.Context) (string, error) {
+	workflow.GetLogger(ctx).Info("HelloWorld(success) workflow started")
+	ctx = setActivityTimeout(ctx, 5*time.Minute)
+
+	// Compute a subject
+	var subject string
+	if err := workflow.ExecuteActivity(ctx, getSubjectTestActivity).Get(ctx, &subject); err != nil {
+		return "", err
+	}
+
+	// Sleep for a while
+	if err := workflow.ExecuteActivity(ctx, sleepTestActivity, 5).Get(ctx, nil); err != nil {
+		return "", err
+	}
+
+	// Return the greeting
+	return fmt.Sprintf("Hello %s", subject), nil
+}
+
+func failTestWorkflow(ctx workflow.Context) (string, error) {
+	workflow.GetLogger(ctx).Info("HelloWorld(fail) workflow started")
+	ctx = setActivityTimeout(ctx, 5*time.Minute)
+
+	// Compute a subject
+	var subject string
+	if err := workflow.ExecuteActivity(ctx, getSubjectTestActivity).Get(ctx, &subject); err != nil {
+		return "", err
+	}
+
+	// Sleep for a while
+	if err := workflow.ExecuteActivity(ctx, sleepTestActivity, 5).Get(ctx, nil); err != nil {
+		return "", err
+	}
+
+	// Return the greeting
+	return "", errors.New("this is a manufactured error to make the test fail")
+}
+
+func sleepTestActivity(ctx context.Context, seconds uint) error {
+	time.Sleep(time.Duration(seconds) * time.Second)
+	return nil
+}
+
+func getSubjectTestActivity(ctx context.Context) (string, error) {
+	return "World10", nil
 }

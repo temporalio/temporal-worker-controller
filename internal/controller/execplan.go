@@ -67,11 +67,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
 	for _, wf := range p.startTestWorkflows {
-		err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, wf.versionID)
-		if err != nil {
-			return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
-		}
-		if _, err = temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
+		if _, err := temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
 			WorkflowExecutionTimeout: time.Hour,
@@ -89,13 +85,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Register current version or ramps
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.SetCurrent {
-			err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.VersionID)
-			if err != nil {
-				return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
-			}
-
 			l.Info("registering new current version", "version", vcfg.VersionID)
-
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 				Version:       vcfg.VersionID,
 				ConflictToken: vcfg.ConflictToken,
@@ -104,13 +94,6 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
 		} else {
-			if vcfg.VersionID != "" {
-				err := awaitVersionRegistration(ctx, l, deploymentHandler, p.TemporalNamespace, vcfg.VersionID)
-				if err != nil {
-					return fmt.Errorf("error waiting for version to register, did your pollers start successfully?: %w", err)
-				}
-			}
-
 			if vcfg.RampPercentage > 0 {
 				l.Info("applying ramp", "version", vcfg.VersionID, "percentage", vcfg.RampPercentage)
 			} else {

@@ -47,6 +47,16 @@ func (b *TemporalWorkerDeploymentBuilder) WithProgressiveStrategy(steps ...tempo
 	return b
 }
 
+// WithGate sets the rollout strategy have a gate workflow
+func (b *TemporalWorkerDeploymentBuilder) WithGate(expectSuccess bool) *TemporalWorkerDeploymentBuilder {
+	if expectSuccess {
+		b.twd.Spec.RolloutStrategy.Gate = &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: successTestWorkflowType}
+	} else {
+		b.twd.Spec.RolloutStrategy.Gate = &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: failTestWorkflowType}
+	}
+	return b
+}
+
 // WithReplicas sets the number of replicas
 func (b *TemporalWorkerDeploymentBuilder) WithReplicas(replicas int32) *TemporalWorkerDeploymentBuilder {
 	b.twd.Spec.Replicas = &replicas
@@ -157,17 +167,18 @@ func (sb *StatusBuilder) WithNamespace(k8sNamespace string) *StatusBuilder {
 }
 
 // WithCurrentVersion sets the current version in the status
-func (sb *StatusBuilder) WithCurrentVersion(imageName string, hasDeployment, createPoller bool) *StatusBuilder {
+func (sb *StatusBuilder) WithCurrentVersion(imageName string, healthy, createDeployment bool) *StatusBuilder {
 	sb.currentVersionBuilder = func(name string, namespace string) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
-		return MakeCurrentVersion(namespace, name, imageName, hasDeployment, createPoller)
+		return MakeCurrentVersion(namespace, name, imageName, healthy, createDeployment)
 	}
 	return sb
 }
 
-// WithTargetVersion sets the target version in the status
-func (sb *StatusBuilder) WithTargetVersion(imageName string, rampPercentage float32, hasDeployment bool, createPoller bool) *StatusBuilder {
+// WithTargetVersion sets the target version in the status.
+// Target Version is required.
+func (sb *StatusBuilder) WithTargetVersion(imageName string, rampPercentage float32, healthy bool, createDeployment bool) *StatusBuilder {
 	sb.targetVersionBuilder = func(name string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
-		return MakeTargetVersion(namespace, name, imageName, rampPercentage, hasDeployment, createPoller)
+		return MakeTargetVersion(namespace, name, imageName, rampPercentage, healthy, createDeployment)
 	}
 	return sb
 }
@@ -198,6 +209,8 @@ type TestCase struct {
 	deprecatedBuildReplicas map[string]int32
 	deprecatedBuildImages   map[string]string
 	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+	// Time to delay before checking expected status
+	waitTime *time.Duration
 }
 
 func (tc *TestCase) GetTWD() *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -216,6 +229,10 @@ func (tc *TestCase) GetExpectedStatus() *temporaliov1alpha1.TemporalWorkerDeploy
 	return tc.expectedStatus
 }
 
+func (tc *TestCase) GetWaitTime() *time.Duration {
+	return tc.waitTime
+}
+
 // TestCaseBuilder provides a fluent interface for building test cases
 type TestCaseBuilder struct {
 	name              string
@@ -225,6 +242,7 @@ type TestCaseBuilder struct {
 	twdBuilder             *TemporalWorkerDeploymentBuilder
 	expectedStatusBuilder  *StatusBuilder
 	deprecatedVersionInfos []DeprecatedVersionInfo
+	waitTime               *time.Duration
 }
 
 // NewTestCase creates a new test case builder
@@ -252,6 +270,13 @@ func NewTestCaseWithValues(name, k8sNamespace, temporalNamespace string) *TestCa
 // WithInput sets the input TWD
 func (tcb *TestCaseBuilder) WithInput(twdBuilder *TemporalWorkerDeploymentBuilder) *TestCaseBuilder {
 	tcb.twdBuilder = twdBuilder
+	return tcb
+}
+
+// WithWaitTime sets the wait time. Use this if you are expecting no change to the initial status and want to ensure
+// that after some time, there is still no change.
+func (tcb *TestCaseBuilder) WithWaitTime(waitTime time.Duration) *TestCaseBuilder {
+	tcb.waitTime = &waitTime
 	return tcb
 }
 
@@ -284,6 +309,7 @@ func (tcb *TestCaseBuilder) WithExpectedStatus(statusBuilder *StatusBuilder) *Te
 // Build returns the constructed test case
 func (tcb *TestCaseBuilder) Build() TestCase {
 	ret := TestCase{
+		waitTime: tcb.waitTime,
 		twd: tcb.twdBuilder.
 			WithName(tcb.name).
 			WithNamespace(tcb.k8sNamespace).
