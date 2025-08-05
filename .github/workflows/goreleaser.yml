@@ -54,7 +54,7 @@ jobs:
         uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
         with:
           version: v2.11.2
-          args: release --config .goreleaser.latest.yml
+          args: release --config .goreleaser.latest.yml --snapshot --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
