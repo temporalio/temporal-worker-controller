@@ -1,0 +1,74 @@
+version: 2
+
+before:
+  hooks:
+    - go mod download
+
+announce:
+  skip: true
+
+changelog:
+  disable: true
+
+release:
+  disable: true
+
+builds:
+  - id: nix
+    dir: cmd
+    binary: temporal-worker-controller
+    ldflags:
+      - -s -w -X github.com/temporalio/temporal-worker-controller/internal/controller.Version={{.Version}}
+    goarch:
+      - amd64
+      - arm64
+    goos:
+      - linux
+    env:
+      - CGO_ENABLED=0
+
+checksum:
+  disable: true
+
+# Only build Docker images with 'latest' tag
+dockers:
+  - image_templates:
+      - "ghcr.io/robholland/temporal-worker-controller:latest-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - --platform=linux/amd64
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.description=Temporal Worker Controller for Kubernetes
+      - --label=org.opencontainers.image.url=https://github.com/robholland/temporal-worker-controller
+      - --label=org.opencontainers.image.source=https://github.com/robholland/temporal-worker-controller
+      - --label=org.opencontainers.image.version=latest
+      - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses=MIT
+    extra_files:
+      - LICENSE
+
+  - image_templates:
+      - "ghcr.io/robholland/temporal-worker-controller:latest-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - --platform=linux/arm64
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.description=Temporal Worker Controller for Kubernetes
+      - --label=org.opencontainers.image.url=https://github.com/robholland/temporal-worker-controller
+      - --label=org.opencontainers.image.source=https://github.com/robholland/temporal-worker-controller
+      - --label=org.opencontainers.image.version=latest
+      - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses=MIT
+    extra_files:
+      - LICENSE
+
+# Create latest manifest
+docker_manifests:
+  - name_template: "ghcr.io/robholland/temporal-worker-controller:latest"
+    image_templates:
+      - "ghcr.io/robholland/temporal-worker-controller:latest-amd64"
+      - "ghcr.io/robholland/temporal-worker-controller:latest-arm64"

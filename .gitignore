@@ -1,6 +1,7 @@
 .idea
 
 bin
+dist
 
 secret.env
 certs
