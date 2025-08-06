@@ -1,10 +1,6 @@
-name: goreleaser
+name: release
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - rh-releases
   release:
     types:
       - published
@@ -14,7 +10,7 @@ permissions:
   packages: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,32 +34,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Full release on tagged releases
-      - name: Run GoReleaser (Release)
-        if: github.event_name == 'release'
+      - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
         with:
           version: v2.11.2
           args: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Latest-only build on main branch pushes
-      - name: Run GoReleaser (Latest)
-        if: github.event_name == 'push'
-        uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
-        with:
-          version: v2.11.2
-          args: release --config .goreleaser.latest.yml --snapshot --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Manual workflow dispatch - snapshot build for testing
-      - name: Run GoReleaser (Manual)
-        if: github.event_name == 'workflow_dispatch'
-        uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
-        with:
-          version: v2.11.2
-          args: release --snapshot --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

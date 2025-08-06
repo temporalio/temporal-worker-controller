@@ -33,15 +33,15 @@ checksum:
 # Only build Docker images with 'latest' tag
 dockers:
   - image_templates:
-      - "ghcr.io/robholland/temporal-worker-controller:latest-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | default \"temporalio\" }}/temporal-worker-controller:latest-amd64"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     build_flag_templates:
       - --platform=linux/amd64
       - --label=org.opencontainers.image.title={{ .ProjectName }}
       - --label=org.opencontainers.image.description=Temporal Worker Controller for Kubernetes
-      - --label=org.opencontainers.image.url=https://github.com/robholland/temporal-worker-controller
-      - --label=org.opencontainers.image.source=https://github.com/robholland/temporal-worker-controller
+      - --label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_REPOSITORY | default "temporalio/temporal-worker-controller" }}
+      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY | default "temporalio/temporal-worker-controller" }}
       - --label=org.opencontainers.image.version=latest
       - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
       - --label=org.opencontainers.image.revision={{ .FullCommit }}
@@ -50,15 +50,15 @@ dockers:
       - LICENSE
 
   - image_templates:
-      - "ghcr.io/robholland/temporal-worker-controller:latest-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | default \"temporalio\" }}/temporal-worker-controller:latest-arm64"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     build_flag_templates:
       - --platform=linux/arm64
       - --label=org.opencontainers.image.title={{ .ProjectName }}
       - --label=org.opencontainers.image.description=Temporal Worker Controller for Kubernetes
-      - --label=org.opencontainers.image.url=https://github.com/robholland/temporal-worker-controller
-      - --label=org.opencontainers.image.source=https://github.com/robholland/temporal-worker-controller
+      - --label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_REPOSITORY | default "temporalio/temporal-worker-controller" }}
+      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY | default "temporalio/temporal-worker-controller" }}
       - --label=org.opencontainers.image.version=latest
       - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
       - --label=org.opencontainers.image.revision={{ .FullCommit }}
@@ -66,9 +66,8 @@ dockers:
     extra_files:
       - LICENSE
 
-# Create latest manifest
 docker_manifests:
-  - name_template: "ghcr.io/robholland/temporal-worker-controller:latest"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | default \"temporalio\" }}/temporal-worker-controller:latest"
     image_templates:
-      - "ghcr.io/robholland/temporal-worker-controller:latest-amd64"
-      - "ghcr.io/robholland/temporal-worker-controller:latest-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | default \"temporalio\" }}/temporal-worker-controller:latest-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | default \"temporalio\" }}/temporal-worker-controller:latest-arm64"
