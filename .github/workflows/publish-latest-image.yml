@@ -43,10 +43,10 @@ jobs:
 
       - name: Push snapshot images
         run: |
-          docker push ghcr.io/${GITHUB_REPOSITORY}:latest-amd64
-          docker push ghcr.io/${GITHUB_REPOSITORY}:latest-arm64
+          docker push "ghcr.io/${GITHUB_REPOSITORY}:latest-amd64"
+          docker push "ghcr.io/${GITHUB_REPOSITORY}:latest-arm64"
       
       - name: Create and push manifest for :latest tag
         run: |
-          docker manifest create ghcr.io/${GITHUB_REPOSITORY}:latest ghcr.io/${GITHUB_REPOSITORY}:latest-{amd64,arm64}
-          docker manifest push ghcr.io/${GITHUB_REPOSITORY}:latest
+          docker manifest create "ghcr.io/${GITHUB_REPOSITORY}:latest" "ghcr.io/${GITHUB_REPOSITORY}:latest-amd64" "ghcr.io/${GITHUB_REPOSITORY}:latest-arm64"
+          docker manifest push "ghcr.io/${GITHUB_REPOSITORY}:latest"
