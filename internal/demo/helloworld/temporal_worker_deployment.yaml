@@ -1,7 +1,7 @@
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
-  name: secret-update-propagation-1
+  name: helloworld
   labels:
     app.kubernetes.io/name: hello-world-worker
     app.kubernetes.io/instance: demo
