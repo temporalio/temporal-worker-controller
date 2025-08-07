@@ -79,6 +79,9 @@ minikube kubectl -- get pods -n temporal-worker-controller -w
 # Describe the controller pod's status
 minikube kubectl -- describe pod <pod-name> -n temporal-worker-controller
 
+# Output the controller pod's logs
+minikube kubectl -- logs -n temporal-system -f pod/<pod-name>
+
 # View TemporalWorkerDeployment status
 kubectl get twd
 ```

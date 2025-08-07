@@ -451,3 +451,109 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 	assert.Equal(t, expectedVersionID, versionID)
 	assert.Equal(t, "hello-world"+k8s.DeploymentNameSeparator+"demo"+k8s.VersionIDSeparator+"v1-0-0-dd84", versionID)
 }
+
+// TestNewDeploymentWithPodAnnotations tests that every new pod created has a connection spec hash annotation
+func TestNewDeploymentWithPodAnnotations(t *testing.T) {
+	connection := temporaliov1alpha1.TemporalConnectionSpec{
+		HostPort:        "localhost:7233",
+		MutualTLSSecret: "my-secret",
+	}
+
+	deployment := k8s.NewDeploymentWithOwnerRef(
+		&metav1.TypeMeta{},
+		&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		&temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+		"test-deployment",
+		"build123",
+		connection,
+	)
+
+	expectedHash := k8s.ComputeConnectionSpecHash(connection)
+	actualHash := deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation]
+
+	assert.Equal(t, expectedHash, actualHash, "Deployment should have correct connection spec hash annotation")
+}
+
+func TestComputeConnectionSpecHash(t *testing.T) {
+	t.Run("generates non-empty hash for valid connection spec", func(t *testing.T) {
+		spec := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "my-tls-secret",
+		}
+
+		result := k8s.ComputeConnectionSpecHash(spec)
+		assert.NotEmpty(t, result, "Hash should not be empty for valid spec")
+		assert.Len(t, result, 64, "SHA256 hash should be 64 characters") // hex encoded SHA256
+	})
+
+	t.Run("returns empty hash when hostport is empty", func(t *testing.T) {
+		spec := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "",
+			MutualTLSSecret: "secret",
+		}
+
+		result := k8s.ComputeConnectionSpecHash(spec)
+		assert.Empty(t, result, "Hash should be empty when hostport is empty")
+	})
+
+	t.Run("is deterministic - same input produces same hash", func(t *testing.T) {
+		spec := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "my-secret",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec)
+		hash2 := k8s.ComputeConnectionSpecHash(spec)
+
+		assert.Equal(t, hash1, hash2, "Same input should produce identical hashes")
+	})
+
+	t.Run("different hostports produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "same-secret",
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "different-host:7233",
+			MutualTLSSecret: "same-secret",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different hostports should produce different hashes")
+	})
+
+	t.Run("different mTLS secrets produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "secret1",
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "secret2",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different mTLS secrets should produce different hashes")
+	})
+
+	t.Run("empty mTLS secret vs non-empty produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "",
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "some-secret",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty mTLS secret should produce different hashes")
+		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty mTLS secret")
+	})
+}

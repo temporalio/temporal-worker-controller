@@ -54,6 +54,15 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
+	// Update deployments
+	for _, d := range p.UpdateDeployments {
+		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
+		if err := r.Update(ctx, d); err != nil {
+			l.Error(err, "unable to update deployment", "deployment", d)
+			return fmt.Errorf("unable to update deployment: %w", err)
+		}
+	}
+
 	// Get deployment handler
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
