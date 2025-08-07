@@ -113,8 +113,9 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// Get or update temporal client for connection
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
-		HostPort:  temporalConnection.Spec.HostPort,
-		Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		HostPort:        temporalConnection.Spec.HostPort,
+		Namespace:       workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		MutualTLSSecret: temporalConnection.Spec.MutualTLSSecret,
 	}, temporalConnection.Spec.MutualTLSSecret != "")
 	if !ok {
 		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{

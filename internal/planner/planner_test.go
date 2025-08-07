@@ -1829,6 +1829,185 @@ func TestGetTestWorkflowID(t *testing.T) {
 	}
 }
 
+func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
+	tests := []struct {
+		name                 string
+		versionID            string
+		existingDeployment   *appsv1.Deployment
+		newConnection        temporaliov1alpha1.TemporalConnectionSpec
+		expectUpdate         bool
+		expectSecretName     string
+		expectHostPortEnv    string
+		expectConnectionHash string
+	}{
+		{
+			name:               "non-existing deployment does not result in an update",
+			versionID:          "non-existent-version",
+			existingDeployment: nil,
+			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "new-host:7233",
+				MutualTLSSecret: "new-secret",
+			},
+			expectUpdate: false,
+		},
+		{
+			name:      "same connection spec hash does not update the existing deployment",
+			versionID: "test-version",
+			existingDeployment: createTestDeploymentWithConnection(
+				"test-version",
+				temporaliov1alpha1.TemporalConnectionSpec{
+					HostPort:        defaultHostPort(),
+					MutualTLSSecret: defaultMutualTLSSecret(),
+				},
+			),
+			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        defaultHostPort(),
+				MutualTLSSecret: defaultMutualTLSSecret(),
+			},
+			expectUpdate: false,
+		},
+		{
+			name:      "different secret name triggers update",
+			versionID: "test-version",
+			existingDeployment: createTestDeploymentWithConnection(
+				"test-version",
+				temporaliov1alpha1.TemporalConnectionSpec{
+					HostPort:        defaultHostPort(),
+					MutualTLSSecret: defaultMutualTLSSecret(),
+				},
+			),
+			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        defaultHostPort(),
+				MutualTLSSecret: "new-secret",
+			},
+			expectUpdate:      true,
+			expectSecretName:  "new-secret",
+			expectHostPortEnv: defaultHostPort(),
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        defaultHostPort(),
+				MutualTLSSecret: "new-secret",
+			}),
+		},
+		{
+			name:      "different host port triggers update",
+			versionID: "test-version",
+			existingDeployment: createTestDeploymentWithConnection(
+				"test-version",
+				temporaliov1alpha1.TemporalConnectionSpec{
+					HostPort:        defaultHostPort(),
+					MutualTLSSecret: defaultMutualTLSSecret(),
+				},
+			),
+			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "new-host:7233",
+				MutualTLSSecret: defaultMutualTLSSecret(),
+			},
+			expectUpdate:      true,
+			expectSecretName:  defaultMutualTLSSecret(),
+			expectHostPortEnv: "new-host:7233",
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "new-host:7233",
+				MutualTLSSecret: defaultMutualTLSSecret(),
+			}),
+		},
+		{
+			name:      "both hostport and secret change triggers update",
+			versionID: "test-version",
+			existingDeployment: createTestDeploymentWithConnection(
+				"test-version",
+				temporaliov1alpha1.TemporalConnectionSpec{
+					HostPort:        defaultHostPort(),
+					MutualTLSSecret: defaultMutualTLSSecret(),
+				},
+			),
+			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "new-host:7233",
+				MutualTLSSecret: "new-secret",
+			},
+			expectUpdate:      true,
+			expectSecretName:  "new-secret",
+			expectHostPortEnv: "new-host:7233",
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "new-host:7233",
+				MutualTLSSecret: "new-secret",
+			}),
+		},
+		{
+			name:      "empty mutual tls secret updates correctly",
+			versionID: "test-version",
+			existingDeployment: createTestDeploymentWithConnection(
+				"test-version",
+				temporaliov1alpha1.TemporalConnectionSpec{
+					HostPort:        defaultHostPort(),
+					MutualTLSSecret: defaultMutualTLSSecret(),
+				},
+			),
+			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        defaultHostPort(),
+				MutualTLSSecret: "",
+			},
+			expectUpdate:      true,
+			expectSecretName:  "", // Should not update secret volume when empty
+			expectHostPortEnv: defaultHostPort(),
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        defaultHostPort(),
+				MutualTLSSecret: "",
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sState := &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{},
+			}
+
+			if tt.existingDeployment != nil {
+				k8sState.Deployments[tt.versionID] = tt.existingDeployment
+			}
+
+			result := checkAndUpdateDeploymentConnectionSpec(tt.versionID, k8sState, tt.newConnection)
+
+			if !tt.expectUpdate {
+				assert.Nil(t, result, "Expected no update, but got deployment")
+				return
+			}
+
+			require.NotNil(t, result, "Expected deployment update, but got nil")
+
+			// Check that the connection hash annotation was updated
+			actualHash := result.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation]
+			assert.Equal(t, tt.expectConnectionHash, actualHash, "Connection spec hash should be updated")
+
+			// Check secret volume update (only if mTLS secret is not empty)
+			if tt.newConnection.MutualTLSSecret != "" {
+				found := false
+				for _, volume := range result.Spec.Template.Spec.Volumes {
+					if volume.Name == "temporal-tls" && volume.Secret != nil {
+						assert.Equal(t, tt.expectSecretName, volume.Secret.SecretName, "Secret name should be updated")
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "Should find temporal-tls volume with updated secret")
+			}
+
+			// Check environment variable update
+			found := false
+			for _, container := range result.Spec.Template.Spec.Containers {
+				for _, env := range container.Env {
+					if env.Name == "TEMPORAL_HOST_PORT" {
+						assert.Equal(t, tt.expectHostPortEnv, env.Value, "TEMPORAL_HOST_PORT should be updated")
+						found = true
+						break
+					}
+				}
+			}
+			assert.True(t, found, "Should find TEMPORAL_HOST_PORT environment variable")
+		})
+	}
+}
+
 // Helper function to create a deployment with the specified replicas and the default connection spec hash
 func createDeploymentWithDefaultConnectionSpecHash(replicas int32) *appsv1.Deployment {
 	return &appsv1.Deployment{
@@ -1904,4 +2083,35 @@ func defaultHostPort() string {
 
 func defaultMutualTLSSecret() string {
 	return "default-secret"
+}
+
+// createDefaultWorkerSpec creates a default TemporalWorkerDeploymentSpec for testing
+func createDefaultWorkerSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
+	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+		Template: corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "worker",
+						Image: "test-image:latest",
+					},
+				},
+			},
+		},
+		WorkerOptions: temporaliov1alpha1.WorkerOptions{
+			TemporalNamespace: "test-namespace",
+		},
+	}
+}
+
+// createTestDeploymentWithConnection creates a test deployment with the specified connection spec
+func createTestDeploymentWithConnection(versionID string, connection temporaliov1alpha1.TemporalConnectionSpec) *appsv1.Deployment {
+	return k8s.NewDeploymentWithOwnerRef(
+		&metav1.TypeMeta{},
+		&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+		createDefaultWorkerSpec(),
+		versionID,
+		"build123",
+		connection,
+	)
 }

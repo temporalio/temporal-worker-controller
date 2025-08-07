@@ -88,8 +88,8 @@ func GeneratePlan(
 	return plan, nil
 }
 
-// checkDeploymentForUpdate checks if a deployment needs to be updated based on connection spec hash changes
-func checkDeploymentForUpdate(
+// checkAndUpdateDeploymentConnectionSpec checks if a deployment needs to be updated. This is true if the connection spec it's using is outdated.
+func checkAndUpdateDeploymentConnectionSpec(
 	versionID string,
 	k8sState *k8s.DeploymentState,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
@@ -100,11 +100,40 @@ func checkDeploymentForUpdate(
 	}
 
 	// If the connection spec hash has changed, update the deployment
-	if k8s.ComputeConnectionSpecHash(connection) != existingDeployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
-		return existingDeployment
+	currentHash := k8s.ComputeConnectionSpecHash(connection)
+	if currentHash != existingDeployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
+
+		// Update the deployment in-place with new connection info
+		updateDeploymentWithConnection(existingDeployment, connection)
+		return existingDeployment // Return the modified deployment
 	}
 
 	return nil
+}
+
+// updateDeploymentWithConnection updates an existing deployment with new TemporalConnectionSpec
+func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection temporaliov1alpha1.TemporalConnectionSpec) {
+	// Update the connection spec hash annotation
+	deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
+
+	// Update secret volume if mTLS is enabled
+	if connection.MutualTLSSecret != "" {
+		for i, volume := range deployment.Spec.Template.Spec.Volumes {
+			if volume.Name == "temporal-tls" && volume.Secret != nil {
+				deployment.Spec.Template.Spec.Volumes[i].Secret.SecretName = connection.MutualTLSSecret
+				break
+			}
+		}
+	}
+
+	// Update any environment variables that reference the connection
+	for i, container := range deployment.Spec.Template.Spec.Containers {
+		for j, env := range container.Env {
+			if env.Name == "TEMPORAL_HOST_PORT" {
+				deployment.Spec.Template.Spec.Containers[i].Env[j].Value = connection.HostPort
+			}
+		}
+	}
 }
 
 func getUpdateDeployments(
@@ -116,21 +145,21 @@ func getUpdateDeployments(
 
 	// Check target version deployment if it has an expired connection spec hash
 	if status.TargetVersion.VersionID != "" {
-		if deployment := checkDeploymentForUpdate(status.TargetVersion.VersionID, k8sState, connection); deployment != nil {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.VersionID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 		}
 	}
 
 	// Check current version deployment if it has an expired connection spec hash
 	if status.CurrentVersion != nil && status.CurrentVersion.VersionID != "" {
-		if deployment := checkDeploymentForUpdate(status.CurrentVersion.VersionID, k8sState, connection); deployment != nil {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.VersionID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 		}
 	}
 
 	// Check deprecated versions for expired connection spec hashes
 	for _, version := range status.DeprecatedVersions {
-		if deployment := checkDeploymentForUpdate(version.VersionID, k8sState, connection); deployment != nil {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(version.VersionID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 		}
 	}
