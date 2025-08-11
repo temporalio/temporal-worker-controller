@@ -14,6 +14,9 @@ This documentation structure is designed to support various types of technical d
 ### [Limits](limits.md)
 Technical constraints and limitations of the Temporal Worker Controller system, including maximum field lengths and other operational boundaries.
 
+### [Patching](patching.md)
+How to deploy a patch build and move workflows to it without making it the Current/Ramping version of your Worker Deployment.
+
 ---
 
 *Note: This documentation structure is designed to grow with the project.*
