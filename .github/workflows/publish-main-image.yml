@@ -1,4 +1,4 @@
-name: publish-test-image
+name: publish-main-image
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 jobs:
-  publish-test-image:
+  publish-main-image:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
