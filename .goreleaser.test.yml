@@ -36,7 +36,7 @@ checksum:
 # Only build Docker images with 'latest' tag
 dockers:
   - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
+      - "temporaliotest/temporal-worker-controller:latest-amd64"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     build_flag_templates:
@@ -53,7 +53,7 @@ dockers:
       - LICENSE
 
   - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
+      - "temporaliotest/temporal-worker-controller:latest-arm64"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     build_flag_templates:
@@ -70,7 +70,7 @@ dockers:
       - LICENSE
 
 docker_manifests:
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest"
+  - name_template: "temporaliotest/temporal-worker-controller:latest"
     image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
+      - "temporaliotest/temporal-worker-controller:latest-amd64"
+      - "temporaliotest/temporal-worker-controller:latest-arm64"
