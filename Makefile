@@ -162,16 +162,18 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 .PHONY: start-sample-workflow
 start-sample-workflow: ## Start a sample workflow.
 	@$(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world" \
-      --tls-cert-path certs/client.pem \
-      --tls-key-path certs/client.key \
-      --address "worker-controller-test.a2dd6.tmprl.cloud:7233" \
-      -n "worker-controller-test.a2dd6"
-#      --address replay-2025.ktasd.tmprl.cloud:7233 \
-#      --api-key $(TEMPORAL_CLOUD_API_KEY)
+      --tls-cert-path /Users/cdf/democerts/ca.pem \
+      --tls-key-path /Users/cdf/democerts/ca.key \
+      --address "worker-controller-demo.a2dd6.tmprl.cloud:7233" \
+      -n "worker-controller-demo.a2dd6"
 
 .PHONY: apply-load-sample-workflow
 apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
-	watch --interval 0.1 -- $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world"
+	watch --interval 0.1 -- $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world" \
+      --tls-cert-path /Users/cdf/democerts/ca.pem \
+      --tls-key-path /Users/cdf/democerts/ca.key \
+      --address "worker-controller-demo.a2dd6.tmprl.cloud:7233" \
+      -n "worker-controller-demo.a2dd6"
 
 .PHONY: list-workflow-build-ids
 list-workflow-build-ids: ## List workflow executions and their build IDs.

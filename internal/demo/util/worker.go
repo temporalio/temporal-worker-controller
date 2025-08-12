@@ -9,12 +9,6 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/worker"
-	"go.temporal.io/sdk/workflow"
-)
-
-const (
-	// VersionIDSeparator is used to separate the deployment name from the build ID in version strings
-	VersionIDSeparator = "."
 )
 
 func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) {
@@ -31,13 +25,17 @@ func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) 
 		}
 	}()
 
-	opts.DeploymentOptions = worker.DeploymentOptions{
-		UseVersioning:             true,
-		Version:                   mustGetEnv("TEMPORAL_DEPLOYMENT_NAME") + VersionIDSeparator + mustGetEnv("WORKER_BUILD_ID"),
-		DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
-	}
+	//opts.DeploymentOptions = worker.DeploymentOptions{
+	//	UseVersioning: true,
+	//	Version: worker.WorkerDeploymentVersion{
+	//		DeploymentName: mustGetEnv("TEMPORAL_DEPLOYMENT_NAME"),
+	//		BuildId:        mustGetEnv("WORKER_BUILD_ID"),
+	//	},
+	//	DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
+	//}
 
-	c, stopClient := NewClient(mustGetEnv("WORKER_BUILD_ID"))
+	//c, stopClient := NewClient(mustGetEnv("WORKER_BUILD_ID"))
+	c, stopClient := NewClient("")
 
 	w = worker.New(c, temporalTaskQueue, opts)
 

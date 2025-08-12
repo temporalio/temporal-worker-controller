@@ -38,18 +38,6 @@ spec:
     metadata:
       annotations:
         force-new-version: ""
-        ad.datadoghq.com/main.checks: |
-          {
-            "openmetrics": {
-              "init_config": {},
-              "instances": [
-                {
-                  "openmetrics_endpoint": "http://%%host%%:9090/metrics",
-                  "metrics": [".*"]
-                }
-              ]
-            }
-          }
     spec:
       containers:
         - name: main
