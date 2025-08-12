@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.temporal.io/server/common/worker_versioning"
 	"strings"
 	"time"
 
@@ -69,8 +70,14 @@ func GetWorkerDeploymentState(
 	routingConfig := workerDeploymentInfo.RoutingConfig
 
 	// Set basic information
-	state.CurrentVersionID = routingConfig.CurrentVersion
-	state.RampingVersionID = routingConfig.RampingVersion
+	state.CurrentVersionID = worker_versioning.UnversionedVersionId
+	if routingConfig.CurrentVersion != nil {
+		state.CurrentVersionID = routingConfig.CurrentVersion.DeploymentName + "." + routingConfig.CurrentVersion.BuildId
+	}
+	state.RampingVersionID = worker_versioning.UnversionedVersionId
+	if routingConfig.RampingVersion != nil {
+		state.RampingVersionID = routingConfig.RampingVersion.DeploymentName + "." + routingConfig.RampingVersion.BuildId
+	}
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
 	state.VersionConflictToken = resp.ConflictToken
@@ -78,7 +85,7 @@ func GetWorkerDeploymentState(
 	// TODO(jlegrone): Re-enable stats once available in versioning v3.
 
 	// Set ramping since time if applicable
-	if routingConfig.RampingVersion != "" {
+	if routingConfig.RampingVersion != nil {
 		var (
 			rampingSinceTime   = metav1.NewTime(routingConfig.RampingVersionChangedTime)
 			lastRampUpdateTime = metav1.NewTime(routingConfig.RampingVersionPercentageChangedTime)
@@ -90,14 +97,14 @@ func GetWorkerDeploymentState(
 	// Process each version
 	for _, version := range workerDeploymentInfo.VersionSummaries {
 		versionInfo := &VersionInfo{
-			VersionID: version.Version,
+			VersionID: version.Version.DeploymentName + "." + version.Version.BuildId,
 		}
 
 		// Determine version status
 		drainageStatus := version.DrainageStatus
-		if version.Version == routingConfig.CurrentVersion {
+		if routingConfig.CurrentVersion != nil && version.Version.BuildId == routingConfig.CurrentVersion.BuildId {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusCurrent
-		} else if version.Version == routingConfig.RampingVersion {
+		} else if routingConfig.RampingVersion != nil && version.Version.BuildId == routingConfig.RampingVersion.BuildId {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusRamping
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDraining {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
@@ -106,7 +113,7 @@ func GetWorkerDeploymentState(
 
 			// Get drain time information
 			versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-				Version: version.Version,
+				BuildID: version.Version.BuildId,
 			})
 			if err == nil {
 				drainedSince := versionResp.Info.DrainageInfo.LastChangedTime
@@ -116,7 +123,7 @@ func GetWorkerDeploymentState(
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
 		}
 
-		state.Versions[version.Version] = versionInfo
+		state.Versions[version.Version.DeploymentName+"."+version.Version.BuildId] = versionInfo
 	}
 
 	return state, nil
@@ -136,9 +143,10 @@ func GetTestWorkflowStatus(
 	// Get deployment handler
 	deploymentHandler := client.WorkerDeploymentClient().GetHandle(workerDeploymentName)
 
+	_, buildID, _ := strings.Cut(versionID, ".")
 	// Describe the version to get task queue information
 	versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-		Version: versionID,
+		BuildID: buildID,
 	})
 
 	var notFound *serviceerror.NotFound

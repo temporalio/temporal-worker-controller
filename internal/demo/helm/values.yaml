@@ -1,9 +1,8 @@
 image:
   repository: helloworld
-  tag: v0.2.0 # versioned worker with DeploymentOptions
+  tag: v0.1.0 # versioned worker with DeploymentOptions
 
-temporal:
-  namespace: worker-controller-demo.a2dd6
-  taskQueue: hello_world
-  mTLSSecret: temporal-cloud-mtls
+replicas: 4
 
+versioning:
+  enabled: false

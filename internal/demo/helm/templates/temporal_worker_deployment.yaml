@@ -1,15 +1,15 @@
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
-  name: worker
+  name: helloworld
   namespace: staging
   labels:
-    app: worker
+    app: helloworld
 spec:
   # Configuration for connecting to Temporal
   workerOptions:
     connection: cloud-demo
-    temporalNamespace: "{{ .Values.temporal.namespace }}"
+    temporalNamespace: worker-controller-demo.a2dd6
 
   # How to roll out new workflow executions to the latest worker version
   rollout:
@@ -20,28 +20,28 @@ spec:
       - rampPercentage: 50
         pauseDuration: 1m
     gate:
-      workflowType: "HelloWorld"
+      workflowType: HelloWorld
   sunset:
     scaledownDelay: 30s
     deleteDelay: 1m
-  replicas: 4
+  replicas: {{ .Values.replicas }}
   template:
     metadata:
       labels:
-        app: worker
+        app: helloworld
     spec:
       containers:
-        - name: worker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        - name: helloworld
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
           imagePullPolicy: IfNotPresent
           env:
             - name: TEMPORAL_TASK_QUEUE
-              value: "{{ .Values.temporal.taskQueue }}"
+              value: hello_world
 ---
 apiVersion: temporal.io/v1alpha1
 kind: TemporalConnection
 metadata:
   name: cloud-demo
 spec:
-  hostPort: "{{ .Values.temporal.namespace }}.tmprl.cloud:7233"
-  mutualTLSSecret: "{{ .Values.temporal.mTLSSecret }}"
+  hostPort: worker-controller-demo.a2dd6.tmprl.cloud:7233
+  mutualTLSSecret: temporal-cloud-mtls

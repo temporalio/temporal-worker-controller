@@ -17,12 +17,12 @@ import (
 	"go.temporal.io/sdk/interceptor"
 )
 
-func NewClient(buildID string) (c client.Client, stopFunc func()) {
-	return newClient(temporalHostPort, temporalNamespace, buildID, tlsKeyFilePath, tlsCertFilePath)
+func NewClient() (c client.Client, stopFunc func()) {
+	return newClient(temporalHostPort, temporalNamespace, tlsKeyFilePath, tlsCertFilePath)
 }
 
-func newClient(hostPort, namespace, buildID, tlsKeyFile, tlsCertFile string) (c client.Client, stopFunc func()) {
-	l, stopFunc := configureObservability(buildID)
+func newClient(hostPort, namespace, tlsKeyFile, tlsCertFile string) (c client.Client, stopFunc func()) {
+	l, stopFunc := configureObservability()
 
 	promScope, err := newPrometheusScope(l, prometheus.Configuration{
 		ListenAddress: "0.0.0.0:9090",

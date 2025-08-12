@@ -57,6 +57,17 @@ func TestIntegration(t *testing.T) {
 					WithTargetVersion("v1", -1, true, false).
 					WithCurrentVersion("v1", true, false),
 			),
+		"progressive-rollout-all-at-once-override": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+					WithVersion("v1"),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", -1, true, true).
+					WithCurrentVersion("v1", true, true),
+			),
 		"progressive-rollout-expect-first-step": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
