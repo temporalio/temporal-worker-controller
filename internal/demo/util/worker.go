@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 )
 
 func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) {
@@ -25,17 +26,16 @@ func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) 
 		}
 	}()
 
-	//opts.DeploymentOptions = worker.DeploymentOptions{
-	//	UseVersioning: true,
-	//	Version: worker.WorkerDeploymentVersion{
-	//		DeploymentName: mustGetEnv("TEMPORAL_DEPLOYMENT_NAME"),
-	//		BuildId:        mustGetEnv("WORKER_BUILD_ID"),
-	//	},
-	//	DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
-	//}
+	opts.DeploymentOptions = worker.DeploymentOptions{
+		UseVersioning: true,
+		Version: worker.WorkerDeploymentVersion{
+			DeploymentName: mustGetEnv("TEMPORAL_DEPLOYMENT_NAME"),
+			BuildId:        mustGetEnv("WORKER_BUILD_ID"),
+		},
+		DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
+	}
 
-	//c, stopClient := NewClient(mustGetEnv("WORKER_BUILD_ID"))
-	c, stopClient := NewClient("")
+	c, stopClient := NewClient(mustGetEnv("WORKER_BUILD_ID"))
 
 	w = worker.New(c, temporalTaskQueue, opts)
 
