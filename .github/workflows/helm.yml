@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -64,7 +64,7 @@ jobs:
           sed -i "s/version: $CURRENT_VERSION/version: $NEW_VERSION/g" helm/temporal-worker-controller/Chart.yaml
 
           # Set output variable for use in later steps
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
           # Commit the change
           git add helm/temporal-worker-controller/Chart.yaml
