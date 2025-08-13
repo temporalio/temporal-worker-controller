@@ -30,7 +30,7 @@ jobs:
         with:
           token: ${{ steps.generate_token.outputs.token }}
           fetch-depth: 0
-          
+
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
