@@ -88,7 +88,10 @@ func GeneratePlan(
 	return plan, nil
 }
 
-// checkAndUpdateDeploymentConnectionSpec checks if a deployment needs to be updated. This is true if the connection spec it's using is outdated.
+// checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given versionID is
+// out-of-date with respect to the provided TemporalConnectionSpec. If an update is required, it mutates
+// the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
+// the Deployment does not exist, it returns nil.
 func checkAndUpdateDeploymentConnectionSpec(
 	versionID string,
 	k8sState *k8s.DeploymentState,

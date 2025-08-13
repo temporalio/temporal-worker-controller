@@ -226,19 +226,19 @@ func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context
 	var requests []reconcile.Request
 
 	// Find all TWDs in same namespace that reference this TC
-	var workers temporaliov1alpha1.TemporalWorkerDeploymentList
-	if err := r.List(ctx, &workers, client.InNamespace(tc.GetNamespace())); err != nil {
+	var twds temporaliov1alpha1.TemporalWorkerDeploymentList
+	if err := r.List(ctx, &twds, client.InNamespace(tc.GetNamespace())); err != nil {
 		return requests
 	}
 
 	// Filter to ones using this connection
-	for _, worker := range workers.Items {
-		if worker.Spec.WorkerOptions.TemporalConnection == tc.GetName() {
-			// Add the TWD object as a reconcile request
+	for _, twd := range twds.Items {
+		if twd.Spec.WorkerOptions.TemporalConnection == tc.GetName() {
+			// Enqueue a reconcile request for this TWD
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      worker.Name,
-					Namespace: worker.Namespace,
+					Name:      twd.Name,
+					Namespace: twd.Namespace,
 				},
 			})
 		}

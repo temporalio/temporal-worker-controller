@@ -24,7 +24,7 @@ import (
 type ClientPoolKey struct {
 	HostPort        string
 	Namespace       string
-	MutualTLSSecret string // Include secret name in key to invalidate cache when the secret name itself changes
+	MutualTLSSecret string // Include secret name in key to invalidate cache when the secret name changes
 }
 
 type ClientInfo struct {
