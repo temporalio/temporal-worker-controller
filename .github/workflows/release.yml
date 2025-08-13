@@ -48,6 +48,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Configure Git
@@ -88,7 +89,7 @@ jobs:
 
           # Update Chart.yaml with new version and appVersion
           sed -i "s/version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller/Chart.yaml
-          sed -i "s/appVersion: .*/appVersion: $GITHUB_REF_NAME/" helm/temporal-worker-controller/Chart.yaml
+          sed -i "s/appVersion: .*/appVersion: ${GITHUB_REF_NAME#v}/" helm/temporal-worker-controller/Chart.yaml
 
           # Set output variable for use in later steps
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
