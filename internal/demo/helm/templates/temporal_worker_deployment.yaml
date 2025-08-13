@@ -29,6 +29,8 @@ spec:
     metadata:
       labels:
         app: helloworld
+      annotations:
+        force-new-version: "1"
     spec:
       containers:
         - name: helloworld

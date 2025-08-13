@@ -56,6 +56,8 @@ variables:
 - `TEMPORAL_DEPLOYMENT_NAME`: The name of the worker deployment. This must be unique to the worker deployment and should not
   change between versions.
 - `WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
+- `TEMPORAL_TLS_KEY_PATH`: The path of the mTLS key, if an mTLS Secret is set on the `TemporalWorkerDeployment`'s `TemporalConnection`
+- `TEMPORAL_TLS_CERT_PATH`: The path of the mTLS certificate, if an mTLS Secret is set on the `TemporalWorkerDeployment`'s `TemporalConnection`
 
 Each of these will be automatically set by the controller, and must not be manually specified in the worker's pod template.
 
