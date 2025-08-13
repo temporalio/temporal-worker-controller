@@ -47,7 +47,7 @@ spec:
         {{- end }}
       containers:
       - name: manager
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /manager
@@ -55,7 +55,7 @@ spec:
         - name: CONTROLLER_IDENTITY
           value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
         - name: CONTROLLER_VERSION
-          value: "{{ .Values.image.tag }}"
+          value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}

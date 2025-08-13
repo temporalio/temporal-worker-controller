@@ -1,48 +1,20 @@
-name: release
+name: Package and Publish Helm Chart
 
 on:
-  release:
-    types:
-      - published
-
-permissions:
-  contents: write
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Type of version bump to perform'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
-        with:
-          go-version-file: "go.mod"
-          check-latest: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PAT}}
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
-        with:
-          version: v2.11.2
-          args: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  helm:
-    needs: release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -60,14 +32,7 @@ jobs:
         with:
           version: v3.12.0
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PAT}}
-
-      - name: Bump Helm Chart Version
+      - name: Bump Chart Version
         id: bump_version
         run: |
           # Get current version from Chart.yaml
@@ -80,15 +45,23 @@ jobs:
           MINOR=${VERSION_PARTS[1]}
           PATCH=${VERSION_PARTS[2]}
 
-          MINOR=$((MINOR + 1))
-          PATCH=0
+          # Increment version based on input
+          if [[ "${{ inputs.version_bump }}" == "major" ]]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [[ "${{ inputs.version_bump }}" == "minor" ]]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
 
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           echo "New version: $NEW_VERSION"
 
-          # Update Chart.yaml with new version and appVersion
-          sed -i "s/version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller/Chart.yaml
-          sed -i "s/appVersion: .*/appVersion: $GITHUB_REF_NAME/" helm/temporal-worker-controller/Chart.yaml
+          # Update Chart.yaml with new version
+          sed -i "s/version: $CURRENT_VERSION/version: $NEW_VERSION/g" helm/temporal-worker-controller/Chart.yaml
 
           # Set output variable for use in later steps
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
@@ -97,6 +70,13 @@ jobs:
           git add helm/temporal-worker-controller/Chart.yaml
           git commit -m "Bump chart version to $NEW_VERSION [skip ci]"
           git push
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PAT}}
 
       - name: Package and Push Helm chart
         run: |
