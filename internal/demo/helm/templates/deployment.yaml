@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helloworld
+  namespace: staging
+  labels:
+    app: helloworld
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: helloworld
+  template:
+    metadata:
+      labels:
+        app: helloworld
+    spec:
+      containers:
+        - name: helloworld
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TEMPORAL_TASK_QUEUE
+              value: hello_world
+            - name: TEMPORAL_NAMESPACE
+              value: worker-controller-demo.a2dd6
+            - name: TEMPORAL_HOST_PORT
+              value: worker-controller-demo.a2dd6.tmprl.cloud:7233
+            - name: TEMPORAL_TLS_KEY_PATH
+              value: /etc/temporal/tls/tls.key
+            - name: TEMPORAL_TLS_CERT_PATH
+              value: /etc/temporal/tls/tls.crt
+          volumeMounts:
+            - mountPath: /etc/temporal/tls
+              name: temporal-tls
+              readOnly: true
+      volumes:
+        - name: temporal-tls
+          secret:
+            secretName: temporal-cloud-mtls
+            defaultMode: 420

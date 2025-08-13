@@ -7,12 +7,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"go.temporal.io/sdk/worker"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/workflow"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,15 +59,18 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
 	for _, wf := range p.startTestWorkflows {
+		deploymentName, buildID, _ := strings.Cut(wf.versionID, ".")
 		if _, err := temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
 			WorkflowExecutionTimeout: time.Hour,
 			WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 			WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
-			VersioningOverride: sdkclient.VersioningOverride{
-				Behavior:      workflow.VersioningBehaviorPinned,
-				PinnedVersion: wf.versionID,
+			VersioningOverride: &sdkclient.PinnedVersioningOverride{
+				Version: worker.WorkerDeploymentVersion{
+					DeploymentName: deploymentName,
+					BuildId:        buildID,
+				},
 			},
 		}, wf.workflowType); err != nil {
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
@@ -75,10 +79,12 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 
 	// Register current version or ramps
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
+		deploymentName, buildID, _ := strings.Cut(vcfg.VersionID, ".")
+
 		if vcfg.SetCurrent {
 			l.Info("registering new current version", "version", vcfg.VersionID)
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-				Version:       vcfg.VersionID,
+				BuildID:       buildID,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
 			}); err != nil {
@@ -92,7 +98,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}
 
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-				Version:       vcfg.VersionID,
+				BuildID:       buildID,
 				Percentage:    vcfg.RampPercentage,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
@@ -100,16 +106,21 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}
 		}
-		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-			Version: vcfg.VersionID,
-			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
-				UpsertEntries: map[string]interface{}{
-					controllerIdentityKey: getControllerIdentity(),
-					controllerVersionKey:  getControllerVersion(),
+		if buildID != "" {
+			if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
+				Version: worker.WorkerDeploymentVersion{
+					DeploymentName: deploymentName,
+					BuildId:        buildID,
 				},
-			},
-		}); err != nil { // would be cool to do this atomically with the update
-			return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
+				MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
+					UpsertEntries: map[string]interface{}{
+						controllerIdentityKey: getControllerIdentity(),
+						controllerVersionKey:  getControllerVersion(),
+					},
+				},
+			}); err != nil { // would be cool to do this atomically with the update
+				return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
+			}
 		}
 	}
 

@@ -1,0 +1,8 @@
+image:
+  repository: helloworld
+  tag: v0.1.0 # versioned worker with DeploymentOptions
+
+replicas: 4
+
+versioning:
+  enabled: false

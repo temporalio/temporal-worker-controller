@@ -1,6 +1,6 @@
 image:
   repository: temporal-worker-controller
-  tag: latest
+  tag: carly-demo
   pullPolicy: IfNotPresent
 
 podAnnotations: {}

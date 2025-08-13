@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -53,8 +52,11 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 
 	opts := worker.Options{
 		DeploymentOptions: worker.DeploymentOptions{
-			UseVersioning:             true,
-			Version:                   temporalDeploymentName + k8s.VersionIDSeparator + workerBuildId,
+			UseVersioning: true,
+			Version: worker.WorkerDeploymentVersion{
+				DeploymentName: temporalDeploymentName,
+				BuildId:        workerBuildId,
+			},
 			DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 		},
 	}
