@@ -1,5 +1,5 @@
 image:
-  repository: temporal-worker-controller
+  repository: temporalio/temporal-worker-controller
   tag: "" # Defaults to Chart.appVersion if not specified
   pullPolicy: IfNotPresent
 
