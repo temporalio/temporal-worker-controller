@@ -12,7 +12,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-    
+
       - name: Generate token
         id: generate_token
         uses: actions/create-github-app-token@v2
@@ -119,6 +119,6 @@ jobs:
           helm package ./helm/temporal-worker-controller
 
           # Push to Docker Hub
-          helm push temporal-worker-controller-${VERSION}.tgz oci://docker.io/temporalio/helm-charts
+          helm push temporal-worker-controller-${VERSION}.tgz oci://docker.io/temporalio
 
-          echo "✅ Chart pushed successfully to oci://docker.io/temporalio/helm-charts/temporal-worker-controller:${VERSION}"
+          echo "✅ Chart pushed successfully to oci://docker.io/temporalio/temporal-worker-controller:${VERSION}"
