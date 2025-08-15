@@ -21,7 +21,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 var (
@@ -58,7 +60,6 @@ type TemporalWorkerDeploymentReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
-// TODO(carlydf): Add watching of temporal connection custom resource (may have issue)
 func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// TODO(Shivam): Monitor if the time taken for a successful reconciliation loop is closing in on 5 minutes. If so, we
 	// may need to increase the timeout value.
@@ -112,8 +113,9 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// Get or update temporal client for connection
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
-		HostPort:  temporalConnection.Spec.HostPort,
-		Namespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		HostPort:        temporalConnection.Spec.HostPort,
+		Namespace:       workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		MutualTLSSecret: temporalConnection.Spec.MutualTLSSecret,
 	}, temporalConnection.Spec.MutualTLSSecret != "")
 	if !ok {
 		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
@@ -212,9 +214,35 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
+		Watches(&temporaliov1alpha1.TemporalConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 			RecoverPanic:            &recoverPanic,
 		}).
 		Complete(r)
+}
+
+func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {
+	var requests []reconcile.Request
+
+	// Find all TWDs in same namespace that reference this TC
+	var twds temporaliov1alpha1.TemporalWorkerDeploymentList
+	if err := r.List(ctx, &twds, client.InNamespace(tc.GetNamespace())); err != nil {
+		return requests
+	}
+
+	// Filter to ones using this connection
+	for _, twd := range twds.Items {
+		if twd.Spec.WorkerOptions.TemporalConnection == tc.GetName() {
+			// Enqueue a reconcile request for this TWD
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      twd.Name,
+					Namespace: twd.Namespace,
+				},
+			})
+		}
+	}
+
+	return requests
 }

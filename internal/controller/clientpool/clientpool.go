@@ -22,8 +22,9 @@ import (
 )
 
 type ClientPoolKey struct {
-	HostPort  string
-	Namespace string
+	HostPort        string
+	Namespace       string
+	MutualTLSSecret string // Include secret name in key to invalidate cache when the secret name changes
 }
 
 type ClientInfo struct {
@@ -142,8 +143,9 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 	defer cp.mux.Unlock()
 
 	key := ClientPoolKey{
-		HostPort:  opts.Spec.HostPort,
-		Namespace: opts.TemporalNamespace,
+		HostPort:        opts.Spec.HostPort,
+		Namespace:       opts.TemporalNamespace,
+		MutualTLSSecret: opts.Spec.MutualTLSSecret,
 	}
 	cp.clients[key] = ClientInfo{
 		client:     c,
