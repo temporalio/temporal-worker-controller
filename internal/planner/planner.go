@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"go.temporal.io/server/common/worker_versioning"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -375,7 +376,7 @@ func getVersionConfigDiff(
 	}
 
 	// If there is no current version, set the target version as the current version
-	if status.CurrentVersion == nil {
+	if status.CurrentVersion.VersionID == worker_versioning.UnversionedVersionId {
 		vcfg.SetCurrent = true
 		return vcfg
 	}

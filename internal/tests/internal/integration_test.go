@@ -57,6 +57,27 @@ func TestIntegration(t *testing.T) {
 					WithTargetVersion("v1", -1, true, false).
 					WithCurrentVersion("v1", true, false),
 			),
+		"progressive-rollout-no-unversioned-pollers-expect-all-at-once": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+					WithVersion("v1"),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", -1, true, false).
+					WithCurrentVersion("v1", true, false),
+			),
+		//"progressive-rollout-yes-unversioned-pollers-expect-first-step": testhelpers.NewTestCase().
+		//	WithInput(
+		//		testhelpers.NewTemporalWorkerDeploymentBuilder().
+		//			WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+		//			WithVersion("v1"),
+		//	).
+		//	WithExpectedStatus(
+		//		testhelpers.NewStatusBuilder().
+		//			WithTargetVersion("v1", 5, true, true),
+		//	),
 		"progressive-rollout-expect-first-step": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
