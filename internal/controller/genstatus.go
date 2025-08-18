@@ -29,7 +29,6 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 ) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
 	targetBuildID := k8s.ComputeBuildID(workerDeploy)
-	targetVersionID := k8s.ComputeVersionID(workerDeploy)
 
 	// Fetch Kubernetes deployment state
 	k8sState, err := k8s.GetDeploymentState(
@@ -49,7 +48,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 			ctx,
 			temporalClient,
 			workerDeploymentName,
-			targetVersionID,
+			targetBuildID,
 			workerDeploy,
 			temporalState,
 		)
@@ -59,7 +58,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 		}
 
 		// Add test workflow status to version info if it doesn't exist
-		if versionInfo, exists := temporalState.Versions[targetVersionID]; exists {
+		if versionInfo, exists := temporalState.Versions[targetBuildID]; exists {
 			versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, testWorkflows...)
 		}
 	}
