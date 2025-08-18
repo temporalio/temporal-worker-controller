@@ -132,7 +132,6 @@ func GetWorkerDeploymentState(
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
 		}
 
-		// Index by build ID instead of version ID
 		state.Versions[version.Version.BuildId] = versionInfo
 	}
 
