@@ -110,18 +110,11 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
-		// Extract deployment name and build ID from version ID
-		deploymentName, buildID, err := k8s.SplitVersionID(wf.VersionID)
-		if err != nil {
-			l.Error(err, "unable to split version ID for test workflow", "versionID", wf.VersionID)
-			continue
-		}
-
 		plan.startTestWorkflows = append(plan.startTestWorkflows, startWorkflowConfig{
 			workflowType:   wf.WorkflowType,
 			workflowID:     wf.WorkflowID,
-			deploymentName: deploymentName,
-			buildID:        buildID,
+			deploymentName: wf.DeploymentName,
+			buildID:        wf.BuildID,
 			taskQueue:      wf.TaskQueue,
 		})
 	}

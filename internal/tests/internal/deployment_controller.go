@@ -151,9 +151,11 @@ func createStatus(
 	rampPercentage *float32,
 ) (workerStopFuncs []func()) {
 	if prevVersion.Deployment != nil && prevVersion.Deployment.FieldPath == "create" {
-		// Construct version ID from deployment name and build ID
-		versionID := k8s.ComputeWorkerDeploymentName(newTWD) + k8s.VersionIDSeparator + prevVersion.BuildID
-		v := getVersion(t, versionID)
+		deploymentName := k8s.ComputeWorkerDeploymentName(newTWD)
+		v := &deployment.WorkerDeploymentVersion{
+			DeploymentName: deploymentName,
+			BuildId:        prevVersion.BuildID,
+		}
 		prevTWD := recreateTWD(newTWD, env.images[v.BuildId], env.replicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
@@ -180,18 +182,6 @@ func createStatus(
 	}
 
 	return workerStopFuncs
-}
-
-// Helper to handle unlikely error caused by invalid string split.
-func getVersion(t *testing.T, versionId string) *deployment.WorkerDeploymentVersion {
-	deploymentName, buildId, err := k8s.SplitVersionID(versionId)
-	if err != nil {
-		t.Error(err)
-	}
-	return &deployment.WorkerDeploymentVersion{
-		DeploymentName: deploymentName,
-		BuildId:        buildId,
-	}
 }
 
 // recreateTWD returns a copy of the given TWD, but replaces the build-id-generating image name with the given one,

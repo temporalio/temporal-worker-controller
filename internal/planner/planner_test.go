@@ -1832,7 +1832,7 @@ func TestGetTestWorkflowID(t *testing.T) {
 func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 	tests := []struct {
 		name                 string
-		versionID            string
+		buildID              string
 		existingDeployment   *appsv1.Deployment
 		newConnection        temporaliov1alpha1.TemporalConnectionSpec
 		expectUpdate         bool
@@ -1842,7 +1842,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 	}{
 		{
 			name:               "non-existing deployment does not result in an update",
-			versionID:          "test-worker.non-existent",
+			buildID:            "non-existent",
 			existingDeployment: nil,
 			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
 				HostPort:        "new-host:7233",
@@ -1851,8 +1851,8 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			expectUpdate: false,
 		},
 		{
-			name:      "same connection spec hash does not update the existing deployment",
-			versionID: "test-worker.v1",
+			name:    "same connection spec hash does not update the existing deployment",
+			buildID: "v1",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker.v1",
 				temporaliov1alpha1.TemporalConnectionSpec{
@@ -1867,8 +1867,8 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			expectUpdate: false,
 		},
 		{
-			name:      "different secret name triggers update",
-			versionID: "test-worker.v2",
+			name:    "different secret name triggers update",
+			buildID: "v2",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker.v2",
 				temporaliov1alpha1.TemporalConnectionSpec{
@@ -1889,8 +1889,8 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			}),
 		},
 		{
-			name:      "different host port triggers update",
-			versionID: "test-worker.v3",
+			name:    "different host port triggers update",
+			buildID: "v3",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker.v3",
 				temporaliov1alpha1.TemporalConnectionSpec{
@@ -1911,8 +1911,8 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			}),
 		},
 		{
-			name:      "both hostport and secret change triggers update",
-			versionID: "test-worker.v4",
+			name:    "both hostport and secret change triggers update",
+			buildID: "v4",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker.v4",
 				temporaliov1alpha1.TemporalConnectionSpec{
@@ -1933,8 +1933,8 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			}),
 		},
 		{
-			name:      "empty mutual tls secret updates correctly",
-			versionID: "test-worker.v5",
+			name:    "empty mutual tls secret updates correctly",
+			buildID: "v5",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker.v5",
 				temporaliov1alpha1.TemporalConnectionSpec{
@@ -1962,18 +1962,9 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 				Deployments: map[string]*appsv1.Deployment{},
 			}
 
-			var buildID string
+			buildID := tt.buildID
 			if tt.existingDeployment != nil {
-				// Extract buildID from versionID since deployments are now indexed by buildID
-				_, extractedBuildID, err := k8s.SplitVersionID(tt.versionID)
-				require.NoError(t, err, "Failed to split version ID in test setup")
-				buildID = extractedBuildID
 				k8sState.Deployments[buildID] = tt.existingDeployment
-			} else {
-				// For non-existing deployments, still extract buildID for the function call
-				_, extractedBuildID, err := k8s.SplitVersionID(tt.versionID)
-				require.NoError(t, err, "Failed to split version ID in test setup")
-				buildID = extractedBuildID
 			}
 
 			result := checkAndUpdateDeploymentConnectionSpec(buildID, k8sState, tt.newConnection)

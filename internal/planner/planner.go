@@ -45,10 +45,11 @@ type VersionConfig struct {
 
 // WorkflowConfig defines a workflow to be started
 type WorkflowConfig struct {
-	WorkflowType string
-	WorkflowID   string
-	VersionID    string
-	TaskQueue    string
+	WorkflowType   string
+	WorkflowID     string
+	DeploymentName string
+	BuildID        string
+	TaskQueue      string
 }
 
 // Config holds the configuration for planning
@@ -326,13 +327,14 @@ func getTestWorkflows(
 	// For each task queue without a running test workflow, create a config
 	for _, tq := range targetVersion.TaskQueues {
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
-			// Construct version ID from deployment name and build ID for interface compatibility
+			// Construct version ID from deployment name and build ID for workflow ID generation
 			versionID := workerDeploymentName + "." + targetVersion.BuildID
 			testWorkflows = append(testWorkflows, WorkflowConfig{
-				WorkflowType: config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:   temporal.GetTestWorkflowID(versionID, tq.Name),
-				VersionID:    versionID,
-				TaskQueue:    tq.Name,
+				WorkflowType:   config.RolloutStrategy.Gate.WorkflowType,
+				WorkflowID:     temporal.GetTestWorkflowID(versionID, tq.Name),
+				DeploymentName: workerDeploymentName,
+				BuildID:        targetVersion.BuildID,
+				TaskQueue:      tq.Name,
 			})
 		}
 	}

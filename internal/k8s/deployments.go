@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
@@ -166,15 +165,6 @@ func CleanAndTruncateString(s string, n int) string {
 	// Keep only letters, numbers, and dashes
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 	return re.ReplaceAllString(s, K8sResourceNameSeparator)
-}
-
-// SplitVersionID splits a version ID into its components
-func SplitVersionID(versionID string) (deploymentName, buildID string, err error) {
-	parts := strings.Split(versionID, VersionIDSeparator)
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("invalid version ID format: %s", versionID)
-	}
-	return parts[0], parts[1], nil
 }
 
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references

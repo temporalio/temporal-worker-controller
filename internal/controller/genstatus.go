@@ -28,6 +28,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	temporalState *temporal.TemporalWorkerState,
 ) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
+	targetBuildID := k8s.ComputeBuildID(workerDeploy)
 	targetVersionID := k8s.ComputeVersionID(workerDeploy)
 
 	// Fetch Kubernetes deployment state
@@ -63,11 +64,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 		}
 	}
 
-	// Extract target build ID from target version ID
-	_, targetBuildID, err := k8s.SplitVersionID(targetVersionID)
-	if err != nil {
-		return nil, fmt.Errorf("unable to split target version ID: %w", err)
-	}
+	// Target build ID already computed above
 
 	// Use the state mapper to convert state objects to CRD status
 	stateMapper := newStateMapper(k8sState, temporalState, workerDeploymentName)
