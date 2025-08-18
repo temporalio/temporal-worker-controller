@@ -87,7 +87,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Register current version or ramps
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.SetCurrent {
-			l.Info("registering new current version", "deploymentName", vcfg.DeploymentName, "buildID", vcfg.BuildID)
+			l.Info("registering new current version", "buildID", vcfg.BuildID)
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 				BuildID:       vcfg.BuildID,
 				ConflictToken: vcfg.ConflictToken,
@@ -97,7 +97,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}
 		} else {
 			if vcfg.RampPercentage > 0 {
-				l.Info("applying ramp", "deploymentName", vcfg.DeploymentName, "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
+				l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
 			} else {
 				l.Info("deleting ramp", "buildID", vcfg.BuildID)
 			}
