@@ -69,12 +69,6 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
 	for _, wf := range p.startTestWorkflows {
-		// Extract deployment name and build ID from version ID
-		deploymentName, buildID, err := k8s.SplitVersionID(wf.versionID)
-		if err != nil {
-			return fmt.Errorf("unable to split version ID %s: %w", wf.versionID, err)
-		}
-
 		if _, err := temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
@@ -83,8 +77,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
 			VersioningOverride: &sdkclient.PinnedVersioningOverride{
 				Version: worker.WorkerDeploymentVersion{
-					DeploymentName: deploymentName,
-					BuildId:        buildID,
+					DeploymentName: wf.deploymentName,
+					BuildId:        wf.buildID,
 				},
 			},
 		}, wf.workflowType); err != nil {
