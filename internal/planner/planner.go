@@ -327,11 +327,9 @@ func getTestWorkflows(
 	// For each task queue without a running test workflow, create a config
 	for _, tq := range targetVersion.TaskQueues {
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
-			// Construct version ID from deployment name and build ID for workflow ID generation
-			versionID := workerDeploymentName + "." + targetVersion.BuildID
 			testWorkflows = append(testWorkflows, WorkflowConfig{
 				WorkflowType:   config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:     temporal.GetTestWorkflowID(versionID, tq.Name),
+				WorkflowID:     temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
 				DeploymentName: workerDeploymentName,
 				BuildID:        targetVersion.BuildID,
 				TaskQueue:      tq.Name,

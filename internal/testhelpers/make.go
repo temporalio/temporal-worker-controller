@@ -88,19 +88,6 @@ func MakeTWDWithImage(name, namespace, imageName string) *temporaliov1alpha1.Tem
 	return MakeTWD(name, namespace, 1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
 }
 
-// MakeVersionId computes a version id based on the image, HelloWorldPodSpec, and k8s namespace.
-func MakeVersionId(k8sNamespace, twdName, imageName string) string {
-	return k8s.ComputeVersionID(
-		ModifyObj(
-			MakeTWDWithName(twdName, k8sNamespace),
-			func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				obj.Spec.Template = MakeHelloWorldPodSpec(imageName)
-				return obj
-			},
-		),
-	)
-}
-
 // MakeBuildId computes a build id based on the image and
 // If no podSpec is provided, defaults to HelloWorldPodSpec with the given image name.
 // If you provide your own podSpec, make sure to give the first container your desired image name if success is expected.

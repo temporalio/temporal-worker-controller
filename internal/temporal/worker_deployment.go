@@ -182,7 +182,7 @@ func GetTestWorkflowStatus(
 		})
 
 		// Check if there is a test workflow for this task queue
-		testWorkflowID := GetTestWorkflowID(versionInfo.VersionID(), tq.Name)
+		testWorkflowID := GetTestWorkflowID(versionInfo.DeploymentName, versionInfo.BuildID, tq.Name)
 		wf, err := client.DescribeWorkflowExecution(
 			ctx,
 			testWorkflowID,
@@ -234,6 +234,11 @@ func mapWorkflowStatus(status enumspb.WorkflowExecutionStatus) temporaliov1alpha
 }
 
 // GetTestWorkflowID generates a workflowID for test workflows
-func GetTestWorkflowID(versionID, taskQueue string) string {
+func GetTestWorkflowID(deploymentName, buildID, taskQueue string) string {
+	return fmt.Sprintf("test-%s.%s-%s", deploymentName, buildID, taskQueue)
+}
+
+// GetTestWorkflowIDFromVersionID is deprecated, use GetTestWorkflowID instead
+func GetTestWorkflowIDFromVersionID(versionID, taskQueue string) string {
 	return fmt.Sprintf("test-%s-%s", versionID, taskQueue)
 }

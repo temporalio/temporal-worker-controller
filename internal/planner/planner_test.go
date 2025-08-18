@@ -1796,34 +1796,38 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 func TestGetTestWorkflowID(t *testing.T) {
 	testCases := []struct {
-		name      string
-		taskQueue string
-		versionID string
-		expectID  string
+		name           string
+		deploymentName string
+		buildID        string
+		taskQueue      string
+		expectID       string
 	}{
 		{
-			name:      "basic workflow ID generation",
-			taskQueue: "my-queue",
-			versionID: "test/namespace.123",
-			expectID:  "test-test/namespace.123-my-queue",
+			name:           "basic workflow ID generation",
+			deploymentName: "test/namespace",
+			buildID:        "123",
+			taskQueue:      "my-queue",
+			expectID:       "test-test/namespace.123-my-queue",
 		},
 		{
-			name:      "workflow ID with special characters in queue name",
-			taskQueue: "queue-with-dashes-and_underscores",
-			versionID: "test/namespace.456",
-			expectID:  "test-test/namespace.456-queue-with-dashes-and_underscores",
+			name:           "workflow ID with special characters in queue name",
+			deploymentName: "test/namespace",
+			buildID:        "456",
+			taskQueue:      "queue-with-dashes-and_underscores",
+			expectID:       "test-test/namespace.456-queue-with-dashes-and_underscores",
 		},
 		{
-			name:      "workflow ID with dots in version",
-			taskQueue: "queue",
-			versionID: "test/namespace.1.2.3",
-			expectID:  "test-test/namespace.1.2.3-queue",
+			name:           "workflow ID with dots in version",
+			deploymentName: "test/namespace",
+			buildID:        "1.2.3",
+			taskQueue:      "queue",
+			expectID:       "test-test/namespace.1.2.3-queue",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			id := temporal.GetTestWorkflowID(tc.versionID, tc.taskQueue)
+			id := temporal.GetTestWorkflowID(tc.deploymentName, tc.buildID, tc.taskQueue)
 			assert.Equal(t, tc.expectID, id, "unexpected workflow ID")
 		})
 	}
