@@ -8,7 +8,6 @@ import (
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/server/api/deployment/v1"
 	"go.temporal.io/server/temporaltest"
@@ -53,7 +52,7 @@ func waitForVersionRegistrationInDeployment(
 			return fmt.Errorf("unable to describe worker deployment %s: %w", version.DeploymentName, err)
 		}
 		for _, vs := range resp.Info.VersionSummaries {
-			if vs.Version == version.DeploymentName+k8s.VersionIDSeparator+version.BuildId {
+			if vs.Version.DeploymentName == version.DeploymentName && vs.Version.BuildId == version.BuildId {
 				return nil
 			}
 		}
@@ -72,7 +71,7 @@ func setCurrentVersion(
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
 	eventually(t, 30*time.Second, time.Second, func() error {
 		_, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-			Version:  version.DeploymentName + k8s.VersionIDSeparator + version.BuildId,
+			BuildID:  version.BuildId,
 			Identity: controller.ControllerIdentity,
 		})
 		if err != nil {
@@ -93,13 +92,13 @@ func setRampingVersion(
 	waitForVersionRegistrationInDeployment(t, ctx, ts, version)
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
 	eventually(t, 30*time.Second, time.Second, func() error {
-		var versionStr string
+		var buildID string
 		if version != nil {
-			versionStr = version.DeploymentName + k8s.VersionIDSeparator + version.BuildId
+			buildID = version.BuildId
 		}
 
 		_, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-			Version:    versionStr,
+			BuildID:    buildID,
 			Percentage: rampPercentage,
 			Identity:   controller.ControllerIdentity,
 		})
@@ -136,10 +135,10 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 			if twd.Status.CurrentVersion == nil {
 				return fmt.Errorf("expected CurrentVersion to be set")
 			}
-			if twd.Status.CurrentVersion.VersionID != expectedDeploymentStatus.CurrentVersion.VersionID {
-				return fmt.Errorf("expected current version id to be '%s', got '%s'",
-					expectedDeploymentStatus.CurrentVersion.VersionID,
-					twd.Status.CurrentVersion.VersionID)
+			if twd.Status.CurrentVersion.BuildID != expectedDeploymentStatus.CurrentVersion.BuildID {
+				return fmt.Errorf("expected current build id to be '%s', got '%s'",
+					expectedDeploymentStatus.CurrentVersion.BuildID,
+					twd.Status.CurrentVersion.BuildID)
 			}
 			if twd.Status.CurrentVersion.Deployment == nil {
 				return fmt.Errorf("expected CurrentVersion.Deployment to be set")
@@ -150,14 +149,14 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 					twd.Status.CurrentVersion.Deployment.Name)
 			}
 		}
-		if expectedDeploymentStatus.TargetVersion.VersionID != "" {
-			if twd.Status.TargetVersion.VersionID == "" {
+		if expectedDeploymentStatus.TargetVersion.BuildID != "" {
+			if twd.Status.TargetVersion.BuildID == "" {
 				return fmt.Errorf("expected TargetVersion to be set")
 			}
-			if twd.Status.TargetVersion.VersionID != expectedDeploymentStatus.TargetVersion.VersionID {
-				return fmt.Errorf("expected target version id to be '%s', got '%s'",
-					expectedDeploymentStatus.TargetVersion.VersionID,
-					twd.Status.TargetVersion.VersionID)
+			if twd.Status.TargetVersion.BuildID != expectedDeploymentStatus.TargetVersion.BuildID {
+				return fmt.Errorf("expected target build id to be '%s', got '%s'",
+					expectedDeploymentStatus.TargetVersion.BuildID,
+					twd.Status.TargetVersion.BuildID)
 			}
 			if expectedDeploymentStatus.TargetVersion.RampPercentage != nil {
 				if twd.Status.TargetVersion.RampPercentage == nil {

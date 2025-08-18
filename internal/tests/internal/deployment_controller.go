@@ -121,13 +121,13 @@ func makePreliminaryStatusTrue(
 	loopDefers := make([]func(), 0)
 	defer handleStopFuncs(loopDefers)
 	for _, dv := range twd.Status.DeprecatedVersions {
-		t.Logf("Setting up deprecated version %v with status %v", dv.VersionID, dv.Status)
+		t.Logf("Setting up deprecated version %v with status %v", dv.BuildID, dv.Status)
 		workerStopFuncs := createStatus(ctx, t, env, twd, dv.BaseWorkerDeploymentVersion, nil)
 		loopDefers = append(loopDefers, func() { handleStopFuncs(workerStopFuncs) })
 	}
 
-	if tv := twd.Status.TargetVersion; tv.VersionID != "" {
-		t.Logf("Setting up target version %v with status %v", tv.VersionID, tv.Status)
+	if tv := twd.Status.TargetVersion; tv.BuildID != "" {
+		t.Logf("Setting up target version %v with status %v", tv.BuildID, tv.Status)
 		workerStopFuncs := createStatus(ctx, t, env, twd, tv.BaseWorkerDeploymentVersion, tv.RampPercentage)
 		defer handleStopFuncs(workerStopFuncs)
 	}
@@ -151,7 +151,9 @@ func createStatus(
 	rampPercentage *float32,
 ) (workerStopFuncs []func()) {
 	if prevVersion.Deployment != nil && prevVersion.Deployment.FieldPath == "create" {
-		v := getVersion(t, prevVersion.VersionID)
+		// Construct version ID from deployment name and build ID
+		versionID := k8s.ComputeWorkerDeploymentName(newTWD) + k8s.VersionIDSeparator + prevVersion.BuildID
+		v := getVersion(t, versionID)
 		prevTWD := recreateTWD(newTWD, env.images[v.BuildId], env.replicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
