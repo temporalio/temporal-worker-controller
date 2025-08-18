@@ -53,7 +53,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	temporalState *temporal.TemporalWorkerState,
 ) (*plan, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(w)
-	targetVersionID := k8s.ComputeVersionID(w)
+	targetBuildID := k8s.ComputeBuildID(w)
 
 	// Fetch Kubernetes deployment state
 	k8sState, err := k8s.GetDeploymentState(
@@ -94,6 +94,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		temporalState,
 		connection,
 		plannerConfig,
+		workerDeploymentName,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)
@@ -127,8 +128,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Handle deployment creation if needed
 	if planResult.ShouldCreateDeployment {
-		_, buildID, _ := k8s.SplitVersionID(targetVersionID)
-		d, err := r.newDeployment(w, buildID, connection)
+		d, err := r.newDeployment(w, targetBuildID, connection)
 		if err != nil {
 			return nil, err
 		}

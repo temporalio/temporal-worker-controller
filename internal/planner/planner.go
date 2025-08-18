@@ -31,8 +31,9 @@ type Plan struct {
 type VersionConfig struct {
 	// Token to use for conflict detection
 	ConflictToken []byte
-	// Version ID for which this config applies
-	VersionID string
+	// Deployment name and build ID for the new SDK structure
+	DeploymentName string
+	BuildID        string
 
 	// One of RampPercentage OR SetCurrent must be set to a non-zero value.
 
@@ -65,6 +66,7 @@ func GeneratePlan(
 	temporalState *temporal.TemporalWorkerState,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 	config *Config,
+	workerDeploymentName string,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
@@ -77,10 +79,10 @@ func GeneratePlan(
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, connection)
 
 	// Determine if we need to start any test workflows
-	plan.TestWorkflows = getTestWorkflows(status, config)
+	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName)
 
 	// Determine version config changes
-	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config)
+	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
@@ -93,11 +95,11 @@ func GeneratePlan(
 // the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
 // the Deployment does not exist, it returns nil.
 func checkAndUpdateDeploymentConnectionSpec(
-	versionID string,
+	buildID string,
 	k8sState *k8s.DeploymentState,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
-	existingDeployment, exists := k8sState.Deployments[versionID]
+	existingDeployment, exists := k8sState.Deployments[buildID]
 	if !exists {
 		return nil
 	}
@@ -147,22 +149,22 @@ func getUpdateDeployments(
 	var updateDeployments []*appsv1.Deployment
 
 	// Check target version deployment if it has an expired connection spec hash
-	if status.TargetVersion.VersionID != "" {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.VersionID, k8sState, connection); deployment != nil {
+	if status.TargetVersion.BuildID != "" {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.BuildID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 		}
 	}
 
 	// Check current version deployment if it has an expired connection spec hash
-	if status.CurrentVersion != nil && status.CurrentVersion.VersionID != "" {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.VersionID, k8sState, connection); deployment != nil {
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID != "" {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.BuildID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 		}
 	}
 
 	// Check deprecated versions for expired connection spec hashes
 	for _, version := range status.DeprecatedVersions {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(version.VersionID, k8sState, connection); deployment != nil {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(version.BuildID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 		}
 	}
@@ -183,8 +185,8 @@ func getDeleteDeployments(
 			continue
 		}
 
-		// Look up the deployment
-		d, exists := k8sState.Deployments[version.VersionID]
+		// Look up the deployment using buildID
+		d, exists := k8sState.Deployments[version.BuildID]
 		if !exists {
 			continue
 		}
@@ -201,7 +203,7 @@ func getDeleteDeployments(
 		case temporaliov1alpha1.VersionStatusNotRegistered:
 			// NotRegistered versions are versions that the server doesn't know about.
 			// Only delete if it's not the target version.
-			if status.TargetVersion.VersionID != version.VersionID {
+			if status.TargetVersion.BuildID != version.BuildID {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}
@@ -222,7 +224,7 @@ func getScaleDeployments(
 	// Scale the current version if needed
 	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
 		ref := status.CurrentVersion.Deployment
-		if d, exists := k8sState.Deployments[status.CurrentVersion.VersionID]; exists {
+		if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
 			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 				scaleDeployments[ref] = uint32(replicas)
 			}
@@ -230,9 +232,9 @@ func getScaleDeployments(
 	}
 
 	// Scale the target version if it exists, and isn't current
-	if (status.CurrentVersion == nil || status.CurrentVersion.VersionID != status.TargetVersion.VersionID) &&
+	if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
 		status.TargetVersion.Deployment != nil {
-		if d, exists := k8sState.Deployments[status.TargetVersion.VersionID]; exists {
+		if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
 			if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
 				scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
 			}
@@ -245,7 +247,7 @@ func getScaleDeployments(
 			continue
 		}
 
-		d, exists := k8sState.Deployments[version.VersionID]
+		d, exists := k8sState.Deployments[version.BuildID]
 		if !exists {
 			continue
 		}
@@ -300,6 +302,7 @@ func shouldCreateDeployment(
 func getTestWorkflows(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	config *Config,
+	workerDeploymentName string,
 ) []WorkflowConfig {
 	var testWorkflows []WorkflowConfig
 
@@ -307,7 +310,7 @@ func getTestWorkflows(
 	// version is not yet registered in temporal
 	if config.RolloutStrategy.Gate == nil ||
 		status.CurrentVersion == nil ||
-		status.CurrentVersion.VersionID == status.TargetVersion.VersionID ||
+		status.CurrentVersion.BuildID == status.TargetVersion.BuildID ||
 		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
 		return nil
 	}
@@ -323,10 +326,12 @@ func getTestWorkflows(
 	// For each task queue without a running test workflow, create a config
 	for _, tq := range targetVersion.TaskQueues {
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
+			// Construct version ID from deployment name and build ID for interface compatibility
+			versionID := workerDeploymentName + "." + targetVersion.BuildID
 			testWorkflows = append(testWorkflows, WorkflowConfig{
 				WorkflowType: config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:   temporal.GetTestWorkflowID(targetVersion.VersionID, tq.Name),
-				VersionID:    targetVersion.VersionID,
+				WorkflowID:   temporal.GetTestWorkflowID(versionID, tq.Name),
+				VersionID:    versionID,
 				TaskQueue:    tq.Name,
 			})
 		}
@@ -341,6 +346,7 @@ func getVersionConfigDiff(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	temporalState *temporal.TemporalWorkerState,
 	config *Config,
+	workerDeploymentName string,
 ) *VersionConfig {
 	strategy := config.RolloutStrategy
 	conflictToken := status.VersionConflictToken
@@ -366,9 +372,13 @@ func getVersionConfigDiff(
 		}
 	}
 
+	// Use deployment name from parameter and build ID from status
+	buildID := status.TargetVersion.BuildID
+
 	vcfg := &VersionConfig{
-		ConflictToken: conflictToken,
-		VersionID:     status.TargetVersion.VersionID,
+		ConflictToken:  conflictToken,
+		DeploymentName: workerDeploymentName,
+		BuildID:        buildID,
 	}
 
 	// If there is no current version, set the target version as the current version
@@ -378,10 +388,9 @@ func getVersionConfigDiff(
 	}
 
 	// If the current version is the target version
-	if status.CurrentVersion.VersionID == status.TargetVersion.VersionID {
+	if status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
 		// Reset ramp if needed, this would happen if a ramp has been rolled back before completing
 		if temporalState.RampingVersionID != "" {
-			vcfg.VersionID = ""
 			vcfg.RampPercentage = 0
 			return vcfg
 		}

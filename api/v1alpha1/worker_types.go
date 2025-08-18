@@ -176,9 +176,8 @@ type TaskQueue struct {
 
 // BaseWorkerDeploymentVersion contains fields common to all worker deployment version types
 type BaseWorkerDeploymentVersion struct {
-	// The string representation of the deployment version.
-	// Currently, this is always `deployment_name.build_id`.
-	VersionID string `json:"versionID"`
+	// BuildID is the unique identifier for this version of the deployment.
+	BuildID string `json:"buildID"`
 
 	// Status indicates whether workers in this version may
 	// be eligible to receive tasks from the Temporal server.

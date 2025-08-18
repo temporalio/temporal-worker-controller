@@ -28,7 +28,7 @@ func TestMapToStatus(t *testing.T) {
 	// Create Kubernetes state
 	k8sState := &k8s.DeploymentState{
 		Deployments: map[string]*appsv1.Deployment{
-			"worker.v1": {
+			"v1": {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "worker-v1",
 					Namespace: "default",
@@ -43,7 +43,7 @@ func TestMapToStatus(t *testing.T) {
 					},
 				},
 			},
-			"worker.v2": {
+			"v2": {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "worker-v2",
 					Namespace: "default",
@@ -58,7 +58,7 @@ func TestMapToStatus(t *testing.T) {
 					},
 				},
 			},
-			"worker.v3": {
+			"v3": {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "worker-v3",
 					Namespace: "default",
@@ -69,19 +69,19 @@ func TestMapToStatus(t *testing.T) {
 			},
 		},
 		DeploymentRefs: map[string]*corev1.ObjectReference{
-			"worker.v1": {
+			"v1": {
 				Kind:      "Deployment",
 				Name:      "worker-v1",
 				Namespace: "default",
 				UID:       types.UID("v1-uid"),
 			},
-			"worker.v2": {
+			"v2": {
 				Kind:      "Deployment",
 				Name:      "worker-v2",
 				Namespace: "default",
 				UID:       types.UID("v2-uid"),
 			},
-			"worker.v3": {
+			"v3": {
 				Kind:      "Deployment",
 				Name:      "worker-v3",
 				Namespace: "default",
@@ -132,17 +132,17 @@ func TestMapToStatus(t *testing.T) {
 	}
 
 	// Create state mapper
-	mapper := newStateMapper(k8sState, temporalState)
+	mapper := newStateMapper(k8sState, temporalState, "worker")
 
-	// Map to status
-	status := mapper.mapToStatus("worker.v2")
+	// Map to status (now takes buildID instead of versionID)
+	status := mapper.mapToStatus("v2")
 
 	// Verify status
 	assert.Equal(t, []byte("test-token"), status.VersionConflictToken)
 
 	// Verify default version
 	assert.NotNil(t, status.CurrentVersion)
-	assert.Equal(t, "worker.v1", status.CurrentVersion.VersionID)
+	assert.Equal(t, "v1", status.CurrentVersion.BuildID)
 
 	// Convert to string for comparison
 	expectedStatus := string(temporaliov1alpha1.VersionStatusCurrent)
@@ -154,7 +154,7 @@ func TestMapToStatus(t *testing.T) {
 
 	// Verify target version
 	assert.NotNil(t, status.TargetVersion)
-	assert.Equal(t, "worker.v2", status.TargetVersion.VersionID)
+	assert.Equal(t, "v2", status.TargetVersion.BuildID)
 
 	// Convert to string for comparison
 	expectedRampingStatus := string(temporaliov1alpha1.VersionStatusRamping)
@@ -172,7 +172,7 @@ func TestMapToStatus(t *testing.T) {
 
 	// Verify deprecated versions
 	assert.Equal(t, 1, len(status.DeprecatedVersions))
-	assert.Equal(t, "worker.v3", status.DeprecatedVersions[0].VersionID)
+	assert.Equal(t, "v3", status.DeprecatedVersions[0].BuildID)
 
 	// Convert to string for comparison
 	expectedDrainedStatus := string(temporaliov1alpha1.VersionStatusDrained)
@@ -195,7 +195,7 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 
 	k8sState := &k8s.DeploymentState{
 		Deployments: map[string]*appsv1.Deployment{
-			"worker.v1": {
+			"v1": {
 				Status: appsv1.DeploymentStatus{
 					Conditions: []appsv1.DeploymentCondition{
 						{
@@ -208,7 +208,7 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 			},
 		},
 		DeploymentRefs: map[string]*corev1.ObjectReference{
-			"worker.v1": {
+			"v1": {
 				Kind:      "Deployment",
 				Name:      "worker-v1",
 				Namespace: "default",
@@ -228,12 +228,12 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 		},
 	}
 
-	mapper := newStateMapper(k8sState, temporalState)
+	mapper := newStateMapper(k8sState, temporalState, "worker")
 
 	// Test current version mapping
-	currentVersion := mapper.mapCurrentWorkerDeploymentVersion("worker.v1")
+	currentVersion := mapper.mapCurrentWorkerDeploymentVersionByBuildID("v1")
 	assert.NotNil(t, currentVersion)
-	assert.Equal(t, "worker.v1", currentVersion.VersionID)
+	assert.Equal(t, "v1", currentVersion.BuildID)
 	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, currentVersion.Status)
 	assert.NotNil(t, currentVersion.HealthySince)
 	assert.Equal(t, healthySince.Time.Unix(), currentVersion.HealthySince.Time.Unix())
@@ -241,8 +241,8 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 	assert.Equal(t, "worker-v1", currentVersion.Deployment.Name)
 
 	// Test target version mapping
-	targetVersion := mapper.mapTargetWorkerDeploymentVersion("worker.v1")
-	assert.Equal(t, "worker.v1", targetVersion.VersionID)
+	targetVersion := mapper.mapTargetWorkerDeploymentVersionByBuildID("v1")
+	assert.Equal(t, "v1", targetVersion.BuildID)
 	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, targetVersion.Status)
 	assert.NotNil(t, targetVersion.HealthySince)
 	assert.Equal(t, healthySince.Time.Unix(), targetVersion.HealthySince.Time.Unix())
@@ -250,9 +250,9 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 	assert.Equal(t, "worker-v1", targetVersion.Deployment.Name)
 
 	// Test deprecated version mapping
-	deprecatedVersion := mapper.mapDeprecatedWorkerDeploymentVersion("worker.v1")
+	deprecatedVersion := mapper.mapDeprecatedWorkerDeploymentVersionByBuildID("v1")
 	assert.NotNil(t, deprecatedVersion)
-	assert.Equal(t, "worker.v1", deprecatedVersion.VersionID)
+	assert.Equal(t, "v1", deprecatedVersion.BuildID)
 	assert.Equal(t, temporaliov1alpha1.VersionStatusCurrent, deprecatedVersion.Status)
 	assert.NotNil(t, deprecatedVersion.HealthySince)
 	assert.Equal(t, healthySince.Time.Unix(), deprecatedVersion.HealthySince.Time.Unix())
@@ -262,9 +262,9 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 	assert.Equal(t, "worker-v1", deprecatedVersion.Deployment.Name)
 
 	// Test with version that doesn't exist
-	currentVersion = mapper.mapCurrentWorkerDeploymentVersion("nonexistent")
+	currentVersion = mapper.mapCurrentWorkerDeploymentVersionByBuildID("nonexistent")
 	assert.NotNil(t, currentVersion)
-	assert.Equal(t, "nonexistent", currentVersion.VersionID)
+	assert.Equal(t, "nonexistent", currentVersion.BuildID)
 	assert.Equal(t, temporaliov1alpha1.VersionStatusNotRegistered, currentVersion.Status)
 	assert.Nil(t, currentVersion.HealthySince)
 	assert.Nil(t, currentVersion.Deployment)

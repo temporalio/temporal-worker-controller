@@ -17,8 +17,6 @@ import (
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 )
 
 func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, temporalClient sdkclient.Client, p *plan) error {
@@ -89,33 +87,23 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Register current version or ramps
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.SetCurrent {
-			// Extract build ID from version ID
-			_, buildID, err := k8s.SplitVersionID(vcfg.VersionID)
-			if err != nil {
-				return fmt.Errorf("unable to split version ID %s: %w", vcfg.VersionID, err)
-			}
-			l.Info("registering new current version", "version", vcfg.VersionID, "buildID", buildID)
+			l.Info("registering new current version", "deploymentName", vcfg.DeploymentName, "buildID", vcfg.BuildID)
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-				BuildID:       buildID,
+				BuildID:       vcfg.BuildID,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
 		} else {
-			// Extract build ID from version ID
-			_, buildID, err := k8s.SplitVersionID(vcfg.VersionID)
-			if err != nil {
-				return fmt.Errorf("unable to split version ID %s: %w", vcfg.VersionID, err)
-			}
 			if vcfg.RampPercentage > 0 {
-				l.Info("applying ramp", "version", vcfg.VersionID, "buildID", buildID, "percentage", vcfg.RampPercentage)
+				l.Info("applying ramp", "deploymentName", vcfg.DeploymentName, "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
 			} else {
-				l.Info("deleting ramp", "buildID", buildID)
+				l.Info("deleting ramp", "buildID", vcfg.BuildID)
 			}
 
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-				BuildID:       buildID,
+				BuildID:       vcfg.BuildID,
 				Percentage:    vcfg.RampPercentage,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
@@ -123,15 +111,10 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}
 		}
-		// Extract deployment name and build ID for metadata update
-		deploymentName, buildID, err := k8s.SplitVersionID(vcfg.VersionID)
-		if err != nil {
-			return fmt.Errorf("unable to split version ID %s: %w", vcfg.VersionID, err)
-		}
 		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
 			Version: worker.WorkerDeploymentVersion{
-				DeploymentName: deploymentName,
-				BuildId:        buildID,
+				DeploymentName: vcfg.DeploymentName,
+				BuildId:        vcfg.BuildID,
 			},
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				UpsertEntries: map[string]interface{}{

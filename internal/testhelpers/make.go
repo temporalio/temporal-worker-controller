@@ -130,7 +130,7 @@ func MakeTWDWithName(name, namespace string) *temporaliov1alpha1.TemporalWorkerD
 func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDeployment bool) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
 	ret := &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-			VersionID:    MakeVersionId(namespace, twdName, imageName),
+			BuildID:      MakeBuildId(twdName, imageName, nil),
 			Status:       temporaliov1alpha1.VersionStatusCurrent,
 			HealthySince: nil,
 			Deployment: &corev1.ObjectReference{
@@ -161,7 +161,7 @@ func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDep
 func MakeTargetVersion(namespace, twdName, imageName string, rampPercentage float32, healthy, createDeployment bool) temporaliov1alpha1.TargetWorkerDeploymentVersion {
 	ret := temporaliov1alpha1.TargetWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-			VersionID:    MakeVersionId(namespace, twdName, imageName),
+			BuildID:      MakeBuildId(twdName, imageName, nil),
 			Status:       temporaliov1alpha1.VersionStatusCurrent,
 			HealthySince: nil,
 			Deployment: &corev1.ObjectReference{
