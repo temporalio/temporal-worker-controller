@@ -44,7 +44,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	}
 
 	// Fetch test workflow status for the desired version
-	if targetVersionID != temporalState.CurrentVersionID {
+	if targetBuildID != temporalState.CurrentBuildID {
 		testWorkflows, err := temporal.GetTestWorkflowStatus(
 			ctx,
 			temporalClient,

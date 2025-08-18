@@ -196,7 +196,7 @@ func TestGeneratePlan(t *testing.T) {
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{
-				RampingVersionID: "test/namespace.456", // This is what triggers the reset
+				RampingBuildID: "456", // This is what triggers the reset
 			},
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
@@ -618,7 +618,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{
-				RampingVersionID: "test/namespace.b",
+				RampingBuildID: "b",
 			},
 			expectScales: 1,
 		},
@@ -1041,7 +1041,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				},
 			},
 			spec:             &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
-			state:            &temporal.TemporalWorkerState{RampingVersionID: "test/namespace.456"},
+			state:            &temporal.TemporalWorkerState{RampingBuildID: "456"},
 			expectConfig:     true,
 			expectSetCurrent: false,
 		},

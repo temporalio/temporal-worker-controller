@@ -35,14 +35,14 @@ func (v *VersionInfo) VersionID() string {
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
 type TemporalWorkerState struct {
-	CurrentVersionID     string
+	CurrentBuildID       string
 	VersionConflictToken []byte
-	RampingVersionID     string
+	RampingBuildID       string
 	RampPercentage       float32
 	// RampingSince is the time when the current ramping version was set.
 	RampingSince       *metav1.Time
 	RampLastModifiedAt *metav1.Time
-	// Versions indexed by build ID instead of version ID
+	// Versions indexed by build ID
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
 }
@@ -77,10 +77,10 @@ func GetWorkerDeploymentState(
 
 	// Set basic information
 	if routingConfig.CurrentVersion != nil {
-		state.CurrentVersionID = routingConfig.CurrentVersion.DeploymentName + "." + routingConfig.CurrentVersion.BuildId
+		state.CurrentBuildID = routingConfig.CurrentVersion.BuildId
 	}
 	if routingConfig.RampingVersion != nil {
-		state.RampingVersionID = routingConfig.RampingVersion.DeploymentName + "." + routingConfig.RampingVersion.BuildId
+		state.RampingBuildID = routingConfig.RampingVersion.BuildId
 	}
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity

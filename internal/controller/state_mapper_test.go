@@ -92,8 +92,8 @@ func TestMapToStatus(t *testing.T) {
 
 	// Create Temporal state
 	temporalState := &temporal.TemporalWorkerState{
-		CurrentVersionID:     "worker.v1",
-		RampingVersionID:     "worker.v2",
+		CurrentBuildID:       "v1",
+		RampingBuildID:       "v2",
 		RampPercentage:       25.0,
 		RampingSince:         &rampingSince,
 		VersionConflictToken: []byte("test-token"),

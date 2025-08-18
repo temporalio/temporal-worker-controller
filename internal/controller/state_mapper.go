@@ -5,8 +5,6 @@
 package controller
 
 import (
-	"strings"
-
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -35,9 +33,9 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 		VersionConflictToken: m.temporalState.VersionConflictToken,
 	}
 
-	// Extract build IDs from version IDs (for internal state compatibility)
-	currentBuildID := strings.TrimPrefix(m.temporalState.CurrentVersionID, m.workerDeploymentName+".")
-	rampingBuildID := strings.TrimPrefix(m.temporalState.RampingVersionID, m.workerDeploymentName+".")
+	// Get build IDs directly from temporal state
+	currentBuildID := m.temporalState.CurrentBuildID
+	rampingBuildID := m.temporalState.RampingBuildID
 
 	// Set current version
 	status.CurrentVersion = m.mapCurrentWorkerDeploymentVersionByBuildID(currentBuildID)
