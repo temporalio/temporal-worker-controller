@@ -12,11 +12,13 @@ import (
 	"github.com/go-logr/logr"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/workflow"
+	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 )
 
 func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, temporalClient sdkclient.Client, p *plan) error {
@@ -67,15 +69,23 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
 	for _, wf := range p.startTestWorkflows {
+		// Extract deployment name and build ID from version ID
+		deploymentName, buildID, err := k8s.SplitVersionID(wf.versionID)
+		if err != nil {
+			return fmt.Errorf("unable to split version ID %s: %w", wf.versionID, err)
+		}
+
 		if _, err := temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
 			WorkflowExecutionTimeout: time.Hour,
 			WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 			WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
-			VersioningOverride: sdkclient.VersioningOverride{
-				Behavior:      workflow.VersioningBehaviorPinned,
-				PinnedVersion: wf.versionID,
+			VersioningOverride: &sdkclient.PinnedVersioningOverride{
+				Version: worker.WorkerDeploymentVersion{
+					DeploymentName: deploymentName,
+					BuildId:        buildID,
+				},
 			},
 		}, wf.workflowType); err != nil {
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
@@ -85,23 +95,33 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Register current version or ramps
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.SetCurrent {
-			l.Info("registering new current version", "version", vcfg.VersionID)
+			// Extract build ID from version ID
+			_, buildID, err := k8s.SplitVersionID(vcfg.VersionID)
+			if err != nil {
+				return fmt.Errorf("unable to split version ID %s: %w", vcfg.VersionID, err)
+			}
+			l.Info("registering new current version", "version", vcfg.VersionID, "buildID", buildID)
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-				Version:       vcfg.VersionID,
+				BuildID:       buildID,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
 			}); err != nil {
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
 		} else {
+			// Extract build ID from version ID
+			_, buildID, err := k8s.SplitVersionID(vcfg.VersionID)
+			if err != nil {
+				return fmt.Errorf("unable to split version ID %s: %w", vcfg.VersionID, err)
+			}
 			if vcfg.RampPercentage > 0 {
-				l.Info("applying ramp", "version", vcfg.VersionID, "percentage", vcfg.RampPercentage)
+				l.Info("applying ramp", "version", vcfg.VersionID, "buildID", buildID, "percentage", vcfg.RampPercentage)
 			} else {
-				l.Info("deleting ramp")
+				l.Info("deleting ramp", "buildID", buildID)
 			}
 
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-				Version:       vcfg.VersionID,
+				BuildID:       buildID,
 				Percentage:    vcfg.RampPercentage,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
@@ -109,8 +129,16 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				return fmt.Errorf("unable to set ramping deployment: %w", err)
 			}
 		}
+		// Extract deployment name and build ID for metadata update
+		deploymentName, buildID, err := k8s.SplitVersionID(vcfg.VersionID)
+		if err != nil {
+			return fmt.Errorf("unable to split version ID %s: %w", vcfg.VersionID, err)
+		}
 		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-			Version: vcfg.VersionID,
+			Version: worker.WorkerDeploymentVersion{
+				DeploymentName: deploymentName,
+				BuildId:        buildID,
+			},
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				UpsertEntries: map[string]interface{}{
 					controllerIdentityKey: getControllerIdentity(),

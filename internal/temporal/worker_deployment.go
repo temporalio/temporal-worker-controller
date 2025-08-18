@@ -20,11 +20,17 @@ import (
 
 // VersionInfo contains information about a specific version
 type VersionInfo struct {
-	VersionID     string
-	Status        temporaliov1alpha1.VersionStatus
-	DrainedSince  *time.Time
-	TaskQueues    []temporaliov1alpha1.TaskQueue
-	TestWorkflows []temporaliov1alpha1.WorkflowExecution
+	DeploymentName string
+	BuildID        string
+	Status         temporaliov1alpha1.VersionStatus
+	DrainedSince   *time.Time
+	TaskQueues     []temporaliov1alpha1.TaskQueue
+	TestWorkflows  []temporaliov1alpha1.WorkflowExecution
+}
+
+// VersionID returns the legacy version ID format for compatibility
+func (v *VersionInfo) VersionID() string {
+	return v.DeploymentName + "." + v.BuildID
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -34,8 +40,9 @@ type TemporalWorkerState struct {
 	RampingVersionID     string
 	RampPercentage       float32
 	// RampingSince is the time when the current ramping version was set.
-	RampingSince         *metav1.Time
-	RampLastModifiedAt   *metav1.Time
+	RampingSince       *metav1.Time
+	RampLastModifiedAt *metav1.Time
+	// Versions indexed by build ID instead of version ID
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
 }
@@ -69,8 +76,12 @@ func GetWorkerDeploymentState(
 	routingConfig := workerDeploymentInfo.RoutingConfig
 
 	// Set basic information
-	state.CurrentVersionID = routingConfig.CurrentVersion
-	state.RampingVersionID = routingConfig.RampingVersion
+	if routingConfig.CurrentVersion != nil {
+		state.CurrentVersionID = routingConfig.CurrentVersion.DeploymentName + "." + routingConfig.CurrentVersion.BuildId
+	}
+	if routingConfig.RampingVersion != nil {
+		state.RampingVersionID = routingConfig.RampingVersion.DeploymentName + "." + routingConfig.RampingVersion.BuildId
+	}
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
 	state.VersionConflictToken = resp.ConflictToken
@@ -78,7 +89,7 @@ func GetWorkerDeploymentState(
 	// TODO(jlegrone): Re-enable stats once available in versioning v3.
 
 	// Set ramping since time if applicable
-	if routingConfig.RampingVersion != "" {
+	if routingConfig.RampingVersion != nil {
 		var (
 			rampingSinceTime   = metav1.NewTime(routingConfig.RampingVersionChangedTime)
 			lastRampUpdateTime = metav1.NewTime(routingConfig.RampingVersionPercentageChangedTime)
@@ -90,14 +101,19 @@ func GetWorkerDeploymentState(
 	// Process each version
 	for _, version := range workerDeploymentInfo.VersionSummaries {
 		versionInfo := &VersionInfo{
-			VersionID: version.Version,
+			DeploymentName: version.Version.DeploymentName,
+			BuildID:        version.Version.BuildId,
 		}
 
 		// Determine version status
 		drainageStatus := version.DrainageStatus
-		if version.Version == routingConfig.CurrentVersion {
+		if routingConfig.CurrentVersion != nil &&
+			version.Version.DeploymentName == routingConfig.CurrentVersion.DeploymentName &&
+			version.Version.BuildId == routingConfig.CurrentVersion.BuildId {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusCurrent
-		} else if version.Version == routingConfig.RampingVersion {
+		} else if routingConfig.RampingVersion != nil &&
+			version.Version.DeploymentName == routingConfig.RampingVersion.DeploymentName &&
+			version.Version.BuildId == routingConfig.RampingVersion.BuildId {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusRamping
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDraining {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
@@ -106,7 +122,7 @@ func GetWorkerDeploymentState(
 
 			// Get drain time information
 			versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-				Version: version.Version,
+				BuildID: version.Version.BuildId,
 			})
 			if err == nil {
 				drainedSince := versionResp.Info.DrainageInfo.LastChangedTime
@@ -116,7 +132,8 @@ func GetWorkerDeploymentState(
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
 		}
 
-		state.Versions[version.Version] = versionInfo
+		// Index by build ID instead of version ID
+		state.Versions[version.Version.BuildId] = versionInfo
 	}
 
 	return state, nil
@@ -127,7 +144,7 @@ func GetTestWorkflowStatus(
 	ctx context.Context,
 	client temporalClient.Client,
 	workerDeploymentName string,
-	versionID string,
+	buildID string,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
 	temporalState *TemporalWorkerState,
 ) ([]temporaliov1alpha1.WorkflowExecution, error) {
@@ -136,15 +153,21 @@ func GetTestWorkflowStatus(
 	// Get deployment handler
 	deploymentHandler := client.WorkerDeploymentClient().GetHandle(workerDeploymentName)
 
+	// Get version info from temporal state to get deployment name
+	versionInfo, exists := temporalState.Versions[buildID]
+	if !exists {
+		return results, nil
+	}
+
 	// Describe the version to get task queue information
 	versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-		Version: versionID,
+		BuildID: versionInfo.BuildID,
 	})
 
 	var notFound *serviceerror.NotFound
 	if err != nil && !errors.As(err, &notFound) {
 		// Ignore NotFound error, because if the version is not found, we know there are no test workflows running on it.
-		return nil, fmt.Errorf("unable to describe worker deployment version for version %q: %w", versionID, err)
+		return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
 	}
 
 	// Check test workflows for each task queue
@@ -155,12 +178,12 @@ func GetTestWorkflowStatus(
 		}
 
 		// Adding task queue information to the current temporal state
-		temporalState.Versions[versionID].TaskQueues = append(temporalState.Versions[versionID].TaskQueues, temporaliov1alpha1.TaskQueue{
+		temporalState.Versions[buildID].TaskQueues = append(temporalState.Versions[buildID].TaskQueues, temporaliov1alpha1.TaskQueue{
 			Name: tq.Name,
 		})
 
 		// Check if there is a test workflow for this task queue
-		testWorkflowID := GetTestWorkflowID(versionID, tq.Name)
+		testWorkflowID := GetTestWorkflowID(versionInfo.VersionID(), tq.Name)
 		wf, err := client.DescribeWorkflowExecution(
 			ctx,
 			testWorkflowID,

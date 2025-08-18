@@ -98,16 +98,18 @@ func TestMapToStatus(t *testing.T) {
 		RampingSince:         &rampingSince,
 		VersionConflictToken: []byte("test-token"),
 		Versions: map[string]*temporal.VersionInfo{
-			"worker.v1": {
-				VersionID: "worker.v1",
-				Status:    temporaliov1alpha1.VersionStatusCurrent,
+			"v1": {
+				DeploymentName: "worker",
+				BuildID:        "v1",
+				Status:         temporaliov1alpha1.VersionStatusCurrent,
 				TaskQueues: []temporaliov1alpha1.TaskQueue{
 					{Name: "queue1"},
 				},
 			},
-			"worker.v2": {
-				VersionID: "worker.v2",
-				Status:    temporaliov1alpha1.VersionStatusRamping,
+			"v2": {
+				DeploymentName: "worker",
+				BuildID:        "v2",
+				Status:         temporaliov1alpha1.VersionStatusRamping,
 				TaskQueues: []temporaliov1alpha1.TaskQueue{
 					{Name: "queue1"},
 				},
@@ -120,10 +122,11 @@ func TestMapToStatus(t *testing.T) {
 					},
 				},
 			},
-			"worker.v3": {
-				VersionID:    "worker.v3",
-				Status:       temporaliov1alpha1.VersionStatusDrained,
-				DrainedSince: &drainedSince,
+			"v3": {
+				DeploymentName: "worker",
+				BuildID:        "v3",
+				Status:         temporaliov1alpha1.VersionStatusDrained,
+				DrainedSince:   &drainedSince,
 			},
 		},
 	}
@@ -216,10 +219,11 @@ func TestMapWorkerDeploymentVersion(t *testing.T) {
 
 	temporalState := &temporal.TemporalWorkerState{
 		Versions: map[string]*temporal.VersionInfo{
-			"worker.v1": {
-				VersionID:    "worker.v1",
-				Status:       temporaliov1alpha1.VersionStatusCurrent,
-				DrainedSince: &drainedSince,
+			"v1": {
+				DeploymentName: "worker",
+				BuildID:        "v1",
+				Status:         temporaliov1alpha1.VersionStatusCurrent,
+				DrainedSince:   &drainedSince,
 			},
 		},
 	}

@@ -14,7 +14,7 @@ require (
 	github.com/pborman/uuid v1.2.1
 	github.com/stretchr/testify v1.10.0
 	go.temporal.io/api v1.50.0
-	go.temporal.io/sdk v1.34.0
+	go.temporal.io/sdk v1.35.0
 	k8s.io/api v0.33.2
 	k8s.io/apimachinery v0.33.2
 	k8s.io/client-go v0.33.2

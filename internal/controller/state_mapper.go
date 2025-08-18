@@ -91,12 +91,15 @@ func (m *stateMapper) mapCurrentWorkerDeploymentVersion(versionID string) *v1alp
 		}
 	}
 
-	// Set version status from temporal state
-	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
-		version.Status = temporalVersion.Status
+	// Set version status from temporal state by extracting build ID from version ID
+	_, buildID, err := k8s.SplitVersionID(versionID)
+	if err == nil {
+		if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
+			version.Status = temporalVersion.Status
 
-		// Set task queues
-		version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
+			// Set task queues
+			version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
+		}
 	}
 
 	return version
@@ -122,22 +125,25 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) v1alpha
 		}
 	}
 
-	// Set version status from temporal state
-	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
-		version.Status = temporalVersion.Status
+	// Set version status from temporal state by extracting build ID from version ID
+	_, buildID, err := k8s.SplitVersionID(versionID)
+	if err == nil {
+		if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
+			version.Status = temporalVersion.Status
 
-		// Set ramp percentage if this is a ramping version
-		// TODO(carlydf): Support setting any ramp in [0,100]
-		// NOTE(rob): We are now setting any ramp > 0, is that correct?
-		if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
-			version.RampPercentage = &m.temporalState.RampPercentage
+			// Set ramp percentage if this is a ramping version
+			// TODO(carlydf): Support setting any ramp in [0,100]
+			// NOTE(rob): We are now setting any ramp > 0, is that correct?
+			if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
+				version.RampPercentage = &m.temporalState.RampPercentage
+			}
+
+			// Set task queues
+			version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
+
+			// Set test workflows
+			version.TestWorkflows = append(version.TestWorkflows, temporalVersion.TestWorkflows...)
 		}
-
-		// Set task queues
-		version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
-
-		// Set test workflows
-		version.TestWorkflows = append(version.TestWorkflows, temporalVersion.TestWorkflows...)
 	}
 
 	return version
@@ -167,18 +173,21 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersion(versionID string) *v1
 		}
 	}
 
-	// Set version status from temporal state
-	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
-		version.Status = temporalVersion.Status
+	// Set version status from temporal state by extracting build ID from version ID
+	_, buildID, err := k8s.SplitVersionID(versionID)
+	if err == nil {
+		if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
+			version.Status = temporalVersion.Status
 
-		// Set drained since if available
-		if temporalVersion.DrainedSince != nil {
-			drainedSince := metav1.NewTime(*temporalVersion.DrainedSince)
-			version.DrainedSince = &drainedSince
+			// Set drained since if available
+			if temporalVersion.DrainedSince != nil {
+				drainedSince := metav1.NewTime(*temporalVersion.DrainedSince)
+				version.DrainedSince = &drainedSince
+			}
+
+			// Set task queues
+			version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
 		}
-
-		// Set task queues
-		version.TaskQueues = append(version.TaskQueues, temporalVersion.TaskQueues...)
 	}
 
 	return version
