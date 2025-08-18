@@ -75,7 +75,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
 			VersioningOverride: &sdkclient.PinnedVersioningOverride{
 				Version: worker.WorkerDeploymentVersion{
-					DeploymentName: wf.deploymentName,
+					DeploymentName: p.WorkerDeploymentName,
 					BuildId:        wf.buildID,
 				},
 			},
