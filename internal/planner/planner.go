@@ -369,12 +369,9 @@ func getVersionConfigDiff(
 		}
 	}
 
-	// Use deployment name from parameter and build ID from status
-	buildID := status.TargetVersion.BuildID
-
 	vcfg := &VersionConfig{
 		ConflictToken: conflictToken,
-		BuildID:       buildID,
+		BuildID:       status.TargetVersion.BuildID,
 	}
 
 	// If there is no current version, set the target version as the current version
