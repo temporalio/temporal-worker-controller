@@ -22,6 +22,11 @@ jobs:
           private-key: ${{ secrets.TEMPORAL_CICD_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
+      - name: Configure Git
+        run: |
+          echo ${{ steps.generate_token.outputs.token }} | gh auth login --with-token
+          gh auth status -a
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -75,6 +80,7 @@ jobs:
       - name: Configure Git
         run: |
           echo ${{ steps.generate_token.outputs.token }} | gh auth login --with-token
+          gh auth status -a
 
       - name: Install Helm
         uses: azure/setup-helm@v3
