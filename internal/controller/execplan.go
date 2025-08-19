@@ -113,7 +113,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
 			Version: worker.WorkerDeploymentVersion{
-				DeploymentName: vcfg.DeploymentName,
+				DeploymentName: p.WorkerDeploymentName,
 				BuildId:        vcfg.BuildID,
 			},
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{

@@ -31,9 +31,8 @@ type Plan struct {
 type VersionConfig struct {
 	// Token to use for conflict detection
 	ConflictToken []byte
-	// Deployment name and build ID for the new SDK structure
-	DeploymentName string
-	BuildID        string
+	// Build ID for the version
+	BuildID string
 
 	// One of RampPercentage OR SetCurrent must be set to a non-zero value.
 
@@ -376,9 +375,8 @@ func getVersionConfigDiff(
 	buildID := status.TargetVersion.BuildID
 
 	vcfg := &VersionConfig{
-		ConflictToken:  conflictToken,
-		DeploymentName: workerDeploymentName,
-		BuildID:        buildID,
+		ConflictToken: conflictToken,
+		BuildID:       buildID,
 	}
 
 	// If there is no current version, set the target version as the current version
