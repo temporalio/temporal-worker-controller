@@ -237,8 +237,3 @@ func mapWorkflowStatus(status enumspb.WorkflowExecutionStatus) temporaliov1alpha
 func GetTestWorkflowID(deploymentName, buildID, taskQueue string) string {
 	return fmt.Sprintf("test-%s.%s-%s", deploymentName, buildID, taskQueue)
 }
-
-// GetTestWorkflowIDFromVersionID is deprecated, use GetTestWorkflowID instead
-func GetTestWorkflowIDFromVersionID(versionID, taskQueue string) string {
-	return fmt.Sprintf("test-%s-%s", versionID, taskQueue)
-}

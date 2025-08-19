@@ -384,6 +384,7 @@ func getVersionConfigDiff(
 	if status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
 		// Reset ramp if needed, this would happen if a ramp has been rolled back before completing
 		if temporalState.RampingBuildID != "" {
+			vcfg.BuildID = ""
 			vcfg.RampPercentage = 0
 			return vcfg
 		}
