@@ -121,13 +121,13 @@ func makePreliminaryStatusTrue(
 	loopDefers := make([]func(), 0)
 	defer handleStopFuncs(loopDefers)
 	for _, dv := range twd.Status.DeprecatedVersions {
-		t.Logf("Setting up deprecated version %v with status %v", dv.VersionID, dv.Status)
+		t.Logf("Setting up deprecated version %v with status %v", dv.BuildID, dv.Status)
 		workerStopFuncs := createStatus(ctx, t, env, twd, dv.BaseWorkerDeploymentVersion, nil)
 		loopDefers = append(loopDefers, func() { handleStopFuncs(workerStopFuncs) })
 	}
 
-	if tv := twd.Status.TargetVersion; tv.VersionID != "" {
-		t.Logf("Setting up target version %v with status %v", tv.VersionID, tv.Status)
+	if tv := twd.Status.TargetVersion; tv.BuildID != "" {
+		t.Logf("Setting up target version %v with status %v", tv.BuildID, tv.Status)
 		workerStopFuncs := createStatus(ctx, t, env, twd, tv.BaseWorkerDeploymentVersion, tv.RampPercentage)
 		defer handleStopFuncs(workerStopFuncs)
 	}
@@ -151,7 +151,11 @@ func createStatus(
 	rampPercentage *float32,
 ) (workerStopFuncs []func()) {
 	if prevVersion.Deployment != nil && prevVersion.Deployment.FieldPath == "create" {
-		v := getVersion(t, prevVersion.VersionID)
+		deploymentName := k8s.ComputeWorkerDeploymentName(newTWD)
+		v := &deployment.WorkerDeploymentVersion{
+			DeploymentName: deploymentName,
+			BuildId:        prevVersion.BuildID,
+		}
 		prevTWD := recreateTWD(newTWD, env.images[v.BuildId], env.replicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
@@ -178,18 +182,6 @@ func createStatus(
 	}
 
 	return workerStopFuncs
-}
-
-// Helper to handle unlikely error caused by invalid string split.
-func getVersion(t *testing.T, versionId string) *deployment.WorkerDeploymentVersion {
-	deploymentName, buildId, err := k8s.SplitVersionID(versionId)
-	if err != nil {
-		t.Error(err)
-	}
-	return &deployment.WorkerDeploymentVersion{
-		DeploymentName: deploymentName,
-		BuildId:        buildId,
-	}
 }
 
 // recreateTWD returns a copy of the given TWD, but replaces the build-id-generating image name with the given one,

@@ -28,7 +28,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	temporalState *temporal.TemporalWorkerState,
 ) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
-	targetVersionID := k8s.ComputeVersionID(workerDeploy)
+	targetBuildID := k8s.ComputeBuildID(workerDeploy)
 
 	// Fetch Kubernetes deployment state
 	k8sState, err := k8s.GetDeploymentState(
@@ -43,12 +43,12 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	}
 
 	// Fetch test workflow status for the desired version
-	if targetVersionID != temporalState.CurrentVersionID {
+	if targetBuildID != temporalState.CurrentBuildID {
 		testWorkflows, err := temporal.GetTestWorkflowStatus(
 			ctx,
 			temporalClient,
 			workerDeploymentName,
-			targetVersionID,
+			targetBuildID,
 			workerDeploy,
 			temporalState,
 		)
@@ -58,14 +58,16 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 		}
 
 		// Add test workflow status to version info if it doesn't exist
-		if versionInfo, exists := temporalState.Versions[targetVersionID]; exists {
+		if versionInfo, exists := temporalState.Versions[targetBuildID]; exists {
 			versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, testWorkflows...)
 		}
 	}
 
+	// Target build ID already computed above
+
 	// Use the state mapper to convert state objects to CRD status
-	stateMapper := newStateMapper(k8sState, temporalState)
-	status := stateMapper.mapToStatus(targetVersionID)
+	stateMapper := newStateMapper(k8sState, temporalState, workerDeploymentName)
+	status := stateMapper.mapToStatus(targetBuildID)
 
 	return status, nil
 }

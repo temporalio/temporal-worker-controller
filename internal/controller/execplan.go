@@ -12,7 +12,7 @@ import (
 	"github.com/go-logr/logr"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/workflow"
+	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,9 +73,11 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			WorkflowExecutionTimeout: time.Hour,
 			WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 			WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
-			VersioningOverride: sdkclient.VersioningOverride{
-				Behavior:      workflow.VersioningBehaviorPinned,
-				PinnedVersion: wf.versionID,
+			VersioningOverride: &sdkclient.PinnedVersioningOverride{
+				Version: worker.WorkerDeploymentVersion{
+					DeploymentName: p.WorkerDeploymentName,
+					BuildId:        wf.buildID,
+				},
 			},
 		}, wf.workflowType); err != nil {
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
@@ -85,9 +87,9 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Register current version or ramps
 	if vcfg := p.UpdateVersionConfig; vcfg != nil {
 		if vcfg.SetCurrent {
-			l.Info("registering new current version", "version", vcfg.VersionID)
+			l.Info("registering new current version", "buildID", vcfg.BuildID)
 			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-				Version:       vcfg.VersionID,
+				BuildID:       vcfg.BuildID,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
 			}); err != nil {
@@ -95,22 +97,25 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}
 		} else {
 			if vcfg.RampPercentage > 0 {
-				l.Info("applying ramp", "version", vcfg.VersionID, "percentage", vcfg.RampPercentage)
+				l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
 			} else {
-				l.Info("deleting ramp")
+				l.Info("deleting ramp", "buildID", vcfg.BuildID)
 			}
 
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-				Version:       vcfg.VersionID,
+				BuildID:       vcfg.BuildID,
 				Percentage:    vcfg.RampPercentage,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
 			}); err != nil {
-				return fmt.Errorf("unable to set ramping deployment: %w", err)
+				return fmt.Errorf("unable to set ramping deployment version: %w", err)
 			}
 		}
 		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-			Version: vcfg.VersionID,
+			Version: worker.WorkerDeploymentVersion{
+				DeploymentName: p.WorkerDeploymentName,
+				BuildId:        vcfg.BuildID,
+			},
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				UpsertEntries: map[string]interface{}{
 					controllerIdentityKey: getControllerIdentity(),

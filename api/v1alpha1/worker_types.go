@@ -176,9 +176,8 @@ type TaskQueue struct {
 
 // BaseWorkerDeploymentVersion contains fields common to all worker deployment version types
 type BaseWorkerDeploymentVersion struct {
-	// The string representation of the deployment version.
-	// Currently, this is always `deployment_name.build_id`.
-	VersionID string `json:"versionID"`
+	// BuildID is the unique identifier for this version of the worker deployment.
+	BuildID string `json:"buildID"`
 
 	// Status indicates whether workers in this version may
 	// be eligible to receive tasks from the Temporal server.
@@ -329,8 +328,8 @@ type QueueStatistics struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
-//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.versionID",description="Current Version for new workflows"
-//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.versionID",description="Version of the current worker template"
+//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current Version Build ID"
+//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Build ID of the target worker (based on the pod template)"
 //+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

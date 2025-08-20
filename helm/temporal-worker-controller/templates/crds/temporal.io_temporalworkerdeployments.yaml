@@ -20,11 +20,11 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: Current Version for new workflows
-      jsonPath: .status.currentVersion.versionID
+      jsonPath: .status.currentVersion.buildID
       name: Current
       type: string
     - description: Version of the current worker template
-      jsonPath: .status.targetVersion.versionID
+      jsonPath: .status.targetVersion.buildID
       name: Target
       type: string
     - description: Percentage of new workflows starting on Target Version
@@ -3810,6 +3810,8 @@ spec:
             properties:
               currentVersion:
                 properties:
+                  buildID:
+                    type: string
                   deployment:
                     properties:
                       apiVersion:
@@ -3844,15 +3846,15 @@ spec:
                       - name
                       type: object
                     type: array
-                  versionID:
-                    type: string
                 required:
+                - buildID
                 - status
-                - versionID
                 type: object
               deprecatedVersions:
                 items:
                   properties:
+                    buildID:
+                      type: string
                     deployment:
                       properties:
                         apiVersion:
@@ -3890,17 +3892,17 @@ spec:
                         - name
                         type: object
                       type: array
-                    versionID:
-                      type: string
                   required:
+                  - buildID
                   - status
-                  - versionID
                   type: object
                 type: array
               lastModifierIdentity:
                 type: string
               targetVersion:
                 properties:
+                  buildID:
+                    type: string
                   deployment:
                     properties:
                       apiVersion:
@@ -3961,11 +3963,9 @@ spec:
                       - workflowID
                       type: object
                     type: array
-                  versionID:
-                    type: string
                 required:
+                - buildID
                 - status
-                - versionID
                 type: object
               versionConflictToken:
                 format: byte

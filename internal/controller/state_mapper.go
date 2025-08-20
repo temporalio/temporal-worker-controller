@@ -13,31 +13,36 @@ import (
 
 // stateMapper maps between Kubernetes and Temporal states
 type stateMapper struct {
-	k8sState      *k8s.DeploymentState
-	temporalState *temporal.TemporalWorkerState
+	k8sState             *k8s.DeploymentState
+	temporalState        *temporal.TemporalWorkerState
+	workerDeploymentName string
 }
 
 // newStateMapper creates a new state mapper
-func newStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.TemporalWorkerState) *stateMapper {
+func newStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.TemporalWorkerState, workerDeploymentName string) *stateMapper {
 	return &stateMapper{
-		k8sState:      k8sState,
-		temporalState: temporalState,
+		k8sState:             k8sState,
+		temporalState:        temporalState,
+		workerDeploymentName: workerDeploymentName,
 	}
 }
 
 // mapToStatus converts the states to a CRD status
-func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWorkerDeploymentStatus {
+func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorkerDeploymentStatus {
 	status := &v1alpha1.TemporalWorkerDeploymentStatus{
 		VersionConflictToken: m.temporalState.VersionConflictToken,
 	}
 
+	// Get build IDs directly from temporal state
+	currentBuildID := m.temporalState.CurrentBuildID
+	rampingBuildID := m.temporalState.RampingBuildID
+
 	// Set current version
-	currentVersionID := m.temporalState.CurrentVersionID
-	status.CurrentVersion = m.mapCurrentWorkerDeploymentVersion(currentVersionID)
+	status.CurrentVersion = m.mapCurrentWorkerDeploymentVersionByBuildID(currentBuildID)
 
 	// Set target version (desired version)
-	status.TargetVersion = m.mapTargetWorkerDeploymentVersion(targetVersionID)
-	if m.temporalState.RampingVersionID == targetVersionID {
+	status.TargetVersion = m.mapTargetWorkerDeploymentVersionByBuildID(targetBuildID)
+	if rampingBuildID == targetBuildID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
 		// TODO(Shivam): Temporal server is not emitting the right value for RampLastModifiedAt.
 		// This is going to be fixed by https://github.com/temporalio/temporal/pull/8089.
@@ -48,13 +53,13 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 
 	// Add deprecated versions
 	var deprecatedVersions []*v1alpha1.DeprecatedWorkerDeploymentVersion
-	for versionID := range m.k8sState.Deployments {
+	for buildID := range m.k8sState.Deployments {
 		// Skip current and target versions
-		if versionID == currentVersionID || versionID == targetVersionID {
+		if buildID == currentBuildID || buildID == targetBuildID {
 			continue
 		}
 
-		versionStatus := m.mapDeprecatedWorkerDeploymentVersion(versionID)
+		versionStatus := m.mapDeprecatedWorkerDeploymentVersionByBuildID(buildID)
 		if versionStatus != nil {
 			deprecatedVersions = append(deprecatedVersions, versionStatus)
 		}
@@ -67,22 +72,22 @@ func (m *stateMapper) mapToStatus(targetVersionID string) *v1alpha1.TemporalWork
 	return status
 }
 
-// mapCurrentWorkerDeploymentVersion creates a current version status from the states
-func (m *stateMapper) mapCurrentWorkerDeploymentVersion(versionID string) *v1alpha1.CurrentWorkerDeploymentVersion {
-	if versionID == "" {
+// mapCurrentWorkerDeploymentVersionByBuildID creates a current version status from the states using buildID
+func (m *stateMapper) mapCurrentWorkerDeploymentVersionByBuildID(buildID string) *v1alpha1.CurrentWorkerDeploymentVersion {
+	if buildID == "" {
 		return nil
 	}
 
 	version := &v1alpha1.CurrentWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
-			VersionID: versionID,
-			Status:    v1alpha1.VersionStatusNotRegistered,
+			BuildID: buildID,
+			Status:  v1alpha1.VersionStatusNotRegistered,
 		},
 	}
 
 	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[versionID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[versionID]
+	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
+		version.Deployment = m.k8sState.DeploymentRefs[buildID]
 
 		// Check deployment health
 		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
@@ -92,7 +97,7 @@ func (m *stateMapper) mapCurrentWorkerDeploymentVersion(versionID string) *v1alp
 	}
 
 	// Set version status from temporal state
-	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
+	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
 		version.Status = temporalVersion.Status
 
 		// Set task queues
@@ -102,18 +107,22 @@ func (m *stateMapper) mapCurrentWorkerDeploymentVersion(versionID string) *v1alp
 	return version
 }
 
-// mapTargetWorkerDeploymentVersion creates a target version status from the states
-func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) v1alpha1.TargetWorkerDeploymentVersion {
+// mapTargetWorkerDeploymentVersionByBuildID creates a target version status from the states using buildID
+func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) v1alpha1.TargetWorkerDeploymentVersion {
 	version := v1alpha1.TargetWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
-			VersionID: versionID,
-			Status:    v1alpha1.VersionStatusNotRegistered,
+			BuildID: buildID,
+			Status:  v1alpha1.VersionStatusNotRegistered,
 		},
 	}
 
+	if buildID == "" {
+		return version
+	}
+
 	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[versionID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[versionID]
+	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
+		version.Deployment = m.k8sState.DeploymentRefs[buildID]
 
 		// Check deployment health
 		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
@@ -123,7 +132,7 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) v1alpha
 	}
 
 	// Set version status from temporal state
-	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
+	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
 		version.Status = temporalVersion.Status
 
 		// Set ramp percentage if this is a ramping version
@@ -143,22 +152,22 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersion(versionID string) v1alpha
 	return version
 }
 
-// mapDeprecatedWorkerDeploymentVersion creates a deprecated version status from the states
-func (m *stateMapper) mapDeprecatedWorkerDeploymentVersion(versionID string) *v1alpha1.DeprecatedWorkerDeploymentVersion {
-	if versionID == "" {
+// mapDeprecatedWorkerDeploymentVersionByBuildID creates a deprecated version status from the states using buildID
+func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID string) *v1alpha1.DeprecatedWorkerDeploymentVersion {
+	if buildID == "" {
 		return nil
 	}
 
 	version := &v1alpha1.DeprecatedWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
-			VersionID: versionID,
-			Status:    v1alpha1.VersionStatusNotRegistered,
+			BuildID: buildID,
+			Status:  v1alpha1.VersionStatusNotRegistered,
 		},
 	}
 
 	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[versionID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[versionID]
+	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
+		version.Deployment = m.k8sState.DeploymentRefs[buildID]
 
 		// Check deployment health
 		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
@@ -168,7 +177,7 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersion(versionID string) *v1
 	}
 
 	// Set version status from temporal state
-	if temporalVersion, exists := m.temporalState.Versions[versionID]; exists {
+	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
 		version.Status = temporalVersion.Status
 
 		// Set drained since if available

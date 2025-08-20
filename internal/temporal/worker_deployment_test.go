@@ -72,29 +72,29 @@ func TestGetTestWorkflowID(t *testing.T) {
 	tests := []struct {
 		name           string
 		deploymentName string
+		buildID        string
 		taskQueue      string
-		versionID      string
 		expected       string
 	}{
 		{
 			name:           "basic test",
 			deploymentName: "worker",
+			buildID:        "v1",
 			taskQueue:      "queue1",
-			versionID:      "worker.v1",
-			expected:       "test-worker.v1-queue1",
+			expected:       "test-worker:v1-queue1",
 		},
 		{
 			name:           "with dots",
 			deploymentName: "worker.app",
+			buildID:        "v2",
 			taskQueue:      "queue.main",
-			versionID:      "worker.app.v2",
-			expected:       "test-worker.app.v2-queue.main",
+			expected:       "test-worker.app:v2-queue.main",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := GetTestWorkflowID(tt.versionID, tt.taskQueue)
+			id := GetTestWorkflowID(tt.deploymentName, tt.buildID, tt.taskQueue)
 			assert.Equal(t, tt.expected, id)
 		})
 	}

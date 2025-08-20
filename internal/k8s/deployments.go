@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
@@ -37,11 +36,11 @@ const (
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
 type DeploymentState struct {
-	// Map of versionID to deployment
+	// Map of buildID to deployment
 	Deployments map[string]*appsv1.Deployment
 	// Sorted deployments by creation time
 	DeploymentsByTime []*appsv1.Deployment
-	// Map of deployment references
+	// Map of buildID to deployment references
 	DeploymentRefs map[string]*corev1.ObjectReference
 }
 
@@ -76,14 +75,13 @@ func GetDeploymentState(
 		return childDeploys.Items[i].ObjectMeta.CreationTimestamp.Before(&childDeploys.Items[j].ObjectMeta.CreationTimestamp)
 	})
 
-	// Track each k8s deployment by version ID
+	// Track each k8s deployment by build ID
 	for i := range childDeploys.Items {
 		deploy := &childDeploys.Items[i]
 		if buildID, ok := deploy.GetLabels()[BuildIDLabel]; ok {
-			versionID := workerDeploymentName + VersionIDSeparator + buildID
-			state.Deployments[versionID] = deploy
+			state.Deployments[buildID] = deploy
 			state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
-			state.DeploymentRefs[versionID] = NewObjectRef(deploy)
+			state.DeploymentRefs[buildID] = NewObjectRef(deploy)
 		}
 		// Any deployments without the build ID label are ignored
 	}
@@ -167,15 +165,6 @@ func CleanAndTruncateString(s string, n int) string {
 	// Keep only letters, numbers, and dashes
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 	return re.ReplaceAllString(s, K8sResourceNameSeparator)
-}
-
-// SplitVersionID splits a version ID into its components
-func SplitVersionID(versionID string) (deploymentName, buildID string, err error) {
-	parts := strings.Split(versionID, VersionIDSeparator)
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("invalid version ID format: %s", versionID)
-	}
-	return parts[0], parts[1], nil
 }
 
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references

@@ -88,19 +88,6 @@ func MakeTWDWithImage(name, namespace, imageName string) *temporaliov1alpha1.Tem
 	return MakeTWD(name, namespace, 1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
 }
 
-// MakeVersionId computes a version id based on the image, HelloWorldPodSpec, and k8s namespace.
-func MakeVersionId(k8sNamespace, twdName, imageName string) string {
-	return k8s.ComputeVersionID(
-		ModifyObj(
-			MakeTWDWithName(twdName, k8sNamespace),
-			func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				obj.Spec.Template = MakeHelloWorldPodSpec(imageName)
-				return obj
-			},
-		),
-	)
-}
-
 // MakeBuildId computes a build id based on the image and
 // If no podSpec is provided, defaults to HelloWorldPodSpec with the given image name.
 // If you provide your own podSpec, make sure to give the first container your desired image name if success is expected.
@@ -130,7 +117,7 @@ func MakeTWDWithName(name, namespace string) *temporaliov1alpha1.TemporalWorkerD
 func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDeployment bool) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
 	ret := &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-			VersionID:    MakeVersionId(namespace, twdName, imageName),
+			BuildID:      MakeBuildId(twdName, imageName, nil),
 			Status:       temporaliov1alpha1.VersionStatusCurrent,
 			HealthySince: nil,
 			Deployment: &corev1.ObjectReference{
@@ -161,7 +148,7 @@ func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDep
 func MakeTargetVersion(namespace, twdName, imageName string, rampPercentage float32, healthy, createDeployment bool) temporaliov1alpha1.TargetWorkerDeploymentVersion {
 	ret := temporaliov1alpha1.TargetWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-			VersionID:    MakeVersionId(namespace, twdName, imageName),
+			BuildID:      MakeBuildId(twdName, imageName, nil),
 			Status:       temporaliov1alpha1.VersionStatusCurrent,
 			HealthySince: nil,
 			Deployment: &corev1.ObjectReference{
