@@ -1807,21 +1807,21 @@ func TestGetTestWorkflowID(t *testing.T) {
 			deploymentName: "test/namespace",
 			buildID:        "123",
 			taskQueue:      "my-queue",
-			expectID:       "test-test/namespace.123-my-queue",
+			expectID:       "test-test/namespace:123-my-queue",
 		},
 		{
 			name:           "workflow ID with special characters in queue name",
 			deploymentName: "test/namespace",
 			buildID:        "456",
 			taskQueue:      "queue-with-dashes-and_underscores",
-			expectID:       "test-test/namespace.456-queue-with-dashes-and_underscores",
+			expectID:       "test-test/namespace:456-queue-with-dashes-and_underscores",
 		},
 		{
 			name:           "workflow ID with dots in version",
 			deploymentName: "test/namespace",
 			buildID:        "1.2.3",
 			taskQueue:      "queue",
-			expectID:       "test-test/namespace.1.2.3-queue",
+			expectID:       "test-test/namespace:1.2.3-queue",
 		},
 	}
 

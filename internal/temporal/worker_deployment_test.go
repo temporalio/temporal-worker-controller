@@ -81,14 +81,14 @@ func TestGetTestWorkflowID(t *testing.T) {
 			deploymentName: "worker",
 			buildID:        "v1",
 			taskQueue:      "queue1",
-			expected:       "test-worker.v1-queue1",
+			expected:       "test-worker:v1-queue1",
 		},
 		{
 			name:           "with dots",
 			deploymentName: "worker.app",
 			buildID:        "v2",
 			taskQueue:      "queue.main",
-			expected:       "test-worker.app.v2-queue.main",
+			expected:       "test-worker.app:v2-queue.main",
 		},
 	}
 

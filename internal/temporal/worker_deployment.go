@@ -28,11 +28,6 @@ type VersionInfo struct {
 	TestWorkflows  []temporaliov1alpha1.WorkflowExecution
 }
 
-// VersionID returns the legacy version ID format for compatibility
-func (v *VersionInfo) VersionID() string {
-	return v.DeploymentName + "." + v.BuildID
-}
-
 // TemporalWorkerState represents the state of a worker deployment in Temporal
 type TemporalWorkerState struct {
 	CurrentBuildID       string
@@ -235,5 +230,5 @@ func mapWorkflowStatus(status enumspb.WorkflowExecutionStatus) temporaliov1alpha
 
 // GetTestWorkflowID generates a workflowID for test workflows
 func GetTestWorkflowID(deploymentName, buildID, taskQueue string) string {
-	return fmt.Sprintf("test-%s.%s-%s", deploymentName, buildID, taskQueue)
+	return fmt.Sprintf("test-%s:%s-%s", deploymentName, buildID, taskQueue)
 }

@@ -108,7 +108,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      ControllerIdentity,
 			}); err != nil {
-				return fmt.Errorf("unable to set ramping deployment: %w", err)
+				return fmt.Errorf("unable to set ramping deployment version: %w", err)
 			}
 		}
 		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
