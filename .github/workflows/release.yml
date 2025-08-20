@@ -75,6 +75,9 @@ jobs:
       - name: Configure Git
         run: |
           echo ${{ steps.generate_token.outputs.token }} | gh auth login --with-token
+          gh auth status -a
+          git config --global user.name "temporal-cicd[bot]"
+          git config --global user.email "gh-action@users.noreply.github.com"
 
       - name: Install Helm
         uses: azure/setup-helm@v3
