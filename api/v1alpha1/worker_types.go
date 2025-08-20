@@ -176,7 +176,7 @@ type TaskQueue struct {
 
 // BaseWorkerDeploymentVersion contains fields common to all worker deployment version types
 type BaseWorkerDeploymentVersion struct {
-	// BuildID is the unique identifier for this version of the deployment.
+	// BuildID is the unique identifier for this version of the worker deployment.
 	BuildID string `json:"buildID"`
 
 	// Status indicates whether workers in this version may

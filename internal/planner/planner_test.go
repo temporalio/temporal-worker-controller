@@ -1858,7 +1858,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			name:    "same connection spec hash does not update the existing deployment",
 			buildID: "v1",
 			existingDeployment: createTestDeploymentWithConnection(
-				"test-worker.v1",
+				"test-worker", "v1",
 				temporaliov1alpha1.TemporalConnectionSpec{
 					HostPort:        defaultHostPort(),
 					MutualTLSSecret: defaultMutualTLSSecret(),
@@ -1874,7 +1874,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			name:    "different secret name triggers update",
 			buildID: "v2",
 			existingDeployment: createTestDeploymentWithConnection(
-				"test-worker.v2",
+				"test-worker", "v2",
 				temporaliov1alpha1.TemporalConnectionSpec{
 					HostPort:        defaultHostPort(),
 					MutualTLSSecret: defaultMutualTLSSecret(),
@@ -1896,7 +1896,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			name:    "different host port triggers update",
 			buildID: "v3",
 			existingDeployment: createTestDeploymentWithConnection(
-				"test-worker.v3",
+				"test-worker", "v3",
 				temporaliov1alpha1.TemporalConnectionSpec{
 					HostPort:        defaultHostPort(),
 					MutualTLSSecret: defaultMutualTLSSecret(),
@@ -1918,7 +1918,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			name:    "both hostport and secret change triggers update",
 			buildID: "v4",
 			existingDeployment: createTestDeploymentWithConnection(
-				"test-worker.v4",
+				"test-worker", "v4",
 				temporaliov1alpha1.TemporalConnectionSpec{
 					HostPort:        defaultHostPort(),
 					MutualTLSSecret: defaultMutualTLSSecret(),
@@ -1940,7 +1940,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			name:    "empty mutual tls secret updates correctly",
 			buildID: "v5",
 			existingDeployment: createTestDeploymentWithConnection(
-				"test-worker.v5",
+				"test-worker", "v5",
 				temporaliov1alpha1.TemporalConnectionSpec{
 					HostPort:        defaultHostPort(),
 					MutualTLSSecret: defaultMutualTLSSecret(),
@@ -2110,13 +2110,13 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec 
 }
 
 // createTestDeploymentWithConnection creates a test deployment with the specified connection spec
-func createTestDeploymentWithConnection(versionID string, connection temporaliov1alpha1.TemporalConnectionSpec) *appsv1.Deployment {
+func createTestDeploymentWithConnection(deploymentName, buildID string, connection temporaliov1alpha1.TemporalConnectionSpec) *appsv1.Deployment {
 	return k8s.NewDeploymentWithOwnerRef(
 		&metav1.TypeMeta{},
 		&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
 		createDefaultWorkerSpec(),
-		versionID,
-		"build123",
+		deploymentName,
+		buildID,
 		connection,
 	)
 }

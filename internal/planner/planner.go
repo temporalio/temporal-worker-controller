@@ -89,7 +89,7 @@ func GeneratePlan(
 	return plan, nil
 }
 
-// checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given versionID is
+// checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
 // out-of-date with respect to the provided TemporalConnectionSpec. If an update is required, it mutates
 // the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
 // the Deployment does not exist, it returns nil.
