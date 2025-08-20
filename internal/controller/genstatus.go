@@ -6,12 +6,15 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"go.temporal.io/server/common/worker_versioning"
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"go.temporal.io/api/serviceerror"
 	temporalclient "go.temporal.io/sdk/client"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -44,22 +47,51 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 
 	// Fetch test workflow status for the desired version
 	if targetBuildID != temporalState.CurrentBuildID {
-		testWorkflows, err := temporal.GetTestWorkflowStatus(
-			ctx,
-			temporalClient,
-			workerDeploymentName,
-			targetBuildID,
-			workerDeploy,
-			temporalState,
-		)
-		if err != nil {
-			l.Error(err, "error getting test workflow status")
-			// Continue without test workflow status
-		}
-
-		// Add test workflow status to version info if it doesn't exist
-		if versionInfo, exists := temporalState.Versions[targetBuildID]; exists {
+		taskQueueInfos, err := temporal.GetVersionTaskQueueInfos(ctx, temporalClient, workerDeploymentName, targetBuildID)
+		var notFound *serviceerror.NotFound
+		var testWorkflows []temporaliov1alpha1.WorkflowExecution
+		if err == nil {
+			testWorkflows, err = temporal.GetTestWorkflowStatus(
+				ctx,
+				temporalClient,
+				workerDeploymentName,
+				targetBuildID,
+				taskQueueInfos,
+			)
+			if err != nil {
+				l.Error(err, "error getting test workflow status")
+				// Continue without test workflow status
+			}
+			// Add test workflow status to version info if the version exists
+			versionInfo, exists := temporalState.Versions[targetBuildID]
+			if !exists {
+				panic("CARLY SHOULD SEE THIS")
+			}
 			versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, testWorkflows...)
+			for _, tqInfo := range taskQueueInfos {
+				var HasUnversionedPoller bool
+				if workerDeploy.Status.CurrentVersion != nil &&
+					workerDeploy.Status.CurrentVersion.VersionID == worker_versioning.UnversionedVersionId &&
+					workerDeploy.Spec.RolloutStrategy.Strategy == temporaliov1alpha1.UpdateProgressive {
+					// check whether task queues have unversioned pollers
+					HasUnversionedPoller, err = temporal.HasUnversionedPoller(ctx, temporalClient, tqInfo)
+					if err != nil {
+						l.Error(err, fmt.Sprintf("error getting pollers of target version %s task queue %s, could not verify presence of unversioned pollers",
+							targetVersionID, tqInfo.Name))
+						// Continue without pollers, assume that there might be no unversioned pollers, so target version should immediately become current.
+					}
+				}
+				if exists {
+					versionInfo.TaskQueues = append(temporalState.Versions[targetVersionID].TaskQueues, temporaliov1alpha1.TaskQueue{
+						Name:                 tqInfo.Name,
+						Type:                 temporal.TaskQueueTypeString(tqInfo.Type),
+						HasUnversionedPoller: HasUnversionedPoller,
+					})
+				}
+			}
+		} else if err != nil && !errors.As(err, &notFound) {
+			// Ignore NotFound error, because if the version is not found, we know there are no task queues or test workflows to describe.
+			l.Error(err, "unable to describe worker deployment version: %w", err)
 		}
 	}
 

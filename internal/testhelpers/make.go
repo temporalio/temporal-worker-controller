@@ -12,10 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-const (
-	testTaskQueue = "hello_world"
-)
-
 func MakeTWD(
 	name string,
 	namespace string,
@@ -77,11 +73,22 @@ func MakePodSpec(containers []corev1.Container, labels map[string]string, taskQu
 	}
 }
 
-// MakeHelloWorldPodSpec creates a pod spec with hello_world task queue and one container with the given image name.
-func MakeHelloWorldPodSpec(imageName string) corev1.PodTemplateSpec {
+func ReplaceTaskQueue(podSpec corev1.PodTemplateSpec, taskQueue string) corev1.PodTemplateSpec {
+	for i, c := range podSpec.Spec.Containers {
+		for j, e := range c.Env {
+			if e.Name == "TEMPORAL_TASK_QUEUE" {
+				podSpec.Spec.Containers[i].Env[j].Value = taskQueue
+			}
+		}
+	}
+	return podSpec
+}
+
+// MakeHelloWorldPodSpec creates a pod spec with the given task queue and one container with the given image name.
+func MakeHelloWorldPodSpec(imageName, taskQueue string) corev1.PodTemplateSpec {
 	return MakePodSpec([]corev1.Container{{Name: "worker", Image: imageName}},
 		map[string]string{"app": "test-worker"},
-		testTaskQueue)
+		taskQueue)
 }
 
 func MakeTWDWithImage(name, namespace, imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -99,7 +106,7 @@ func MakeBuildId(twdName, imageName string, podSpec *corev1.PodTemplateSpec) str
 				if podSpec != nil {
 					obj.Spec.Template = *podSpec
 				} else {
-					obj.Spec.Template = MakeHelloWorldPodSpec(imageName)
+					obj.Spec.Template = MakeHelloWorldPodSpec(imageName, twdName)
 				}
 				return obj
 			},
@@ -128,7 +135,7 @@ func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDep
 				),
 			},
 			TaskQueues: []temporaliov1alpha1.TaskQueue{
-				{Name: testTaskQueue},
+				{Name: twdName},
 			},
 			ManagedBy: "",
 		},
@@ -159,7 +166,7 @@ func MakeTargetVersion(namespace, twdName, imageName string, rampPercentage floa
 				),
 			},
 			TaskQueues: []temporaliov1alpha1.TaskQueue{
-				{Name: testTaskQueue},
+				{Name: twdName},
 			},
 			ManagedBy: "",
 		},

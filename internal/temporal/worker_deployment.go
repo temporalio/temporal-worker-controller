@@ -114,7 +114,6 @@ func GetWorkerDeploymentState(
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDrained {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
-
 			// Get drain time information
 			versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
 				BuildID: version.Version.BuildId,
@@ -122,6 +121,14 @@ func GetWorkerDeploymentState(
 			if err == nil {
 				drainedSince := versionResp.Info.DrainageInfo.LastChangedTime
 				versionInfo.DrainedSince = &drainedSince
+				for _, tqInfo := range versionResp.Info.TaskQueuesInfos {
+					hasNoVersionedPollers, _ := HasNoVersionedPollers(ctx, client, tqInfo) // consider logging this error
+					versionInfo.TaskQueues = append(versionInfo.TaskQueues, temporaliov1alpha1.TaskQueue{
+						Name:                  tqInfo.Name,
+						Type:                  TaskQueueTypeString(tqInfo.Type),
+						HasNoVersionedPollers: hasNoVersionedPollers,
+					})
+				}
 			}
 		} else {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
@@ -133,51 +140,103 @@ func GetWorkerDeploymentState(
 	return state, nil
 }
 
-// GetTestWorkflowStatus queries Temporal to get the status of test workflows for a version
-func GetTestWorkflowStatus(
-	ctx context.Context,
+func GetVersionTaskQueueInfos(ctx context.Context,
 	client temporalClient.Client,
 	workerDeploymentName string,
 	buildID string,
-	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
-	temporalState *TemporalWorkerState,
-) ([]temporaliov1alpha1.WorkflowExecution, error) {
-	var results []temporaliov1alpha1.WorkflowExecution
-
+) ([]temporalClient.WorkerDeploymentTaskQueueInfo, error) {
 	// Get deployment handler
 	deploymentHandler := client.WorkerDeploymentClient().GetHandle(workerDeploymentName)
 
 	// Get version info from temporal state to get deployment name
-	versionInfo, exists := temporalState.Versions[buildID]
+	_, exists := temporalState.Versions[buildID]
 	if !exists {
 		return results, nil
 	}
 
 	// Describe the version to get task queue information
 	versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-		BuildID: versionInfo.BuildID,
+		BuildID: buildID,
 	})
-
-	var notFound *serviceerror.NotFound
-	if err != nil && !errors.As(err, &notFound) {
-		// Ignore NotFound error, because if the version is not found, we know there are no test workflows running on it.
-		return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
+	if err != nil {
+		return nil, err
 	}
+	return versionResp.Info.TaskQueuesInfos, nil
+}
+
+func HasUnversionedPoller(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) (bool, error) {
+	pollers, err := getPollers(ctx, client, taskQueueInfo)
+	if err != nil {
+		return false, fmt.Errorf("unable to confirm presence of unversioned pollers: %w", err)
+	}
+	for _, p := range pollers {
+		switch p.GetDeploymentOptions().GetWorkerVersioningMode() {
+		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
+			return true, nil
+		case temporalClient.WorkerVersioningModeVersioned:
+		}
+	}
+	return false, nil
+}
+
+func HasNoVersionedPollers(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) (bool, error) {
+	pollers, err := getPollers(ctx, client, taskQueueInfo)
+	if err != nil {
+		return false, fmt.Errorf("unable to confirm absence of versioned pollers: %w", err)
+	}
+	for _, p := range pollers {
+		switch p.GetDeploymentOptions().GetWorkerVersioningMode() {
+		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
+		case temporalClient.WorkerVersioningModeVersioned:
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func getPollers(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) ([]*taskqueue.PollerInfo, error) {
+	var resp *workflowservice.DescribeTaskQueueResponse
+	var err error
+	switch taskQueueInfo.Type {
+	case temporalClient.TaskQueueTypeWorkflow:
+		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeWorkflow)
+	case temporalClient.TaskQueueTypeActivity:
+		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeActivity)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
+	}
+	return resp.GetPollers(), nil
+}
+
+// GetTestWorkflowStatus queries Temporal to get the status of test workflows for a version
+func GetTestWorkflowStatus(
+	ctx context.Context,
+	client temporalClient.Client,
+	workerDeploymentName string,
+	buildID string,
+	taskQueueInfos []temporalClient.WorkerDeploymentTaskQueueInfo,
+) ([]temporaliov1alpha1.WorkflowExecution, error) {
+	var results []temporaliov1alpha1.WorkflowExecution
 
 	// Check test workflows for each task queue
-	for _, tq := range versionResp.Info.TaskQueuesInfos {
+	for _, tq := range taskQueueInfos {
 		// Skip non-workflow task queues
 		if tq.Type != temporalClient.TaskQueueTypeWorkflow {
 			continue
 		}
 
-		// Adding task queue information to the current temporal state
-		temporalState.Versions[buildID].TaskQueues = append(temporalState.Versions[buildID].TaskQueues, temporaliov1alpha1.TaskQueue{
-			Name: tq.Name,
-		})
-
 		// Check if there is a test workflow for this task queue
-		testWorkflowID := GetTestWorkflowID(versionInfo.DeploymentName, versionInfo.BuildID, tq.Name)
+		testWorkflowID := GetTestWorkflowID(workerDeploymentName, buildID, tq.Name)
 		wf, err := client.DescribeWorkflowExecution(
 			ctx,
 			testWorkflowID,
@@ -226,6 +285,13 @@ func mapWorkflowStatus(status enumspb.WorkflowExecutionStatus) temporaliov1alpha
 		// Default to running for unspecified or any other status
 		return temporaliov1alpha1.WorkflowExecutionStatusRunning
 	}
+}
+
+func TaskQueueTypeString(tqType temporalClient.TaskQueueType) string {
+	if tqType == temporalClient.TaskQueueTypeActivity {
+		return "Activity"
+	}
+	return "Workflow"
 }
 
 // GetTestWorkflowID generates a workflowID for test workflows

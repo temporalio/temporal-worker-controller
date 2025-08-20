@@ -3840,10 +3840,19 @@ spec:
                   taskQueues:
                     items:
                       properties:
+                        HasUnversionedPoller:
+                          type: boolean
+                        hasNoVersionedPollers:
+                          type: boolean
                         name:
                           type: string
+                        type:
+                          type: string
                       required:
+                      - HasUnversionedPoller
+                      - hasNoVersionedPollers
                       - name
+                      - type
                       type: object
                     type: array
                 required:
@@ -3886,10 +3895,19 @@ spec:
                     taskQueues:
                       items:
                         properties:
+                          HasUnversionedPoller:
+                            type: boolean
+                          hasNoVersionedPollers:
+                            type: boolean
                           name:
                             type: string
+                          type:
+                            type: string
                         required:
+                        - HasUnversionedPoller
+                        - hasNoVersionedPollers
                         - name
+                        - type
                         type: object
                       type: array
                   required:
@@ -3939,10 +3957,19 @@ spec:
                   taskQueues:
                     items:
                       properties:
+                        HasUnversionedPoller:
+                          type: boolean
+                        hasNoVersionedPollers:
+                          type: boolean
                         name:
                           type: string
+                        type:
+                          type: string
                       required:
+                      - HasUnversionedPoller
+                      - hasNoVersionedPollers
                       - name
+                      - type
                       type: object
                     type: array
                   testWorkflows:
@@ -3971,6 +3998,9 @@ spec:
                 format: byte
                 type: string
               versionCount:
+                format: int32
+                type: integer
+              versionCountIneligibleForDeletion:
                 format: int32
                 type: integer
             required:
