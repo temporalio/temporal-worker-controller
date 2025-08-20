@@ -193,7 +193,7 @@ func TestGetDeploymentState(t *testing.T) {
 	assert.Equal(t, 2, len(state.DeploymentsByTime))
 	assert.Equal(t, 2, len(state.DeploymentRefs))
 
-	// Verify the content of the maps (now indexed by buildID)
+	// Verify the content of the maps
 	assert.Equal(t, "worker-v1", state.Deployments["v1"].Name)
 	assert.Equal(t, "worker-v2", state.Deployments["v2"].Name)
 
@@ -201,7 +201,7 @@ func TestGetDeploymentState(t *testing.T) {
 	assert.Equal(t, "worker-v1", state.DeploymentsByTime[0].Name)
 	assert.Equal(t, "worker-v2", state.DeploymentsByTime[1].Name)
 
-	// Verify refs are correctly created (now indexed by buildID)
+	// Verify refs are correctly created
 	assert.Equal(t, "worker-v1", state.DeploymentRefs["v1"].Name)
 	assert.Equal(t, "worker-v2", state.DeploymentRefs["v2"].Name)
 }

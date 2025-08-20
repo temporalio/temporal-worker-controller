@@ -134,7 +134,7 @@ func TestMapToStatus(t *testing.T) {
 	// Create state mapper
 	mapper := newStateMapper(k8sState, temporalState, "worker")
 
-	// Map to status (now takes buildID instead of versionID)
+	// Map to status
 	status := mapper.mapToStatus("v2")
 
 	// Verify status
