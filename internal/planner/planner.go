@@ -387,7 +387,7 @@ func getVersionConfigDiff(
 	}
 
 	// If the current version is the target version
-	if status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
 		// Reset ramp if needed, this would happen if a ramp has been rolled back before completing
 		if temporalState.RampingBuildID != "" {
 			vcfg.BuildID = ""

@@ -9,6 +9,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -151,11 +152,11 @@ func createStatus(
 ) (workerStopFuncs []func()) {
 	if prevVersion.Deployment != nil && prevVersion.Deployment.FieldPath == "create" {
 		deploymentName := k8s.ComputeWorkerDeploymentName(newTWD)
-		v := &deployment.WorkerDeploymentVersion{
+		v := &worker.WorkerDeploymentVersion{
 			DeploymentName: deploymentName,
 			BuildId:        prevVersion.BuildID,
 		}
-		prevTWD := recreateTWD(newTWD, env.images[v.BuildId], env.replicas[v.BuildId])
+		prevTWD := recreateTWD(newTWD, env.Images[v.BuildId], env.Replicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
 		waitForDeployment(t, env.K8sClient, expectedDeploymentName, prevTWD.Namespace, 30*time.Second)
