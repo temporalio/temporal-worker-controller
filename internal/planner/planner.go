@@ -5,7 +5,6 @@
 package planner
 
 import (
-	"go.temporal.io/server/common/worker_versioning"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -378,8 +377,7 @@ func getVersionConfigDiff(
 	// If there is no current version, and if any of the target version's task queues do not have unversioned
 	// pollers to handle traffic during the ramp period, set the target version as current immediately to avoid
 	// tasks being sent to the unversioned queue when there are no unversioned pollers there.
-	if status.CurrentVersion.VersionID == worker_versioning.UnversionedVersionId &&
-		strategy.Strategy == temporaliov1alpha1.UpdateProgressive {
+	if status.CurrentVersion == nil && strategy.Strategy == temporaliov1alpha1.UpdateProgressive { // todo(carlydf) double check
 		for _, tq := range status.TargetVersion.TaskQueues {
 			if !tq.HasUnversionedPoller {
 				vcfg.SetCurrent = true

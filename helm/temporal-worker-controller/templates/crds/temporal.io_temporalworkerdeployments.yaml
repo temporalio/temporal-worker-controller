@@ -19,11 +19,11 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Current Version for new workflows
+    - description: Current Version Build ID
       jsonPath: .status.currentVersion.buildID
       name: Current
       type: string
-    - description: Version of the current worker template
+    - description: Build ID of the target worker (based on the pod template)
       jsonPath: .status.targetVersion.buildID
       name: Target
       type: string

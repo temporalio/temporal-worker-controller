@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/api/workflowservice/v1"
 	"strings"
 	"time"
 
@@ -147,12 +149,6 @@ func GetVersionTaskQueueInfos(ctx context.Context,
 ) ([]temporalClient.WorkerDeploymentTaskQueueInfo, error) {
 	// Get deployment handler
 	deploymentHandler := client.WorkerDeploymentClient().GetHandle(workerDeploymentName)
-
-	// Get version info from temporal state to get deployment name
-	_, exists := temporalState.Versions[buildID]
-	if !exists {
-		return results, nil
-	}
 
 	// Describe the version to get task queue information
 	versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
