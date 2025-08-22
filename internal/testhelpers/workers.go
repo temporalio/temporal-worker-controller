@@ -37,7 +37,7 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	if err != nil {
 		return nil, nil, err
 	}
-	temporalTaskQueue, err := getEnv(podTemplateSpec, "TEMPORAL_TASK_QUEUE")
+	temporalTaskQueue, err := getEnv(podTemplateSpec, TaskQueueEnvKey)
 	if err != nil {
 		return nil, nil, err
 	}
