@@ -729,16 +729,4 @@ See the [Concepts](concepts.md) document for detailed explanations of the resour
 
 This approach ensures a safe transition from unversioned to versioned workflows without disrupting running workflows or introducing deployment risks.
 
-## Next Steps
-
-After successful migration to versioned workflows:
-
-1. **Set up monitoring** for your TemporalWorkerDeployment resources and version transitions
-2. **Update CI/CD pipelines** to patch TemporalWorkerDeployment image specs instead of managing Deployments directly  
-3. **Configure alerting** on version transition failures and rollout issues
-4. **Train your team** on the new versioned deployment process and rollback procedures
-5. **Document your rollout strategies** and tune them based on your specific risk tolerance
-6. **Plan for advanced features** like canary analysis and automated rollbacks
-7. **Migrate remaining services** using the lessons learned from initial migrations
-
 The Temporal Worker Controller should significantly improve your deployment safety and reduce the risk of workflow disruptions while providing automated rollout capabilities that weren't possible with unversioned workflows. 
