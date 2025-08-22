@@ -1,61 +1,70 @@
-# Migrating to Temporal Worker Controller
+# Migrating from Unversioned to Versioned Workflows with Temporal Worker Controller
 
-This guide helps teams migrate from their existing versioned worker deployment systems to the Temporal Worker Controller. It assumes you are already running versioned workers using Temporal's Worker Versioning feature and want to automate the management of these deployments.
+This guide helps teams migrate from unversioned Temporal workflows to versioned workflows using the Temporal Worker Controller. It assumes you are currently running workers without Temporal's Worker Versioning feature and want to adopt versioned deployments for safer, more controlled rollouts.
 
-## Important Terminology
+## Important Note
 
-To avoid confusion, this guide uses specific terminology:
-
-- **Temporal Worker Deployment**: A logical grouping in Temporal (e.g., "payment-processor", "notification-sender")
-- **`TemporalWorkerDeployment` CRD**: The Kubernetes custom resource that manages one Temporal Worker Deployment
-- **Kubernetes `Deployment`**: The actual k8s Deployment resources that run worker pods (multiple per Temporal Worker Deployment, one per version)
-
-**Key Relationship**: One `TemporalWorkerDeployment` CRD → Multiple Kubernetes `Deployment` resources (managed by controller)
+This guide uses specific terminology that is defined in the [Concepts](concepts.md) document. Please review the concepts document first to understand key terms like **Temporal Worker Deployment**, **`TemporalWorkerDeployment` CRD**, and **Kubernetes `Deployment`**, as well as the relationship between them.
 
 ## Table of Contents
 
-1. [Prerequisites](#prerequisites)
-2. [Understanding the Differences](#understanding-the-differences)
-3. [Migration Strategy](#migration-strategy)
-4. [Step-by-Step Migration](#step-by-step-migration)
-5. [Configuration Mapping](#configuration-mapping)
-6. [Testing and Validation](#testing-and-validation)
-7. [Common Migration Patterns](#common-migration-patterns)
-8. [Troubleshooting](#troubleshooting)
+1. [Why Migrate to Versioned Workflows](#why-migrate-to-versioned-workflows)
+2. [Prerequisites](#prerequisites)
+3. [Understanding the Differences](#understanding-the-differences)
+4. [Migration Strategy](#migration-strategy)
+5. [Step-by-Step Migration](#step-by-step-migration)
+6. [Configuration Reference](#configuration-reference)
+7. [Testing and Validation](#testing-and-validation)
+8. [Common Migration Patterns](#common-migration-patterns)
+9. [Troubleshooting](#troubleshooting)
+
+## Why Migrate to Versioned Workflows
+
+If you're currently running unversioned Temporal workflows, you may be experiencing challenges with deployments:
+
+- **Deployment Risk**: Code changes can break running workflows if they're not backward compatible
+- **Rollback Complexity**: Rolling back deployments can disrupt in-flight workflows
+- **Workflow Determinism Issues**: Changes to workflow logic can cause non-deterministic errors
+
+Versioned workflows with the Temporal Worker Controller solve these problems by:
+
+- ✅ **Safe Deployments**: New versions run alongside old ones, ensuring running workflows complete successfully
+- ✅ **Automated Rollouts**: Progressive rollout strategies reduce risk of new deployments
+- ✅ **Easy Rollbacks**: Can instantly route new workflows back to previous versions
+- ✅ **Workflow Continuity**: Running workflows can continue on their original version until completion
 
 ## Prerequisites
 
 Before starting the migration, ensure you have:
 
-- ✅ **Existing versioned workers**: Your workers are already using Temporal's Worker Versioning feature
+- ✅ **Unversioned Temporal workers**: Currently running workers without Worker Versioning
 - ✅ **Kubernetes cluster**: Running Kubernetes 1.19+ with CustomResourceDefinition support
-- ✅ **Worker configuration**: Workers are configured with deployment names and build IDs
-- ✅ **Rainbow deployments**: Currently managing multiple concurrent versions manually
+- ✅ **Basic worker configuration**: Workers connect to Temporal with namespace and task queue configuration
 - ✅ **Administrative access**: Ability to install Custom Resource Definitions and controllers
+- ✅ **Deployment pipeline**: Existing CI/CD system that can be updated to use new deployment method
 
-### Environment Variables Your Workers Should Already Use
+### Current Environment Variables
 
-Your workers should already be configured with these standard environment variables:
+Your workers are likely configured with basic environment variables like:
 
 ```bash
 TEMPORAL_HOST_PORT=your-namespace.tmprl.cloud:7233
 TEMPORAL_NAMESPACE=your-temporal-namespace
-TEMPORAL_DEPLOYMENT_NAME=your-deployment-name
-WORKER_BUILD_ID=your-build-id
+# No TEMPORAL_DEPLOYMENT_NAME or WORKER_BUILD_ID yet
 ```
 
-If you're using different variable names, you'll need to update your worker code during migration.
+The controller will automatically add the versioning-related environment variables during migration.
 
 ## Understanding the Differences
 
-### Before: Manual Version Management
+### Before: Unversioned Workers
 
 ```yaml
-# You currently manage multiple deployments manually
+# Single deployment, all workers run the same code
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: my-worker-v1
+  name: my-worker
 spec:
   replicas: 3
   template:
@@ -64,29 +73,23 @@ spec:
       - name: worker
         image: my-worker:v1.2.3
         env:
-        - name: WORKER_BUILD_ID
-          value: "v1.2.3"
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: my-worker-v2
-spec:
-  replicas: 3
-  template:
-    spec:
-      containers:
-      - name: worker
-        image: my-worker:v1.2.4
-        env:
-        - name: WORKER_BUILD_ID
-          value: "v1.2.4"
+        - name: TEMPORAL_HOST_PORT
+          value: "production.tmprl.cloud:7233"
+        - name: TEMPORAL_NAMESPACE
+          value: "production"
+        # No versioning environment variables
 ```
 
-### After: Controller-Managed Versions
+**Current Deployment Process:**
+1. Build new worker image
+2. Update Deployment with new image
+3. Kubernetes rolls out new pods, terminating old ones
+4. **Risk**: Running workflows may fail if code changes break compatibility
+
+### After: Versioned Workers with Controller
 
 ```yaml
-# Single resource manages all versions automatically
+# Single CRD manages multiple versions automatically
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
@@ -97,7 +100,12 @@ spec:
     connection: production-temporal
     temporalNamespace: production
   cutover:
-    strategy: Manual  # Use Manual during migration, then switch to Progressive
+    strategy: Progressive  # Gradual rollout of new versions
+    steps:
+      - rampPercentage: 10
+        pauseDuration: 5m
+      - rampPercentage: 50
+        pauseDuration: 10m
   sunset:
     scaledownDelay: 1h
     deleteDelay: 24h
@@ -105,42 +113,64 @@ spec:
     spec:
       containers:
       - name: worker
-        image: my-worker:v1.2.4  # Update this image to import/deploy versions
+        image: my-worker:v1.2.4  # Update this to deploy new versions
+        # Note: Controller automatically adds versioning environment variables:
+        # TEMPORAL_HOST_PORT, TEMPORAL_NAMESPACE, TEMPORAL_DEPLOYMENT_NAME, WORKER_BUILD_ID
 ```
 
-**Key Differences:**
-- ✅ **Single CRD resource** manages multiple versions instead of multiple manual Kubernetes Deployments
-- ✅ **Controller creates Kubernetes Deployments** automatically (one per version)
-- ✅ **Automated lifecycle** handles registration, routing, and cleanup
-- ✅ **Version history** tracked in the CRD resource status
-- ✅ **Rollout strategies** automate traffic shifting between versions
+**New Deployment Process:**
+1. Build new worker image  
+2. Update `TemporalWorkerDeployment` CRD with new image
+3. Controller creates new Kubernetes `Deployment` for the new version
+4. Controller gradually routes new workflows to new version
+5. Old version continues handling existing workflows until they complete
+6. **Safety**: No disruption to running workflows, automated rollout control
+
+**Key Benefits:**
+- ✅ **Zero-disruption deployments** - Running workflows continue on original version
+- ✅ **Automated version management** - Controller handles registration and routing
+- ✅ **Progressive rollouts** - Gradual traffic shifting with automatic pause points
+- ✅ **Easy rollbacks** - Instantly route new workflows back to previous version
+- ✅ **Workflow continuity** - Deterministic execution preserved across deployments
 
 ## Migration Strategy
 
-### The Single Resource Requirement
+### Safe Migration Approach
 
-⚠️ **CRITICAL**: For each **Temporal Worker Deployment**, you MUST create exactly **ONE** `TemporalWorkerDeployment` CRD resource and import all existing versions into it. This is not optional - it's how the system works.
-
-**Terminology Clarification:**
-- **Temporal Worker Deployment**: A logical grouping in Temporal (e.g., "payment-processor")
-- **`TemporalWorkerDeployment` CRD**: One Kubernetes custom resource per Temporal Worker Deployment
-- **Kubernetes `Deployment`**: Multiple k8s Deployments (one per version) managed by the controller
+The migration from unversioned to versioned workflows requires careful planning to avoid disrupting running workflows. The key is to transition gradually while maintaining workflow continuity.
 
 **Key Principles:**
-- **One CRD resource per Temporal Worker Deployment** - Don't create multiple `TemporalWorkerDeployment` resources for the same logical worker
-- **Use Manual strategy during import** - Prevents unwanted automatic promotions
-- **Import versions sequentially** - Update the same CRD resource to import each existing version
-- **Enable automation last** - Switch to Progressive strategy only after migration is complete
+- **Start with Manual strategy** - Prevents automatic promotions during initial setup
+- **Migrate one worker deployment at a time** - Reduces risk and allows learning
+- **Test thoroughly in non-production** - Validate the approach before production migration
+- **Preserve running workflows** - Ensure in-flight workflows complete successfully
+- **Enable automation gradually** - Move to Progressive rollouts only after validation
 
-### Recommended Migration Steps
+### Migration Phases
 
-1. **Install the controller** in your cluster
-2. **Choose a non-critical worker** to migrate first
-3. **Create a single TemporalWorkerDeployment** with Manual strategy
-4. **Import existing versions one by one** by updating the image spec
-5. **Clean up manual deployments** after confirming controller management
-6. **Enable automated rollouts** by switching to Progressive strategy
-7. **Repeat for remaining workers** one deployment at a time
+#### Phase 1: Preparation
+1. **Install the controller** in non-production environments
+2. **Update worker code** to support versioning (if needed)
+3. **Test migration process** with non-critical workers
+4. **Prepare CI/CD pipeline changes** for new deployment method
+
+#### Phase 2: Initial Migration
+1. **Choose lowest-risk worker** to migrate first
+2. **Create `TemporalWorkerDeployment` CRD** with Manual strategy
+3. **Validate controller management** works correctly
+4. **Update deployment pipeline** for this worker
+
+#### Phase 3: Gradual Rollout
+1. **Migrate remaining workers** one at a time
+2. **Enable Progressive rollouts** for validated workers
+3. **Monitor and tune** rollout configurations
+4. **Train team** on new deployment process
+
+### Recommended Migration Order
+
+1. **Background/batch processing workers** - Lower risk, easier to validate
+2. **Internal service workers** - Limited external impact
+3. **Customer-facing workers** - Highest risk, migrate last with most care
 
 ## Step-by-Step Migration
 
@@ -148,7 +178,10 @@ spec:
 
 ```bash
 # Install the controller using Helm
-helm install --repo FIXME temporal-worker-controller temporal-worker-controller
+helm install -n temporal-system --create-namespace \
+  temporal-worker-controller \
+  oci://docker.io/temporalio/temporal-worker-controller
+  
 ```
 
 ### Step 2: Create TemporalConnection Resources
@@ -175,46 +208,55 @@ spec:
   mutualTLSSecret: temporal-cloud-mtls
 ```
 
-### Step 3: Map Your Current Configuration
+### Step 3: Prepare Your Worker Code (If Needed)
 
-For each existing **Temporal Worker Deployment** (logical grouping), identify all currently running versions. You'll create a single `TemporalWorkerDeployment` CRD resource and import each version one by one.
+Most workers will work without changes, but you may need to update your worker initialization code to properly handle versioning:
 
-**Current Manual Kubernetes Deployments:**
+**Before (Unversioned):**
+```go
+// Worker connects without versioning
+worker := worker.New(client, "my-task-queue", worker.Options{})
+```
+
+**After (Versioned - Optional Enhancement):**
+```go
+// Worker can optionally use build ID from environment
+buildID := os.Getenv("WORKER_BUILD_ID")
+workerOptions := worker.Options{}
+if buildID != "" {
+    workerOptions.BuildID = buildID
+    workerOptions.UseBuildIDForVersioning = true
+}
+worker := worker.New(client, "my-task-queue", workerOptions)
+```
+
+> **Note**: The controller automatically sets `WORKER_BUILD_ID` environment variable, so most workers will work without code changes.
+
+### Step 4: Create Your First TemporalWorkerDeployment
+
+Start with your lowest-risk worker. Convert your existing unversioned Deployment to a `TemporalWorkerDeployment` CRD:
+
+**Current Unversioned Deployment:**
 ```yaml
-# Version 1 (older, still has running workflows)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: payment-processor-v1
+  name: payment-processor
 spec:
-  replicas: 2
-  template:
-    spec:
-      containers:
-      - name: worker
-        image: payment-processor:v1.5.1
-        env:
-        - name: WORKER_BUILD_ID
-          value: "v1.5.1"
----
-# Version 2 (current production version)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: payment-processor-v2
-spec:
-  replicas: 5
+  replicas: 3
   template:
     spec:
       containers:
       - name: worker
         image: payment-processor:v1.5.2
         env:
-        - name: WORKER_BUILD_ID
-          value: "v1.5.2"
+        - name: TEMPORAL_HOST_PORT
+          value: "production.tmprl.cloud:7233"
+        - name: TEMPORAL_NAMESPACE
+          value: "production"
 ```
 
-**Single `TemporalWorkerDeployment` CRD Resource (CRITICAL: Use Manual strategy):**
+**New TemporalWorkerDeployment CRD (IMPORTANT: Use Manual strategy initially):**
 ```yaml
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
@@ -223,11 +265,11 @@ metadata:
   labels:
     app: payment-processor
 spec:
-  replicas: 5
+  replicas: 3
   workerOptions:
     connection: production-temporal
     temporalNamespace: production
-  # IMPORTANT: Use Manual during migration to prevent unwanted promotions
+  # CRITICAL: Use Manual during initial migration
   cutover:
     strategy: Manual
   sunset:
@@ -240,131 +282,155 @@ spec:
     spec:
       containers:
       - name: worker
-        image: payment-processor:v1.5.1  # Start with oldest version
+        image: payment-processor:v1.5.2  # Same image as current deployment
         resources:
           requests:
             memory: "512Mi"
             cpu: "250m"
-        # Note: TEMPORAL_* env vars are set automatically by controller
+        # Note: Controller automatically adds TEMPORAL_* env vars
 ```
 
-### Step 4: Import Existing Versions One by One
+### Step 5: Deploy the TemporalWorkerDeployment
 
-⚠️ **CRITICAL**: Use a single `TemporalWorkerDeployment` CRD resource with `strategy: Manual` to import all existing versions.
-
-1. **Create the `TemporalWorkerDeployment` CRD with the oldest version:**
+1. **Create the `TemporalWorkerDeployment` CRD:**
    ```bash
-   kubectl apply -f payment-processor-migration.yaml
+   kubectl apply -f payment-processor-versioned.yaml
    ```
 
-2. **Wait for the first version to be registered:**
+2. **Wait for the version to be registered:**
    ```bash
    # Monitor until status shows the version is registered and current
    kubectl get temporalworkerdeployment payment-processor -w
    ```
    
-   The controller will create a Kubernetes `Deployment` resource (e.g., `payment-processor-v1.5.1`) for this version.
+   You should see the controller create a new Kubernetes `Deployment` resource (e.g., `payment-processor-v1.5.2`) for this version.
 
-3. **Import the next version by updating the CRD resource:**
+3. **Verify the versioned deployment is working:**
    ```bash
-   # Edit the TemporalWorkerDeployment CRD to use the next image version
-   kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{"spec":{"template":{"spec":{"containers":[{"name":"worker","image":"payment-processor:v1.5.2"}]}}}}'
+   # Check that controller-managed deployment exists
+   kubectl get deployments -l temporal.io/managed-by=temporal-worker-controller
+   
+   # Check pods are running
+   kubectl get pods -l temporal.io/worker-deployment=payment-processor
+   
+   # Check worker logs to verify versioning is active
+   kubectl logs -l temporal.io/worker-deployment=payment-processor
    ```
 
-4. **Wait for the new version to be registered:**
+   You should see logs indicating the worker has registered with a Build ID.
+
+4. **Verify in Temporal UI:**
+   - Check the Workers page in Temporal UI
+   - You should see your worker deployment with version information
+   - New workflows should be routed to the versioned worker
+
+### Step 6: Transition from Unversioned to Versioned
+
+Now you need to carefully transition from your old unversioned deployment to the new versioned one:
+
+1. **Ensure both deployments are running:**
    ```bash
-   # Monitor until the new version appears in status.targetVersion
-   kubectl get temporalworkerdeployment payment-processor -o yaml
+   # Check your original unversioned deployment
+   kubectl get deployment payment-processor
+   
+   # Check the new controller-managed versioned deployment  
+   kubectl get deployments -l temporal.io/managed-by=temporal-worker-controller
    ```
 
-   You should see:
-   ```yaml
-   status:
-     currentVersion:
-       versionID: "payment-processor.v1.5.1"
-       status: Current
-     targetVersion:
-       versionID: "payment-processor.v1.5.2"
-       status: Inactive  # Will be Inactive because strategy is Manual
+2. **Monitor workflow routing:**
+   - In Temporal UI, check that new workflows are being routed to the versioned worker
+   - Existing workflows should continue on the unversioned worker until they complete
+
+3. **Wait for existing workflows to complete:**
+   ```bash
+   # Monitor running workflows in Temporal UI
+   # Or use Temporal CLI to check workflow status
+   temporal workflow list --namespace production
    ```
+
+4. **Scale down the original unversioned deployment:**
+   ```bash
+   # Gradually reduce replicas of the original deployment
+   kubectl scale deployment payment-processor --replicas=1
    
-   The controller will create another Kubernetes `Deployment` resource (e.g., `payment-processor-v1.5.2`) for this new version.
+   # Monitor that workflows continue to work correctly
+   # Once confident, scale to zero
+   kubectl scale deployment payment-processor --replicas=0
+   ```
 
-5. **Repeat for all existing versions** until all are imported under controller management.
-   
-   Each version update will result in a new Kubernetes `Deployment` being created by the controller.
-
-### Step 5: Validate All Versions Are Imported
-
-Confirm all your existing versions are now managed by the controller:
-
-```bash
-# Check all versions are registered in the CRD status
-kubectl get temporalworkerdeployment payment-processor -o yaml
-
-# Verify controller-managed Kubernetes Deployments exist for all versions
-kubectl get deployments -l temporal.io/managed-by=temporal-worker-controller
-
-# Check pods are running for all versions
-kubectl get pods -l temporal.io/worker-deployment=payment-processor
-```
-
-You should see multiple Kubernetes `Deployment` resources created by the controller, one for each version you imported.
-
-### Step 6: Clean Up Manual Kubernetes Deployments
-
-⚠️ **Only after confirming all versions are imported and working:**
-
-```bash
-# Scale down your original manual Kubernetes Deployments
-kubectl scale deployment payment-processor-v1 --replicas=0
-kubectl scale deployment payment-processor-v2 --replicas=0
-
-# Monitor that the controller-managed Kubernetes Deployments are handling all traffic
-# Check Temporal UI to verify workflows are running on controller-managed versions
-
-# Delete the original manual Kubernetes Deployments
-kubectl delete deployment payment-processor-v1 payment-processor-v2
-```
-
-At this point, you should only have controller-managed Kubernetes `Deployment` resources running your workers.
+5. **Clean up the original deployment:**
+   ```bash
+   # Only after confirming all workflows are handled by versioned workers
+   kubectl delete deployment payment-processor
+   ```
 
 ### Step 7: Enable Automated Rollouts
 
-Once migration is complete and all legacy versions are imported, update your deployment system to use automated rollouts:
+Once the initial migration is complete and validated, enable automated rollouts for future deployments:
 
 ```bash
-# Update the TemporalWorkerDeployment CRD to use Progressive strategy for new deployments
+# Update the TemporalWorkerDeployment CRD to use Progressive strategy
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{
   "spec": {
     "cutover": {
       "strategy": "Progressive",
       "steps": [
-        {"rampPercentage": 5, "pauseDuration": "5m"},
-        {"rampPercentage": 25, "pauseDuration": "10m"}, 
-        {"rampPercentage": 50, "pauseDuration": "15m"}
+        {"rampPercentage": 10, "pauseDuration": "5m"},
+        {"rampPercentage": 50, "pauseDuration": "10m"}
       ]
     }
   }
 }'
 ```
 
-From this point forward:
-- **New worker versions** will automatically follow the Progressive rollout strategy
-- **Your CI/CD system** should update the `spec.template.spec.containers[0].image` field in the `TemporalWorkerDeployment` CRD to deploy new versions
-- **The controller** will automatically create new Kubernetes `Deployment` resources, handle version registration, traffic routing, and cleanup
+### Step 8: Update Your CI/CD Pipeline
 
-Example CI/CD update command:
+Modify your deployment pipeline to work with the new versioned approach:
+
+**Before (Unversioned):**
 ```bash
-# Your deployment pipeline should update the CRD image field like this:
+# Old pipeline updated Deployment directly
+kubectl set image deployment/payment-processor worker=payment-processor:v1.6.0
+```
+
+**After (Versioned):**
+```bash
+# New pipeline updates TemporalWorkerDeployment CRD
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{"spec":{"template":{"spec":{"containers":[{"name":"worker","image":"payment-processor:v1.6.0"}]}}}}'
 ```
 
-The controller will automatically create a new Kubernetes `Deployment` (e.g., `payment-processor-v1.6.0`) and manage the rollout.
+**What happens next:**
+1. Controller detects the image change
+2. Creates a new Kubernetes `Deployment` (e.g., `payment-processor-v1.6.0`)
+3. Registers the new version with Temporal
+4. Gradually routes traffic according to Progressive strategy
+5. Scales down and cleans up old version once new version is fully deployed
 
-## Configuration Mapping
+### Step 9: Test Your First Versioned Deployment
+
+Deploy a new version to validate the entire flow:
+
+1. **Make a small, safe change** to your worker code
+2. **Build and push** a new container image
+3. **Update the TemporalWorkerDeployment:**
+   ```bash
+   kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{"spec":{"template":{"spec":{"containers":[{"name":"worker","image":"payment-processor:v1.6.0"}]}}}}'
+   ```
+4. **Monitor the rollout:**
+   ```bash
+   # Watch the deployment progress
+   kubectl get temporalworkerdeployment payment-processor -w
+   
+   # Check that new deployment is created
+   kubectl get deployments -l temporal.io/managed-by=temporal-worker-controller
+   ```
+5. **Verify in Temporal UI** that traffic is gradually shifting to the new version
+
+## Configuration Reference
 
 ### Rollout Strategies
+
+See the [Concepts](concepts.md) document for detailed explanations of rollout strategies. Here are the basic configuration patterns:
 
 **Manual Strategy (Default Behavior):**
 ```yaml
@@ -469,67 +535,104 @@ template:
 
 ## Common Migration Patterns
 
-⚠️ **Remember**: Each pattern below represents **separate Temporal Worker Deployments**. Each gets exactly **one** `TemporalWorkerDeployment` CRD resource.
+Here are common scenarios when migrating from unversioned to versioned workflows:
 
-### Pattern 1: Microservices with Multiple Workers
+### Pattern 1: Microservices Architecture
+
+If you have multiple services with their own workers, migrate each service independently:
 
 ```yaml
-# payment-service workers (ONE CRD for this Temporal Worker Deployment)
+# Payment service worker
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
   name: payment-processor
+  namespace: payments
 spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: payments
   cutover:
-    strategy: Manual  # Use Manual during migration
+    strategy: Progressive  # Conservative rollout for financial operations
+    steps:
+      - rampPercentage: 5
+        pauseDuration: 10m
+      - rampPercentage: 25
+        pauseDuration: 15m
   # ... rest of config
 ---
-# notification-service workers (separate Temporal Worker Deployment = separate CRD)
+# Notification service worker (separate service, different risk profile)
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
   name: notification-sender
+  namespace: notifications
 spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: notifications
   cutover:
-    strategy: Manual  # Use Manual during migration
+    strategy: AllAtOnce  # Lower risk, faster rollouts acceptable
   # ... rest of config
 ```
 
-### Pattern 2: Environment-Specific Deployments
+### Pattern 2: Environment-Specific Strategies
+
+Use different rollout strategies based on environment risk:
 
 ```yaml
-# Production (use Manual during migration, then switch to Progressive)
+# Production - Conservative rollout
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
-  name: my-worker
+  name: order-processor
   namespace: production
 spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: production
   cutover:
-    strategy: Manual  # Use Manual during migration, then switch to Progressive
+    strategy: Progressive
+    steps:
+      - rampPercentage: 10
+        pauseDuration: 15m
+      - rampPercentage: 50
+        pauseDuration: 30m
+    gate:
+      workflowType: "HealthCheck"  # Validate new version before proceeding
 ---
-# Staging (use Manual during migration, then switch to AllAtOnce)
+# Staging - Fast rollout for testing
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
-  name: my-worker
+  name: order-processor
   namespace: staging
 spec:
   workerOptions:
     connection: staging-temporal
     temporalNamespace: staging
   cutover:
-    strategy: Manual  # Use Manual during migration, then switch to AllAtOnce
+    strategy: AllAtOnce  # Immediate cutover for faster iteration
 ```
+
+### Pattern 3: Gradual Team Migration
+
+Migrate teams/services based on their readiness and risk tolerance:
+
+**Phase 1: Low-Risk Services**
+- Background processing workers
+- Internal tooling workflows
+- Non-customer-facing operations
+
+**Phase 2: Medium-Risk Services**  
+- Internal API workflows
+- Data processing pipelines
+- Administrative workflows
+
+**Phase 3: High-Risk Services**
+- Customer-facing workflows
+- Payment processing
+- Critical business operations
 
 
 
@@ -548,35 +651,50 @@ status:
 
 *Solutions:*
 - Check worker logs for connection errors
-- Verify TemporalConnection configuration
+- Verify TemporalConnection configuration  
 - Ensure TLS secrets are properly configured
 - Verify network connectivity to Temporal server
+- Check that worker code properly handles `WORKER_BUILD_ID` environment variable
 
-**2. Version Stuck in Ramping State**
+**2. New Workflows Still Going to Unversioned Workers**
+
+*Symptoms:*
+- Temporal UI shows workflows executing on unversioned workers
+- Versioned workers appear idle
+
+*Solutions:*
+- Verify versioned workers are properly registered in Temporal UI
+- Check that new workflow starts are using the correct task queue
+- Ensure unversioned workers are scaled down gradually, not immediately
+- Verify Temporal routing rules are working correctly
+
+**3. Existing Workflows Failing During Migration**
+
+*Symptoms:*
+- Running workflows encounter errors during migration
+- Workflow history shows non-deterministic errors
+
+*Solutions:*
+- Ensure unversioned workers remain running until workflows complete
+- Don't force-terminate unversioned workers with running workflows
+- Check that worker code changes are backward compatible
+- Monitor workflow completion before scaling down old workers
+
+**4. Version Stuck in Ramping State**
 
 *Symptoms:*
 ```
 status:
   targetVersion:
     status: Ramping
-    rampPercentage: 5
+    rampPercentage: 10
 ```
 
 *Solutions:*
 - Check if gate workflow is configured and completing successfully
 - Verify progressive rollout steps are reasonable
 - Check controller logs for errors
-
-**3. Old Versions Not Being Cleaned Up**
-
-*Symptoms:*
-- Multiple old Deployments still exist
-- Deprecated versions not transitioning to Drained
-
-*Solutions:*
-- Check if workflows are still running on old versions
-- Verify sunset configuration is reasonable
-- Check Temporal UI for workflow status
+- Ensure new version is healthy and processing workflows correctly
 
 ### Debugging Commands
 
@@ -606,26 +724,27 @@ kubectl get events --field-selector involvedObject.kind=TemporalWorkerDeployment
 
 ## Migration Summary
 
-🎯 **Remember the core principle**: 
-- **One `TemporalWorkerDeployment` CRD per Temporal Worker Deployment**
-- **Manual strategy during migration** to prevent unwanted promotions
-- **Import existing versions sequentially** by updating the same CRD resource
-- **Enable automation only after migration is complete**
+🎯 **Key principles for unversioned to versioned migration**: 
+- **Start with Manual strategy** to maintain control during initial migration
+- **Run both unversioned and versioned workers** during transition period
+- **Wait for existing workflows to complete** before scaling down unversioned workers
+- **Enable Progressive rollouts** only after validating the migration process
+- **Migrate one service at a time** to reduce risk and enable learning
 
-**Resource Relationship:**
-- **Before**: Multiple manual Kubernetes `Deployment` resources per worker
-- **After**: One `TemporalWorkerDeployment` CRD → Controller creates multiple Kubernetes `Deployment` resources (one per version)
+See the [Concepts](concepts.md) document for detailed explanations of the resource relationships and terminology.
 
-This approach ensures a smooth transition from manual version management to controller automation without disrupting running workflows.
+This approach ensures a safe transition from unversioned to versioned workflows without disrupting running workflows or introducing deployment risks.
 
 ## Next Steps
 
-After successful migration:
+After successful migration to versioned workflows:
 
-1. **Set up monitoring** for your TemporalWorkerDeployment resources
-2. **Update CI/CD pipelines** to patch TemporalWorkerDeployment image specs instead of managing Deployments directly
-3. **Configure alerting** on version transition failures
-4. **Train your team** on the new deployment process (single resource updates vs multiple Deployment management)
-5. **Document your specific configuration** patterns for future reference
+1. **Set up monitoring** for your TemporalWorkerDeployment resources and version transitions
+2. **Update CI/CD pipelines** to patch TemporalWorkerDeployment image specs instead of managing Deployments directly  
+3. **Configure alerting** on version transition failures and rollout issues
+4. **Train your team** on the new versioned deployment process and rollback procedures
+5. **Document your rollout strategies** and tune them based on your specific risk tolerance
+6. **Plan for advanced features** like canary analysis and automated rollbacks
+7. **Migrate remaining services** using the lessons learned from initial migrations
 
-The Temporal Worker Controller should significantly reduce the operational overhead of managing versioned worker deployments while providing better automation and safety for your workflow deployments. 
+The Temporal Worker Controller should significantly improve your deployment safety and reduce the risk of workflow disruptions while providing automated rollout capabilities that weren't possible with unversioned workflows. 
