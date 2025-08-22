@@ -348,6 +348,10 @@ func getVersionConfigDiff(
 	strategy := config.RolloutStrategy
 	conflictToken := status.VersionConflictToken
 
+	if strategy.Strategy == temporaliov1alpha1.UpdateManual {
+		return nil
+	}
+
 	// Do nothing if target version's deployment is not healthy yet, or if the version is not yet registered in temporal
 	if status.TargetVersion.HealthySince == nil ||
 		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {

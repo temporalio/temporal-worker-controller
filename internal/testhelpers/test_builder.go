@@ -103,27 +103,8 @@ func (b *TemporalWorkerDeploymentBuilder) WithLabels(labels map[string]string) *
 	return b
 }
 
-// WithTargetVersionStatus sets the status to have a target version
-func (b *TemporalWorkerDeploymentBuilder) WithTargetVersionStatus(imageName string, rampPercentage float32, healthy, createDeployment bool) *TemporalWorkerDeploymentBuilder {
-	if b.statusBuilder == nil {
-		b.statusBuilder = NewStatusBuilder()
-	}
-
-	b.statusBuilder.targetVersionBuilder = func(name string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
-		return MakeTargetVersion(namespace, name, imageName, rampPercentage, healthy, createDeployment)
-	}
-	return b
-}
-
-// WithCurrentVersionStatus sets the status to have a current version
-func (b *TemporalWorkerDeploymentBuilder) WithCurrentVersionStatus(imageName string, healthy, createDeployment bool) *TemporalWorkerDeploymentBuilder {
-	if b.statusBuilder == nil {
-		b.statusBuilder = NewStatusBuilder()
-	}
-
-	b.statusBuilder.currentVersionBuilder = func(name string, namespace string) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
-		return MakeCurrentVersion(namespace, name, imageName, healthy, createDeployment)
-	}
+func (b *TemporalWorkerDeploymentBuilder) WithStatus(statusBuilder *StatusBuilder) *TemporalWorkerDeploymentBuilder {
+	b.statusBuilder = statusBuilder
 	return b
 }
 
@@ -179,17 +160,34 @@ func (sb *StatusBuilder) WithNamespace(k8sNamespace string) *StatusBuilder {
 
 // WithCurrentVersion sets the current version in the status
 func (sb *StatusBuilder) WithCurrentVersion(imageName string, healthy, createDeployment bool) *StatusBuilder {
-	sb.currentVersionBuilder = func(name string, namespace string) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
-		return MakeCurrentVersion(namespace, name, imageName, healthy, createDeployment)
+	sb.currentVersionBuilder = func(twdName string, namespace string) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
+		return MakeCurrentVersion(namespace, twdName, imageName, healthy, createDeployment)
 	}
 	return sb
 }
 
 // WithTargetVersion sets the target version in the status.
+// Set createDeployment to true if the test runner should create the Deployment, or false if you expect the controller to create it..
 // Target Version is required.
-func (sb *StatusBuilder) WithTargetVersion(imageName string, rampPercentage float32, healthy bool, createDeployment bool) *StatusBuilder {
-	sb.targetVersionBuilder = func(name string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
-		return MakeTargetVersion(namespace, name, imageName, rampPercentage, healthy, createDeployment)
+func (sb *StatusBuilder) WithTargetVersion(imageName string, status temporaliov1alpha1.VersionStatus, rampPercentage float32, healthy bool, createDeployment bool) *StatusBuilder {
+	sb.targetVersionBuilder = func(twdName string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
+		return MakeTargetVersion(namespace, twdName, imageName, status, rampPercentage, healthy, createDeployment)
+	}
+	return sb
+}
+
+// WithDeprecatedVersions adds deprecated versions to the status.
+// Note: The image name and replica count are not stored in the status. If you need to know those in your test case,
+// use TestCaseBuilder.WithDeprecatedVersions instead, which will add your deprecated versions to the status and also save
+// the image names and replica counts that you need in the Test Case info.
+func (sb *StatusBuilder) WithDeprecatedVersions(infos ...DeprecatedVersionInfo) *StatusBuilder {
+	sb.deprecatedVersionsBuilder = func(twdName string, namespace string) []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+		ret := make([]*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion, len(infos))
+		for i, info := range infos {
+			ret[i] = MakeDeprecatedVersion(namespace, twdName, info.image, info.status, info.drainedSince, info.healthy, info.createDeployment)
+
+		}
+		return ret
 	}
 	return sb
 }
@@ -217,12 +215,12 @@ type TestCase struct {
 	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
 	// versions, so for test scenarios that start with existing deprecated version Deployments,
 	// specify the number of replicas for each deprecated build here.
-	deprecatedBuildReplicas map[string]int32
+	existingDeploymentReplicas map[string]int32
 	// TemporalWorkerDeploymentStatus only tracks the build ids of the Deployments for deprecated
 	// versions, not their images so for test scenarios that start with existing deprecated version Deployments,
 	// specify the images for each deprecated build here.
-	deprecatedBuildImages map[string]string
-	expectedStatus        *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+	existingDeploymentImages map[string]string
+	expectedStatus           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 	// Time to delay before checking expected status
 	waitTime *time.Duration
 
@@ -235,12 +233,12 @@ func (tc *TestCase) GetTWD() *temporaliov1alpha1.TemporalWorkerDeployment {
 	return tc.twd
 }
 
-func (tc *TestCase) GetDeprecatedBuildReplicas() map[string]int32 {
-	return tc.deprecatedBuildReplicas
+func (tc *TestCase) GetExistingDeploymentReplicas() map[string]int32 {
+	return tc.existingDeploymentReplicas
 }
 
-func (tc *TestCase) GetDeprecatedBuildImages() map[string]string {
-	return tc.deprecatedBuildImages
+func (tc *TestCase) GetExistingDeploymentImages() map[string]string {
+	return tc.existingDeploymentImages
 }
 
 func (tc *TestCase) GetExpectedStatus() *temporaliov1alpha1.TemporalWorkerDeploymentStatus {
@@ -261,10 +259,10 @@ type TestCaseBuilder struct {
 	k8sNamespace      string
 	temporalNamespace string
 
-	twdBuilder             *TemporalWorkerDeploymentBuilder
-	expectedStatusBuilder  *StatusBuilder
-	deprecatedVersionInfos []DeprecatedVersionInfo
-	waitTime               *time.Duration
+	twdBuilder              *TemporalWorkerDeploymentBuilder
+	expectedStatusBuilder   *StatusBuilder
+	existingDeploymentInfos []ExistingDeploymentInfo
+	waitTime                *time.Duration
 
 	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
@@ -272,9 +270,9 @@ type TestCaseBuilder struct {
 // NewTestCase creates a new test case builder
 func NewTestCase() *TestCaseBuilder {
 	return &TestCaseBuilder{
-		twdBuilder:             NewTemporalWorkerDeploymentBuilder(),
-		expectedStatusBuilder:  NewStatusBuilder(),
-		deprecatedVersionInfos: make([]DeprecatedVersionInfo, 0),
+		twdBuilder:              NewTemporalWorkerDeploymentBuilder(),
+		expectedStatusBuilder:   NewStatusBuilder(),
+		existingDeploymentInfos: make([]ExistingDeploymentInfo, 0),
 	}
 }
 
@@ -285,9 +283,9 @@ func NewTestCaseWithValues(name, k8sNamespace, temporalNamespace string) *TestCa
 		k8sNamespace:      k8sNamespace,
 		temporalNamespace: temporalNamespace,
 
-		twdBuilder:             NewTemporalWorkerDeploymentBuilder(),
-		expectedStatusBuilder:  NewStatusBuilder(),
-		deprecatedVersionInfos: make([]DeprecatedVersionInfo, 0),
+		twdBuilder:              NewTemporalWorkerDeploymentBuilder(),
+		expectedStatusBuilder:   NewStatusBuilder(),
+		existingDeploymentInfos: make([]ExistingDeploymentInfo, 0),
 	}
 }
 
@@ -310,23 +308,43 @@ func (tcb *TestCaseBuilder) WithWaitTime(waitTime time.Duration) *TestCaseBuilde
 	return tcb
 }
 
-// DeprecatedVersionInfo defines the necessary information about a deprecated worker version, so that
-// tests can recreate state that is not visible in the TemporalWorkerDeployment status
 type DeprecatedVersionInfo struct {
+	image  string // determines build id
+	status temporaliov1alpha1.VersionStatus
+	// nil if not drained
+	drainedSince *time.Time
+	healthy      bool
+	// set to true if the test runner needs to create the Deployment, false if the controller will create it
+	createDeployment bool
+}
+
+func NewDeprecatedVersionInfo(imageName string, status temporaliov1alpha1.VersionStatus, drainedSince *time.Time, healthy, createDeployment bool) DeprecatedVersionInfo {
+	return DeprecatedVersionInfo{
+		image:            imageName,
+		status:           status,
+		drainedSince:     drainedSince,
+		healthy:          healthy,
+		createDeployment: createDeployment,
+	}
+}
+
+// ExistingDeploymentInfo defines the necessary information about an existing Deployment, so that
+// tests can recreate state that is not visible in the TemporalWorkerDeployment status
+type ExistingDeploymentInfo struct {
 	image    string
 	replicas int32
 }
 
-func NewDeprecatedVersionInfo(image string, replicas int32) DeprecatedVersionInfo {
-	return DeprecatedVersionInfo{
-		image:    image,
+func NewExistingDeploymentInfo(imageName string, replicas int32) ExistingDeploymentInfo {
+	return ExistingDeploymentInfo{
+		image:    imageName,
 		replicas: replicas,
 	}
 }
 
-// WithDeprecatedBuilds adds deprecated build replicas and images, indexed by the build id that the given image would result in
-func (tcb *TestCaseBuilder) WithDeprecatedBuilds(deprecatedVersionInfos ...DeprecatedVersionInfo) *TestCaseBuilder {
-	tcb.deprecatedVersionInfos = deprecatedVersionInfos
+// WithExistingDeployments adds info to create existing deployments, indexed by the build id that the given image would result in
+func (tcb *TestCaseBuilder) WithExistingDeployments(existingDeploymentInfos ...ExistingDeploymentInfo) *TestCaseBuilder {
+	tcb.existingDeploymentInfos = existingDeploymentInfos
 	return tcb
 }
 
@@ -347,17 +365,17 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 			WithTemporalConnection(tcb.name).
 			WithTemporalNamespace(tcb.temporalNamespace).
 			Build(),
-		deprecatedBuildReplicas: make(map[string]int32),
-		deprecatedBuildImages:   make(map[string]string),
+		existingDeploymentReplicas: make(map[string]int32),
+		existingDeploymentImages:   make(map[string]string),
 		expectedStatus: tcb.expectedStatusBuilder.
 			WithName(tcb.name).
 			WithNamespace(tcb.k8sNamespace).
 			Build(),
 	}
-	for _, info := range tcb.deprecatedVersionInfos {
+	for _, info := range tcb.existingDeploymentInfos {
 		buildId := MakeBuildId(tcb.name, info.image, nil)
-		ret.deprecatedBuildReplicas[buildId] = info.replicas
-		ret.deprecatedBuildImages[buildId] = info.image
+		ret.existingDeploymentReplicas[buildId] = info.replicas
+		ret.existingDeploymentImages[buildId] = info.image
 	}
 	ret.twd.Spec.Template = SetTaskQueue(ret.twd.Spec.Template, tcb.name)
 	return ret
@@ -386,12 +404,11 @@ type TestEnv struct {
 	Mgr        manager.Manager
 	Ts         *temporaltest.TestServer
 	Connection *temporaliov1alpha1.TemporalConnection
-	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
-	// versions, so for test scenarios that start with existing deprecated version Deployments,
-	// specify the number of replicas for each deprecated build here.
-	DeprecatedBuildReplicas map[string]int32
-	// TemporalWorkerDeploymentStatus only tracks the build ids of the Deployments for deprecated
-	// versions, not their images so for test scenarios that start with existing deprecated version Deployments,
-	// specify the images for each deprecated build here.
-	DeprecatedBuildImages map[string]string
+	// TemporalWorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
+	// created, so for test scenarios that start with existing Deployments, specify the number of replicas for each.
+	ExistingDeploymentReplicas map[string]int32
+	// TemporalWorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
+	// created, so for test scenarios that start with existing Deployments, specify the image names here, so that the
+	// test runner can generate the same pod spec and build id as the controller.
+	ExistingDeploymentImages map[string]string
 }

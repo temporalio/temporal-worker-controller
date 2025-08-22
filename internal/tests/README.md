@@ -83,7 +83,7 @@ type testCase struct {
 	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
 	// versions, so for test scenarios that start with existing deprecated version Deployments,
 	// specify the number of replicas for each deprecated build here.
-	deprecatedBuildReplicas map[string]int32
+	existingDeploymentReplicas map[string]int32
 	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 }
 ```

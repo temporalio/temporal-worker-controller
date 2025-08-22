@@ -106,7 +106,7 @@ func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient cli
 	}
 }
 
-// Uses input.Status + deprecatedBuildReplicas to create (and maybe kill) pollers for deprecated versions in temporal
+// Uses input.Status + existingDeploymentReplicas to create (and maybe kill) pollers for deprecated versions in temporal
 // also gets routing config of the deployment into the starting state before running the test.
 // Does not set Status.VersionConflictToken, since that is only set internally by the server.
 func makePreliminaryStatusTrue(
@@ -156,7 +156,7 @@ func createStatus(
 			DeploymentName: deploymentName,
 			BuildId:        prevVersion.BuildID,
 		}
-		prevTWD := recreateTWD(newTWD, env.DeprecatedBuildImages[v.BuildId], env.DeprecatedBuildReplicas[v.BuildId])
+		prevTWD := recreateTWD(newTWD, env.ExistingDeploymentImages[v.BuildId], env.ExistingDeploymentReplicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
 		waitForDeployment(t, env.K8sClient, expectedDeploymentName, prevTWD.Namespace, 30*time.Second)
