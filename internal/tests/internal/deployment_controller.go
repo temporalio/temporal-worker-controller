@@ -168,16 +168,16 @@ func createStatus(
 		case temporaliov1alpha1.VersionStatusInactive, temporaliov1alpha1.VersionStatusNotRegistered:
 			// no-op
 		case temporaliov1alpha1.VersionStatusRamping:
-			setRampingVersion(t, ctx, env.Ts, v, *rampPercentage) // rampPercentage won't be nil if the version is ramping
+			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId, *rampPercentage) // rampPercentage won't be nil if the version is ramping
 		case temporaliov1alpha1.VersionStatusCurrent:
-			setCurrentVersion(t, ctx, env.Ts, v)
+			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId)
 		case temporaliov1alpha1.VersionStatusDraining:
-			setRampingVersion(t, ctx, env.Ts, v, 1)
+			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId, 1)
 			// TODO(carlydf): start a workflow on v that does not complete -> will never drain
-			setRampingVersion(t, ctx, env.Ts, nil, 0)
+			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, "", 0)
 		case temporaliov1alpha1.VersionStatusDrained:
-			setRampingVersion(t, ctx, env.Ts, v, 1)
-			setRampingVersion(t, ctx, env.Ts, nil, 0)
+			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId)
+			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, "")
 		}
 	}
 

@@ -252,10 +252,18 @@ func getScaleDeployments(
 		}
 
 		switch version.Status {
-		case temporaliov1alpha1.VersionStatusInactive,
-			temporaliov1alpha1.VersionStatusRamping,
-			temporaliov1alpha1.VersionStatusCurrent:
-			// TODO(carlydf): Consolidate scale up cases and verify that scale up is the correct action for inactive versions
+		case temporaliov1alpha1.VersionStatusInactive:
+			// Scale down inactive versions that are not the target
+			if status.TargetVersion.BuildID == version.BuildID {
+				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+					scaleDeployments[version.Deployment] = uint32(replicas)
+				}
+			} else {
+				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
+					scaleDeployments[version.Deployment] = 0
+				}
+			}
+		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
 			// Scale up these deployments
 			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 				scaleDeployments[version.Deployment] = uint32(replicas)

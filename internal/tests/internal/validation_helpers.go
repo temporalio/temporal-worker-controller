@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"testing"
 	"time"
 
@@ -66,17 +67,22 @@ func setCurrentVersion(
 	t *testing.T,
 	ctx context.Context,
 	ts *temporaltest.TestServer,
-	version *worker.WorkerDeploymentVersion,
+	workerDeploymentName, buildID string,
 ) {
-	waitForVersionRegistrationInDeployment(t, ctx, ts, version)
-	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
+	if buildID != "" {
+		waitForVersionRegistrationInDeployment(t, ctx, ts, &worker.WorkerDeploymentVersion{
+			DeploymentName: workerDeploymentName,
+			BuildId:        buildID,
+		})
+	}
+	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
 	eventually(t, 30*time.Second, time.Second, func() error {
 		_, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-			BuildID:  version.BuildId,
+			BuildID:  buildID,
 			Identity: controller.ControllerIdentity,
 		})
 		if err != nil {
-			return fmt.Errorf("unable to set current version %v: %w", version, err)
+			return fmt.Errorf("unable to set build '%s' as current of worker deployment %s: %w", buildID, workerDeploymentName, err)
 		}
 		return nil
 	})
@@ -87,24 +93,24 @@ func setRampingVersion(
 	t *testing.T,
 	ctx context.Context,
 	ts *temporaltest.TestServer,
-	version *worker.WorkerDeploymentVersion,
+	workerDeploymentName, buildID string,
 	rampPercentage float32,
 ) {
-	waitForVersionRegistrationInDeployment(t, ctx, ts, version)
-	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
+	if buildID != "" {
+		waitForVersionRegistrationInDeployment(t, ctx, ts, &worker.WorkerDeploymentVersion{
+			DeploymentName: workerDeploymentName,
+			BuildId:        buildID,
+		})
+	}
+	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
 	eventually(t, 30*time.Second, time.Second, func() error {
-		var buildID string
-		if version != nil {
-			buildID = version.BuildId
-		}
-
 		_, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 			BuildID:    buildID,
 			Percentage: rampPercentage,
 			Identity:   controller.ControllerIdentity,
 		})
 		if err != nil {
-			return fmt.Errorf("unable to set current version %v: %w", version, err)
+			return fmt.Errorf("unable to set build '%s' as ramping of worker deployment %s: %w", buildID, workerDeploymentName, err)
 		}
 		return nil
 	})
@@ -215,10 +221,11 @@ func verifyTemporalStateMatchesStatusEventually(
 	})
 }
 
+// TODO(carlydf): check version task queues and reduce code repetition
 func verifyTemporalWorkerDeploymentStatusEventually(
 	t *testing.T,
 	ctx context.Context,
-	k8sClient client.Client,
+	env testhelpers.TestEnv,
 	twdName,
 	namespace string,
 	expectedDeploymentStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
@@ -230,12 +237,13 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 	}
 	eventually(t, timeout, interval, func() error {
 		var twd temporaliov1alpha1.TemporalWorkerDeployment
-		if err := k8sClient.Get(ctx, types.NamespacedName{
+		if err := env.K8sClient.Get(ctx, types.NamespacedName{
 			Name:      twdName,
 			Namespace: namespace,
 		}, &twd); err != nil {
 			return fmt.Errorf("failed to get updated worker deployment: %v", err)
 		}
+		// validate current version
 		if expectedDeploymentStatus.CurrentVersion != nil {
 			if twd.Status.CurrentVersion == nil {
 				return fmt.Errorf("expected CurrentVersion to be set")
@@ -254,6 +262,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 					twd.Status.CurrentVersion.Deployment.Name)
 			}
 		}
+		// validate target version
 		if expectedDeploymentStatus.TargetVersion.BuildID != "" {
 			if twd.Status.TargetVersion.BuildID != expectedDeploymentStatus.TargetVersion.BuildID {
 				return fmt.Errorf("expected target build id to be '%s', got '%s'",
@@ -282,8 +291,82 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 				}
 			}
 		}
+		// validate deprecated version(s)
+		if len(expectedDeploymentStatus.DeprecatedVersions) != len(twd.Status.DeprecatedVersions) {
+			return fmt.Errorf("expected deprecated versions count to be '%v', got '%v'",
+				len(expectedDeploymentStatus.DeprecatedVersions), len(twd.Status.DeprecatedVersions))
+		}
+		for _, expectedDV := range expectedDeploymentStatus.DeprecatedVersions {
+			found := false
+			for _, actualDV := range twd.Status.DeprecatedVersions {
+				if expectedDV.BuildID == actualDV.BuildID {
+					found = true
+					if err := validateDeprecatedVersion(ctx, env, expectedDV, actualDV); err != nil {
+						return fmt.Errorf("expected deprecated version did not match actual: %w", err)
+					}
+				}
+			}
+			if !found {
+				return fmt.Errorf("expected to find deprecated build '%s', but did not find it", expectedDV.BuildID)
+			}
+		}
+		for _, actualDV := range twd.Status.DeprecatedVersions {
+			found := false
+			for _, expectedDV := range expectedDeploymentStatus.DeprecatedVersions {
+				if expectedDV.BuildID == actualDV.BuildID {
+					found = true
+					if err := validateDeprecatedVersion(ctx, env, expectedDV, actualDV); err != nil {
+						return fmt.Errorf("expected deprecated version did not match actual: %w", err)
+					}
+				}
+			}
+			if !found {
+				return fmt.Errorf("did not expect to find actual build '%s', but did find it", actualDV.BuildID)
+			}
+		}
 		return nil // All assertions passed!
 	})
+}
+
+func validateDeprecatedVersion(ctx context.Context, env testhelpers.TestEnv, expectedDV, actualDV *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) error {
+	// status
+	if expectedDV.Status != actualDV.Status {
+		return fmt.Errorf("expected status of deprecated build '%s' to be '%v', got '%v'",
+			expectedDV.BuildID, expectedDV.Status, expectedDV.Status)
+	}
+	// deployment
+	if expectedDV.Deployment == nil {
+		if actualDV.Deployment != nil {
+			return fmt.Errorf("expected Deployment for deprecated build '%s' to be nil, but was %v",
+				expectedDV.BuildID, *actualDV.Deployment)
+		}
+	} else {
+		if expectedDV.Deployment == nil {
+			return fmt.Errorf("expected Deployment for deprecated build '%s' to be %v, but was nil",
+				expectedDV.BuildID, *expectedDV.Deployment)
+		}
+		if expectedDV.Deployment.Name != actualDV.Deployment.Name {
+			return fmt.Errorf("expected Deployment for deprecated build '%s' to be named '%s, but was '%s'",
+				expectedDV.BuildID, expectedDV.Deployment.Name, actualDV.Deployment.Name)
+		}
+		var deployment appsv1.Deployment
+		if err := env.K8sClient.Get(ctx, types.NamespacedName{
+			Name:      expectedDV.Deployment.Name,
+			Namespace: expectedDV.Deployment.Namespace,
+		}, &deployment); err != nil {
+			return fmt.Errorf("error getting expected Deployment: %w", err)
+		}
+		if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas != env.ExpectedDeploymentReplicas[expectedDV.BuildID] {
+			return fmt.Errorf("expected Deployment for build '%s' to have %v replicas, but had %v",
+				expectedDV.BuildID, env.ExpectedDeploymentReplicas[expectedDV.BuildID], *deployment.Spec.Replicas)
+		}
+	}
+	// drainage status
+	if (expectedDV.DrainedSince == nil) != (actualDV.DrainedSince == nil) { // TODO: test actual time values someday
+		return fmt.Errorf("expected DrainedSince for deprecated build '%s' to be %v, but was %v",
+			expectedDV.BuildID, expectedDV.DrainedSince, actualDV.DrainedSince)
+	}
+	return nil
 }
 
 func eventually(t *testing.T, timeout, interval time.Duration, check func() error) {

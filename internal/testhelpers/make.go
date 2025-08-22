@@ -136,23 +136,19 @@ func MakeTWDWithName(name, namespace string) *temporaliov1alpha1.TemporalWorkerD
 
 func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDeployment bool) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
 	ret := &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, temporaliov1alpha1.VersionStatusCurrent),
+		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, temporaliov1alpha1.VersionStatusCurrent, createDeployment, true),
 	}
 
 	if healthy {
 		h := metav1.NewTime(time.Now())
 		ret.HealthySince = &h
 	}
-
-	if createDeployment {
-		ret.Deployment.FieldPath = "create"
-	}
 	return ret
 }
 
 func MakeTargetVersion(namespace, twdName, imageName string, status temporaliov1alpha1.VersionStatus, rampPercentage float32, healthy, createDeployment bool) temporaliov1alpha1.TargetWorkerDeploymentVersion {
 	ret := temporaliov1alpha1.TargetWorkerDeploymentVersion{
-		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, status),
+		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, status, createDeployment, true),
 	}
 
 	if rampPercentage >= 0 {
@@ -163,19 +159,15 @@ func MakeTargetVersion(namespace, twdName, imageName string, status temporaliov1
 		h := metav1.NewTime(time.Now())
 		ret.HealthySince = &h
 	}
-
-	if createDeployment {
-		ret.Deployment.FieldPath = "create"
-	}
 	return ret
 }
 
-func MakeDeprecatedVersion(namespace, twdName, imageName string, status temporaliov1alpha1.VersionStatus, drainedSince *time.Time, healthy, createDeployment bool) *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+func MakeDeprecatedVersion(namespace, twdName, imageName string, status temporaliov1alpha1.VersionStatus, healthy, createDeployment, hasDeployment bool) *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
 	ret := &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
-		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, status),
+		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, status, createDeployment, hasDeployment),
 	}
-	if drainedSince != nil {
-		t := metav1.NewTime(*drainedSince)
+	if status == temporaliov1alpha1.VersionStatusDrained {
+		t := metav1.NewTime(time.Now())
 		ret.DrainedSince = &t
 	}
 
@@ -183,30 +175,33 @@ func MakeDeprecatedVersion(namespace, twdName, imageName string, status temporal
 		h := metav1.NewTime(time.Now())
 		ret.HealthySince = &h
 	}
-
-	if createDeployment {
-		ret.Deployment.FieldPath = "create"
-	}
 	return ret
 }
 
-func MakeBaseVersion(namespace, twdName, imageName string, status temporaliov1alpha1.VersionStatus) temporaliov1alpha1.BaseWorkerDeploymentVersion {
-	return temporaliov1alpha1.BaseWorkerDeploymentVersion{
+func MakeBaseVersion(namespace, twdName, imageName string, status temporaliov1alpha1.VersionStatus, createDeployment, hasDeployment bool) temporaliov1alpha1.BaseWorkerDeploymentVersion {
+	ret := temporaliov1alpha1.BaseWorkerDeploymentVersion{
 		BuildID:      MakeBuildId(twdName, imageName, nil),
 		Status:       status,
 		HealthySince: nil,
-		Deployment: &corev1.ObjectReference{
-			Namespace: namespace,
-			Name: k8s.ComputeVersionedDeploymentName(
-				twdName,
-				MakeBuildId(twdName, imageName, nil),
-			),
-		},
 		TaskQueues: []temporaliov1alpha1.TaskQueue{
 			{Name: twdName},
 		},
 		ManagedBy: "",
 	}
+	if hasDeployment {
+		ret.Deployment = &corev1.ObjectReference{
+			Namespace: namespace,
+			Name: k8s.ComputeVersionedDeploymentName(
+				twdName,
+				MakeBuildId(twdName, imageName, nil),
+			),
+		}
+	}
+
+	if createDeployment {
+		ret.Deployment.FieldPath = "create"
+	}
+	return ret
 }
 
 func ModifyObj[T any](obj T, callback func(obj T) T) T {
