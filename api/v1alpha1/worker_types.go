@@ -141,6 +141,13 @@ type TemporalWorkerDeploymentStatus struct {
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional
 	VersionCount int32 `json:"versionCount,omitempty"`
+
+	// VersionCountIneligibleForDeletion is the total number of versions currently known by the worker
+	// deployment that are *not* eligible for deletion. A version is eligible for deletion if it is Drained
+	// and has no pollers. If a worker deployment hits the Temporal server's maximum limit of versions per
+	// worker deployment, the server will make room for new versions by deleting the oldest eligible version.
+	// If no versions are eligible for deletion, the pollers with the new version will be rejected.
+	VersionCountIneligibleForDeletion int32 `json:"versionCountIneligibleForDeletion,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
@@ -172,6 +179,24 @@ type WorkflowExecution struct {
 type TaskQueue struct {
 	// Name is the name of the task queue.
 	Name string `json:"name"`
+
+	Type string `json:"type"`
+
+	// HasUnversionedPoller is true if we know the task queue has unversioned pollers. False means none or unknown.
+	// Unversioned Task Queue pollers are only queried for the Target Version if the Current Version is nil / unversioned
+	// and rollout strategy is Progressive, so if those conditions are not met, this will always be false (unknown).
+	// If Current Version is nil / unversioned and the Target Version has no unversioned pollers, the specified
+	// Progressive rollout steps will be ignored and the Target Version will immediately become Current, to ensure
+	// that tasks are not sent to a queue that has no poller.
+	HasUnversionedPoller bool `json:"HasUnversionedPoller"`
+
+	// HasNoVersionedPollers is true if we confirm the task queue has *no* versioned pollers with the version in question.
+	// False means >=1 versioned poller or unknown.
+	// Versioned Task Queue pollers are only queried for Drained Versions, so if the version this Task Queue is in is
+	// not Drained, this will always be false (unknown).
+	// If a version is Drained and has no versioned pollers, it is eligible for deletion and won't count against the max
+	// non-deletable versions of your Worker Deployment.
+	HasNoVersionedPollers bool `json:"hasNoVersionedPollers"`
 }
 
 // BaseWorkerDeploymentVersion contains fields common to all worker deployment version types

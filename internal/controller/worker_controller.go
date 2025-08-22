@@ -72,7 +72,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// Fetch the worker deployment
 	var workerDeploy temporaliov1alpha1.TemporalWorkerDeployment
 	if err := r.Get(ctx, req.NamespacedName, &workerDeploy); err != nil {
-		l.Error(err, "unable to fetch TemporalWorker")
+		l.Error(err, "unable to fetch TemporalWorkerDeployment")
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
 		// requeue (we'll need to wait for a new notification), and we can get them
 		// on deleted requests.

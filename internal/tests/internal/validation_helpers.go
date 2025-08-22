@@ -9,7 +9,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/server/api/deployment/v1"
+	"go.temporal.io/sdk/worker"
 	"go.temporal.io/server/temporaltest"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -42,7 +42,7 @@ func waitForVersionRegistrationInDeployment(
 	t *testing.T,
 	ctx context.Context,
 	ts *temporaltest.TestServer,
-	version *deployment.WorkerDeploymentVersion) {
+	version *worker.WorkerDeploymentVersion) {
 
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
 
@@ -65,7 +65,7 @@ func setCurrentVersion(
 	t *testing.T,
 	ctx context.Context,
 	ts *temporaltest.TestServer,
-	version *deployment.WorkerDeploymentVersion,
+	version *worker.WorkerDeploymentVersion,
 ) {
 	waitForVersionRegistrationInDeployment(t, ctx, ts, version)
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
@@ -86,7 +86,7 @@ func setRampingVersion(
 	t *testing.T,
 	ctx context.Context,
 	ts *temporaltest.TestServer,
-	version *deployment.WorkerDeploymentVersion,
+	version *worker.WorkerDeploymentVersion,
 	rampPercentage float32,
 ) {
 	waitForVersionRegistrationInDeployment(t, ctx, ts, version)

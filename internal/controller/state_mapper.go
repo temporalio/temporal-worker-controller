@@ -39,6 +39,7 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 
 	// Set current version
 	status.CurrentVersion = m.mapCurrentWorkerDeploymentVersionByBuildID(currentBuildID)
+	status.VersionCountIneligibleForDeletion++ // current version is not eligible for deletion
 
 	// Set target version (desired version)
 	status.TargetVersion = m.mapTargetWorkerDeploymentVersionByBuildID(targetBuildID)
@@ -49,6 +50,12 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt
 		rampPercentage := m.temporalState.RampPercentage
 		status.TargetVersion.RampPercentage = &rampPercentage
+	}
+
+	// count target version as ineligible for deletion if it is different from the current version and is registered
+	if status.TargetVersion.Status != v1alpha1.VersionStatusCurrent &&
+		status.TargetVersion.Status != v1alpha1.VersionStatusNotRegistered {
+		status.VersionCountIneligibleForDeletion++
 	}
 
 	// Add deprecated versions
@@ -68,6 +75,19 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 
 	// Set version count from temporal state (directly from VersionSummaries via Versions map)
 	status.VersionCount = int32(len(m.temporalState.Versions))
+
+	for _, dv := range status.DeprecatedVersions {
+		if dv.Status != v1alpha1.VersionStatusDrained {
+			status.VersionCountIneligibleForDeletion++ // non-drained versions are not eligible for deletion
+		} else {
+			for _, tq := range dv.TaskQueues {
+				if !tq.HasNoVersionedPollers { // if the version might have versioned pollers, it's not eligible for deletion
+					status.VersionCountIneligibleForDeletion++
+					break
+				}
+			}
+		}
+	}
 
 	return status
 }

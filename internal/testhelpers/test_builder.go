@@ -1,10 +1,15 @@
 package testhelpers
 
 import (
+	"context"
+	"go.temporal.io/server/temporaltest"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"testing"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // TemporalWorkerDeploymentBuilder provides a fluent interface for building test TWD objects
@@ -31,6 +36,12 @@ func (b *TemporalWorkerDeploymentBuilder) WithName(name string) *TemporalWorkerD
 // WithNamespace sets the namespace
 func (b *TemporalWorkerDeploymentBuilder) WithNamespace(namespace string) *TemporalWorkerDeploymentBuilder {
 	b.twd.ObjectMeta.Namespace = namespace
+	return b
+}
+
+// WithManualStrategy sets the rollout strategy to manual
+func (b *TemporalWorkerDeploymentBuilder) WithManualStrategy() *TemporalWorkerDeploymentBuilder {
+	b.twd.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
 	return b
 }
 
@@ -65,7 +76,7 @@ func (b *TemporalWorkerDeploymentBuilder) WithReplicas(replicas int32) *Temporal
 
 // WithVersion sets the worker version (creates HelloWorld pod spec)
 func (b *TemporalWorkerDeploymentBuilder) WithVersion(version string) *TemporalWorkerDeploymentBuilder {
-	b.twd.Spec.Template = MakeHelloWorldPodSpec(version)
+	b.twd.Spec.Template = MakeHelloWorldPodSpec(version, "replace_me")
 	return b
 }
 
@@ -211,6 +222,10 @@ type TestCase struct {
 	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 	// Time to delay before checking expected status
 	waitTime *time.Duration
+
+	// Arbitrary function called at the end of setting up the environment specified by input.Status.
+	// Can be used for additional state creation / destruction
+	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
 
 func (tc *TestCase) GetTWD() *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -233,6 +248,10 @@ func (tc *TestCase) GetWaitTime() *time.Duration {
 	return tc.waitTime
 }
 
+func (tc *TestCase) GetSetupFunc() func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv) {
+	return tc.setupFunc
+}
+
 // TestCaseBuilder provides a fluent interface for building test cases
 type TestCaseBuilder struct {
 	name              string
@@ -243,6 +262,8 @@ type TestCaseBuilder struct {
 	expectedStatusBuilder  *StatusBuilder
 	deprecatedVersionInfos []DeprecatedVersionInfo
 	waitTime               *time.Duration
+
+	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
 
 // NewTestCase creates a new test case builder
@@ -265,6 +286,12 @@ func NewTestCaseWithValues(name, k8sNamespace, temporalNamespace string) *TestCa
 		expectedStatusBuilder:  NewStatusBuilder(),
 		deprecatedVersionInfos: make([]DeprecatedVersionInfo, 0),
 	}
+}
+
+// WithSetupFunction defines a function that the test case will call while setting up the state.
+func (tcb *TestCaseBuilder) WithSetupFunction(f func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)) *TestCaseBuilder {
+	tcb.setupFunc = f
+	return tcb
 }
 
 // WithInput sets the input TWD
@@ -309,7 +336,8 @@ func (tcb *TestCaseBuilder) WithExpectedStatus(statusBuilder *StatusBuilder) *Te
 // Build returns the constructed test case
 func (tcb *TestCaseBuilder) Build() TestCase {
 	ret := TestCase{
-		waitTime: tcb.waitTime,
+		setupFunc: tcb.setupFunc,
+		waitTime:  tcb.waitTime,
 		twd: tcb.twdBuilder.
 			WithName(tcb.name).
 			WithNamespace(tcb.k8sNamespace).
@@ -328,6 +356,7 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 		ret.deprecatedBuildReplicas[buildId] = info.replicas
 		ret.deprecatedBuildImages[buildId] = info.image
 	}
+	ret.twd.Spec.Template = ReplaceTaskQueue(ret.twd.Spec.Template, tcb.name)
 	return ret
 }
 
@@ -345,4 +374,13 @@ func ProgressiveStep(rampPercentage float32, pauseDuration time.Duration) tempor
 		RampPercentage: rampPercentage,
 		PauseDuration:  metav1.Duration{Duration: pauseDuration},
 	}
+}
+
+type TestEnv struct {
+	K8sClient  k8sclient.Client
+	Mgr        manager.Manager
+	Ts         *temporaltest.TestServer
+	Connection *temporaliov1alpha1.TemporalConnection
+	Replicas   map[string]int32
+	Images     map[string]string
 }
