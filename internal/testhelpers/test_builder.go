@@ -74,9 +74,9 @@ func (b *TemporalWorkerDeploymentBuilder) WithReplicas(replicas int32) *Temporal
 	return b
 }
 
-// WithVersion sets the worker version (creates HelloWorld pod spec)
-func (b *TemporalWorkerDeploymentBuilder) WithVersion(version string) *TemporalWorkerDeploymentBuilder {
-	b.twd.Spec.Template = MakeHelloWorldPodSpec(version)
+// WithTargetTemplate sets the template of the worker deployment to a pod spec with the given image name, thus defining the target version.
+func (b *TemporalWorkerDeploymentBuilder) WithTargetTemplate(imageName string) *TemporalWorkerDeploymentBuilder {
+	b.twd.Spec.Template = MakePodSpecWithImage(imageName)
 	return b
 }
 

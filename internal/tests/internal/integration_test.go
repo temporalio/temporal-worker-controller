@@ -47,7 +47,7 @@ func TestIntegration(t *testing.T) {
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithManualStrategy().
-					WithVersion("v1"),
+					WithTargetTemplate("v1"),
 			).
 			WithWaitTime(5 * time.Second). // wait before checking to confirm no change
 			WithExpectedStatus(
@@ -59,7 +59,7 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithAllAtOnceStrategy().
 					WithReplicas(2).
-					WithVersion("v1"),
+					WithTargetTemplate("v1"),
 			).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
@@ -70,7 +70,7 @@ func TestIntegration(t *testing.T) {
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-					WithVersion("v1"),
+					WithTargetTemplate("v1"),
 			).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
@@ -82,7 +82,7 @@ func TestIntegration(t *testing.T) {
 		//	WithInput(
 		//		testhelpers.NewTemporalWorkerDeploymentBuilder().
 		//			WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-		//			WithVersion("v1"),
+		//			WithTargetTemplate("v1"),
 		//	).
 		//	WithSetupFunction(setupUnversionedPoller).
 		//	WithExpectedStatus(
@@ -93,7 +93,7 @@ func TestIntegration(t *testing.T) {
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-					WithVersion("v1").
+					WithTargetTemplate("v1").
 					WithTargetVersionStatus("v0", -1, true, true).
 					WithCurrentVersionStatus("v0", true, true),
 			).
@@ -109,7 +109,7 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 					WithGate(true).
-					WithVersion("v1").
+					WithTargetTemplate("v1").
 					WithTargetVersionStatus("v0", -1, true, true).
 					WithCurrentVersionStatus("v0", true, true),
 			).
@@ -125,7 +125,7 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 					WithGate(false).
-					WithVersion("v1").
+					WithTargetTemplate("v1").
 					WithTargetVersionStatus("v0", -1, true, true).
 					WithCurrentVersionStatus("v0", true, true),
 			).

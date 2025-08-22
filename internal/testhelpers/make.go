@@ -57,7 +57,7 @@ func MakeTWD(
 	return twd
 }
 
-// MakePodSpec creates a pod spec. Feel free to add parameters as needed.
+// MakePodSpec creates a pod spec with the given containers, labels, and task queue
 func MakePodSpec(containers []corev1.Container, labels map[string]string, taskQueue string) corev1.PodTemplateSpec {
 	for i := range containers {
 		containers[i].Env = append(containers[i].Env, corev1.EnvVar{Name: "TEMPORAL_TASK_QUEUE", Value: taskQueue})
@@ -73,8 +73,8 @@ func MakePodSpec(containers []corev1.Container, labels map[string]string, taskQu
 	}
 }
 
-// MakeHelloWorldPodSpec creates a pod spec with an empty task queue and one container with the given image name.
-func MakeHelloWorldPodSpec(imageName string) corev1.PodTemplateSpec {
+// MakePodSpecWithImage creates a pod spec with an empty task queue and one container with the given image name.
+func MakePodSpecWithImage(imageName string) corev1.PodTemplateSpec {
 	return MakePodSpec([]corev1.Container{{Name: "worker", Image: imageName}},
 		map[string]string{"app": "test-worker"},
 		"")
@@ -115,7 +115,7 @@ func MakeBuildId(twdName, imageName string, podSpec *corev1.PodTemplateSpec) str
 				if podSpec != nil {
 					obj.Spec.Template = *podSpec
 				} else {
-					obj.Spec.Template = SetTaskQueue(MakeHelloWorldPodSpec(imageName), twdName)
+					obj.Spec.Template = SetTaskQueue(MakePodSpecWithImage(imageName), twdName)
 				}
 				return obj
 			},
