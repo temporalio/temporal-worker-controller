@@ -28,6 +28,29 @@ type VersionInfo struct {
 	DrainedSince   *time.Time
 	TaskQueues     []temporaliov1alpha1.TaskQueue
 	TestWorkflows  []temporaliov1alpha1.WorkflowExecution
+
+	// AllTaskQueuesHaveUnversionedPoller is true if we confirm that all task queues in the version have at least one
+	// unversioned poller. False means none exist or unknown.
+	// Unversioned Task Queue pollers are only queried for the Target Version, and only if both are true:
+	//   - The Current Version is nil / unversioned
+	//   - The rollout strategy is Progressive
+	// If those conditions are not met, this will always be false (unknown).
+	//
+	// If Current Version is nil and a Task Queue in the Target Version has no unversioned pollers, gradually ramping
+	// N% of traffic to the Target Version would mean that the remaining traffic is routed to the unversioned queue,
+	// where it would not get picked up, leading to task timeouts.
+	// To prevent that, if the Current Version is nil, and we cannot confirm that there are unversioned pollers on the
+	// Target Version's task queues, we promote the Target Version to Current immediately, skipping Progressive steps.
+	AllTaskQueuesHaveUnversionedPoller bool
+
+	// AllTaskQueuesHaveNoVersionedPollers is true if we confirm that none of the task queues in the version have any
+	// versioned pollers polling this version. False means at least one versioned poller exists or unknown.
+	// Versioned Task Queue pollers are only queried for Drained Versions, so if the version this Task Queue is in is
+	// not Drained, this will always be false (unknown).
+	// If a version is Drained and has no versioned pollers, it is eligible for deletion and can be automatically
+	// and won't count against the max
+	// non-deletable versions of your Worker Deployment.
+	NoTaskQueuesHaveVersionedPollers bool
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
