@@ -276,9 +276,6 @@ spec:
     scaledownDelay: 30m
     deleteDelay: 2h
   template:
-    metadata:
-      annotations:
-        prometheus.io/scrape: "true"
     spec:
       containers:
       - name: worker
@@ -490,9 +487,6 @@ template:
 ```yaml
 template:
   metadata:
-    annotations:
-      prometheus.io/scrape: "true"
-      prometheus.io/port: "9090"
     labels:
       team: payments
       environment: production
