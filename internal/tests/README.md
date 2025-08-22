@@ -77,19 +77,29 @@ test cases.
 
 Each test case should pass in:
 ```go
-type testCase struct {
+type TestCase struct {
 	// If starting from a particular state, specify that in input.Status
-	input *temporaliov1alpha1.TemporalWorkerDeployment
+	twd *temporaliov1alpha1.TemporalWorkerDeployment
 	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
 	// versions, so for test scenarios that start with existing deprecated version Deployments,
 	// specify the number of replicas for each deprecated build here.
 	existingDeploymentReplicas map[string]int32
-	expectedStatus          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+	// TemporalWorkerDeploymentStatus only tracks the build ids of the Deployments for deprecated
+	// versions, not their images so for test scenarios that start with existing deprecated version Deployments,
+	// specify the images for each deprecated build here.
+	existingDeploymentImages map[string]string
+	expectedStatus           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+	// Time to delay before checking expected status
+	waitTime *time.Duration
+
+	// Arbitrary function called at the end of setting up the environment specified by input.Status.
+	// Can be used for additional state creation / destruction
+	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
 ```
 
 Each test function should follow the same pattern:
-1. Set up test environment
+1. Set up test environment (including preliminary state)
 2. Create test resources
 3. Perform the test action
 4. Wait for expected state changes
