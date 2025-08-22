@@ -9,7 +9,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
-	"go.temporal.io/server/api/deployment/v1"
+	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -112,7 +112,7 @@ func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient cli
 func makePreliminaryStatusTrue(
 	ctx context.Context,
 	t *testing.T,
-	env testEnv,
+	env testhelpers.TestEnv,
 	twd *temporaliov1alpha1.TemporalWorkerDeployment,
 ) {
 	t.Logf("Creating starting test env based on input.Status")
@@ -145,39 +145,39 @@ func handleStopFuncs(funcs []func()) {
 func createStatus(
 	ctx context.Context,
 	t *testing.T,
-	env testEnv,
+	env testhelpers.TestEnv,
 	newTWD *temporaliov1alpha1.TemporalWorkerDeployment,
 	prevVersion temporaliov1alpha1.BaseWorkerDeploymentVersion,
 	rampPercentage *float32,
 ) (workerStopFuncs []func()) {
 	if prevVersion.Deployment != nil && prevVersion.Deployment.FieldPath == "create" {
 		deploymentName := k8s.ComputeWorkerDeploymentName(newTWD)
-		v := &deployment.WorkerDeploymentVersion{
+		v := &worker.WorkerDeploymentVersion{
 			DeploymentName: deploymentName,
 			BuildId:        prevVersion.BuildID,
 		}
-		prevTWD := recreateTWD(newTWD, env.images[v.BuildId], env.replicas[v.BuildId])
+		prevTWD := recreateTWD(newTWD, env.DeprecatedBuildImages[v.BuildId], env.DeprecatedBuildReplicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
-		waitForDeployment(t, env.k8sClient, expectedDeploymentName, prevTWD.Namespace, 30*time.Second)
+		waitForDeployment(t, env.K8sClient, expectedDeploymentName, prevTWD.Namespace, 30*time.Second)
 		if prevVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
-			workerStopFuncs = applyDeployment(t, ctx, env.k8sClient, expectedDeploymentName, prevTWD.Namespace)
+			workerStopFuncs = applyDeployment(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
 		}
 
 		switch prevVersion.Status {
 		case temporaliov1alpha1.VersionStatusInactive, temporaliov1alpha1.VersionStatusNotRegistered:
 			// no-op
 		case temporaliov1alpha1.VersionStatusRamping:
-			setRampingVersion(t, ctx, env.ts, v, *rampPercentage) // rampPercentage won't be nil if the version is ramping
+			setRampingVersion(t, ctx, env.Ts, v, *rampPercentage) // rampPercentage won't be nil if the version is ramping
 		case temporaliov1alpha1.VersionStatusCurrent:
-			setCurrentVersion(t, ctx, env.ts, v)
+			setCurrentVersion(t, ctx, env.Ts, v)
 		case temporaliov1alpha1.VersionStatusDraining:
-			setRampingVersion(t, ctx, env.ts, v, 1)
+			setRampingVersion(t, ctx, env.Ts, v, 1)
 			// TODO(carlydf): start a workflow on v that does not complete -> will never drain
-			setRampingVersion(t, ctx, env.ts, nil, 0)
+			setRampingVersion(t, ctx, env.Ts, nil, 0)
 		case temporaliov1alpha1.VersionStatusDrained:
-			setRampingVersion(t, ctx, env.ts, v, 1)
-			setRampingVersion(t, ctx, env.ts, nil, 0)
+			setRampingVersion(t, ctx, env.Ts, v, 1)
+			setRampingVersion(t, ctx, env.Ts, nil, 0)
 		}
 	}
 
@@ -197,18 +197,18 @@ func recreateTWD(twd *temporaliov1alpha1.TemporalWorkerDeployment, imageName str
 func createWorkerDeployment(
 	ctx context.Context,
 	t *testing.T,
-	env testEnv,
+	env testhelpers.TestEnv,
 	twd *temporaliov1alpha1.TemporalWorkerDeployment,
 	buildId string,
 ) {
-	dep, err := k8s.NewDeploymentWithControllerRef(twd, buildId, env.connection.Spec, env.mgr.GetScheme())
+	dep, err := k8s.NewDeploymentWithControllerRef(twd, buildId, env.Connection.Spec, env.Mgr.GetScheme())
 	if err != nil {
 		t.Fatalf("error creating Deployment spec: %v", err.Error())
 	}
 
 	t.Logf("Creating Deployment %s in namespace %s", dep.Name, dep.Namespace)
 
-	if err := env.k8sClient.Create(ctx, dep); err != nil {
+	if err := env.K8sClient.Create(ctx, dep); err != nil {
 		t.Fatalf("failed to create Deployment: %v", err)
 	}
 }

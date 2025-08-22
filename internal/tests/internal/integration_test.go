@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	testPollerHistoryTTL              = time.Second
+	testShortPollerHistoryTTL         = time.Second
 	testDrainageVisibilityGracePeriod = time.Second
 	testDrainageRefreshInterval       = time.Second
 )
@@ -34,8 +34,6 @@ func TestIntegration(t *testing.T) {
 
 	// Create test Temporal server and client
 	dc := dynamicconfig.NewMemoryClient()
-	// make versions eligible for deletion faster
-	dc.OverrideValue("matching.PollerHistoryTTL", testPollerHistoryTTL)
 	// make versions drain faster
 	dc.OverrideValue("matching.wv.VersionDrainageStatusVisibilityGracePeriod", testDrainageVisibilityGracePeriod)
 	dc.OverrideValue("matching.wv.VersionDrainageStatusRefreshInterval", testDrainageRefreshInterval)
@@ -45,6 +43,17 @@ func TestIntegration(t *testing.T) {
 	)
 
 	tests := map[string]*testhelpers.TestCaseBuilder{
+		"manual-rollout-expect-no-change": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithManualStrategy().
+					WithVersion("v1"),
+			).
+			WithWaitTime(5 * time.Second). // wait before checking to confirm no change
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", -1, true, true),
+			),
 		"all-at-once-rollout-2-replicas": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -57,7 +66,30 @@ func TestIntegration(t *testing.T) {
 					WithTargetVersion("v1", -1, true, false).
 					WithCurrentVersion("v1", true, false),
 			),
-		"progressive-rollout-expect-first-step": testhelpers.NewTestCase().
+		"progressive-rollout-no-unversioned-pollers-expect-all-at-once": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+					WithVersion("v1"),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", -1, true, false).
+					WithCurrentVersion("v1", true, false),
+			),
+		// TODO(carlydf): this won't work until the controller detects unversioned pollers
+		// "progressive-rollout-yes-unversioned-pollers-expect-first-step": testhelpers.NewTestCase().
+		//	WithInput(
+		//		testhelpers.NewTemporalWorkerDeploymentBuilder().
+		//			WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+		//			WithVersion("v1"),
+		//	).
+		//	WithSetupFunction(setupUnversionedPoller).
+		//	WithExpectedStatus(
+		//		testhelpers.NewStatusBuilder().
+		//			WithTargetVersion("v1", 5, true, true),
+		//	),
+		"nth-progressive-rollout-expect-first-step": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
@@ -72,7 +104,7 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewStatusBuilder().
 					WithTargetVersion("v1", 5, true, true),
 			),
-		"progressive-rollout-with-success-gate": testhelpers.NewTestCase().
+		"nth-progressive-rollout-with-success-gate": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
@@ -88,7 +120,7 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewStatusBuilder().
 					WithTargetVersion("v1", 5, true, true),
 			),
-		"progressive-rollout-with-failed-gate": testhelpers.NewTestCase().
+		"nth-progressive-rollout-with-failed-gate": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
@@ -113,7 +145,28 @@ func TestIntegration(t *testing.T) {
 			ctx := context.Background()
 			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.BuildWithValues(testName, testNamespace.Name, ts.GetDefaultNamespace()))
 		})
+	}
 
+	// Create short TTL test Temporal server and client
+	dcShortTTL := dynamicconfig.NewMemoryClient()
+	// make versions eligible for deletion faster
+	dcShortTTL.OverrideValue("matching.PollerHistoryTTL", testShortPollerHistoryTTL) // default is 5 minutes
+	// make versions drain faster
+	dcShortTTL.OverrideValue("matching.wv.VersionDrainageStatusVisibilityGracePeriod", testDrainageVisibilityGracePeriod)
+	dcShortTTL.OverrideValue("matching.wv.VersionDrainageStatusRefreshInterval", testDrainageRefreshInterval)
+	tsShortTTL := temporaltest.NewServer(
+		temporaltest.WithT(t),
+		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcShortTTL)),
+	)
+	testsShortPollerTTL := map[string]*testhelpers.TestCaseBuilder{
+		// Note: Add tests that require pollers to expire quickly here
+	}
+
+	for testName, tc := range testsShortPollerTTL {
+		t.Run(testName, func(t *testing.T) {
+			ctx := context.Background()
+			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, tsShortTTL, tc.BuildWithValues(testName, testNamespace.Name, ts.GetDefaultNamespace()))
+		})
 	}
 
 }
@@ -144,13 +197,13 @@ func testTemporalWorkerDeploymentCreation(
 		t.Fatalf("failed to create TemporalConnection: %v", err)
 	}
 
-	env := testEnv{
-		k8sClient:  k8sClient,
-		mgr:        mgr,
-		ts:         ts,
-		connection: temporalConnection,
-		replicas:   tc.GetDeprecatedBuildReplicas(),
-		images:     tc.GetDeprecatedBuildImages(),
+	env := testhelpers.TestEnv{
+		K8sClient:               k8sClient,
+		Mgr:                     mgr,
+		Ts:                      ts,
+		Connection:              temporalConnection,
+		DeprecatedBuildReplicas: tc.GetDeprecatedBuildReplicas(),
+		DeprecatedBuildImages:   tc.GetDeprecatedBuildImages(),
 	}
 
 	makePreliminaryStatusTrue(ctx, t, env, twd)
