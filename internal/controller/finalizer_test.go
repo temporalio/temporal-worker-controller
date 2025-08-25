@@ -54,7 +54,7 @@ func TestFinalizerAddition(t *testing.T) {
 	}
 
 	// Verify finalizer is not present initially
-	if controllerutil.ContainsFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer) {
+	if controllerutil.ContainsFinalizer(workerDeploy, temporalWorkerDeploymentFinalizer) {
 		t.Error("Finalizer should not be present initially")
 	}
 
@@ -79,7 +79,7 @@ func TestFinalizerAddition(t *testing.T) {
 	}
 
 	// Verify finalizer was added
-	if !controllerutil.ContainsFinalizer(updated, TemporalWorkerDeploymentFinalizer) {
+	if !controllerutil.ContainsFinalizer(updated, temporalWorkerDeploymentFinalizer) {
 		t.Error("Finalizer should be present after update")
 	}
 }
@@ -202,7 +202,7 @@ func TestHandleDeletion(t *testing.T) {
 	workerDeploy := testhelpers.ModifyObj(testhelpers.MakeTWDWithName("test-worker", "default"), func(twd *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 		twd.UID = "worker-uid-123"
 		twd.DeletionTimestamp = &now
-		twd.Finalizers = []string{TemporalWorkerDeploymentFinalizer}
+		twd.Finalizers = []string{temporalWorkerDeploymentFinalizer}
 		twd.Spec.WorkerOptions = temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace:  "test-namespace",
 			TemporalConnection: "test-connection",
@@ -222,7 +222,7 @@ func TestHandleDeletion(t *testing.T) {
 	logger := testlogr.New(t)
 
 	// Verify finalizer is present before deletion
-	if !controllerutil.ContainsFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer) {
+	if !controllerutil.ContainsFinalizer(workerDeploy, temporalWorkerDeploymentFinalizer) {
 		t.Error("Finalizer should be present before deletion handling")
 	}
 

@@ -37,8 +37,8 @@ const (
 	// TODO(jlegrone): add this everywhere
 	deployOwnerKey = ".metadata.controller"
 	buildIDLabel   = "temporal.io/build-id"
-	// TemporalWorkerDeploymentFinalizer is the finalizer used to ensure proper cleanup of resources
-	TemporalWorkerDeploymentFinalizer = "temporal.io/temporal-worker-deployment-finalizer"
+	// temporalWorkerDeploymentFinalizer is the finalizer used to ensure proper cleanup of resources
+	temporalWorkerDeploymentFinalizer = "temporal.io/temporal-worker-deployment-finalizer"
 
 	// Cleanup timeout and polling constants
 	cleanupTimeout      = 2 * time.Minute
@@ -94,8 +94,8 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Add finalizer if it doesn't exist
-	if !controllerutil.ContainsFinalizer(&workerDeploy, TemporalWorkerDeploymentFinalizer) {
-		controllerutil.AddFinalizer(&workerDeploy, TemporalWorkerDeploymentFinalizer)
+	if !controllerutil.ContainsFinalizer(&workerDeploy, temporalWorkerDeploymentFinalizer) {
+		controllerutil.AddFinalizer(&workerDeploy, temporalWorkerDeploymentFinalizer)
 		if err := r.Update(ctx, &workerDeploy); err != nil {
 			l.Error(err, "unable to add finalizer")
 			return ctrl.Result{}, err
@@ -217,7 +217,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 func (r *TemporalWorkerDeploymentReconciler) handleDeletion(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment) (ctrl.Result, error) {
 	l.Info("Handling deletion of TemporalWorkerDeployment")
 
-	if !controllerutil.ContainsFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer) {
+	if !controllerutil.ContainsFinalizer(workerDeploy, temporalWorkerDeploymentFinalizer) {
 		// Finalizer has already been removed, allow deletion to proceed
 		return ctrl.Result{}, nil
 	}
@@ -229,7 +229,7 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(ctx context.Context,
 	}
 
 	// Remove the finalizer to allow deletion
-	controllerutil.RemoveFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer)
+	controllerutil.RemoveFinalizer(workerDeploy, temporalWorkerDeploymentFinalizer)
 	if err := r.Update(ctx, workerDeploy); err != nil {
 		l.Error(err, "Failed to remove finalizer")
 		return ctrl.Result{}, err
