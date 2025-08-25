@@ -711,7 +711,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				assert.True(t, ok, "did not expect to find Deployment %s in ScaleDeployments, but found it", deploymentRef.Name)
 				assert.Equal(t, expectedReplicas, actualReplicas, "unexpected scale replicas")
 			}
-			for expectedName, _ := range tc.expectScales {
+			for expectedName := range tc.expectScales {
 				if !slices.Contains(actualScaleDeploymentNames, expectedName) {
 					t.Errorf("expected to find Deployment %s in ScaleDeployments, but did not find it", expectedName)
 				}
