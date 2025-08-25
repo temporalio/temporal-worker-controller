@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -57,13 +58,17 @@ func TestFinalizerAddition(t *testing.T) {
 		t.Error("Finalizer should not be present initially")
 	}
 
-	// Simulate what happens in the reconcile loop when finalizer needs to be added
-	if !controllerutil.ContainsFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer) {
-		controllerutil.AddFinalizer(workerDeploy, TemporalWorkerDeploymentFinalizer)
-		err := reconciler.Update(ctx, workerDeploy)
-		if err != nil {
-			t.Fatalf("Failed to add finalizer: %v", err)
-		}
+	// Exercise the controller's logic for adding finalizers by calling Reconcile
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      "test-worker",
+			Namespace: "default",
+		},
+	}
+
+	_, err = reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
 	}
 
 	// Fetch the updated resource
