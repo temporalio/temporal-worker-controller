@@ -258,10 +258,8 @@ func getScaleDeployments(
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 					scaleDeployments[version.Deployment] = uint32(replicas)
 				}
-			} else {
-				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
-					scaleDeployments[version.Deployment] = 0
-				}
+			} else if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
+				scaleDeployments[version.Deployment] = 0
 			}
 		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
 			// Scale up these deployments

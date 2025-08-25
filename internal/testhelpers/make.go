@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	TaskQueueEnvKey = "TEMPORAL_TASK_QUEUE"
+	taskQueueEnvKey = "TEMPORAL_TASK_QUEUE"
 )
 
 func MakeTWD(
@@ -64,7 +64,7 @@ func MakeTWD(
 // MakePodSpec creates a pod spec with the given containers, labels, and task queue
 func MakePodSpec(containers []corev1.Container, labels map[string]string, taskQueue string) corev1.PodTemplateSpec {
 	for i := range containers {
-		containers[i].Env = append(containers[i].Env, corev1.EnvVar{Name: TaskQueueEnvKey, Value: taskQueue})
+		containers[i].Env = append(containers[i].Env, corev1.EnvVar{Name: taskQueueEnvKey, Value: taskQueue})
 	}
 
 	return corev1.PodTemplateSpec{
@@ -84,19 +84,19 @@ func MakePodSpecWithImage(imageName string) corev1.PodTemplateSpec {
 		"")
 }
 
-// SetTaskQueue sets or replaces the env var TaskQueueEnvKey with the given string in all containers
+// SetTaskQueue sets or replaces the env var taskQueueEnvKey with the given string in all containers
 func SetTaskQueue(podSpec corev1.PodTemplateSpec, taskQueue string) corev1.PodTemplateSpec {
 	for i, c := range podSpec.Spec.Containers {
 		found := false
 		for j, e := range c.Env {
-			if e.Name == TaskQueueEnvKey {
+			if e.Name == taskQueueEnvKey {
 				found = true
 				podSpec.Spec.Containers[i].Env[j].Value = taskQueue
 			}
 		}
 		if !found {
 			podSpec.Spec.Containers[i].Env = append(podSpec.Spec.Containers[i].Env, corev1.EnvVar{
-				Name:  TaskQueueEnvKey,
+				Name:  taskQueueEnvKey,
 				Value: taskQueue,
 			})
 		}
