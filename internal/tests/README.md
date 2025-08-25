@@ -75,28 +75,7 @@ If that becomes an issue, it can be changed, but I think using one `temporaltest
 functional test and sharing it across test cases will make the tests run a lot faster as we add more 
 test cases.
 
-Each test case should pass in:
-```go
-type TestCase struct {
-	// If starting from a particular state, specify that in input.Status
-	twd *temporaliov1alpha1.TemporalWorkerDeployment
-	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
-	// versions, so for test scenarios that start with existing deprecated version Deployments,
-	// specify the number of replicas for each deprecated build here.
-	existingDeploymentReplicas map[string]int32
-	// TemporalWorkerDeploymentStatus only tracks the build ids of the Deployments for deprecated
-	// versions, not their images so for test scenarios that start with existing deprecated version Deployments,
-	// specify the images for each deprecated build here.
-	existingDeploymentImages map[string]string
-	expectedStatus           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-	// Time to delay before checking expected status
-	waitTime *time.Duration
-
-	// Arbitrary function called at the end of setting up the environment specified by input.Status.
-	// Can be used for additional state creation / destruction
-	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
-}
-```
+Each test case should use the `testhelpers.TestCase` struct. See the godoc for `testhelpers.TestCase` for detailed field descriptions and the examples in `testhelpers/example_test.go` for usage patterns.
 
 Each test function should follow the same pattern:
 1. Set up test environment (including preliminary state)

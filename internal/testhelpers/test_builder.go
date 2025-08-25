@@ -209,25 +209,37 @@ func (sb *StatusBuilder) Build() *temporaliov1alpha1.TemporalWorkerDeploymentSta
 	return ret
 }
 
+// TestCase represents a single test scenario for integration testing of TemporalWorkerDeployment controllers.
+// It encapsulates the input state, expected outputs, and any additional setup required for the test.
 type TestCase struct {
-	// If starting from a particular state, specify that in input.Status
+	// twd is the TemporalWorkerDeployment resource to test with.
+	// If starting from a particular state, specify that in input.Status.
 	twd *temporaliov1alpha1.TemporalWorkerDeployment
+
+	// existingDeploymentReplicas specifies the number of replicas for each deprecated build.
 	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
 	// versions, so for test scenarios that start with existing deprecated version Deployments,
 	// specify the number of replicas for each deprecated build here.
 	existingDeploymentReplicas map[string]int32
+
+	// existingDeploymentImages specifies the images for each deprecated build.
 	// TemporalWorkerDeploymentStatus only tracks the build ids of the Deployments for deprecated
 	// versions, not their images so for test scenarios that start with existing deprecated version Deployments,
 	// specify the images for each deprecated build here.
 	existingDeploymentImages map[string]string
-	expectedStatus           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-	// validate that deployments have correct # of replicas. TODO(carlydf): validate replica count for more than just the deprecated versions
+
+	// expectedStatus is the expected TemporalWorkerDeploymentStatus after the test completes.
+	expectedStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+
+	// expectedDeploymentReplicas validates that deployments have correct number of replicas.
+	// TODO(carlydf): validate replica count for more than just the deprecated versions
 	expectedDeploymentReplicas map[string]int32
-	// Time to delay before checking expected status
+
+	// waitTime is the duration to delay before checking expected status.
 	waitTime *time.Duration
 
-	// Arbitrary function called at the end of setting up the environment specified by input.Status.
-	// Can be used for additional state creation / destruction
+	// setupFunc is an arbitrary function called at the end of setting up the environment specified by input.Status.
+	// It can be used for additional state creation or destruction.
 	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
 
