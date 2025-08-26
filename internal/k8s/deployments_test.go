@@ -6,6 +6,7 @@ package k8s_test
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -559,7 +560,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 }
 
-func TestNewDeploymentWithOwnerRef_EnvironmentVariables(t *testing.T) {
+func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) {
 	tests := map[string]struct {
 		connection        temporaliov1alpha1.TemporalConnectionSpec
 		expectedEnvVars   map[string]string
@@ -704,7 +705,23 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	assert.Equal(t, "localhost:7233", clientOptions.HostPort, "Address should match")
 	assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should match")
 
+	// Verify all environment variables injected by the controller are accessible
+	expectedEnvVars := map[string]string{
+		"TEMPORAL_ADDRESS":         "localhost:7233",
+		"TEMPORAL_NAMESPACE":       "test-namespace",
+		"TEMPORAL_DEPLOYMENT_NAME": "test-deployment",
+		"TEMPORAL_WORKER_BUILD_ID": "test-build-id",
+	}
+
+	for envVar, expectedValue := range expectedEnvVars {
+		actualValue := os.Getenv(envVar)
+		assert.Equal(t, expectedValue, actualValue, "Environment variable %s should match expected value", envVar)
+	}
+
 	// Verify the client options can be used to create a client (without actually connecting)
 	assert.NotEmpty(t, clientOptions.HostPort, "HostPort should be set")
 	assert.NotEmpty(t, clientOptions.Namespace, "Namespace should be set")
+
+	// Verify that no TLS configuration is present for non-mTLS case
+	assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
 }
