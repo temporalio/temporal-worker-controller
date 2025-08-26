@@ -103,12 +103,12 @@ Defines how new versions are promoted:
 - **gate**: Optional workflow that must succeed on all task queues in the target Worker Deployment Version before promotion continues
 
 ### Sunset Configuration
-Defines how old versions are cleaned up:
-- **scaledownDelay**: How long to wait after draining before scaling pods to zero
-- **deleteDelay**: How long to wait after draining before deleting the Kubernetes `Deployment`
+Defines how Drained versions are cleaned up:
+- **scaledownDelay**: How long to wait after a version has been Drained before scaling pods to zero
+- **deleteDelay**: How long to wait after a version has been Drained before deleting the Kubernetes `Deployment`
 
 ### Template
-The pod template used for all versions of this deployment. Similar to a standard Kubernetes Deployment template but managed by the controller.
+The pod template used for the target version of this worker deployment. Similar to a standard Kubernetes Deployment template but managed by the controller.
 
 ## Environment Variables
 
@@ -116,27 +116,30 @@ The controller automatically sets these environment variables for all worker pod
 
 ### TEMPORAL_HOST_PORT
 The host and port of the Temporal server, derived from the `TemporalConnection` resource.
+The worker must connect to this Temporal endpoint, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that endpoint if it already knows the endpoint another way.
 
 ### TEMPORAL_NAMESPACE
 The Temporal namespace the worker should connect to, from `spec.workerOptions.temporalNamespace`.
+The worker must connect to this Temporal namespace, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that namespace if it already knows the namespace another way.
 
 ### TEMPORAL_DEPLOYMENT_NAME
-The deployment name in Temporal, either from `spec.workerOptions.deploymentName` or auto-generated from the CRD name.
+The worker deployment name in Temporal, auto-generated from the `TemporalWorkerDeployment` name and Kubernetes namespace.
+The worker *must* use this to configure its `worker.DeploymentOptions`.
 
 ### WORKER_BUILD_ID
-The build ID for this specific version, derived from the container image tag or explicitly set.
+The build ID for this specific version, derived from the container image tag and hash of the target pod template.
+The worker *must* use this to configure its `worker.DeploymentOptions`.
 
 ## Resource Management Concepts
 
 ### Rainbow Deployments
-The pattern of running multiple versions of the same worker simultaneously. This is essential for maintaining workflow determinism in Temporal, as running workflows must continue executing on the version they started with.
+The pattern of running multiple versions of the same service simultaneously. Running multiple versions of your workers simultaneously is essential for supporting Pinned workflows in Temporal, as Pinned workflows must continue executing on the worker version they started on.
 
 ### Version Lifecycle Management
 The automated process of:
 1. Registering new versions with Temporal
 2. Gradually routing traffic to new versions
-3. Draining old versions once they're no longer needed
-4. Cleaning up resources for drained versions
+3. Cleaning up resources for drained versions
 
 ### Controller-Managed Resources
 Resources that are created, updated, and deleted automatically by the controller:
@@ -149,9 +152,9 @@ Resources that are created, updated, and deleted automatically by the controller
 
 ### Import Process
 The process of bringing existing manually-managed worker deployments under controller management. This involves:
-1. Creating a `TemporalWorkerDeployment` CRD with Manual strategy
-2. Sequentially updating the image spec to register each existing version
-3. Cleaning up original manual Kubernetes `Deployment` resources
+1. Creating a `TemporalWorkerDeployment` custom resource with Manual strategy
+2. Sequentially updating the target pod template in the `TemporalWorkerDeployment` spec to prompt the controller to create a Kubernetes Deployment with that pod spec that is owned and tracked by the controller. Do this for each of your existing Deployments.
+3. Cleaning up original non-worker-controller-managed Kubernetes `Deployment` resources
 4. Enabling automated rollouts
 
 ### Single Resource Requirement

@@ -1,6 +1,6 @@
 # Migrating from Unversioned to Versioned Workflows with Temporal Worker Controller
 
-This guide helps teams migrate from unversioned Temporal workflows to versioned workflows using the Temporal Worker Controller. It assumes you are currently running workers without Temporal's Worker Versioning feature and want to adopt versioned deployments for safer, more controlled rollouts.
+This guide helps teams migrate from unversioned Temporal workflows to versioned workflows using the Temporal Worker Controller. It assumes you are currently running workers without Temporal's Worker Versioning feature and want to adopt versioned worker deployments for safer, more controlled rollouts.
 
 ## Important Note
 
@@ -48,7 +48,7 @@ Before starting the migration, ensure you have:
 Your workers are likely configured with basic environment variables like:
 
 ```bash
-TEMPORAL_HOST_PORT=your-namespace.tmprl.cloud:7233
+TEMPORAL_HOST_PORT=your-temporal-namespace.tmprl.cloud:7233
 TEMPORAL_NAMESPACE=your-temporal-namespace
 # No TEMPORAL_DEPLOYMENT_NAME or WORKER_BUILD_ID yet
 ```
@@ -89,7 +89,7 @@ spec:
 ### After: Versioned Workers with Controller
 
 ```yaml
-# Single CRD manages multiple versions automatically
+# Single Custom Resource manages multiple versions of a worker deployment automatically
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
@@ -122,8 +122,8 @@ spec:
 1. Build new worker image  
 2. Update `TemporalWorkerDeployment` CRD with new image
 3. Controller creates new Kubernetes `Deployment` for the new version
-4. Controller gradually routes new workflows to new version
-5. Old version continues handling existing workflows until they complete
+4. Controller gradually routes new workflows and existing AutoUpgrade workflows to new version
+5. Old version continues handling existing Pinned workflows until they complete
 6. **Safety**: No disruption to running workflows, automated rollout control
 
 **Key Benefits:**
@@ -236,7 +236,7 @@ worker := worker.New(client, "my-task-queue", workerOptions)
 
 Start with your lowest-risk worker. Convert your existing unversioned Deployment to a `TemporalWorkerDeployment` CRD:
 
-**Current Unversioned Deployment:**
+**Existing Unversioned Deployment:**
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -270,7 +270,7 @@ spec:
     connection: production-temporal
     temporalNamespace: production
   # CRITICAL: Use Manual during initial migration
-  cutover:
+  rollout:
     strategy: Manual
   sunset:
     scaledownDelay: 30m
@@ -279,7 +279,7 @@ spec:
     spec:
       containers:
       - name: worker
-        image: payment-processor:v1.5.2  # Same image as current deployment
+        image: payment-processor:v1.5.2  # Same image as current deployment to ensure no breaking changes
         resources:
           requests:
             memory: "512Mi"
@@ -289,7 +289,7 @@ spec:
 
 ### Step 5: Deploy the TemporalWorkerDeployment
 
-1. **Create the `TemporalWorkerDeployment` CRD:**
+1. **Create the `TemporalWorkerDeployment` custom resource:**
    ```bash
    kubectl apply -f payment-processor-versioned.yaml
    ```
@@ -366,7 +366,7 @@ Now you need to carefully transition from your old unversioned deployment to the
 Once the initial migration is complete and validated, enable automated rollouts for future deployments:
 
 ```bash
-# Update the TemporalWorkerDeployment CRD to use Progressive strategy
+# Update the TemporalWorkerDeployment custom resource to use Progressive strategy
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{
   "spec": {
     "cutover": {
@@ -392,7 +392,7 @@ kubectl set image deployment/payment-processor worker=payment-processor:v1.6.0
 
 **After (Versioned):**
 ```bash
-# New pipeline updates TemporalWorkerDeployment CRD
+# New pipeline updates TemporalWorkerDeployment custom resource
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{"spec":{"template":{"spec":{"containers":[{"name":"worker","image":"payment-processor:v1.6.0"}]}}}}'
 ```
 
@@ -547,7 +547,7 @@ spec:
     connection: production-temporal
     temporalNamespace: payments
   cutover:
-    strategy: Progressive  # Conservative rollout for financial operations
+    strategy: Progressive
     steps:
       - rampPercentage: 5
         pauseDuration: 10m
@@ -658,7 +658,7 @@ status:
 
 *Solutions:*
 - Verify versioned workers are properly registered in Temporal UI
-- Check that new workflow starts are using the correct task queue
+- Check that new workflows are starting on the correct task queue
 - Ensure unversioned workers are scaled down gradually, not immediately
 - Verify Temporal routing rules are working correctly
 
