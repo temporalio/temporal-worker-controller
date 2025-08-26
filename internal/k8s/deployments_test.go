@@ -701,26 +701,21 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	clientOptions, err := envconfig.LoadDefaultClientOptions()
 	require.NoError(t, err, "envconfig should successfully parse environment variables")
 
-	// Verify that the parsed client options match our expectations
-	assert.Equal(t, "localhost:7233", clientOptions.HostPort, "Address should match")
-	assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should match")
+	// Verify that the parsed client options match our expectations exhaustively
+	// These should correspond to all the environment variables injected by the controller
+	assert.Equal(t, "localhost:7233", clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+	assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
 
-	// Verify all environment variables injected by the controller are accessible
-	expectedEnvVars := map[string]string{
-		"TEMPORAL_ADDRESS":         "localhost:7233",
-		"TEMPORAL_NAMESPACE":       "test-namespace",
-		"TEMPORAL_DEPLOYMENT_NAME": "test-deployment",
-		"TEMPORAL_WORKER_BUILD_ID": "test-build-id",
-	}
+	// Verify other client option fields that should have default/empty values
+	assert.Empty(t, clientOptions.Identity, "Identity should be empty when not set via env vars")
+	assert.Nil(t, clientOptions.Logger, "Logger should be nil when not set")
+	assert.Nil(t, clientOptions.MetricsHandler, "MetricsHandler should be nil when not set")
+	assert.Empty(t, clientOptions.Interceptors, "Interceptors should be empty when not set")
 
-	for envVar, expectedValue := range expectedEnvVars {
-		actualValue := os.Getenv(envVar)
-		assert.Equal(t, expectedValue, actualValue, "Environment variable %s should match expected value", envVar)
-	}
-
-	// Verify the client options can be used to create a client (without actually connecting)
-	assert.NotEmpty(t, clientOptions.HostPort, "HostPort should be set")
-	assert.NotEmpty(t, clientOptions.Namespace, "Namespace should be set")
+	// Note: TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID are not part of client options
+	// but are used by the worker for versioning - they should still be available as env vars
+	assert.Equal(t, "test-deployment", os.Getenv("TEMPORAL_DEPLOYMENT_NAME"), "TEMPORAL_DEPLOYMENT_NAME should be set")
+	assert.Equal(t, "test-build-id", os.Getenv("TEMPORAL_WORKER_BUILD_ID"), "TEMPORAL_WORKER_BUILD_ID should be set")
 
 	// Verify that no TLS configuration is present for non-mTLS case
 	assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
