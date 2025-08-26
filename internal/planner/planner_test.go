@@ -6,6 +6,7 @@ package planner
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -490,12 +491,13 @@ func TestGetDeleteDeployments(t *testing.T) {
 
 func TestGetScaleDeployments(t *testing.T) {
 	testCases := []struct {
-		name         string
-		k8sState     *k8s.DeploymentState
-		status       *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec         *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		state        *temporal.TemporalWorkerState
-		expectScales int
+		name     string
+		k8sState *k8s.DeploymentState
+		status   *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		spec     *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		state    *temporal.TemporalWorkerState
+		// map of build id to scaled replicas
+		expectScales map[string]uint32
 	}{
 		{
 			name: "current version needs scaling",
@@ -523,7 +525,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(2); return &r }(),
 			},
-			expectScales: 1,
+			expectScales: map[string]uint32{"test-123": 2},
 		},
 		{
 			name: "drained version needs scaling down",
@@ -560,13 +562,13 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			expectScales: 1,
+			expectScales: map[string]uint32{"test-456": 0},
 		},
 		{
-			name: "inactive version needs scaling up",
+			name: "inactive non-target version needs scaling down",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
-					"a": createDeploymentWithDefaultConnectionSpecHash(0),
+					"a": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 				DeploymentRefs: map[string]*corev1.ObjectReference{
 					"a": {Name: "test-a"},
@@ -593,7 +595,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
-			expectScales: 1,
+			expectScales: map[string]uint32{"test-a": 0},
 		},
 		{
 			name: "ramping version needs scaling up",
@@ -620,10 +622,10 @@ func TestGetScaleDeployments(t *testing.T) {
 			state: &temporal.TemporalWorkerState{
 				RampingBuildID: "b",
 			},
-			expectScales: 1,
+			expectScales: map[string]uint32{"test-b": 3},
 		},
 		{
-			name: "target version needs scaling up",
+			name: "inactive target version needs scaling up",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
 					"a": createDeploymentWithDefaultConnectionSpecHash(0),
@@ -653,7 +655,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
-			expectScales: 1,
+			expectScales: map[string]uint32{"test-a": 3},
 		},
 		{
 			name: "don't scale down drained deployment before delay",
@@ -694,14 +696,26 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
-			expectScales: 0, // No scaling yet because not enough time passed
+			expectScales: map[string]uint32{}, // No scaling yet because not enough time passed
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec)
-			assert.Equal(t, tc.expectScales, len(scales), "unexpected number of scales")
+			assert.Equal(t, len(tc.expectScales), len(scales), "unexpected number of scales")
+			actualScaleDeploymentNames := make([]string, 0)
+			for deploymentRef, actualReplicas := range scales {
+				expectedReplicas, ok := tc.expectScales[deploymentRef.Name]
+				actualScaleDeploymentNames = append(actualScaleDeploymentNames, deploymentRef.Name)
+				assert.True(t, ok, "did not expect to find Deployment %s in ScaleDeployments, but found it", deploymentRef.Name)
+				assert.Equal(t, expectedReplicas, actualReplicas, "unexpected scale replicas")
+			}
+			for expectedName := range tc.expectScales {
+				if !slices.Contains(actualScaleDeploymentNames, expectedName) {
+					t.Errorf("expected to find Deployment %s in ScaleDeployments, but did not find it", expectedName)
+				}
+			}
 		})
 	}
 }

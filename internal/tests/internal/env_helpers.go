@@ -15,8 +15,12 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/api/workflowservice/v1"
+	temporalClient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
-	"go.temporal.io/server/temporaltest"
+	"go.temporal.io/sdk/workflow"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -28,15 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
-
-type testEnv struct {
-	k8sClient  client.Client
-	mgr        manager.Manager
-	ts         *temporaltest.TestServer
-	connection *temporaliov1alpha1.TemporalConnection
-	replicas   map[string]int32
-	images     map[string]string
-}
 
 // setupKubebuilderAssets sets up the KUBEBUILDER_ASSETS environment variable if not already set
 func setupKubebuilderAssets() error {
@@ -193,4 +188,76 @@ func cleanupTestNamespace(t *testing.T, cfg *rest.Config, k8sClient client.Clien
 			t.Errorf("failed to delete test namespace: %v", err)
 		}
 	}
+}
+
+func setupUnversionedPoller(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+	w, _, err := testhelpers.NewWorker(ctx, "", "", tc.GetTWD().Name, env.Ts.GetFrontendHostPort(), env.Ts.GetDefaultNamespace(), false)
+
+	// Register a dummy workflow and activity so the worker has something to poll for
+	w.RegisterWorkflowWithOptions(func(ctx workflow.Context) (string, error) { return "hi", nil }, workflow.RegisterOptions{Name: "dummyWorkflow"})
+	w.RegisterActivity(func(ctx context.Context) (string, error) { return "hi", nil })
+
+	err = w.Start()
+	if err != nil {
+		t.Errorf("error starting unversioned worker %v", err)
+	}
+	eventually(t, 5*time.Second, 500*time.Millisecond, func() error {
+		unversionedWorkflowPoller, err := hasUnversionedPoller(ctx, env.Ts.GetDefaultClient(), temporalClient.WorkerDeploymentTaskQueueInfo{
+			Name: tc.GetTWD().Name,
+			Type: temporalClient.TaskQueueTypeWorkflow,
+		})
+		if err != nil {
+			return fmt.Errorf("error checking unversioned Workflow pollers %v", err)
+		}
+		unversionedActivityPoller, err := hasUnversionedPoller(ctx, env.Ts.GetDefaultClient(), temporalClient.WorkerDeploymentTaskQueueInfo{
+			Name: tc.GetTWD().Name,
+			Type: temporalClient.TaskQueueTypeActivity,
+		})
+		if err != nil {
+			return fmt.Errorf("error checking unversioned Activity pollers %v", err)
+		}
+		if !unversionedWorkflowPoller {
+			return fmt.Errorf("no workflow poller")
+		}
+		if !unversionedActivityPoller {
+			return fmt.Errorf("no activity poller")
+		}
+		return nil
+	})
+}
+
+func hasUnversionedPoller(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) (bool, error) {
+	pollers, err := getPollers(ctx, client, taskQueueInfo)
+	if err != nil {
+		return false, fmt.Errorf("unable to confirm presence of unversioned poller: %w", err)
+	}
+	for _, p := range pollers {
+		switch p.GetDeploymentOptions().GetWorkerVersioningMode() {
+		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
+			return true, nil
+		case temporalClient.WorkerVersioningModeVersioned:
+		}
+	}
+	return false, nil
+}
+
+func getPollers(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) ([]*taskqueue.PollerInfo, error) {
+	var resp *workflowservice.DescribeTaskQueueResponse
+	var err error
+	switch taskQueueInfo.Type {
+	case temporalClient.TaskQueueTypeWorkflow:
+		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeWorkflow)
+	case temporalClient.TaskQueueTypeActivity:
+		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeActivity)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
+	}
+	return resp.GetPollers(), nil
 }
