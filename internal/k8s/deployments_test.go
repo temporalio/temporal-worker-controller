@@ -666,9 +666,11 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 // createTestCerts generates a self-signed certificate and private key for testing purposes.
 // WARNING: This uses a lighter-weight 1024-bit RSA key for faster test execution.
 // DO NOT copy this for production use - use 2048-bit or higher keys for security.
-func createTestCerts(t *testing.T, tempDir string) (certPath, keyPath string) {
+func createTestCerts(t *testing.T) (certPath, keyPath string) {
 	t.Helper()
 
+	// Create temp directory for certificate files
+	tempDir := t.TempDir()
 	certPath = filepath.Join(tempDir, "client.pem")
 	keyPath = filepath.Join(tempDir, "client.key")
 
@@ -690,17 +692,19 @@ func createTestCerts(t *testing.T, tempDir string) (certPath, keyPath string) {
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 	require.NoError(t, err)
 
-	// Write certificate file
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	err = os.WriteFile(certPath, certPEM, 0644)
+	// Write certificate file directly
+	certFile, err := os.Create(certPath)
 	require.NoError(t, err)
+	defer certFile.Close()
+	require.NoError(t, pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
 
-	// Write private key file
+	// Write private key file directly
 	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	require.NoError(t, err)
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	err = os.WriteFile(keyPath, keyPEM, 0644)
+	keyFile, err := os.Create(keyPath)
 	require.NoError(t, err)
+	defer keyFile.Close()
+	require.NoError(t, pem.Encode(keyFile, &pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
 
 	return certPath, keyPath
 }
@@ -765,8 +769,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 			if expectTLS {
 				// Create temporary test certificate files
-				tempDir := t.TempDir()
-				certPath, keyPath := createTestCerts(t, tempDir)
+				certPath, keyPath := createTestCerts(t)
 
 				// Override the certificate paths to point to our test files
 				t.Setenv("TEMPORAL_TLS_CLIENT_CERT_PATH", certPath)
