@@ -4,5 +4,6 @@ toolchain go1.24.6
 
 use (
 	.
+	./internal/demo
 	./internal/tests
 )
