@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - job-name: "Unit Tests"
+          - job-name: "Unit"
             make-target: "test-unit"
             artifact-name: "unit-test-results"
           - job-name: "Go Vet"
@@ -54,7 +54,7 @@ jobs:
 
   # Integration tests need special setup, keep separate
   test-integration:
-    name: Integration Tests
+    name: Integration
     runs-on: ubuntu-latest
     
     steps:
