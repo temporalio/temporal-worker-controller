@@ -677,7 +677,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	}
 
 	connection := temporaliov1alpha1.TemporalConnectionSpec{
-		HostPort: "localhost:7233",
+		HostPort: "test.temporal.example:9999",
 	}
 
 	deployment := k8s.NewDeploymentWithOwnerRef(
@@ -703,7 +703,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 	// Verify that the parsed client options match our expectations exhaustively
 	// These should correspond to all the environment variables injected by the controller
-	assert.Equal(t, "localhost:7233", clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+	assert.Equal(t, "test.temporal.example:9999", clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
 	assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
 
 	// Verify other client option fields that should have default/empty values
