@@ -701,9 +701,7 @@ func createTestCerts(t *testing.T) (certPath, keyPath string) {
 	// Write private key file directly
 	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	require.NoError(t, err)
-	keyFile, err := os.Create(keyPath)
-	require.NoError(t, err)
-	defer keyFile.Close()
+	defer func() { require.NoError(t, keyFile.Close()) }()
 	require.NoError(t, pem.Encode(keyFile, &pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
 
 	return certPath, keyPath
