@@ -55,7 +55,7 @@ variables:
 - `TEMPORAL_NAMESPACE`: The Temporal namespace to connect to, e.g. `default`
 - `TEMPORAL_DEPLOYMENT_NAME`: The name of the worker deployment. This must be unique to the worker deployment and should not
   change between versions.
-- `WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
+- `TEMPORAL_WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
 
 Each of these will be automatically set by the controller, and must not be manually specified in the worker's pod template.
 

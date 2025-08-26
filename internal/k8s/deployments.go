@@ -212,7 +212,7 @@ func NewDeploymentWithOwnerRef(
 				Value: workerDeploymentName,
 			},
 			corev1.EnvVar{
-				Name:  "WORKER_BUILD_ID",
+				Name:  "TEMPORAL_WORKER_BUILD_ID",
 				Value: buildID,
 			},
 		)

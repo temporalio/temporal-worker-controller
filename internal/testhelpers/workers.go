@@ -33,7 +33,7 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	if err != nil {
 		return nil, nil, err
 	}
-	workerBuildId, err := getEnv(podTemplateSpec, "WORKER_BUILD_ID")
+	workerBuildId, err := getEnv(podTemplateSpec, "TEMPORAL_WORKER_BUILD_ID")
 	if err != nil {
 		return nil, nil, err
 	}
