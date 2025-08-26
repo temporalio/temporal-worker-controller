@@ -663,29 +663,65 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 	}
 }
 
+// createTestCerts generates a self-signed certificate and private key for testing purposes.
+// WARNING: This uses a lighter-weight 1024-bit RSA key for faster test execution.
+// DO NOT copy this for production use - use 2048-bit or higher keys for security.
+func createTestCerts(t *testing.T, tempDir string) (certPath, keyPath string) {
+	t.Helper()
+
+	certPath = filepath.Join(tempDir, "client.pem")
+	keyPath = filepath.Join(tempDir, "client.key")
+
+	// Generate a self-signed certificate for testing (using 1024-bit for speed)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "test",
+		},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(time.Hour),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+
+	// Write certificate file
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	err = os.WriteFile(certPath, certPEM, 0644)
+	require.NoError(t, err)
+
+	// Write private key file
+	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	err = os.WriteFile(keyPath, keyPEM, 0644)
+	require.NoError(t, err)
+
+	return certPath, keyPath
+}
+
 func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	// Test that the environment variables injected by the controller
 	// can be parsed by the official Temporal SDK envconfig package
 
 	tests := map[string]struct {
-		connection      temporaliov1alpha1.TemporalConnectionSpec
-		expectedAddress string
-		expectTLS       bool
+		connection temporaliov1alpha1.TemporalConnectionSpec
 	}{
 		"without TLS": {
 			connection: temporaliov1alpha1.TemporalConnectionSpec{
 				HostPort: "test.temporal.example:9999",
 			},
-			expectedAddress: "test.temporal.example:9999",
-			expectTLS:       false,
 		},
 		"with TLS": {
 			connection: temporaliov1alpha1.TemporalConnectionSpec{
 				HostPort:        "mtls.temporal.example:8888",
 				MutualTLSSecret: "test-tls-secret",
 			},
-			expectedAddress: "mtls.temporal.example:8888",
-			expectTLS:       true,
 		},
 	}
 
@@ -724,41 +760,13 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 				t.Setenv(env.Name, env.Value)
 			}
 
-			if tt.expectTLS {
+			// Infer whether TLS is expected from connection spec
+			expectTLS := tt.connection.MutualTLSSecret != ""
+
+			if expectTLS {
 				// Create temporary test certificate files
 				tempDir := t.TempDir()
-				certPath := filepath.Join(tempDir, "client.pem")
-				keyPath := filepath.Join(tempDir, "client.key")
-
-				// Generate a self-signed certificate for testing
-				privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-				require.NoError(t, err)
-
-				template := x509.Certificate{
-					SerialNumber: big.NewInt(1),
-					Subject: pkix.Name{
-						CommonName: "test",
-					},
-					NotBefore:   time.Now(),
-					NotAfter:    time.Now().Add(365 * 24 * time.Hour),
-					KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-					ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-				}
-
-				certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-				require.NoError(t, err)
-
-				// Write certificate file
-				certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-				err = os.WriteFile(certPath, certPEM, 0644)
-				require.NoError(t, err)
-
-				// Write private key file
-				keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
-				require.NoError(t, err)
-				keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-				err = os.WriteFile(keyPath, keyPEM, 0644)
-				require.NoError(t, err)
+				certPath, keyPath := createTestCerts(t, tempDir)
 
 				// Override the certificate paths to point to our test files
 				t.Setenv("TEMPORAL_TLS_CLIENT_CERT_PATH", certPath)
@@ -774,7 +782,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 				require.NoError(t, err, "envconfig should successfully parse environment variables with TLS files")
 
 				// Verify that the parsed client options match our expectations
-				assert.Equal(t, tt.expectedAddress, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+				assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
 				assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
 				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
 			} else {
@@ -783,7 +791,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 				require.NoError(t, err, "envconfig should successfully parse environment variables")
 
 				// Verify that the parsed client options match our expectations exhaustively
-				assert.Equal(t, tt.expectedAddress, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+				assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
 				assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
 				assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
 
