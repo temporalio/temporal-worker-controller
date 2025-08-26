@@ -6,6 +6,14 @@ package k8s_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +23,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/sdk/contrib/envconfig"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -556,4 +565,252 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty mTLS secret should produce different hashes")
 		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty mTLS secret")
 	})
+}
+
+func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) {
+	tests := map[string]struct {
+		connection        temporaliov1alpha1.TemporalConnectionSpec
+		expectedEnvVars   map[string]string
+		unexpectedEnvVars []string
+	}{
+		"without mTLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort: "localhost:7233",
+			},
+			expectedEnvVars: map[string]string{
+				"TEMPORAL_ADDRESS":         "localhost:7233",
+				"TEMPORAL_NAMESPACE":       "test-namespace",
+				"TEMPORAL_DEPLOYMENT_NAME": "test-deployment",
+				"TEMPORAL_WORKER_BUILD_ID": "test-build-id",
+			},
+			unexpectedEnvVars: []string{"TEMPORAL_TLS", "TEMPORAL_TLS_CLIENT_KEY_PATH", "TEMPORAL_TLS_CLIENT_CERT_PATH"},
+		},
+		"with mTLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "mtls.localhost:7233",
+				MutualTLSSecret: "my-tls-secret",
+			},
+			expectedEnvVars: map[string]string{
+				"TEMPORAL_ADDRESS":              "mtls.localhost:7233",
+				"TEMPORAL_NAMESPACE":            "test-namespace",
+				"TEMPORAL_DEPLOYMENT_NAME":      "test-deployment",
+				"TEMPORAL_WORKER_BUILD_ID":      "test-build-id",
+				"TEMPORAL_TLS":                  "true",
+				"TEMPORAL_TLS_CLIENT_KEY_PATH":  "/etc/temporal/tls/tls.key",
+				"TEMPORAL_TLS_CLIENT_CERT_PATH": "/etc/temporal/tls/tls.crt",
+			},
+			unexpectedEnvVars: []string{},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "worker",
+								Image: "temporal/worker:latest",
+							},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+				},
+			}
+
+			deployment := k8s.NewDeploymentWithOwnerRef(
+				&metav1.TypeMeta{},
+				&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				spec,
+				"test-deployment",
+				"test-build-id",
+				tt.connection,
+			)
+
+			// Verify expected environment variables are present
+			container := deployment.Spec.Template.Spec.Containers[0]
+			envMap := make(map[string]string)
+			for _, env := range container.Env {
+				envMap[env.Name] = env.Value
+			}
+
+			for expectedKey, expectedValue := range tt.expectedEnvVars {
+				actualValue, exists := envMap[expectedKey]
+				assert.True(t, exists, "Environment variable %s should be present", expectedKey)
+				assert.Equal(t, expectedValue, actualValue, "Environment variable %s should have correct value", expectedKey)
+			}
+
+			// Verify unexpected environment variables are not present
+			for _, unexpectedKey := range tt.unexpectedEnvVars {
+				value, exists := envMap[unexpectedKey]
+				assert.False(t, exists, "Environment variable %s should not be present, but found value: %s", unexpectedKey, value)
+			}
+
+			// For mTLS case, verify volume mounts and volumes are configured
+			if tt.connection.MutualTLSSecret != "" {
+				assert.Len(t, container.VolumeMounts, 1)
+				assert.Equal(t, "temporal-tls", container.VolumeMounts[0].Name)
+				assert.Equal(t, "/etc/temporal/tls", container.VolumeMounts[0].MountPath)
+
+				assert.Len(t, deployment.Spec.Template.Spec.Volumes, 1)
+				assert.Equal(t, "temporal-tls", deployment.Spec.Template.Spec.Volumes[0].Name)
+				assert.Equal(t, tt.connection.MutualTLSSecret, deployment.Spec.Template.Spec.Volumes[0].VolumeSource.Secret.SecretName)
+			}
+		})
+	}
+}
+
+// createTestCerts generates a self-signed certificate and private key for testing purposes.
+// WARNING: This uses a lighter-weight 1024-bit RSA key for faster test execution.
+// DO NOT copy this for production use - use 2048-bit or higher keys for security.
+func createTestCerts(t *testing.T) (certPath, keyPath string) {
+	t.Helper()
+
+	// Create temp directory for certificate files
+	tempDir := t.TempDir()
+	certPath = filepath.Join(tempDir, "client.pem")
+	keyPath = filepath.Join(tempDir, "client.key")
+
+	// Generate a self-signed certificate for testing (using 2048-bit for security)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "test",
+		},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(time.Hour),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+
+	// Write certificate file directly
+	certFile, err := os.Create(certPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, certFile.Close()) })
+	require.NoError(t, pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+
+	// Write private key file directly
+	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	keyFile, err := os.Create(keyPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, keyFile.Close()) })
+	require.NoError(t, pem.Encode(keyFile, &pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+
+	return certPath, keyPath
+}
+
+func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
+	// Test that the environment variables injected by the controller
+	// can be parsed by the official Temporal SDK envconfig package
+	tests := map[string]struct {
+		connection temporaliov1alpha1.TemporalConnectionSpec
+		namespace  string
+	}{
+		"without TLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort: "test.temporal.example:9999",
+			},
+			namespace: "test-namespace-no-tls",
+		},
+		"with TLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "mtls.temporal.example:8888",
+				MutualTLSSecret: "test-tls-secret",
+			},
+			namespace: "test-namespace-with-tls",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "worker",
+								Image: "temporal/worker:latest",
+							},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: tt.namespace,
+				},
+			}
+
+			deployment := k8s.NewDeploymentWithOwnerRef(
+				&metav1.TypeMeta{},
+				&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				spec,
+				"test-deployment",
+				"test-build-id",
+				tt.connection,
+			)
+
+			// Extract environment variables from the deployment
+			container := deployment.Spec.Template.Spec.Containers[0]
+
+			// Infer whether TLS is expected from connection spec
+			expectTLS := tt.connection.MutualTLSSecret != ""
+
+			if expectTLS {
+				// Create temporary test certificate files
+				certPath, keyPath := createTestCerts(t)
+
+				// First assert that certificate paths match expected volume mount paths.
+				// Then override the paths in the spec since we have to use a temp dir in tests.
+				for i := range container.Env {
+					if container.Env[i].Name == "TEMPORAL_TLS_CLIENT_CERT_PATH" {
+						assert.Equal(t, "/etc/temporal/tls/tls.crt", container.Env[i].Value, "Certificate path should match volume mount")
+						container.Env[i].Value = certPath
+					}
+					if container.Env[i].Name == "TEMPORAL_TLS_CLIENT_KEY_PATH" {
+						assert.Equal(t, "/etc/temporal/tls/tls.key", container.Env[i].Value, "Key path should match volume mount")
+						container.Env[i].Value = keyPath
+					}
+				}
+			}
+
+			// Set environment variables using t.Setenv() to simulate the runtime environment
+			for _, env := range container.Env {
+				t.Setenv(env.Name, env.Value)
+			}
+
+			// Use the envconfig package to load client options for TLS case
+			clientOptions, err := envconfig.LoadDefaultClientOptions()
+			require.NoError(t, err, "envconfig should successfully parse environment variables")
+
+			// Verify that the parsed client options match our expectations
+			assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+			assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+
+			// Verify other client option fields that should have default/empty values
+			assert.Empty(t, clientOptions.Identity, "Identity should be empty when not set via env vars")
+			assert.Nil(t, clientOptions.Logger, "Logger should be nil when not set")
+			assert.Nil(t, clientOptions.MetricsHandler, "MetricsHandler should be nil when not set")
+			assert.Empty(t, clientOptions.Interceptors, "Interceptors should be empty when not set")
+
+			if expectTLS {
+				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
+			} else {
+				assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
+			}
+
+			// Note: TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID are not part of client options
+			// but are used by the worker for versioning - they should still be available as env vars
+			assert.Equal(t, "test-deployment", os.Getenv("TEMPORAL_DEPLOYMENT_NAME"), "TEMPORAL_DEPLOYMENT_NAME should be set")
+			assert.Equal(t, "test-build-id", os.Getenv("TEMPORAL_WORKER_BUILD_ID"), "TEMPORAL_WORKER_BUILD_ID should be set")
+		})
+	}
 }

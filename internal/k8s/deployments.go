@@ -200,7 +200,7 @@ func NewDeploymentWithOwnerRef(
 	for i, container := range podSpec.Containers {
 		container.Env = append(container.Env,
 			corev1.EnvVar{
-				Name:  "TEMPORAL_HOST_PORT",
+				Name:  "TEMPORAL_ADDRESS",
 				Value: connection.HostPort,
 			},
 			corev1.EnvVar{
@@ -212,7 +212,7 @@ func NewDeploymentWithOwnerRef(
 				Value: workerDeploymentName,
 			},
 			corev1.EnvVar{
-				Name:  "WORKER_BUILD_ID",
+				Name:  "TEMPORAL_WORKER_BUILD_ID",
 				Value: buildID,
 			},
 		)
@@ -224,11 +224,15 @@ func NewDeploymentWithOwnerRef(
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_KEY_PATH",
+					Name:  "TEMPORAL_TLS",
+					Value: "true",
+				},
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS_CLIENT_KEY_PATH",
 					Value: "/etc/temporal/tls/tls.key",
 				},
 				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_CERT_PATH",
+					Name:  "TEMPORAL_TLS_CLIENT_CERT_PATH",
 					Value: "/etc/temporal/tls/tls.crt",
 				},
 			)
