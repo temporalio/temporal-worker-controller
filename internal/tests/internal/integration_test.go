@@ -44,15 +44,6 @@ func waitForCondition(condition func() bool, timeout, interval time.Duration) bo
 	}
 }
 
-type testEnv struct {
-	k8sClient  client.Client
-	mgr        manager.Manager
-	ts         *temporaltest.TestServer
-	connection *temporaliov1alpha1.TemporalConnection
-	replicas   map[string]int32
-	images     map[string]string
-}
-
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
 	// Set up test environment
