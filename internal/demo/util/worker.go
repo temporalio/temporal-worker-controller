@@ -33,11 +33,11 @@ func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) 
 
 	opts.DeploymentOptions = worker.DeploymentOptions{
 		UseVersioning:             true,
-		Version:                   mustGetEnv("TEMPORAL_DEPLOYMENT_NAME") + VersionIDSeparator + mustGetEnv("WORKER_BUILD_ID"),
+		Version:                   mustGetEnv("TEMPORAL_DEPLOYMENT_NAME") + VersionIDSeparator + mustGetEnv("TEMPORAL_WORKER_BUILD_ID"),
 		DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 	}
 
-	c, stopClient := NewClient(mustGetEnv("WORKER_BUILD_ID"))
+	c, stopClient := NewClient(mustGetEnv("TEMPORAL_WORKER_BUILD_ID"))
 
 	w = worker.New(c, temporalTaskQueue, opts)
 

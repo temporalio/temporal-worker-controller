@@ -10,11 +10,8 @@ import (
 )
 
 var (
-	temporalHostPort  = mustGetEnv("TEMPORAL_ADDRESS")
-	temporalNamespace = mustGetEnv("TEMPORAL_NAMESPACE")
+	// temporalTaskQueue is still needed for worker creation as it's not part of client config
 	temporalTaskQueue = mustGetEnv("TEMPORAL_TASK_QUEUE")
-	tlsKeyFilePath    = mustGetEnv("TEMPORAL_TLS_CLIENT_KEY_PATH")
-	tlsCertFilePath   = mustGetEnv("TEMPORAL_TLS_CLIENT_CERT_PATH")
 )
 
 func mustGetEnv(key string) string {
