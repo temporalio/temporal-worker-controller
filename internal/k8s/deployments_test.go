@@ -15,6 +15,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/sdk/contrib/envconfig"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -652,4 +653,58 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariables(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
+	// Test that the environment variables injected by the controller
+	// can be parsed by the official Temporal SDK envconfig package
+
+	spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+		Template: corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "worker",
+						Image: "temporal/worker:latest",
+					},
+				},
+			},
+		},
+		WorkerOptions: temporaliov1alpha1.WorkerOptions{
+			TemporalNamespace: "test-namespace",
+		},
+	}
+
+	connection := temporaliov1alpha1.TemporalConnectionSpec{
+		HostPort: "localhost:7233",
+	}
+
+	deployment := k8s.NewDeploymentWithOwnerRef(
+		&metav1.TypeMeta{},
+		&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		spec,
+		"test-deployment",
+		"test-build-id",
+		connection,
+	)
+
+	// Extract environment variables from the deployment
+	container := deployment.Spec.Template.Spec.Containers[0]
+
+	// Set environment variables using t.Setenv() to simulate the runtime environment
+	for _, env := range container.Env {
+		t.Setenv(env.Name, env.Value)
+	}
+
+	// Use the envconfig package to load client options
+	clientOptions, err := envconfig.LoadDefaultClientOptions()
+	require.NoError(t, err, "envconfig should successfully parse environment variables")
+
+	// Verify that the parsed client options match our expectations
+	assert.Equal(t, "localhost:7233", clientOptions.HostPort, "Address should match")
+	assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should match")
+
+	// Verify the client options can be used to create a client (without actually connecting)
+	assert.NotEmpty(t, clientOptions.HostPort, "HostPort should be set")
+	assert.NotEmpty(t, clientOptions.Namespace, "Namespace should be set")
 }
