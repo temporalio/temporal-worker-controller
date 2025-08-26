@@ -7,51 +7,53 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    name: ${{ matrix.job-name }}
+  lint-actions:
+    name: Actions
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - job-name: "Actions"
-            setup-script: |
-              bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-            make-target: "lint-actions"
-            check-dirty: false
-          - job-name: "Format Imports"
-            setup-script: ""
-            make-target: "fmt-imports"
-            check-dirty: true
-          - job-name: "GolangCI"
-            setup-script: ""
-            make-target: "GOLANGCI_LINT_FIX=false GOLANGCI_LINT_BASE_REV=HEAD~ lint-code"
-            check-dirty: true
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        check-latest: true
-
-    - name: Setup tools
-      if: matrix.setup-script != ''
-      run: ${{ matrix.setup-script }}
+    - name: Setup environment
+      uses: ./.github/actions/setup-go-linters
+      
+    - name: Setup actionlint
+      run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
       shell: bash
 
-    - name: Run ${{ matrix.job-name }}
-      run: make ${{ matrix.make-target }}
+    - name: Run Actions linter
+      run: make lint-actions
+
+  fmt-imports:
+    name: Format Imports
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-go-linters
+
+    - name: Run import formatter
+      run: make fmt-imports
 
     - name: Check for uncommitted changes
-      if: matrix.check-dirty
       run: |
         if [[ -n $(git status --porcelain) ]]; then
-          echo "Detected uncommitted changes after ${{ matrix.job-name }}."
+          echo "Detected uncommitted changes after Format Imports."
+          git status
+          git diff
+          exit 1
+        fi
+
+  lint-code:
+    name: GolangCI
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-go-linters
+
+    - name: Run code linter
+      run: make GOLANGCI_LINT_FIX=false GOLANGCI_LINT_BASE_REV=HEAD~ lint-code
+
+    - name: Check for uncommitted changes
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "Detected uncommitted changes after GolangCI."
           git status
           git diff
           exit 1
@@ -60,7 +62,7 @@ jobs:
   # Keep the final success check job as-is since it's needed for branch protection
   linters-succeed:
     name: All Linters Succeed
-    needs: [lint]
+    needs: [lint-actions, fmt-imports, lint-code]
     runs-on: ubuntu-latest
     if: always()
     env:
