@@ -17,18 +17,17 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate token
-        id: generate_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.TEMPORAL_CICD_APP_ID }}
-          private-key: ${{ secrets.TEMPORAL_CICD_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+      - name: Generate GitHub App token
+        id: token
+        uses: ./.github/actions/github-token
+        env:
+          TEMPORAL_CICD_APP_ID: ${{ secrets.TEMPORAL_CICD_APP_ID }}
+          TEMPORAL_CICD_PRIVATE_KEY: ${{ secrets.TEMPORAL_CICD_PRIVATE_KEY }}
           
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ steps.generate_token.outputs.token }}
+          token: ${{ steps.token.outputs.token }}
           fetch-depth: 0
 
       - name: Configure Git
@@ -37,9 +36,9 @@ jobs:
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Install Helm
-        uses: azure/setup-helm@v3
+        uses: azure/setup-helm@v4
         with:
-          version: v3.12.0
+          version: v3.14.3
 
       - name: Bump Chart Version
         id: bump_version
@@ -81,11 +80,10 @@ jobs:
           git push
 
       - name: Login to Docker Hub
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PAT}}
+        uses: ./.github/actions/docker-login
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PAT: ${{ secrets.DOCKER_PAT }}
 
       - name: Package and Push Helm chart
         run: |

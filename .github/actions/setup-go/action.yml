@@ -1,15 +1,34 @@
 name: 'Setup Go Environment'
-description: 'Sets up Go with caching and downloads dependencies'
+description: 'Sets up Go with optional caching, checkout, and dependency download'
+inputs:
+  fetch-depth:
+    description: 'Depth of git fetch (0 for full history, default: 1)'
+    required: false
+    default: '1'
+  cache:
+    description: 'Enable Go module caching'
+    required: false
+    default: 'true'
+  download-deps:
+    description: 'Download Go module dependencies'
+    required: false
+    default: 'true'
 runs:
   using: 'composite'
   steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: ${{ inputs.fetch-depth }}
+        
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go.mod'
         check-latest: true
-        cache: true
+        cache: ${{ inputs.cache }}
         
     - name: Download dependencies
+      if: inputs.download-deps == 'true'
       run: go mod download
       shell: bash

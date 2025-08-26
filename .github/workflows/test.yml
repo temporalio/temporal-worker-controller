@@ -11,9 +11,6 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
     - name: Setup Go environment
       uses: ./.github/actions/setup-go
       
@@ -34,11 +31,10 @@ jobs:
     name: Go Vet
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
     - name: Setup Go environment
       uses: ./.github/actions/setup-go
+      with:
+        download-deps: 'false'
       
     - name: Run vet
       run: make vet
@@ -49,20 +45,11 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        check-latest: true
-        cache: true
+    - name: Setup Go environment
+      uses: ./.github/actions/setup-go
     
     - name: Install dependencies
       run: |
-        # Download Go dependencies
-        go mod download
         
         # Install Temporal CLI
         curl -sSf https://temporal.download/cli.sh | sh
