@@ -6,7 +6,14 @@ package k8s_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -638,8 +645,8 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 
 			// Verify unexpected environment variables are not present
 			for _, unexpectedKey := range tt.unexpectedEnvVars {
-				_, exists := envMap[unexpectedKey]
-				assert.False(t, exists, "Environment variable %s should not be present", unexpectedKey)
+				value, exists := envMap[unexpectedKey]
+				assert.False(t, exists, "Environment variable %s should not be present, but found value: %s", unexpectedKey, value)
 			}
 
 			// For mTLS case, verify volume mounts and volumes are configured
@@ -717,16 +724,59 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 				t.Setenv(env.Name, env.Value)
 			}
 
-			// For TLS tests, verify environment variables are set but skip actual client loading
-			// because creating valid test certificates is complex
 			if tt.expectTLS {
-				// Verify TLS-specific environment variables are set
-				assert.Equal(t, "true", os.Getenv("TEMPORAL_TLS"), "TEMPORAL_TLS should be set to true")
-				assert.NotEmpty(t, os.Getenv("TEMPORAL_TLS_CLIENT_CERT_PATH"), "TEMPORAL_TLS_CLIENT_CERT_PATH should be set")
-				assert.NotEmpty(t, os.Getenv("TEMPORAL_TLS_CLIENT_KEY_PATH"), "TEMPORAL_TLS_CLIENT_KEY_PATH should be set")
+				// Create temporary test certificate files
+				tempDir := t.TempDir()
+				certPath := filepath.Join(tempDir, "client.pem")
+				keyPath := filepath.Join(tempDir, "client.key")
 
-				// Skip client options loading for TLS case due to certificate validation complexity
-				t.Log("Skipping client options loading for TLS case - certificates would need to be valid")
+				// Generate a self-signed certificate for testing
+				privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+				require.NoError(t, err)
+
+				template := x509.Certificate{
+					SerialNumber: big.NewInt(1),
+					Subject: pkix.Name{
+						CommonName: "test",
+					},
+					NotBefore:   time.Now(),
+					NotAfter:    time.Now().Add(365 * 24 * time.Hour),
+					KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+					ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+				}
+
+				certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+				require.NoError(t, err)
+
+				// Write certificate file
+				certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+				err = os.WriteFile(certPath, certPEM, 0644)
+				require.NoError(t, err)
+
+				// Write private key file
+				keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+				require.NoError(t, err)
+				keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+				err = os.WriteFile(keyPath, keyPEM, 0644)
+				require.NoError(t, err)
+
+				// Override the certificate paths to point to our test files
+				t.Setenv("TEMPORAL_TLS_CLIENT_CERT_PATH", certPath)
+				t.Setenv("TEMPORAL_TLS_CLIENT_KEY_PATH", keyPath)
+
+				// Verify TLS-specific environment variables are set correctly
+				assert.Equal(t, "true", os.Getenv("TEMPORAL_TLS"), "TEMPORAL_TLS should be set to true")
+				assert.Equal(t, certPath, os.Getenv("TEMPORAL_TLS_CLIENT_CERT_PATH"), "TEMPORAL_TLS_CLIENT_CERT_PATH should point to test cert")
+				assert.Equal(t, keyPath, os.Getenv("TEMPORAL_TLS_CLIENT_KEY_PATH"), "TEMPORAL_TLS_CLIENT_KEY_PATH should point to test key")
+
+				// Use the envconfig package to load client options for TLS case
+				clientOptions, err := envconfig.LoadDefaultClientOptions()
+				require.NoError(t, err, "envconfig should successfully parse environment variables with TLS files")
+
+				// Verify that the parsed client options match our expectations
+				assert.Equal(t, tt.expectedAddress, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+				assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
 			} else {
 				// Use the envconfig package to load client options for non-TLS case
 				clientOptions, err := envconfig.LoadDefaultClientOptions()
