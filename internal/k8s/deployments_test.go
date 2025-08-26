@@ -20,6 +20,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/sdk/contrib/envconfig"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,10 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestIsDeploymentHealthy(t *testing.T) {
@@ -694,6 +693,8 @@ func createTestCerts(t *testing.T) (certPath, keyPath string) {
 	require.NoError(t, err)
 
 	// Write certificate file directly
+	certFile, err := os.Create(certPath)
+	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, certFile.Close())
 	}()
@@ -701,6 +702,8 @@ func createTestCerts(t *testing.T) (certPath, keyPath string) {
 
 	// Write private key file directly
 	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	keyFile, err := os.Create(keyPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, keyFile.Close()) }()
 	require.NoError(t, pem.Encode(keyFile, &pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
