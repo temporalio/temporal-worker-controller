@@ -674,8 +674,8 @@ func createTestCerts(t *testing.T) (certPath, keyPath string) {
 	certPath = filepath.Join(tempDir, "client.pem")
 	keyPath = filepath.Join(tempDir, "client.key")
 
-	// Generate a self-signed certificate for testing (using 1024-bit for speed)
-	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	// Generate a self-signed certificate for testing (using 2048-bit for security)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
 	template := x509.Certificate{
