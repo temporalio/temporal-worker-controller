@@ -6,9 +6,19 @@ on:
   pull_request:
 
 jobs:
-  test-integration:
-    name: Integration
+  # Run unit tests and go vet in parallel using matrix
+  test-unit-vet:
+    name: ${{ matrix.job-name }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - job-name: "Unit Tests"
+            make-target: "test-unit"
+            artifact-name: "unit-test-results"
+          - job-name: "Go Vet"
+            make-target: "vet"
+            artifact-name: "vet-results"
     
     steps:
     - name: Checkout code
@@ -21,10 +31,55 @@ jobs:
         check-latest: true
         cache: true
         
-    - name: Install Temporal CLI
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run ${{ matrix.job-name }}
       run: |
+        if [ "${{ matrix.make-target }}" = "vet" ]; then
+          go vet ./...
+        else
+          make ${{ matrix.make-target }}
+        fi
+      
+    - name: Upload test results
+      if: always() && matrix.make-target != 'vet'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact-name }}
+        path: |
+          cover.out
+          bin/
+        retention-days: 7
+
+  # Integration tests need special setup, keep separate
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+        cache: true
+    
+    - name: Install dependencies
+      run: |
+        # Download Go dependencies
+        go mod download
+        
+        # Install Temporal CLI
         curl -sSf https://temporal.download/cli.sh | sh
         echo "$HOME/.temporalio/bin" >> "$GITHUB_PATH"
+        
+        # Install Go tools
+        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.2
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
         
     - name: Install kubectl
       uses: azure/setup-kubectl@v3
@@ -36,17 +91,6 @@ jobs:
       with:
         version: 'v3.14.3'
         
-    - name: Install controller-gen
-      run: |
-        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.2
-        
-    - name: Install envtest
-      run: |
-        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-        
-    - name: Download dependencies
-      run: go mod download
-      
     - name: Integration tests
       run: make test-integration
       
@@ -54,60 +98,8 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: test-results
+        name: integration-test-results
         path: |
           cover.out
           bin/
         retention-days: 7
-
-  unit-test:
-    name: Unit
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        check-latest: true
-        cache: true
-        
-    - name: Download dependencies
-      run: go mod download
-      
-    - name: Unit tests
-      run: make test-unit
-      
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: unit-test-results
-        path: |
-          cover.out
-          bin/
-        retention-days: 7 
-
-  go-vet:
-    name: Go Vet
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        check-latest: true
-        cache: true
-        
-    - name: Download dependencies
-      run: go mod download
-      
-    - name: Go vet
-      run: go vet ./...
