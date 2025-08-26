@@ -1,4 +1,4 @@
-name: Integration Tests
+name: Test
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   test-integration:
-    name: Run Integration Tests
+    name: Integration
     runs-on: ubuntu-latest
     
     steps:
@@ -47,7 +47,7 @@ jobs:
     - name: Download dependencies
       run: go mod download
       
-    - name: Run integration tests
+    - name: Integration tests
       run: make test-integration
       
     - name: Upload test results
@@ -61,7 +61,7 @@ jobs:
         retention-days: 7
 
   unit-test:
-    name: Run Unit Tests
+    name: Unit
     runs-on: ubuntu-latest
     
     steps:
@@ -78,7 +78,7 @@ jobs:
     - name: Download dependencies
       run: go mod download
       
-    - name: Run unit tests
+    - name: Unit tests
       run: make test-unit
       
     - name: Upload test results
@@ -92,7 +92,7 @@ jobs:
         retention-days: 7 
 
   go-vet:
-    name: Run Go Vet
+    name: Go Vet
     runs-on: ubuntu-latest
     
     steps:
@@ -109,5 +109,5 @@ jobs:
     - name: Download dependencies
       run: go mod download
       
-    - name: Run go vet
+    - name: Go vet
       run: go vet ./...

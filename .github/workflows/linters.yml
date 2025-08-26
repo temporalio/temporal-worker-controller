@@ -1,10 +1,11 @@
-name: linters
+name: Lint
 on:
   pull_request:
 permissions:
   contents: read
 jobs:
   lint-actions:
+    name: Lint Actions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,13 +17,14 @@ jobs:
           go-version-file: 'go.mod'
           check-latest: true
 
-      - name: lint actions
+      - name: Lint actions
         run: |
           bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           make lint-actions
         shell: bash
 
   fmt-imports:
+    name: Fmt Imports
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,11 +36,11 @@ jobs:
           go-version-file: 'go.mod'
           check-latest: true
 
-      - name: format golang import statements
+      - name: Format golang import statements
         run: |
           make fmt-imports
 
-      - name: check-is-dirty
+      - name: Check is dirty
         run: |
           if [[ -n $(git status --porcelain) ]]; then
             echo "Detected uncommitted changes."
@@ -48,6 +50,7 @@ jobs:
           fi
 
   golangci:
+    name: GolangCI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,11 +62,11 @@ jobs:
           go-version-file: 'go.mod'
           check-latest: true
 
-      - name: lint code
+      - name: Lint code
         run: |
           make GOLANGCI_LINT_FIX=false GOLANGCI_LINT_BASE_REV=HEAD~ lint-code
 
-      - name: check-is-dirty
+      - name: Check is dirty
         run: |
           if [[ -n $(git status --porcelain) ]]; then
             echo "Detected uncommitted changes."
