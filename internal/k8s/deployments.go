@@ -275,8 +275,8 @@ func NewDeploymentWithOwnerRef(
 				BlockOwnerDeletion: &blockOwnerDeletion,
 				Controller:         nil,
 			}},
-			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
-			//                 deleting deployments that are still reachable.
+			// Note: Finalizer is managed at the TemporalWorkerDeployment level to ensure
+			//       proper cleanup of all managed resources including deployments.
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: spec.Replicas,

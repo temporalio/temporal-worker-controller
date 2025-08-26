@@ -459,10 +459,9 @@ func handleProgressiveRollout(
 			if i < len(steps)-1 {
 				vcfg.RampPercentage = steps[i+1].RampPercentage
 				return vcfg
-			} else {
-				vcfg.SetCurrent = true
-				return vcfg
 			}
+			vcfg.SetCurrent = true
+			return vcfg
 		}
 	}
 
