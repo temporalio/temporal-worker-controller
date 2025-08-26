@@ -715,17 +715,20 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 	tests := map[string]struct {
 		connection temporaliov1alpha1.TemporalConnectionSpec
+		namespace  string
 	}{
 		"without TLS": {
 			connection: temporaliov1alpha1.TemporalConnectionSpec{
 				HostPort: "test.temporal.example:9999",
 			},
+			namespace: "test-namespace-no-tls",
 		},
 		"with TLS": {
 			connection: temporaliov1alpha1.TemporalConnectionSpec{
 				HostPort:        "mtls.temporal.example:8888",
 				MutualTLSSecret: "test-tls-secret",
 			},
+			namespace: "test-namespace-with-tls",
 		},
 	}
 
@@ -743,7 +746,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 					},
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
-					TemporalNamespace: "test-namespace",
+					TemporalNamespace: tt.namespace,
 				},
 			}
 
@@ -786,7 +789,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 				// Verify that the parsed client options match our expectations
 				assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
-				assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+				assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
 				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
 			} else {
 				// Use the envconfig package to load client options for non-TLS case
@@ -795,7 +798,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 				// Verify that the parsed client options match our expectations exhaustively
 				assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
-				assert.Equal(t, "test-namespace", clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+				assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
 				assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
 
 				// Verify other client option fields that should have default/empty values
