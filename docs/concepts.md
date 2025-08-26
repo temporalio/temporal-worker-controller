@@ -5,61 +5,62 @@ This document defines key concepts and terminology used throughout the Temporal 
 ## Core Terminology
 
 ### Temporal Worker Deployment
-A logical grouping in Temporal that represents a collection of workers that handle the same set of workflows and activities. Examples include "payment-processor", "notification-sender", or "data-pipeline-worker". This is a concept within Temporal itself, not specific to Kubernetes.
+A logical grouping in Temporal that represents a collection of workers that are deployed together and should be versioned together. Examples include "payment-processor", "notification-sender", or "data-pipeline-worker". This is a concept within Temporal itself, not specific to Kubernetes. See https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning for more details.
 
 **Key characteristics:**
-- Identified by a unique deployment name (e.g., "payment-processor")
-- Can have multiple concurrent versions running simultaneously
-- Versions are identified by Build IDs (e.g., "v1.5.1", "v1.5.2")
+- Identified by a unique worker deployment name (e.g., "payment-processor/staging")
+- Can have multiple concurrent worker versions running simultaneously
+- Versions of a Worker Deployment are identified by Build IDs (e.g., "v1.5.1", "v1.5.2")
+- Temporal routes workflow executions to appropriate worker versions based on the `RoutingConfig` of the Worker Deployment that the versions are in.
 - Temporal routes workflow executions to appropriate versions based on compatibility rules
 
 ### `TemporalWorkerDeployment` CRD
 The Kubernetes Custom Resource Definition that manages one Temporal Worker Deployment. This is the primary resource you interact with when using the Temporal Worker Controller.
 
 **Key characteristics:**
-- One CRD resource per Temporal Worker Deployment
-- Manages the lifecycle of all versions for that deployment
+- One `TemporalWorkerDeployment` Custom Resource per Temporal Worker Deployment
+- Manages the lifecycle of all versions for that worker deployment
 - Defines rollout strategies, resource requirements, and connection details
 - Controller creates and manages multiple Kubernetes `Deployment` resources based on this spec
 
-### Kubernetes `Deployment`
+The actual Kubernetes `Deployment` resources that run worker pods. The controller automatically creates these - you don't manage them directly.
 The actual Kubernetes Deployment resources that run worker pods. The controller automatically creates these - you don't manage them directly.
 
 **Key characteristics:**
-- Multiple Kubernetes `Deployment` resources per `TemporalWorkerDeployment` CRD (one per version)
-- Named with the pattern: `{deployment-name}-{build-id}` (e.g., `payment-processor-v1.5.1`)
+- Multiple Kubernetes `Deployment` resources per `TemporalWorkerDeployment` Custom Resource (one per version)
+- Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `payment-processor/staging-v1.5.1`)
 - Managed entirely by the controller - created, updated, and deleted automatically
 - Each runs a specific version of your worker code
 
 ### Key Relationship
-**One `TemporalWorkerDeployment` CRD → Multiple Kubernetes `Deployment` resources (managed by controller)**
+**One `TemporalWorkerDeployment` Custom Resource → Multiple Kubernetes `Deployment` resources (managed by controller)**
 
-This is the fundamental architecture: you manage a single CRD resource, and the controller handles all the underlying Kubernetes `Deployment` resources for different versions.
+make changes to the spec of your `TemporalWorkerDeployment` Custom Resource, and the controller handles all the underlying Kubernetes `Deployment` resources for different versions.
 
 ## Version States
 
 Worker deployment versions progress through various states during their lifecycle:
 
 ### NotRegistered
-The version has been specified in the CRD but hasn't been registered with Temporal yet. This typically happens when:
+The version has been specified in the `TemporalWorkerDeployment` resource but hasn't been registered with Temporal yet. This typically happens when:
 - The worker pods are still starting up
 - There are connectivity issues to Temporal
 - The worker code has errors preventing registration
 
 ### Inactive
-The version is registered with Temporal but isn't receiving any new workflow executions. This is the initial state for new versions when using Manual rollout strategy.
+The version is registered with Temporal but isn't automatically receiving any new workflow executions through the Worker Deployment's `RoutingConfig`. This is the initial state for new versions before they are promoted via Versioning API calls. Inactive versions can receive workflow executions via `VersioningOverride` only.
 
 ### Ramping
-The version is receiving a percentage of new workflow executions as part of a Progressive rollout. The percentage gradually increases according to the configured rollout steps.
+The version is receiving a percentage of new workflow executions. If managed by a Progressive rollout, the percentage gradually increases according to the configured rollout steps. If the rollout is Manual, the user is responsible for setting the ramp percentage and ramping version.
 
 ### Current
-The version is receiving 100% of new workflow executions. This is the "production" version that handles all new work.
+The version is receiving 100% of new workflow executions. This is the "stable" version that handles all new workflows and all existing AutoUpgrade workflows running on the task queues in this Worker Deployment.
 
 ### Draining
-The version is no longer receiving new workflow executions but may still be processing existing workflows. The controller waits for all workflows on this version to complete.
+The version is no longer receiving new workflow executions but may still be processing existing workflows.
 
 ### Drained
-All workflows on this version have completed. The version is ready for cleanup according to the sunset configuration.
+All Pinned workflows on this version have completed. The version is ready for cleanup according to the sunset configuration.
 
 ## Rollout Strategies
 
@@ -72,7 +73,7 @@ Requires explicit human intervention to promote versions. New versions remain in
 - Testing and validation scenarios
 
 ### AllAtOnce Strategy
-Immediately routes 100% of new workflow executions to the new version once it's healthy and registered.
+Immediately routes 100% of new workflow executions to the target version once it's healthy and registered.
 
 **Use cases:**
 - Non-production environments
@@ -90,16 +91,16 @@ Gradually increases the percentage of new workflow executions routed to the new 
 ## Configuration Concepts
 
 ### Worker Options
-Configuration that defines how workers connect to Temporal:
+Configuration that tells the controller how to connect to the same Temporal cluster and namespace that the worker is connected to:
 - **connection**: Reference to a `TemporalConnection` resource
 - **temporalNamespace**: The Temporal namespace to connect to
 - **deploymentName**: The logical deployment name in Temporal (auto-generated if not specified)
 
-### Cutover Configuration
+### Rollout Configuration
 Defines how new versions are promoted:
 - **strategy**: Manual, AllAtOnce, or Progressive
 - **steps**: For Progressive strategy, defines ramp percentages and pause durations
-- **gate**: Optional workflow that must succeed before promotion continues
+- **gate**: Optional workflow that must succeed on all task queues in the target Worker Deployment Version before promotion continues
 
 ### Sunset Configuration
 Defines how old versions are cleaned up:
