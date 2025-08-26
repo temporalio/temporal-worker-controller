@@ -557,3 +557,99 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty mTLS secret")
 	})
 }
+
+func TestNewDeploymentWithOwnerRef_EnvironmentVariables(t *testing.T) {
+	tests := map[string]struct {
+		connection        temporaliov1alpha1.TemporalConnectionSpec
+		expectedEnvVars   map[string]string
+		unexpectedEnvVars []string
+	}{
+		"without mTLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort: "localhost:7233",
+			},
+			expectedEnvVars: map[string]string{
+				"TEMPORAL_ADDRESS":         "localhost:7233",
+				"TEMPORAL_NAMESPACE":       "test-namespace",
+				"TEMPORAL_DEPLOYMENT_NAME": "test-deployment",
+				"WORKER_BUILD_ID":          "test-build-id",
+			},
+			unexpectedEnvVars: []string{"TEMPORAL_TLS", "TEMPORAL_TLS_CLIENT_KEY_PATH", "TEMPORAL_TLS_CLIENT_CERT_PATH"},
+		},
+		"with mTLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "mtls.localhost:7233",
+				MutualTLSSecret: "my-tls-secret",
+			},
+			expectedEnvVars: map[string]string{
+				"TEMPORAL_ADDRESS":              "mtls.localhost:7233",
+				"TEMPORAL_NAMESPACE":            "test-namespace",
+				"TEMPORAL_DEPLOYMENT_NAME":      "test-deployment",
+				"WORKER_BUILD_ID":               "test-build-id",
+				"TEMPORAL_TLS":                  "true",
+				"TEMPORAL_TLS_CLIENT_KEY_PATH":  "/etc/temporal/tls/tls.key",
+				"TEMPORAL_TLS_CLIENT_CERT_PATH": "/etc/temporal/tls/tls.crt",
+			},
+			unexpectedEnvVars: []string{},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "worker",
+								Image: "temporal/worker:latest",
+							},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+				},
+			}
+
+			deployment := k8s.NewDeploymentWithOwnerRef(
+				&metav1.TypeMeta{},
+				&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				spec,
+				"test-deployment",
+				"test-build-id",
+				tt.connection,
+			)
+
+			// Verify expected environment variables are present
+			container := deployment.Spec.Template.Spec.Containers[0]
+			envMap := make(map[string]string)
+			for _, env := range container.Env {
+				envMap[env.Name] = env.Value
+			}
+
+			for expectedKey, expectedValue := range tt.expectedEnvVars {
+				actualValue, exists := envMap[expectedKey]
+				assert.True(t, exists, "Environment variable %s should be present", expectedKey)
+				assert.Equal(t, expectedValue, actualValue, "Environment variable %s should have correct value", expectedKey)
+			}
+
+			// Verify unexpected environment variables are not present
+			for _, unexpectedKey := range tt.unexpectedEnvVars {
+				_, exists := envMap[unexpectedKey]
+				assert.False(t, exists, "Environment variable %s should not be present", unexpectedKey)
+			}
+
+			// For mTLS case, verify volume mounts and volumes are configured
+			if tt.connection.MutualTLSSecret != "" {
+				assert.Len(t, container.VolumeMounts, 1)
+				assert.Equal(t, "temporal-tls", container.VolumeMounts[0].Name)
+				assert.Equal(t, "/etc/temporal/tls", container.VolumeMounts[0].MountPath)
+
+				assert.Len(t, deployment.Spec.Template.Spec.Volumes, 1)
+				assert.Equal(t, "temporal-tls", deployment.Spec.Template.Spec.Volumes[0].Name)
+				assert.Equal(t, tt.connection.MutualTLSSecret, deployment.Spec.Template.Spec.Volumes[0].VolumeSource.Secret.SecretName)
+			}
+		})
+	}
+}

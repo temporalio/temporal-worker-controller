@@ -41,7 +41,7 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	if err != nil {
 		return nil, nil, err
 	}
-	temporalHostPort, err := getEnv(podTemplateSpec, "TEMPORAL_HOST_PORT")
+	temporalHostPort, err := getEnv(podTemplateSpec, "TEMPORAL_ADDRESS")
 	if err != nil {
 		return nil, nil, err
 	}

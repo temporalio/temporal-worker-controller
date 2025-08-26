@@ -2015,14 +2015,14 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			found := false
 			for _, container := range result.Spec.Template.Spec.Containers {
 				for _, env := range container.Env {
-					if env.Name == "TEMPORAL_HOST_PORT" {
-						assert.Equal(t, tt.expectHostPortEnv, env.Value, "TEMPORAL_HOST_PORT should be updated")
+					if env.Name == "TEMPORAL_ADDRESS" {
+						assert.Equal(t, tt.expectHostPortEnv, env.Value, "TEMPORAL_ADDRESS should be updated")
 						found = true
 						break
 					}
 				}
 			}
-			assert.True(t, found, "Should find TEMPORAL_HOST_PORT environment variable")
+			assert.True(t, found, "Should find TEMPORAL_ADDRESS environment variable")
 		})
 	}
 }

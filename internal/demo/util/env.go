@@ -10,11 +10,11 @@ import (
 )
 
 var (
-	temporalHostPort  = mustGetEnv("TEMPORAL_HOST_PORT")
+	temporalHostPort  = mustGetEnv("TEMPORAL_ADDRESS")
 	temporalNamespace = mustGetEnv("TEMPORAL_NAMESPACE")
 	temporalTaskQueue = mustGetEnv("TEMPORAL_TASK_QUEUE")
-	tlsKeyFilePath    = mustGetEnv("TEMPORAL_TLS_KEY_PATH")
-	tlsCertFilePath   = mustGetEnv("TEMPORAL_TLS_CERT_PATH")
+	tlsKeyFilePath    = mustGetEnv("TEMPORAL_TLS_CLIENT_KEY_PATH")
+	tlsCertFilePath   = mustGetEnv("TEMPORAL_TLS_CLIENT_CERT_PATH")
 )
 
 func mustGetEnv(key string) string {

@@ -133,7 +133,7 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 	// Update any environment variables that reference the connection
 	for i, container := range deployment.Spec.Template.Spec.Containers {
 		for j, env := range container.Env {
-			if env.Name == "TEMPORAL_HOST_PORT" {
+			if env.Name == "TEMPORAL_ADDRESS" {
 				deployment.Spec.Template.Spec.Containers[i].Env[j].Value = connection.HostPort
 			}
 		}

@@ -51,7 +51,7 @@ significant references to Kubernetes Deployment resource, within this repository
 In order to be compatible with this controller, workers need to be configured using these standard environment
 variables:
 
-- `TEMPORAL_HOST_PORT`: The host and port of the Temporal server, e.g. `default.foo.tmprl.cloud:7233`
+- `TEMPORAL_ADDRESS`: The host and port of the Temporal server, e.g. `default.foo.tmprl.cloud:7233`
 - `TEMPORAL_NAMESPACE`: The Temporal namespace to connect to, e.g. `default`
 - `TEMPORAL_DEPLOYMENT_NAME`: The name of the worker deployment. This must be unique to the worker deployment and should not
   change between versions.
