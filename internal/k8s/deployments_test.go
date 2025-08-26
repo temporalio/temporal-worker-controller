@@ -693,9 +693,9 @@ func createTestCerts(t *testing.T) (certPath, keyPath string) {
 	require.NoError(t, err)
 
 	// Write certificate file directly
-	certFile, err := os.Create(certPath)
-	require.NoError(t, err)
-	defer certFile.Close()
+	defer func() {
+		require.NoError(t, certFile.Close())
+	}()
 	require.NoError(t, pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
 
 	// Write private key file directly
