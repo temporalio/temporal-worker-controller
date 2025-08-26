@@ -18,7 +18,6 @@ jobs:
             artifact-name: "unit-test-results"
           - job-name: "Go Vet"
             make-target: "vet"
-            artifact-name: "vet-results"
     
     steps:
     - name: Checkout code
@@ -35,12 +34,7 @@ jobs:
       run: go mod download
       
     - name: Run ${{ matrix.job-name }}
-      run: |
-        if [ "${{ matrix.make-target }}" = "vet" ]; then
-          go vet ./...
-        else
-          make ${{ matrix.make-target }}
-        fi
+      run: make ${{ matrix.make-target }}
       
     - name: Upload test results
       if: always() && matrix.make-target != 'vet'
