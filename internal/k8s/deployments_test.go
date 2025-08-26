@@ -778,10 +778,8 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 				t.Setenv("TEMPORAL_TLS_CLIENT_CERT_PATH", certPath)
 				t.Setenv("TEMPORAL_TLS_CLIENT_KEY_PATH", keyPath)
 
-				// Verify TLS-specific environment variables are set correctly
+				// Verify TLS environment variable is set by the deployment creation
 				assert.Equal(t, "true", os.Getenv("TEMPORAL_TLS"), "TEMPORAL_TLS should be set to true")
-				assert.Equal(t, certPath, os.Getenv("TEMPORAL_TLS_CLIENT_CERT_PATH"), "TEMPORAL_TLS_CLIENT_CERT_PATH should point to test cert")
-				assert.Equal(t, keyPath, os.Getenv("TEMPORAL_TLS_CLIENT_KEY_PATH"), "TEMPORAL_TLS_CLIENT_KEY_PATH should point to test key")
 
 				// Use the envconfig package to load client options for TLS case
 				clientOptions, err := envconfig.LoadDefaultClientOptions()
