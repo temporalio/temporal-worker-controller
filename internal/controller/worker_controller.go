@@ -41,7 +41,13 @@ const (
 	temporalWorkerDeploymentFinalizer = "temporal.io/temporal-worker-deployment-finalizer"
 
 	// Cleanup timeout and polling constants
-	cleanupTimeout      = 2 * time.Minute
+	// cleanupTimeout defines the maximum time to wait for all owned deployments to be deleted
+	// during finalizer cleanup. 2 minutes is chosen to allow sufficient time for Kubernetes to
+	// process deployment deletions while preventing indefinite blocking during shutdown.
+	cleanupTimeout = 2 * time.Minute
+	// cleanupPollInterval defines how frequently to check if owned deployments have been deleted
+	// during cleanup. 5 seconds provides a reasonable balance between responsiveness and
+	// avoiding excessive API calls during the cleanup process.
 	cleanupPollInterval = 5 * time.Second
 )
 
@@ -254,7 +260,7 @@ func (r *TemporalWorkerDeploymentReconciler) cleanupManagedResources(ctx context
 	err := r.List(ctx, deploymentList, listOpts)
 	if err != nil {
 		// If field selector fails (common in tests), fall back to listing all deployments
-		l.Info("Field selector not available, falling back to listing all deployments", "error", err.Error())
+		l.V(1).Info("Field selector not available, falling back to listing all deployments", "error", err.Error())
 		listOpts = &client.ListOptions{
 			Namespace: workerDeploy.Namespace,
 		}
