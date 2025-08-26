@@ -6,45 +6,42 @@ on:
   pull_request:
 
 jobs:
-  # Run unit tests and go vet in parallel using matrix
-  test-unit-vet:
-    name: ${{ matrix.job-name }}
+  # Run unit tests and vet in parallel as separate jobs
+  test-unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - job-name: "Unit"
-            make-target: "test-unit"
-            artifact-name: "unit-test-results"
-          - job-name: "Go Vet"
-            make-target: "vet"
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        check-latest: true
-        cache: true
-        
-    - name: Download dependencies
-      run: go mod download
+    - name: Setup Go environment
+      uses: ./.github/actions/setup-go
       
-    - name: Run ${{ matrix.job-name }}
-      run: make ${{ matrix.make-target }}
+    - name: Run unit tests
+      run: make test-unit
       
     - name: Upload test results
-      if: always() && matrix.make-target != 'vet'
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.artifact-name }}
+        name: unit-test-results
         path: |
           cover.out
           bin/
         retention-days: 7
+
+  vet:
+    name: Go Vet
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Go environment
+      uses: ./.github/actions/setup-go
+      
+    - name: Run vet
+      run: make vet
 
   # Integration tests need special setup, keep separate
   test-integration:
