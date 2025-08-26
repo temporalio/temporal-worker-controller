@@ -20,9 +20,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/k8s"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/sdk/contrib/envconfig"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestIsDeploymentHealthy(t *testing.T) {
@@ -710,7 +711,6 @@ func createTestCerts(t *testing.T) (certPath, keyPath string) {
 func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	// Test that the environment variables injected by the controller
 	// can be parsed by the official Temporal SDK envconfig package
-
 	tests := map[string]struct {
 		connection temporaliov1alpha1.TemporalConnectionSpec
 		namespace  string
@@ -760,11 +760,6 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 			// Extract environment variables from the deployment
 			container := deployment.Spec.Template.Spec.Containers[0]
 
-			// Set environment variables using t.Setenv() to simulate the runtime environment
-			for _, env := range container.Env {
-				t.Setenv(env.Name, env.Value)
-			}
-
 			// Infer whether TLS is expected from connection spec
 			expectTLS := tt.connection.MutualTLSSecret != ""
 
@@ -772,36 +767,43 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 				// Create temporary test certificate files
 				certPath, keyPath := createTestCerts(t)
 
-				// Override the certificate paths to point to our test files
-				t.Setenv("TEMPORAL_TLS_CLIENT_CERT_PATH", certPath)
-				t.Setenv("TEMPORAL_TLS_CLIENT_KEY_PATH", keyPath)
+				// First assert that certificate paths match expected volume mount paths.
+				// Then override the paths in the spec since we have to use a temp dir in tests.
+				for i := range container.Env {
+					if container.Env[i].Name == "TEMPORAL_TLS_CLIENT_CERT_PATH" {
+						assert.Equal(t, "/etc/temporal/tls/tls.crt", container.Env[i].Value, "Certificate path should match volume mount")
+						container.Env[i].Value = certPath
+					}
+					if container.Env[i].Name == "TEMPORAL_TLS_CLIENT_KEY_PATH" {
+						assert.Equal(t, "/etc/temporal/tls/tls.key", container.Env[i].Value, "Key path should match volume mount")
+						container.Env[i].Value = keyPath
+					}
+				}
+			}
 
-				// Verify TLS environment variable is set by the deployment creation
-				assert.Equal(t, "true", os.Getenv("TEMPORAL_TLS"), "TEMPORAL_TLS should be set to true")
+			// Set environment variables using t.Setenv() to simulate the runtime environment
+			for _, env := range container.Env {
+				t.Setenv(env.Name, env.Value)
+			}
 
-				// Use the envconfig package to load client options for TLS case
-				clientOptions, err := envconfig.LoadDefaultClientOptions()
-				require.NoError(t, err, "envconfig should successfully parse environment variables with TLS files")
+			// Use the envconfig package to load client options for TLS case
+			clientOptions, err := envconfig.LoadDefaultClientOptions()
+			require.NoError(t, err, "envconfig should successfully parse environment variables")
 
-				// Verify that the parsed client options match our expectations
-				assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
-				assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+			// Verify that the parsed client options match our expectations
+			assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+			assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+
+			// Verify other client option fields that should have default/empty values
+			assert.Empty(t, clientOptions.Identity, "Identity should be empty when not set via env vars")
+			assert.Nil(t, clientOptions.Logger, "Logger should be nil when not set")
+			assert.Nil(t, clientOptions.MetricsHandler, "MetricsHandler should be nil when not set")
+			assert.Empty(t, clientOptions.Interceptors, "Interceptors should be empty when not set")
+
+			if expectTLS {
 				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
 			} else {
-				// Use the envconfig package to load client options for non-TLS case
-				clientOptions, err := envconfig.LoadDefaultClientOptions()
-				require.NoError(t, err, "envconfig should successfully parse environment variables")
-
-				// Verify that the parsed client options match our expectations exhaustively
-				assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
-				assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
 				assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
-
-				// Verify other client option fields that should have default/empty values
-				assert.Empty(t, clientOptions.Identity, "Identity should be empty when not set via env vars")
-				assert.Nil(t, clientOptions.Logger, "Logger should be nil when not set")
-				assert.Nil(t, clientOptions.MetricsHandler, "MetricsHandler should be nil when not set")
-				assert.Empty(t, clientOptions.Interceptors, "Interceptors should be empty when not set")
 			}
 
 			// Note: TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID are not part of client options
