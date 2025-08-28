@@ -1,0 +1,83 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  # Run unit tests and vet in parallel as separate jobs
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup Go environment
+      uses: ./.github/actions/setup-go
+      
+    - name: Run unit tests
+      run: make test-unit
+      
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results
+        path: |
+          cover.out
+          bin/
+        retention-days: 7
+
+  vet:
+    name: Go Vet
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup Go environment
+      uses: ./.github/actions/setup-go
+      with:
+        download-deps: 'false'
+      
+    - name: Run vet
+      run: make vet
+
+  # Integration tests need special setup, keep separate
+  test-integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Setup Go environment
+      uses: ./.github/actions/setup-go
+    
+    - name: Install dependencies
+      run: |
+        
+        # Install Temporal CLI
+        curl -sSf https://temporal.download/cli.sh | sh
+        echo "$HOME/.temporalio/bin" >> "$GITHUB_PATH"
+        
+        # Install Go tools
+        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.2
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+        
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.14.3'
+        
+    - name: Integration tests
+      run: make test-integration
+      
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results
+        path: |
+          cover.out
+          bin/
+        retention-days: 7

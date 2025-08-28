@@ -1,0 +1,16 @@
+name: 'Generate GitHub App Token'
+description: 'Generate GitHub App token for CI/CD operations'
+outputs:
+  token:
+    description: 'Generated GitHub App token'
+    value: ${{ steps.generate_token.outputs.token }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate token
+      id: generate_token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ env.TEMPORAL_CICD_APP_ID }}
+        private-key: ${{ env.TEMPORAL_CICD_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
