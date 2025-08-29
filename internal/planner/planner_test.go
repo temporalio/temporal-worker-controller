@@ -1733,6 +1733,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			expectDeletes:  1, // Only e should be deleted (drained long enough and scaled to 0)
 			expectScales:   2, // b needs scaling up, d needs scaling down
 			expectVersions: []string{"b", "d"},
+			state:          &temporal.TemporalWorkerState{},
 		},
 		{
 			name: "draining version not scaled down before delay",
@@ -1774,6 +1775,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			},
 			expectDeletes: 0,
 			expectScales:  0,
+			state:         &temporal.TemporalWorkerState{},
 		},
 	}
 
