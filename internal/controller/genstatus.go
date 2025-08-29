@@ -16,9 +16,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-// ControllerIdentity is the identity the controller passes to all write calls.
-const ControllerIdentity = "temporal-worker-controller"
-
 func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	ctx context.Context,
 	l logr.Logger,

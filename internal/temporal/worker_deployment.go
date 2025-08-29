@@ -15,7 +15,12 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	temporalClient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	ignoreLastModifierKey = "temporal.io/ignore-last-modifier"
 )
 
 // VersionInfo contains information about a specific version
@@ -40,6 +45,7 @@ type TemporalWorkerState struct {
 	// Versions indexed by build ID
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
+	IgnoreLastModifier   bool
 }
 
 // GetWorkerDeploymentState queries Temporal to get the state of a worker deployment
@@ -48,6 +54,7 @@ func GetWorkerDeploymentState(
 	client temporalClient.Client,
 	workerDeploymentName string,
 	namespace string,
+	controllerIdentity string,
 ) (*TemporalWorkerState, error) {
 	state := &TemporalWorkerState{
 		Versions: make(map[string]*VersionInfo),
@@ -80,6 +87,23 @@ func GetWorkerDeploymentState(
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
 	state.VersionConflictToken = resp.ConflictToken
+
+	// Decide whether to ignore LastModifierIdentity
+	if state.LastModifierIdentity != controllerIdentity && state.LastModifierIdentity != "" {
+		if routingConfig.CurrentVersion != nil {
+			state.IgnoreLastModifier, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !state.IgnoreLastModifier && // if someone has a non-nil Current Version, but set the metadata in their Ramping Version instead, still count it
+			routingConfig.RampingVersion != nil {
+			state.IgnoreLastModifier, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// TODO(jlegrone): Re-enable stats once available in versioning v3.
 
@@ -231,4 +255,28 @@ func mapWorkflowStatus(status enumspb.WorkflowExecutionStatus) temporaliov1alpha
 // GetTestWorkflowID generates a workflowID for test workflows
 func GetTestWorkflowID(deploymentName, buildID, taskQueue string) string {
 	return fmt.Sprintf("test-%s:%s-%s", deploymentName, buildID, taskQueue)
+}
+
+func getShouldIgnoreLastModifier(
+	ctx context.Context,
+	deploymentHandler temporalClient.WorkerDeploymentHandle,
+	buildId string,
+) (bool, error) {
+	desc, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+		BuildID: buildId,
+	})
+	if err != nil {
+		return false, fmt.Errorf("unable to describe version: %w", err)
+	}
+	for k, v := range desc.Info.Metadata {
+		if k == ignoreLastModifierKey {
+			var s string
+			err = converter.GetDefaultDataConverter().FromPayload(v, &s)
+			if err != nil {
+				return false, fmt.Errorf("unable to decode metadata payload for key %s: %w", ignoreLastModifierKey, err)
+			}
+			return s == "true", nil
+		}
+	}
+	return false, nil
 }
