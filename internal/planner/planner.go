@@ -291,12 +291,12 @@ func shouldCreateDeployment(
 	}
 
 	// Check if we're at the version limit
-	maxVersions := int32(75) // Default from defaults.MaxVersions
-	if spec.MaxVersions != nil {
-		maxVersions = *spec.MaxVersions
+	maxVersionsIneligibleForDeletion := int32(75) // Default from defaults.MaxVersionsIneligibleForDeletion
+	if spec.MaxVersionsIneligibleForDeletion != nil {
+		maxVersionsIneligibleForDeletion = *spec.MaxVersionsIneligibleForDeletion
 	}
 
-	if status.VersionCount >= maxVersions {
+	if status.VersionCountIneligibleForDeletion >= maxVersionsIneligibleForDeletion {
 		return false
 	}
 
@@ -384,8 +384,10 @@ func getVersionConfigDiff(
 		BuildID:       status.TargetVersion.BuildID,
 	}
 
-	// If there is no current version, set the target version as the current version
-	if status.CurrentVersion == nil {
+	// If there is no current version and presence of unversioned pollers is not confirmed for all
+	// target version task queues, set the target version as the current version right away.
+	if status.CurrentVersion == nil &&
+		!temporalState.Versions[status.TargetVersion.BuildID].AllTaskQueuesHaveUnversionedPoller {
 		vcfg.SetCurrent = true
 		return vcfg
 	}

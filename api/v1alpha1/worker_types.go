@@ -61,8 +61,19 @@ type TemporalWorkerDeploymentSpec struct {
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 
-	// MaxVersions defines the maximum number of worker deployment versions allowed.
-	// This helps prevent hitting Temporal's default limit of 100 versions per deployment.
+	// MaxVersionsIneligibleForDeletion defines the maximum number of worker deployment versions
+	// allowed that are not eligible for deletion allowed.
+	// This helps prevent hitting Temporal's default limit of 100 versions per deployment and
+	// being unable to create new version.
+	//
+	// When a Worker Deployment has the maximum number of versions (100 by default), it will
+	// delete the oldest eligible version when a worker with the 101st version arrives.
+	// If no versions are eligible for deletion, that worker's poll will fail, which is dangerous.
+	// To protect against this, when a Worker Deployment has hits the maximum versions that are
+	// ineligible for deletion, the controller will stop deploying new workers in order to give the
+	// user the opportunity to adjust their sunset policy to avoid this situation before it actually
+	// blocks deployment of a new worker version on the server side.
+	//
 	// Defaults to 75. Users can override this by explicitly setting a higher value in
 	// the CRD, but should exercise caution: once the server's version limit is reached,
 	// Temporal attempts to delete an eligible version. If no version is eligible for deletion,
@@ -71,7 +82,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// in dynamicconfig.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
-	MaxVersions *int32 `json:"maxVersions,omitempty"`
+	MaxVersionsIneligibleForDeletion *int32 `json:"maxVersionsIneligibleForDeletion,omitempty"`
 }
 
 // VersionStatus indicates the status of a version.
@@ -141,6 +152,12 @@ type TemporalWorkerDeploymentStatus struct {
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional
 	VersionCount int32 `json:"versionCount,omitempty"`
+
+	// VersionCountIneligibleForDeletion is the total number of versions currently known by the worker
+	// deployment that are ineligible for deletion.
+	// A version is eligible for deletion if it is Drained and has no pollers.
+	// +optional
+	VersionCountIneligibleForDeletion int32 `json:"versionCountIneligibleForDeletion,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
@@ -267,7 +284,8 @@ type RolloutStrategy struct {
 	// - "AllAtOnce": start 100% of new workflow executions on the new worker deployment version as soon as it's healthy;
 	// - "Progressive": ramp up the percentage of new workflow executions targeting the new worker deployment version over time;
 	//
-	// Note: If the Current Version of a Worker Deployment is nil, the controller will ignore any Progressive Rollout
+	// Note: If the Current Version of a Worker Deployment is nil and the controller cannot confirm that all Task Queues
+	// in the Target Version have at least one unversioned poller, the controller will ignore any Progressive Rollout
 	// Steps and immediately set the new worker deployment version to be Current.
 	// Sending a percentage of traffic to a "nil" version means that traffic will be sent to unversioned workers. If
 	// there are no unversioned workers, those tasks will get stuck. This behavior ensures that all traffic on the task

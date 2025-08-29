@@ -130,20 +130,36 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		temporalClient = c
 	}
 
-	// Fetch Temporal worker deployment state
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(&workerDeploy)
+	targetBuildID := k8s.ComputeBuildID(&workerDeploy)
+
+	// Fetch Kubernetes deployment state
+	k8sState, err := k8s.GetDeploymentState(
+		ctx,
+		r.Client,
+		req.Namespace,
+		req.Name,
+		workerDeploymentName,
+	)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("unable to get Kubernetes deployment state: %w", err)
+	}
+
+	// Fetch Temporal worker deployment state
 	temporalState, err := temporal.GetWorkerDeploymentState(
 		ctx,
 		temporalClient,
 		workerDeploymentName,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		k8sState.Deployments,
+		targetBuildID,
 	)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)
 	}
 
 	// Compute a new status from k8s and temporal state
-	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy, temporalState)
+	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy, temporalState, k8sState)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

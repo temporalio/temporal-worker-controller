@@ -69,6 +69,15 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 	// Set version count from temporal state (directly from VersionSummaries via Versions map)
 	status.VersionCount = int32(len(m.temporalState.Versions))
 
+	for _, v := range m.temporalState.Versions {
+		if v.Status != v1alpha1.VersionStatusDrained {
+			status.VersionCountIneligibleForDeletion++
+		} else if !v.NoTaskQueuesHaveVersionedPoller {
+			// if there is or might be a versioned poller, consider it ineligible
+			status.VersionCountIneligibleForDeletion++
+		}
+	}
+
 	return status
 }
 

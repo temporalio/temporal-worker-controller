@@ -46,7 +46,7 @@ spec:
             type: object
           spec:
             properties:
-              maxVersions:
+              maxVersionsIneligibleForDeletion:
                 format: int32
                 minimum: 1
                 type: integer
@@ -3971,6 +3971,9 @@ spec:
                 format: byte
                 type: string
               versionCount:
+                format: int32
+                type: integer
+              versionCountIneligibleForDeletion:
                 format: int32
                 type: integer
             required:

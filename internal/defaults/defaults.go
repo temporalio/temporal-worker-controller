@@ -7,8 +7,8 @@ import "time"
 
 // Default values for TemporalWorkerDeploymentSpec fields
 const (
-	ScaledownDelay    = 1 * time.Hour
-	DeleteDelay       = 24 * time.Hour
-	ServerMaxVersions = 100
-	MaxVersions       = int32(ServerMaxVersions * 0.75)
+	ScaledownDelay                   = 1 * time.Hour
+	DeleteDelay                      = 24 * time.Hour
+	ServerMaxVersions                = 100
+	MaxVersionsIneligibleForDeletion = int32(ServerMaxVersions * 0.75)
 )
