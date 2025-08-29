@@ -421,8 +421,8 @@ func (in *TemporalWorkerDeploymentSpec) DeepCopyInto(out *TemporalWorkerDeployme
 	in.RolloutStrategy.DeepCopyInto(&out.RolloutStrategy)
 	in.SunsetStrategy.DeepCopyInto(&out.SunsetStrategy)
 	out.WorkerOptions = in.WorkerOptions
-	if in.MaxVersions != nil {
-		in, out := &in.MaxVersions, &out.MaxVersions
+	if in.MaxVersionsIneligibleForDeletion != nil {
+		in, out := &in.MaxVersionsIneligibleForDeletion, &out.MaxVersionsIneligibleForDeletion
 		*out = new(int32)
 		**out = **in
 	}

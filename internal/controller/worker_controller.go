@@ -153,6 +153,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		k8sState.Deployments,
 		targetBuildID,
+		workerDeploy.Spec.RolloutStrategy.Strategy,
 	)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)

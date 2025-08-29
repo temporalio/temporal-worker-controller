@@ -228,8 +228,8 @@ func TestGeneratePlan(t *testing.T) {
 				},
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				MaxVersions: func() *int32 { i := int32(5); return &i }(),
-				Replicas:    func() *int32 { r := int32(1); return &r }(),
+				MaxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
+				Replicas:                         func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
 			config: &Config{
@@ -790,8 +790,8 @@ func TestShouldCreateDeployment(t *testing.T) {
 				},
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				MaxVersions: func() *int32 { i := int32(5); return &i }(),
-				Replicas:    func() *int32 { r := int32(1); return &r }(),
+				MaxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
+				Replicas:                         func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates: false,
 		},
@@ -808,8 +808,8 @@ func TestShouldCreateDeployment(t *testing.T) {
 				},
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				MaxVersions: func() *int32 { i := int32(5); return &i }(),
-				Replicas:    func() *int32 { r := int32(1); return &r }(),
+				MaxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
+				Replicas:                         func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates: true,
 		},
