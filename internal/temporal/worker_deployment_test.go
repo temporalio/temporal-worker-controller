@@ -134,7 +134,7 @@ func TestGetIgnoreLastModifier(t *testing.T) {
 			},
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				UpsertEntries: map[string]interface{}{
-					ignoreLastModifierKey: "true",
+					IgnoreLastModifierKey: "true",
 				},
 			},
 		})

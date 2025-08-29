@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	ignoreLastModifierKey = "temporal.io/ignore-last-modifier"
+	IgnoreLastModifierKey = "temporal.io/ignore-last-modifier"
 )
 
 // VersionInfo contains information about a specific version
@@ -269,11 +269,11 @@ func getShouldIgnoreLastModifier(
 		return false, fmt.Errorf("unable to describe version: %w", err)
 	}
 	for k, v := range desc.Info.Metadata {
-		if k == ignoreLastModifierKey {
+		if k == IgnoreLastModifierKey {
 			var s string
 			err = converter.GetDefaultDataConverter().FromPayload(v, &s)
 			if err != nil {
-				return false, fmt.Errorf("unable to decode metadata payload for key %s: %w", ignoreLastModifierKey, err)
+				return false, fmt.Errorf("unable to decode metadata payload for key %s: %w", IgnoreLastModifierKey, err)
 			}
 			return s == "true", nil
 		}
