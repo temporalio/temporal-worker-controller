@@ -155,11 +155,11 @@ func eventually(t *testing.T, timeout, interval time.Duration, check func() erro
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if err := check(); err == nil {
+		err := check()
+		if err == nil {
 			return // Success!
-		} else {
-			lastErr = err
 		}
+		lastErr = err
 		time.Sleep(interval)
 	}
 	if lastErr != nil {
