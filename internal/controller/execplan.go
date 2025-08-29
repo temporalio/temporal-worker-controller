@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -124,6 +125,20 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			},
 		}); err != nil { // would be cool to do this atomically with the update
 			return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
+		}
+	}
+
+	for _, buildId := range p.RemoveIgnoreLastModifierBuilds {
+		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
+			Version: worker.WorkerDeploymentVersion{
+				DeploymentName: p.WorkerDeploymentName,
+				BuildId:        buildId,
+			},
+			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
+				RemoveEntries: []string{temporal.IgnoreLastModifierKey},
+			},
+		}); err != nil {
+			return fmt.Errorf("unable to update metadata to remove %s deployment: %w", temporal.IgnoreLastModifierKey, err)
 		}
 	}
 

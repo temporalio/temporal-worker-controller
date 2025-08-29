@@ -34,8 +34,9 @@ type plan struct {
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
 
-	// TODO(carlydf): add something here to tell controller to unset the ignoreLastModifier metadata field on the version(s)
-	// removing a metadata field that does not exist is a no-op, so it's fine to just do both
+	// Build IDs of versions from which the controller should
+	// remove IgnoreLastModifierKey from the version metadata
+	RemoveIgnoreLastModifierBuilds []string
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -113,6 +114,8 @@ see ownership runbook in docs/ for more details.'`)
 
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
+
+	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

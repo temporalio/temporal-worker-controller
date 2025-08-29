@@ -25,6 +25,9 @@ type Plan struct {
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
+	// Build IDs of versions from which the controller should
+	// remove IgnoreLastModifierKey from the version metadata
+	RemoveIgnoreLastModifierBuilds []string
 }
 
 // VersionConfig defines version configuration for Temporal
@@ -82,6 +85,15 @@ func GeneratePlan(
 
 	// Determine version config changes
 	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
+
+	if temporalState.IgnoreLastModifier {
+		if temporalState.RampingBuildID != "" {
+			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.RampingBuildID)
+		}
+		if temporalState.CurrentBuildID != "" {
+			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.CurrentBuildID)
+		}
+	}
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
