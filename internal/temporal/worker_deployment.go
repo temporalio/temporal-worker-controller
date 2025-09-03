@@ -165,6 +165,9 @@ func GetWorkerDeploymentState(
 					time.Sleep(2 * time.Second)
 				}
 
+				// Note: We can only check whether the task queues that we know of have unversioned pollers.
+				//       If, later on, a poll request arrives tying a new task queue to the target version, we
+				//       don't know whether that task queue has unversioned pollers.
 				if err == nil {
 					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
 				}
