@@ -21,7 +21,7 @@ any more changes to ensure a human's change is not clobbered.
 Once you are done making your own changes to the Worker Deployment's current and ramping versions, and you are ready
 for the Worker Controller to take over, you can update the metadata to indicate that.
 
-There is no Temporal server supports Worker Deployment Version-level metadata, so you'll have to set this value on
+There is no Temporal server support for Worker Deployment Version-level metadata, so you'll have to set this value on
 the Current Version of your Worker Deployment.
 
 ```bash
