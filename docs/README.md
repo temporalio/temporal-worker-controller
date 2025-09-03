@@ -14,6 +14,9 @@ This documentation structure is designed to support various types of technical d
 ### [Limits](limits.md)
 Technical constraints and limitations of the Temporal Worker Controller system, including maximum field lengths and other operational boundaries.
 
+### [Ownership](ownership.md)
+How the controller gets permission to manage a Worker Deployment, how a human client can take or give back control.
+
 ---
 
 *Note: This documentation structure is designed to grow with the project.*

@@ -11,7 +11,7 @@ import (
 const (
 	controllerIdentityKey     = "temporal.io/controller"
 	controllerVersionKey      = "temporal.io/controller-version"
-	defaultControllerIdentity = "temporal-worker-controller"
+	DefaultControllerIdentity = "temporal-worker-controller"
 )
 
 // Version is set by goreleaser via ldflags at build time
@@ -35,5 +35,5 @@ func getControllerIdentity() string {
 	if identity := os.Getenv("CONTROLLER_IDENTITY"); identity != "" {
 		return identity
 	}
-	return defaultControllerIdentity
+	return DefaultControllerIdentity
 }

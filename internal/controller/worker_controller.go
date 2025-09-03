@@ -137,6 +137,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		temporalClient,
 		workerDeploymentName,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		getControllerIdentity(),
 	)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)

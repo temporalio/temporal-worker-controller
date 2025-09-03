@@ -33,6 +33,10 @@ type plan struct {
 
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
+
+	// Build IDs of versions from which the controller should
+	// remove IgnoreLastModifierKey from the version metadata
+	RemoveIgnoreLastModifierBuilds []string
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -75,8 +79,10 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Check if we need to force manual strategy due to external modification
 	rolloutStrategy := w.Spec.RolloutStrategy
-	if w.Status.LastModifierIdentity != ControllerIdentity && w.Status.LastModifierIdentity != "" {
-		l.Info("Forcing manual rollout strategy since deployment was modified externally")
+	if w.Status.LastModifierIdentity != getControllerIdentity() &&
+		w.Status.LastModifierIdentity != "" &&
+		!temporalState.IgnoreLastModifier {
+		l.Info(fmt.Sprintf("Forcing Manual rollout strategy since Worker Deployment was modified by a user with a different identity '%s'; to allow controller to make changes again, set 'temporal.io/ignore-last-modifier=true' in the metadata of your Current or Ramping Version; see ownership runbook at docs/ownership.md for more details.", w.Status.LastModifierIdentity))
 		rolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
 	}
 
@@ -106,6 +112,8 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
+
+	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

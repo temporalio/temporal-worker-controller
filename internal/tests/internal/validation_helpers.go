@@ -79,7 +79,7 @@ func setCurrentVersion(
 	eventually(t, 30*time.Second, time.Second, func() error {
 		_, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 			BuildID:  buildID,
-			Identity: controller.ControllerIdentity,
+			Identity: controller.DefaultControllerIdentity,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to set build '%s' as current of worker deployment %s: %w", buildID, workerDeploymentName, err)
@@ -107,7 +107,7 @@ func setRampingVersion(
 		_, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 			BuildID:    buildID,
 			Percentage: rampPercentage,
-			Identity:   controller.ControllerIdentity,
+			Identity:   controller.DefaultControllerIdentity,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to set build '%s' as ramping of worker deployment %s: %w", buildID, workerDeploymentName, err)
@@ -332,7 +332,7 @@ func validateDeprecatedVersion(ctx context.Context, env testhelpers.TestEnv, exp
 	// status
 	if expectedDV.Status != actualDV.Status {
 		return fmt.Errorf("expected status of deprecated build '%s' to be '%v', got '%v'",
-			expectedDV.BuildID, expectedDV.Status, expectedDV.Status)
+			expectedDV.BuildID, expectedDV.Status, actualDV.Status)
 	}
 	// deployment
 	if expectedDV.Deployment == nil {
