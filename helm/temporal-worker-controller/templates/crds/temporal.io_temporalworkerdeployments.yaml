@@ -46,10 +46,6 @@ spec:
             type: object
           spec:
             properties:
-              maxVersionsIneligibleForDeletion:
-                format: int32
-                minimum: 1
-                type: integer
               minReadySeconds:
                 format: int32
                 type: integer
@@ -3876,6 +3872,8 @@ spec:
                     drainedSince:
                       format: date-time
                       type: string
+                    eligibleForDeletion:
+                      type: boolean
                     healthySince:
                       format: date-time
                       type: string
@@ -3971,9 +3969,6 @@ spec:
                 format: byte
                 type: string
               versionCount:
-                format: int32
-                type: integer
-              versionCountIneligibleForDeletion:
                 format: int32
                 type: integer
             required:

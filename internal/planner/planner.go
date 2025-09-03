@@ -66,6 +66,7 @@ func GeneratePlan(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 	config *Config,
 	workerDeploymentName string,
+	maxVersionsIneligibleForDeletion int32,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
@@ -74,7 +75,7 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
-	plan.ShouldCreateDeployment = shouldCreateDeployment(status, spec)
+	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, connection)
 
 	// Determine if we need to start any test workflows
@@ -283,20 +284,22 @@ func getScaleDeployments(
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	maxVersionsIneligibleForDeletion int32,
 ) bool {
 	// Check if target version already has a deployment
 	if status.TargetVersion.Deployment != nil {
 		return false
 	}
 
-	// Check if we're at the version limit
-	maxVersionsIneligibleForDeletion := int32(75) // Default from defaults.MaxVersionsIneligibleForDeletion
-	if spec.MaxVersionsIneligibleForDeletion != nil {
-		maxVersionsIneligibleForDeletion = *spec.MaxVersionsIneligibleForDeletion
+	versionCountIneligibleForDeletion := int32(0)
+
+	for _, v := range status.DeprecatedVersions {
+		if !v.EligibleForDeletion {
+			versionCountIneligibleForDeletion++
+		}
 	}
 
-	if status.VersionCountIneligibleForDeletion >= maxVersionsIneligibleForDeletion {
+	if versionCountIneligibleForDeletion >= maxVersionsIneligibleForDeletion {
 		return false
 	}
 

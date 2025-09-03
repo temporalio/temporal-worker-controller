@@ -57,11 +57,6 @@ func (s *TemporalWorkerDeploymentSpec) Default(ctx context.Context) error {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
 	}
 
-	if s.MaxVersionsIneligibleForDeletion == nil {
-		maxVersions := int32(defaults.MaxVersionsIneligibleForDeletion)
-		s.MaxVersionsIneligibleForDeletion = &maxVersions
-	}
-
 	return nil
 }
 

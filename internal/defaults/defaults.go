@@ -11,4 +11,5 @@ const (
 	DeleteDelay                      = 24 * time.Hour
 	ServerMaxVersions                = 100
 	MaxVersionsIneligibleForDeletion = int32(ServerMaxVersions * 0.75)
+	ControllerIdentity               = "temporal-worker-controller"
 )

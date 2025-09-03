@@ -33,6 +33,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
+const (
+	testShortPollerHistoryTTL            = time.Second
+	testDrainageVisibilityGracePeriod    = time.Second
+	testDrainageRefreshInterval          = time.Second
+	testMaxVersionsIneligibleForDeletion = 5
+)
+
 // setupKubebuilderAssets sets up the KUBEBUILDER_ASSETS environment variable if not already set
 func setupKubebuilderAssets() error {
 	if os.Getenv("KUBEBUILDER_ASSETS") != "" {
@@ -88,6 +95,9 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	if kubeAssets := os.Getenv("KUBEBUILDER_ASSETS"); kubeAssets == "" {
 		t.Skip("Skipping because KUBEBUILDER_ASSETS not set")
 	}
+
+	// set max versions value for testing
+	t.Setenv(controller.ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey, fmt.Sprintf("%d", testMaxVersionsIneligibleForDeletion))
 
 	// Setup kubebuilder assets for IDE testing
 	if err := setupKubebuilderAssets(); err != nil {

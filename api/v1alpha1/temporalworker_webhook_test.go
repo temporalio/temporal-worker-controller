@@ -159,24 +159,6 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 		obj      runtime.Object
 		expected func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment)
 	}{
-		"sets default maxVersionsIneligibleForDeletion": {
-			obj: testhelpers.MakeTWDWithName("default-max-versions", ""),
-			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
-				require.NotNil(t, obj.Spec.MaxVersionsIneligibleForDeletion)
-				assert.Equal(t, int32(75), *obj.Spec.MaxVersionsIneligibleForDeletion)
-			},
-		},
-		"preserves existing maxVersionsIneligibleForDeletion": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("preserve-max-versions", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
-				maxVersions := int32(100)
-				obj.Spec.MaxVersionsIneligibleForDeletion = &maxVersions
-				return obj
-			}),
-			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
-				require.NotNil(t, obj.Spec.MaxVersionsIneligibleForDeletion)
-				assert.Equal(t, int32(100), *obj.Spec.MaxVersionsIneligibleForDeletion)
-			},
-		},
 		"sets default sunset strategy delays": {
 			obj: testhelpers.MakeTWDWithName("default-sunset-delays", ""),
 			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {

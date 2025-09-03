@@ -60,29 +60,6 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
-
-	// MaxVersionsIneligibleForDeletion defines the maximum number of worker deployment versions
-	// allowed that are not eligible for deletion allowed.
-	// This helps prevent hitting Temporal's default limit of 100 versions per deployment and
-	// being unable to create new version.
-	//
-	// When a Worker Deployment has the maximum number of versions (100 by default), it will
-	// delete the oldest eligible version when a worker with the 101st version arrives.
-	// If no versions are eligible for deletion, that worker's poll will fail, which is dangerous.
-	// To protect against this, when a Worker Deployment has hits the maximum versions that are
-	// ineligible for deletion, the controller will stop deploying new workers in order to give the
-	// user the opportunity to adjust their sunset policy to avoid this situation before it actually
-	// blocks deployment of a new worker version on the server side.
-	//
-	// Defaults to 75. Users can override this by explicitly setting a higher value in
-	// the CRD, but should exercise caution: once the server's version limit is reached,
-	// Temporal attempts to delete an eligible version. If no version is eligible for deletion,
-	// new deployments get blocked which prevents the controller from making progress.
-	// This limit can be adjusted server-side by setting `matching.maxVersionsInDeployment`
-	// in dynamicconfig.
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	MaxVersionsIneligibleForDeletion *int32 `json:"maxVersionsIneligibleForDeletion,omitempty"`
 }
 
 // VersionStatus indicates the status of a version.
@@ -152,12 +129,6 @@ type TemporalWorkerDeploymentStatus struct {
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional
 	VersionCount int32 `json:"versionCount,omitempty"`
-
-	// VersionCountIneligibleForDeletion is the total number of versions currently known by the worker
-	// deployment that are ineligible for deletion.
-	// A version is eligible for deletion if it is Drained and has no pollers.
-	// +optional
-	VersionCountIneligibleForDeletion int32 `json:"versionCountIneligibleForDeletion,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
@@ -257,6 +228,12 @@ type DeprecatedWorkerDeploymentVersion struct {
 	// Only set when Status is VersionStatusDrained.
 	// +optional
 	DrainedSince *metav1.Time `json:"drainedSince"`
+
+	// A Version is eligible for deletion if it is drained and has no pollers on any task queue.
+	// After pollers stop polling, the server will still consider them present until `matching.PollerHistoryTTL`
+	// has passed.
+	// +optional
+	EligibleForDeletion bool `json:"eligibleForDeletion,omitempty"`
 }
 
 // DefaultVersionUpdateStrategy describes how to cut over new workflow executions
