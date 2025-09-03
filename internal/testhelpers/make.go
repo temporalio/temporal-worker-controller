@@ -135,6 +135,9 @@ func MakeTWDWithName(name, namespace string) *temporaliov1alpha1.TemporalWorkerD
 }
 
 func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDeployment bool) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
+	if imageName == "" { // empty build id == nil current version == unversioned
+		return nil
+	}
 	ret := &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, temporaliov1alpha1.VersionStatusCurrent, createDeployment, true),
 	}

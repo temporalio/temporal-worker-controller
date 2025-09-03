@@ -235,7 +235,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd2 := testhelpers.MakeTWD("", "", 1, pod2, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my-test-image",
+			expectedPrefix:  "my.test-image",
 			expectedHashLen: 4,
 			expectEquality:  false, // should be different
 		},
@@ -248,7 +248,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd2 := testhelpers.MakeTWD("", "", 2, pod, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my-test-image",
+			expectedPrefix:  "my.test-image",
 			expectedHashLen: 4,
 			expectEquality:  true, // should be the same
 		},
@@ -334,7 +334,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  "this-is-my-weird-image",
+			expectedPrefix:  "this.is.my-weird-image",
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -450,15 +450,9 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 	versionedName := k8s.ComputeVersionedDeploymentName(workerDeploymentName, buildID)
 
 	// Verify the expected formats
-	assert.Equal(t, "hello-world"+k8s.DeploymentNameSeparator+"demo", workerDeploymentName)
-	assert.True(t, strings.HasPrefix(versionedName, "hello-world"+k8s.DeploymentNameSeparator+"demo-"))
-	assert.True(t, strings.Contains(versionedName, "v1-0-0"), "versioned name should contain cleaned image tag")
-
-	// Verify the version ID combines worker deployment name and build ID
-	versionID := k8s.ComputeVersionID(twd)
-	expectedVersionID := workerDeploymentName + k8s.VersionIDSeparator + buildID
-	assert.Equal(t, expectedVersionID, versionID)
-	assert.Equal(t, "hello-world"+k8s.DeploymentNameSeparator+"demo"+k8s.VersionIDSeparator+"v1-0-0-dd84", versionID)
+	assert.Equal(t, "demo"+k8s.WorkerDeploymentNameSeparator+"hello-world", workerDeploymentName)
+	assert.True(t, strings.HasPrefix(versionedName, "demo"+k8s.WorkerDeploymentNameSeparator+"hello-world-"))
+	assert.True(t, strings.Contains(versionedName, "v1.0.0"), "versioned name should contain cleaned image tag")
 }
 
 // TestNewDeploymentWithPodAnnotations tests that every new pod created has a connection spec hash annotation

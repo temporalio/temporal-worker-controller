@@ -238,9 +238,13 @@ type TestCase struct {
 	// waitTime is the duration to delay before checking expected status.
 	waitTime *time.Duration
 
-	// setupFunc is an arbitrary function called at the end of setting up the environment specified by input.Status.
+	// setupFunc is an arbitrary function called at the end of setting up the environment, after making the state match input.Status.
 	// It can be used for additional state creation or destruction.
 	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
+
+	// validatorFunc is an arbitrary function called after the test validates the expected TWD Status has been achieved.
+	// It can be used for additional state validation.
+	validatorFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
 
 func (tc *TestCase) GetTWD() *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -271,6 +275,10 @@ func (tc *TestCase) GetSetupFunc() func(t *testing.T, ctx context.Context, tc Te
 	return tc.setupFunc
 }
 
+func (tc *TestCase) GetValidatorFunc() func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv) {
+	return tc.validatorFunc
+}
+
 // TestCaseBuilder provides a fluent interface for building test cases
 type TestCaseBuilder struct {
 	name              string
@@ -283,7 +291,8 @@ type TestCaseBuilder struct {
 	expectedDeploymentInfos []DeploymentInfo
 	waitTime                *time.Duration
 
-	setupFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
+	setupFunc     func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
+	validatorFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
 
 // NewTestCase creates a new test case builder
@@ -310,9 +319,16 @@ func NewTestCaseWithValues(name, k8sNamespace, temporalNamespace string) *TestCa
 	}
 }
 
-// WithSetupFunction defines a function that the test case will call while setting up the state.
+// WithSetupFunction defines a function that the test case will call while setting up the state, after creating the initial Status.
 func (tcb *TestCaseBuilder) WithSetupFunction(f func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)) *TestCaseBuilder {
 	tcb.setupFunc = f
+	return tcb
+}
+
+// WithValidatorFunction defines a function that the test case will call after the TWD expected state has been validated.
+// Can be used to validate any other arbitrary state.
+func (tcb *TestCaseBuilder) WithValidatorFunction(f func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)) *TestCaseBuilder {
+	tcb.validatorFunc = f
 	return tcb
 }
 
@@ -384,8 +400,9 @@ func (tcb *TestCaseBuilder) WithExpectedStatus(statusBuilder *StatusBuilder) *Te
 // Build returns the constructed test case
 func (tcb *TestCaseBuilder) Build() TestCase {
 	ret := TestCase{
-		setupFunc: tcb.setupFunc,
-		waitTime:  tcb.waitTime,
+		setupFunc:     tcb.setupFunc,
+		validatorFunc: tcb.validatorFunc,
+		waitTime:      tcb.waitTime,
 		twd: tcb.twdBuilder.
 			WithName(tcb.name).
 			WithNamespace(tcb.k8sNamespace).

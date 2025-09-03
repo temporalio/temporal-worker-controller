@@ -17,8 +17,13 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	IgnoreLastModifierKey = "temporal.io/ignore-last-modifier"
 )
 
 // VersionInfo contains information about a specific version
@@ -57,6 +62,7 @@ type TemporalWorkerState struct {
 	// Versions indexed by build ID
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
+	IgnoreLastModifier   bool
 }
 
 // GetWorkerDeploymentState queries Temporal to get the state of a worker deployment
@@ -68,6 +74,7 @@ func GetWorkerDeploymentState(
 	k8sDeployments map[string]*appsv1.Deployment,
 	targetBuildId string,
 	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
+	controllerIdentity string,
 ) (*TemporalWorkerState, error) {
 	state := &TemporalWorkerState{
 		Versions: make(map[string]*VersionInfo),
@@ -100,6 +107,14 @@ func GetWorkerDeploymentState(
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
 	state.VersionConflictToken = resp.ConflictToken
+
+	// Decide whether to ignore LastModifierIdentity
+	if state.LastModifierIdentity != controllerIdentity && state.LastModifierIdentity != "" {
+		state.IgnoreLastModifier, err = DeploymentShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// TODO(jlegrone): Re-enable stats once available in versioning v3.
 
@@ -307,6 +322,48 @@ func HasUnversionedPoller(ctx context.Context,
 		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
 			return true, nil
 		case temporalClient.WorkerVersioningModeVersioned:
+		}
+	}
+	return false, nil
+}
+
+func DeploymentShouldIgnoreLastModifier(
+	ctx context.Context,
+	deploymentHandler temporalClient.WorkerDeploymentHandle,
+	routingConfig temporalClient.WorkerDeploymentRoutingConfig,
+) (shouldIgnore bool, err error) {
+	if routingConfig.CurrentVersion != nil {
+		shouldIgnore, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+		if err != nil {
+			return false, err
+		}
+	}
+	if !shouldIgnore && // if someone has a non-nil Current Version, but only set the metadata in their Ramping Version, also count that
+		routingConfig.RampingVersion != nil {
+		return getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+	}
+	return shouldIgnore, nil
+}
+
+func getShouldIgnoreLastModifier(
+	ctx context.Context,
+	deploymentHandler temporalClient.WorkerDeploymentHandle,
+	buildId string,
+) (bool, error) {
+	desc, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+		BuildID: buildId,
+	})
+	if err != nil {
+		return false, fmt.Errorf("unable to describe version: %w", err)
+	}
+	for k, v := range desc.Info.Metadata {
+		if k == IgnoreLastModifierKey {
+			var s string
+			err = converter.GetDefaultDataConverter().FromPayload(v, &s)
+			if err != nil {
+				return false, fmt.Errorf("unable to decode metadata payload for key %s: %w", IgnoreLastModifierKey, err)
+			}
+			return s == "true", nil
 		}
 	}
 	return false, nil
