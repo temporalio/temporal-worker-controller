@@ -155,20 +155,19 @@ func GetWorkerDeploymentState(
 				routingConfig.CurrentVersion == nil &&
 				strategy == temporaliov1alpha1.UpdateProgressive {
 				var desc temporalClient.WorkerDeploymentVersionDescription
-				for i := 0; i < 5; i++ { // at first, version is found in DeploymentInfo.VersionSummaries but not ready for describe, so we have to try again
+				describeVersion := func() error {
 					desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
 						BuildID: version.Version.BuildId,
 					})
-					if err == nil {
-						break
-					}
-					time.Sleep(2 * time.Second)
+					return err
 				}
-
+				// At first, version is found in DeploymentInfo.VersionSummaries but not ready for describe, so we have
+				// to describe with backoff.
+				//
 				// Note: We can only check whether the task queues that we know of have unversioned pollers.
 				//       If, later on, a poll request arrives tying a new task queue to the target version, we
 				//       don't know whether that task queue has unversioned pollers.
-				if err == nil { //revive:disable-line:max-control-nesting
+				if err = withBackoff(10*time.Second, 1*time.Second, describeVersion); err == nil { //revive:disable-line:max-control-nesting
 					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
 				}
 			}
@@ -179,6 +178,20 @@ func GetWorkerDeploymentState(
 	}
 
 	return state, nil
+}
+
+func withBackoff(timeout time.Duration, tick time.Duration, fn func() error) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := fn(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		time.Sleep(tick)
+	}
+	return lastErr
 }
 
 // GetTestWorkflowStatus queries Temporal to get the status of test workflows for a version
