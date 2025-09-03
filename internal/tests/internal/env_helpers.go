@@ -151,6 +151,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		Scheme:              mgr.GetScheme(),
 		TemporalClientPool:  clientPool,
 		DisableRecoverPanic: true,
+		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 	}
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {

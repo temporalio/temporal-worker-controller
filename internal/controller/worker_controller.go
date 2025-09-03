@@ -44,6 +44,19 @@ type TemporalWorkerDeploymentReconciler struct {
 
 	// Disables panic recovery if true
 	DisableRecoverPanic bool
+
+	// When a Worker Deployment has the maximum number of versions (100 per Worker Deployment by default),
+	// it will delete the oldest eligible version when a worker with the 101st version arrives.
+	// If no versions are eligible for deletion, that worker's poll will fail, which is dangerous.
+	// To protect against this, when a Worker Deployment has too many versions ineligible for deletion,
+	// the controller will stop deploying new workers in order to give the user the opportunity to adjust
+	// their sunset policy to avoid this situation before it actually blocks deployment of a new worker
+	// version on the server side.
+	//
+	// MaxDeploymentVersionsIneligibleForDeletion is currently defaulted to 75, which is safe for the default
+	// server value of `matching.maxVersionsInDeployment=100`.
+	// Users who reduce `matching.maxVersionsInDeployment` in their dynamicconfig should also reduce this value.
+	MaxDeploymentVersionsIneligibleForDeletion int32
 }
 
 //+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete

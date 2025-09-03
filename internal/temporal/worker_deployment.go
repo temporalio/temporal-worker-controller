@@ -184,11 +184,11 @@ func withBackoff(timeout time.Duration, tick time.Duration, fn func() error) err
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if err := fn(); err == nil {
+		err := fn()
+		if err == nil {
 			return nil
-		} else {
-			lastErr = err
 		}
+		lastErr = err
 		time.Sleep(tick)
 	}
 	return lastErr

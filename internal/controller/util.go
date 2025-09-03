@@ -44,7 +44,7 @@ func getControllerIdentity() string {
 	return defaults.ControllerIdentity
 }
 
-func getControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
+func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
 	if maxStr := os.Getenv(ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey); maxStr != "" {
 		i, err := strconv.Atoi(maxStr)
 		if err == nil {
