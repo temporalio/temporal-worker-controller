@@ -144,7 +144,7 @@ func GetWorkerDeploymentState(
 				versionInfo.DrainedSince = &drainedSince
 				// If the deployment exists and has replicas, we assume there are versioned pollers, no need to check
 				deployment, ok := k8sDeployments[version.Version.BuildId]
-				if !ok || deployment.Status.Replicas == 0 {
+				if !ok || deployment.Status.Replicas == 0 { //revive:disable-line:max-control-nesting
 					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, versionResp.Info.TaskQueuesInfos)
 				}
 			}
@@ -168,7 +168,7 @@ func GetWorkerDeploymentState(
 				// Note: We can only check whether the task queues that we know of have unversioned pollers.
 				//       If, later on, a poll request arrives tying a new task queue to the target version, we
 				//       don't know whether that task queue has unversioned pollers.
-				if err == nil {
+				if err == nil { //revive:disable-line:max-control-nesting
 					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
 				}
 			}
