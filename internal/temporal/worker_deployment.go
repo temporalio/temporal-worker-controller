@@ -14,7 +14,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/api/taskqueue/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
 	appsv1 "k8s.io/api/apps/v1"
@@ -320,7 +320,7 @@ func HasNoVersionedPollers(ctx context.Context,
 func getPollers(ctx context.Context,
 	client temporalClient.Client,
 	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
-) ([]*taskqueue.PollerInfo, error) {
+) ([]*taskqueuepb.PollerInfo, error) {
 	var resp *workflowservice.DescribeTaskQueueResponse
 	var err error
 	switch taskQueueInfo.Type {
