@@ -215,7 +215,8 @@ func TestIntegration(t *testing.T) {
 			).
 			WithExpectedDeployments(
 				testhelpers.NewDeploymentInfo("v0", 1),
-			),
+			).
+			WithValidatorFunction(validateIgnoreLastModifierMetadata(false)),
 		"nth-rollout-unblocked-by-modifier-with-ignore": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -238,7 +239,8 @@ func TestIntegration(t *testing.T) {
 			).
 			WithExpectedDeployments(
 				testhelpers.NewDeploymentInfo("v0", 1),
-			),
+			).
+			WithValidatorFunction(validateIgnoreLastModifierMetadata(false)),
 	}
 	// TODO(carlydf): Add additional test case where multiple ramping steps are done
 
@@ -335,4 +337,9 @@ func testTemporalWorkerDeploymentCreation(
 	}
 	verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, expectedStatus, 30*time.Second, 5*time.Second)
 	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, *expectedStatus, 30*time.Second, 5*time.Second)
+
+	// apply post-expected-status validation function
+	if f := tc.GetValidatorFunc(); f != nil {
+		tc.GetValidatorFunc()(t, ctx, tc, env)
+	}
 }

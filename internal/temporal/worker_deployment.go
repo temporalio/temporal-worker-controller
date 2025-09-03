@@ -90,18 +90,9 @@ func GetWorkerDeploymentState(
 
 	// Decide whether to ignore LastModifierIdentity
 	if state.LastModifierIdentity != controllerIdentity && state.LastModifierIdentity != "" {
-		if routingConfig.CurrentVersion != nil {
-			state.IgnoreLastModifier, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if !state.IgnoreLastModifier && // if someone has a non-nil Current Version, but only set the metadata in their Ramping Version, also count that
-			routingConfig.RampingVersion != nil {
-			state.IgnoreLastModifier, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
-			if err != nil {
-				return nil, err
-			}
+		state.IgnoreLastModifier, err = DeploymentShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -255,6 +246,24 @@ func mapWorkflowStatus(status enumspb.WorkflowExecutionStatus) temporaliov1alpha
 // GetTestWorkflowID generates a workflowID for test workflows
 func GetTestWorkflowID(deploymentName, buildID, taskQueue string) string {
 	return fmt.Sprintf("test-%s:%s-%s", deploymentName, buildID, taskQueue)
+}
+
+func DeploymentShouldIgnoreLastModifier(
+	ctx context.Context,
+	deploymentHandler temporalClient.WorkerDeploymentHandle,
+	routingConfig temporalClient.WorkerDeploymentRoutingConfig,
+) (shouldIgnore bool, err error) {
+	if routingConfig.CurrentVersion != nil {
+		shouldIgnore, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+		if err != nil {
+			return false, err
+		}
+	}
+	if !shouldIgnore && // if someone has a non-nil Current Version, but only set the metadata in their Ramping Version, also count that
+		routingConfig.RampingVersion != nil {
+		return getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+	}
+	return shouldIgnore, nil
 }
 
 func getShouldIgnoreLastModifier(

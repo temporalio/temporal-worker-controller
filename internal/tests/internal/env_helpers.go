@@ -321,3 +321,23 @@ func setCurrentAndSetIgnoreModifierMetadata(t *testing.T, ctx context.Context, t
 	}
 	t.Log("set current version's metadata to have \"temporal.io/ignore-last-modifier\"=\"true\"")
 }
+
+func validateIgnoreLastModifierMetadata(expectShouldIgnore bool) func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+	return func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+		workerDeploymentName := k8s.ComputeWorkerDeploymentName(tc.GetTWD())
+		deploymentHandle := env.Ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
+
+		desc, err := deploymentHandle.Describe(ctx, temporalClient.WorkerDeploymentDescribeOptions{})
+		if err != nil {
+			t.Errorf("error describing worker deployment: %v", err)
+		}
+
+		shouldIgnore, err := temporal.DeploymentShouldIgnoreLastModifier(ctx, deploymentHandle, desc.Info.RoutingConfig)
+		if err != nil {
+			t.Errorf("error checking ignore last modifier for worker deployment: %v", err)
+		}
+		if shouldIgnore != expectShouldIgnore {
+			t.Errorf("expected ignore last modifier to be %v, got %v", expectShouldIgnore, shouldIgnore)
+		}
+	}
+}
