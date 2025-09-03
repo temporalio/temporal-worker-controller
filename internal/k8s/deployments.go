@@ -26,12 +26,11 @@ import (
 const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
-	BuildIDLabel                 = "temporal.io/build-id"
-	DeploymentNameSeparator      = "/" // TODO(carlydf): change this to "." once the server accepts `.` in deployment names
-	VersionIDSeparator           = "." // TODO(carlydf): change this to ":"
-	K8sResourceNameSeparator     = "-"
-	MaxBuildIdLen                = 63
-	ConnectionSpecHashAnnotation = "temporal.io/connection-spec-hash"
+	BuildIDLabel                  = "temporal.io/build-id"
+	WorkerDeploymentNameSeparator = "/"
+	K8sResourceNameSeparator      = "-"
+	MaxBuildIdLen                 = 63
+	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -111,11 +110,6 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 	}
 }
 
-// ComputeVersionID generates a version ID from the worker deployment spec
-func ComputeVersionID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	return ComputeWorkerDeploymentName(w) + VersionIDSeparator + ComputeBuildID(w)
-}
-
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
@@ -131,7 +125,7 @@ func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 // ComputeWorkerDeploymentName generates the base worker deployment name
 func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	// Use the name and namespace to form the worker deployment name
-	return w.GetName() + DeploymentNameSeparator + w.GetNamespace()
+	return w.GetNamespace() + WorkerDeploymentNameSeparator + w.GetName()
 }
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
@@ -162,8 +156,8 @@ func CleanAndTruncateString(s string, n int) string {
 	if len(s) > n && n > 0 {
 		s = s[:n]
 	}
-	// Keep only letters, numbers, and dashes
-	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
+	// Keep only letters, numbers, dashes, and dots
+	re := regexp.MustCompile(`[^a-zA-Z0-9-.]+`)
 	return re.ReplaceAllString(s, K8sResourceNameSeparator)
 }
 
