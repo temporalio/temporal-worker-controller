@@ -235,7 +235,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd2 := testhelpers.MakeTWD("", "", 1, pod2, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my-test-image",
+			expectedPrefix:  "my.test-image",
 			expectedHashLen: 4,
 			expectEquality:  false, // should be different
 		},
@@ -248,7 +248,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd2 := testhelpers.MakeTWD("", "", 2, pod, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my-test-image",
+			expectedPrefix:  "my.test-image",
 			expectedHashLen: 4,
 			expectEquality:  true, // should be the same
 		},
@@ -334,7 +334,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  "this-is-my-weird-image",
+			expectedPrefix:  "this.is.my-weird-image",
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},

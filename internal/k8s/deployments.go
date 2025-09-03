@@ -162,8 +162,8 @@ func CleanAndTruncateString(s string, n int) string {
 	if len(s) > n && n > 0 {
 		s = s[:n]
 	}
-	// Keep only letters, numbers, and dashes
-	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
+	// Keep only letters, numbers, dashes, and dots
+	re := regexp.MustCompile(`[^a-zA-Z0-9-.]+`)
 	return re.ReplaceAllString(s, K8sResourceNameSeparator)
 }
 
