@@ -109,9 +109,6 @@ func newClient(ctx context.Context, hostPort, namespace string) (client.Client, 
 // RunHelloWorldWorker runs one worker per replica in the pod spec. callback is a function that can be called multiple times.
 func RunHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateSpec, callback func(stopFunc func(), err error)) {
 	w, stopFunc, err := newVersionedWorker(ctx, podTemplateSpec)
-	defer func() {
-		callback(stopFunc, err)
-	}()
 	if err != nil {
 		return
 	}
@@ -127,6 +124,8 @@ func RunHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplate
 		err = w.Start()
 		if err != nil {
 			callback(nil, err)
+		} else {
+			callback(stopFunc, nil)
 		}
 	}()
 }

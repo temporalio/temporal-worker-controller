@@ -33,6 +33,7 @@ func waitForDeployment(t *testing.T, k8sClient client.Client, deploymentName, na
 			Name:      deploymentName,
 			Namespace: namespace,
 		}, &deployment); err == nil {
+			t.Logf("Found deployment %s in namespace %s", deployment.Name, namespace)
 			return
 		}
 		time.Sleep(1 * time.Second)

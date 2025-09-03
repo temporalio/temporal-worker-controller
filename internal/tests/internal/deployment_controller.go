@@ -31,6 +31,38 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 	}
 }
 
+func startAndStopWorker(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) {
+	var deployment appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{
+		Name:      deploymentName,
+		Namespace: namespace,
+	}, &deployment); err != nil {
+		t.Fatalf("failed to get deployment: %v", err)
+	}
+
+	startedCh := make(chan struct{})
+	var stop func()
+	workerCallback := func(stopFunc func(), err error) {
+		if err != nil {
+			t.Errorf("failed to start worker: %v", err)
+		} else {
+			startedCh <- struct{}{}
+			stop = stopFunc
+		}
+	}
+
+	testhelpers.RunHelloWorldWorker(ctx, deployment.Spec.Template, workerCallback)
+	// wait for worker to start
+	<-startedCh
+
+	time.Sleep(1 * time.Second)
+
+	// kill worker
+	if stop != nil {
+		stop()
+	}
+}
+
 func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) []func() {
 	var deployment appsv1.Deployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{
@@ -151,18 +183,16 @@ func createStatus(
 	rampPercentage *float32,
 ) (workerStopFuncs []func()) {
 	if prevVersion.Deployment != nil && prevVersion.Deployment.FieldPath == "create" {
-		deploymentName := k8s.ComputeWorkerDeploymentName(newTWD)
+		workerDeploymentName := k8s.ComputeWorkerDeploymentName(newTWD)
 		v := &worker.WorkerDeploymentVersion{
-			DeploymentName: deploymentName,
+			DeploymentName: workerDeploymentName,
 			BuildId:        prevVersion.BuildID,
 		}
 		prevTWD := recreateTWD(newTWD, env.ExistingDeploymentImages[v.BuildId], env.ExistingDeploymentReplicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
 		waitForDeployment(t, env.K8sClient, expectedDeploymentName, prevTWD.Namespace, 30*time.Second)
-		if prevVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
-			workerStopFuncs = applyDeployment(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
-		}
+		workerStopFuncs = applyDeployment(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
 
 		switch prevVersion.Status {
 		case temporaliov1alpha1.VersionStatusInactive, temporaliov1alpha1.VersionStatusNotRegistered:
@@ -176,6 +206,9 @@ func createStatus(
 			// TODO(carlydf): start a workflow on v that does not complete -> will never drain
 			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, "", 0)
 		case temporaliov1alpha1.VersionStatusDrained:
+			if env.ExistingDeploymentReplicas[v.BuildId] == 0 {
+				startAndStopWorker(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
+			}
 			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId)
 			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, "")
 		}
