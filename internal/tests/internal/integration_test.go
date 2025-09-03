@@ -9,6 +9,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -211,9 +212,9 @@ func TestIntegration(t *testing.T) {
 			WithWaitTime(5*time.Second).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-					WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-					WithCurrentVersion("v4", true, false).
-					WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+								WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+								WithCurrentVersion("v4", true, false).
+								WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 						testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 						testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 						testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
@@ -239,12 +240,15 @@ func TestIntegration(t *testing.T) {
 							WithCurrentVersion("v0", true, true),
 					),
 			).
+			WithExistingDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+			).
 			WithWaitTime(5 * time.Second).
 			WithSetupFunction(setUnversionedCurrent).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
 					WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
-					WithCurrentVersion("", false, false).
+					WithCurrentVersion(worker_versioning.UnversionedVersionId, false, false).
 					WithDeprecatedVersions(testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true)),
 			).
 			WithExpectedDeployments(
