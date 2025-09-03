@@ -242,10 +242,20 @@ type DeprecatedWorkerDeploymentVersion struct {
 type DefaultVersionUpdateStrategy string
 
 const (
+	// UpdateManual scales worker resources up or down, but does not update the current or ramping worker deployment version.
 	UpdateManual DefaultVersionUpdateStrategy = "Manual"
 
+	// UpdateAllAtOnce starts 100% of new workflow executions on the new worker deployment version as soon as it's healthy.
 	UpdateAllAtOnce DefaultVersionUpdateStrategy = "AllAtOnce"
 
+	// UpdateProgressive ramps up the percentage of new workflow executions targeting the new worker deployment version over time.
+	//
+	// Note: If the Current Version of a Worker Deployment is nil and the controller cannot confirm that all Task Queues
+	// in the Target Version have at least one unversioned poller, the controller will immediately set the new worker
+	// deployment version to be Current and ignore the Progressive rollout steps.
+	// Sending a percentage of traffic to a "nil" version means that traffic will be sent to unversioned workers. If
+	// there are no unversioned workers, those tasks will get stuck. This behavior ensures that all traffic on the task
+	// queues in this worker deployment can be handled by an active poller.
 	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
 )
 
@@ -257,16 +267,9 @@ type GateWorkflowConfig struct {
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
 	// Valid values are:
-	// - "Manual": scale worker resources up or down, but do not update the current or ramping worker deployment version;
-	// - "AllAtOnce": start 100% of new workflow executions on the new worker deployment version as soon as it's healthy;
-	// - "Progressive": ramp up the percentage of new workflow executions targeting the new worker deployment version over time;
-	//
-	// Note: If the Current Version of a Worker Deployment is nil and the controller cannot confirm that all Task Queues
-	// in the Target Version have at least one unversioned poller, the controller will ignore any Progressive Rollout
-	// Steps and immediately set the new worker deployment version to be Current.
-	// Sending a percentage of traffic to a "nil" version means that traffic will be sent to unversioned workers. If
-	// there are no unversioned workers, those tasks will get stuck. This behavior ensures that all traffic on the task
-	// queues in this worker deployment can be handled by an active poller.
+	// - "Manual"
+	// - "AllAtOnce"
+	// - "Progressive"
 	Strategy DefaultVersionUpdateStrategy `json:"strategy"`
 
 	// Gate specifies a workflow type that must run once to completion on the new worker deployment version before
