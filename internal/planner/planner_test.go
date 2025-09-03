@@ -211,14 +211,14 @@ func TestGeneratePlan(t *testing.T) {
 			expectConfigRampPercent: func() *float32 { f := float32(0); return &f }(), // Should reset ramp to 0
 		},
 		{
-			name: "should not create deployment when version limit is reached",
+			name: "should not create deployment when version limit (ineligible for deletion) is reached",
 			k8sState: &k8s.DeploymentState{
 				Deployments:       map[string]*appsv1.Deployment{},
 				DeploymentsByTime: []*appsv1.Deployment{},
 				DeploymentRefs:    map[string]*corev1.ObjectReference{},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				VersionCount: 5,
+				VersionCountIneligibleForDeletion: 5,
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -236,6 +236,34 @@ func TestGeneratePlan(t *testing.T) {
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			expectCreate: false,
+		},
+		{
+			name: "should create deployment when version limit (ineligible for deletion) is not reached",
+			k8sState: &k8s.DeploymentState{
+				Deployments:       map[string]*appsv1.Deployment{},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*corev1.ObjectReference{},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				VersionCountIneligibleForDeletion: 4,
+				VersionCount:                      5,
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+						Deployment: nil,
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				MaxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
+				Replicas:                         func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectCreate: true,
 		},
 		{
 			name: "update deployment when target version, with an existing deployment, has an expired connection spec hash",
@@ -760,9 +788,9 @@ func TestShouldCreateDeployment(t *testing.T) {
 			expectCreates: true,
 		},
 		{
-			name: "should not create when version limit is reached (default limit)",
+			name: "should not create when version limit ineligible for deletion is reached (default limit)",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				VersionCount: 75, // Default limit is 75
+				VersionCountIneligibleForDeletion: 75, // Default limit is 75
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -778,9 +806,9 @@ func TestShouldCreateDeployment(t *testing.T) {
 			expectCreates: false,
 		},
 		{
-			name: "should not create when version limit is reached (custom limit)",
+			name: "should not create when version limit ineligible for deletion is reached (custom limit)",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				VersionCount: 5,
+				VersionCountIneligibleForDeletion: 5,
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",

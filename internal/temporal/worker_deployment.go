@@ -142,19 +142,10 @@ func GetWorkerDeploymentState(
 			if err == nil {
 				drainedSince := versionResp.Info.DrainageInfo.LastChangedTime
 				versionInfo.DrainedSince = &drainedSince
-				// If the deployment has replicas, we assume there are versioned pollers, no need to check
+				// If the deployment exists and has replicas, we assume there are versioned pollers, no need to check
 				deployment, ok := k8sDeployments[version.Version.BuildId]
 				if !ok || deployment.Status.Replicas == 0 {
-					countHasNoVersionedPollers := 0
-					for _, tqInfo := range versionResp.Info.TaskQueuesInfos {
-						hasNoVersionedPollers, _ := HasNoVersionedPollers(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
-						if hasNoVersionedPollers {
-							countHasNoVersionedPollers++
-						}
-					}
-					if countHasNoVersionedPollers == len(versionResp.Info.TaskQueuesInfos) {
-						versionInfo.NoTaskQueuesHaveVersionedPoller = true
-					}
+					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, versionResp.Info.TaskQueuesInfos)
 				}
 			}
 		} else {
@@ -167,16 +158,7 @@ func GetWorkerDeploymentState(
 					BuildID: version.Version.BuildId,
 				})
 				if err == nil {
-					countHasUnversionedPoller := 0
-					for _, tqInfo := range versionResp.Info.TaskQueuesInfos {
-						hasUnversionedPoller, _ := HasUnversionedPoller(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
-						if hasUnversionedPoller {
-							countHasUnversionedPoller++
-						}
-					}
-					if countHasUnversionedPoller == len(versionResp.Info.TaskQueuesInfos) {
-						versionInfo.AllTaskQueuesHaveUnversionedPoller = true
-					}
+					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, versionResp.Info.TaskQueuesInfos)
 				}
 			}
 
@@ -340,4 +322,34 @@ func getPollers(ctx context.Context,
 		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
 	}
 	return resp.GetPollers(), nil
+}
+
+func noTaskQueuesHaveVersionedPollers(
+	ctx context.Context,
+	client temporalClient.Client,
+	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
+) bool {
+	countHasNoVersionedPollers := 0
+	for _, tqInfo := range tqs {
+		hasNoVersionedPollers, _ := HasNoVersionedPollers(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
+		if hasNoVersionedPollers {
+			countHasNoVersionedPollers++
+		}
+	}
+	return countHasNoVersionedPollers == len(tqs)
+}
+
+func allTaskQueuesHaveUnversionedPoller(
+	ctx context.Context,
+	client temporalClient.Client,
+	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
+) bool {
+	countHasUnversionedPoller := 0
+	for _, tqInfo := range tqs {
+		hasUnversionedPoller, _ := HasUnversionedPoller(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
+		if hasUnversionedPoller {
+			countHasUnversionedPoller++
+		}
+	}
+	return countHasUnversionedPoller == len(tqs)
 }
