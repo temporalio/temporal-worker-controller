@@ -86,6 +86,8 @@ func GeneratePlan(
 	// Determine version config changes
 	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
 
+	// Only remove the IgnoreLastModifier metadata after it's been used to make a version config change, which will
+	// make the controller the LastModifier again
 	if temporalState.IgnoreLastModifier && plan.VersionConfig != nil {
 		if temporalState.RampingBuildID != "" {
 			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.RampingBuildID)
