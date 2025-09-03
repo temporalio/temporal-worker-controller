@@ -74,6 +74,12 @@ func (b *TemporalWorkerDeploymentBuilder) WithReplicas(replicas int32) *Temporal
 	return b
 }
 
+// WithMaxVersionsIneligibleForDeletion sets the max number of versions ineligible for deletion
+func (b *TemporalWorkerDeploymentBuilder) WithMaxVersionsIneligibleForDeletion(n int32) *TemporalWorkerDeploymentBuilder {
+	b.twd.Spec.MaxVersionsIneligibleForDeletion = &n
+	return b
+}
+
 // WithTargetTemplate sets the template of the worker deployment to a pod spec with the given image name, thus defining the target version.
 func (b *TemporalWorkerDeploymentBuilder) WithTargetTemplate(imageName string) *TemporalWorkerDeploymentBuilder {
 	b.twd.Spec.Template = MakePodSpecWithImage(imageName)

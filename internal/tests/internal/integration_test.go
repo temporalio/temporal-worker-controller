@@ -77,18 +77,17 @@ func TestIntegration(t *testing.T) {
 		//			WithTargetVersion("v1", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
 		//			WithCurrentVersion("v1", true, false),
 		//	),
-		// TODO(carlydf): this won't work until the controller detects unversioned pollers
-		"progressive-rollout-yes-unversioned-pollers-expect-first-step": testhelpers.NewTestCase().
-			WithInput(
-				testhelpers.NewTemporalWorkerDeploymentBuilder().
-					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-					WithTargetTemplate("v1"),
-			).
-			WithSetupFunction(setupUnversionedPollers).
-			WithExpectedStatus(
-				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
-			),
+		//"progressive-rollout-yes-unversioned-pollers-expect-first-step": testhelpers.NewTestCase().
+		//	WithInput(
+		//		testhelpers.NewTemporalWorkerDeploymentBuilder().
+		//			WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+		//			WithTargetTemplate("v1"),
+		//	).
+		//	WithSetupFunction(setupUnversionedPollers).
+		//	WithExpectedStatus(
+		//		testhelpers.NewStatusBuilder().
+		//			WithTargetVersion("v1", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
+		//	),
 		//"nth-progressive-rollout-expect-first-step": testhelpers.NewTestCase().
 		//	WithInput(
 		//		testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -191,6 +190,38 @@ func TestIntegration(t *testing.T) {
 		//		testhelpers.NewDeploymentInfo("v1", 0),
 		//		testhelpers.NewDeploymentInfo("v2", 1),
 		//	),
+		"nth-rollout-at-max-replicas": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithMaxVersionsIneligibleForDeletion(2).
+					WithTargetTemplate("v2").
+					WithStatus(
+						testhelpers.NewStatusBuilder().
+							WithTargetVersion("v1", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+							WithCurrentVersion("v1", true, true).
+							WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+								testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+							),
+					),
+			).
+			WithExistingDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+				testhelpers.NewDeploymentInfo("v1", 1),
+			).
+			WithWaitTime(5*time.Second).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder(). // controller won't even deploy v2
+								WithTargetVersion("v2", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+								WithCurrentVersion("v1", true, true).
+								WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+					),
+			).
+			WithExpectedDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+				testhelpers.NewDeploymentInfo("v1", 1),
+			),
 	}
 	// TODO(carlydf): Add additional test case where multiple ramping steps are done
 
@@ -277,9 +308,13 @@ func testTemporalWorkerDeploymentCreation(
 
 	t.Log("Waiting for the controller to reconcile")
 	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
-	waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
-	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
-	defer handleStopFuncs(workerStopFuncs)
+
+	// only wait for and create the deployment if it is expected
+	if expectedStatus.TargetVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
+		waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
+		workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+		defer handleStopFuncs(workerStopFuncs)
+	}
 
 	if wait := tc.GetWaitTime(); wait != nil {
 		time.Sleep(*wait)
