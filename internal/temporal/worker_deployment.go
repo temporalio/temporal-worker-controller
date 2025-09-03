@@ -96,7 +96,7 @@ func GetWorkerDeploymentState(
 				return nil, err
 			}
 		}
-		if !state.IgnoreLastModifier && // if someone has a non-nil Current Version, but set the metadata in their Ramping Version instead, still count it
+		if !state.IgnoreLastModifier && // if someone has a non-nil Current Version, but only set the metadata in their Ramping Version, also count that
 			routingConfig.RampingVersion != nil {
 			state.IgnoreLastModifier, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
 			if err != nil {

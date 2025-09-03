@@ -33,6 +33,8 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 		VersionConflictToken: m.temporalState.VersionConflictToken,
 	}
 
+	status.LastModifierIdentity = m.temporalState.LastModifierIdentity
+
 	// Get build IDs directly from temporal state
 	currentBuildID := m.temporalState.CurrentBuildID
 	rampingBuildID := m.temporalState.RampingBuildID

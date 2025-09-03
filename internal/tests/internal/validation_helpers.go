@@ -332,7 +332,7 @@ func validateDeprecatedVersion(ctx context.Context, env testhelpers.TestEnv, exp
 	// status
 	if expectedDV.Status != actualDV.Status {
 		return fmt.Errorf("expected status of deprecated build '%s' to be '%v', got '%v'",
-			expectedDV.BuildID, expectedDV.Status, expectedDV.Status)
+			expectedDV.BuildID, expectedDV.Status, actualDV.Status)
 	}
 	// deployment
 	if expectedDV.Deployment == nil {

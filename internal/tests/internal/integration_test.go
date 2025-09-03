@@ -191,6 +191,54 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewDeploymentInfo("v1", 0),
 				testhelpers.NewDeploymentInfo("v2", 1),
 			),
+		"nth-rollout-blocked-by-modifier": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithTargetTemplate("v1").
+					WithStatus(
+						testhelpers.NewStatusBuilder().
+							WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+							WithCurrentVersion("v0", true, true),
+					),
+			).
+			WithExistingDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+			).
+			WithWaitTime(5 * time.Second).
+			WithSetupFunction(setUnversionedCurrent).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
+					WithCurrentVersion("", false, false).
+					WithDeprecatedVersions(testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true)),
+			).
+			WithExpectedDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+			),
+		"nth-rollout-unblocked-by-modifier-with-ignore": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithTargetTemplate("v1").
+					WithStatus(
+						testhelpers.NewStatusBuilder().
+							WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+							WithCurrentVersion("v0", true, true),
+					),
+			).
+			WithExistingDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+			).
+			WithSetupFunction(setCurrentAndSetIgnoreModifierMetadata).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+					WithDeprecatedVersions(testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true)),
+			).
+			WithExpectedDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+			),
 	}
 	// TODO(carlydf): Add additional test case where multiple ramping steps are done
 
@@ -265,6 +313,11 @@ func testTemporalWorkerDeploymentCreation(
 
 	// verify that temporal state matches the preliminary status, to confirm that makePreliminaryStatusTrue worked
 	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, twd.Status, 30*time.Second, 5*time.Second)
+
+	// apply post-status setup function
+	if f := tc.GetSetupFunc(); f != nil {
+		tc.GetSetupFunc()(t, ctx, tc, env)
+	}
 
 	t.Log("Creating a TemporalWorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
