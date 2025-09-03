@@ -154,11 +154,19 @@ func GetWorkerDeploymentState(
 			if version.Version.BuildId == targetBuildId &&
 				routingConfig.CurrentVersion == nil &&
 				strategy == temporaliov1alpha1.UpdateProgressive {
-				versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-					BuildID: version.Version.BuildId,
-				})
+				var desc temporalClient.WorkerDeploymentVersionDescription
+				for i := 0; i < 5; i++ { // at first, version is found in DeploymentInfo.VersionSummaries but not ready for describe, so we have to try again
+					desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+						BuildID: version.Version.BuildId,
+					})
+					if err == nil {
+						break
+					}
+					time.Sleep(2 * time.Second)
+				}
+
 				if err == nil {
-					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, versionResp.Info.TaskQueuesInfos)
+					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
 				}
 			}
 

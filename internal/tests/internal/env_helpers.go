@@ -190,14 +190,18 @@ func cleanupTestNamespace(t *testing.T, cfg *rest.Config, k8sClient client.Clien
 	}
 }
 
-func setupUnversionedPoller(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+func setupUnversionedPollers(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 	w, _, err := testhelpers.NewWorker(ctx, "", "", tc.GetTWD().Name, env.Ts.GetFrontendHostPort(), env.Ts.GetDefaultNamespace(), false)
+	if err != nil {
+		t.Errorf("failed to setup worker: %v", err)
+	}
 
 	// Register a dummy workflow and activity so the worker has something to poll for
 	w.RegisterWorkflowWithOptions(func(ctx workflow.Context) (string, error) { return "hi", nil }, workflow.RegisterOptions{Name: "dummyWorkflow"})
 	w.RegisterActivity(func(ctx context.Context) (string, error) { return "hi", nil })
 
 	err = w.Start()
+	t.Log("started unversioned worker")
 	if err != nil {
 		t.Errorf("error starting unversioned worker %v", err)
 	}
@@ -224,6 +228,7 @@ func setupUnversionedPoller(t *testing.T, ctx context.Context, tc testhelpers.Te
 		}
 		return nil
 	})
+	t.Logf("confirmed that task queue %v has unversioned workflow and activity pollers", tc.GetTWD().Name)
 }
 
 func hasUnversionedPoller(ctx context.Context,

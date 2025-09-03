@@ -387,13 +387,14 @@ func getVersionConfigDiff(
 	// If there is no current version and presence of unversioned pollers is not confirmed for all
 	// target version task queues, set the target version as the current version right away.
 	if status.CurrentVersion == nil &&
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusInactive &&
 		!temporalState.Versions[status.TargetVersion.BuildID].AllTaskQueuesHaveUnversionedPoller {
 		vcfg.SetCurrent = true
 		return vcfg
 	}
 
 	// If the current version is the target version
-	if status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
 		// Reset ramp if needed, this would happen if a ramp has been rolled back before completing
 		if temporalState.RampingBuildID != "" {
 			vcfg.BuildID = ""
