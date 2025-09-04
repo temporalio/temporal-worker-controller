@@ -5,91 +5,32 @@
 package controller
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"os"
-	"strings"
-	"time"
+	"strconv"
 
-	"github.com/go-logr/logr"
-	"go.temporal.io/api/serviceerror"
-	sdkclient "go.temporal.io/sdk/client"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 )
 
 const (
-	controllerIdentityKey     = "temporal.io/controller"
-	controllerVersionKey      = "temporal.io/controller-version"
-	defaultControllerIdentity = "temporal-worker-controller"
+	controllerIdentityMetadataKey = "temporal.io/controller"
+	controllerVersionMetadataKey  = "temporal.io/controller-version"
+
+	controllerVersionEnvKey                                    = "CONTROLLER_VERSION"
+	controllerIdentityEnvKey                                   = "CONTROLLER_IDENTITY"
+	ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 )
 
-// TODO(carlydf): Cache describe success for versions that already exist
-// awaitVersionRegistration should be called after a poller starts polling with config of this version, since that is
-// what will register the version with the server. SetRamp and SetCurrent will fail if the version does not exist.
-func awaitVersionRegistration(
-	ctx context.Context,
-	l logr.Logger,
-	deploymentHandler sdkclient.WorkerDeploymentHandle,
-	namespace, versionID string) error {
-	ticker := time.NewTicker(1 * time.Second)
-	for {
-		l.Info(fmt.Sprintf("checking if version %s exists", versionID))
-		select {
-		case <-ctx.Done():
-			return context.Canceled
-		case <-ticker.C:
-			_, err := deploymentHandler.DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{
-				Version: versionID,
-			})
-			var notFoundErr *serviceerror.NotFound
-			if err != nil {
-				if errors.As(err, &notFoundErr) {
-					continue
-				} else {
-					return fmt.Errorf("unable to describe worker deployment version %s: %w", versionID, err)
-				}
-			}
-			// After the version exists, confirm that it also exists in the worker deployment
-			// TODO(carlydf): Remove this check after next Temporal Cloud version which solves this inconsistency
-			return awaitVersionRegistrationInDeployment(ctx, l, deploymentHandler, namespace, versionID)
-		}
-	}
-}
+// Version is set by goreleaser via ldflags at build time
+var Version = "unknown"
 
-func awaitVersionRegistrationInDeployment(
-	ctx context.Context,
-	l logr.Logger,
-	deploymentHandler sdkclient.WorkerDeploymentHandle,
-	namespace, versionID string) error {
-	deploymentName, _, _ := strings.Cut(versionID, ".")
-	ticker := time.NewTicker(1 * time.Second)
-	for {
-		l.Info(fmt.Sprintf("checking if version %s exists in worker deployment", versionID))
-		select {
-		case <-ctx.Done():
-			return context.Canceled
-		case <-ticker.C:
-			resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
-			var notFoundErr *serviceerror.NotFound
-			if err != nil {
-				if errors.As(err, &notFoundErr) {
-					continue
-				} else {
-					return fmt.Errorf("unable to describe worker deployment %s: %w", deploymentName, err)
-				}
-			}
-			for _, vs := range resp.Info.VersionSummaries {
-				if vs.Version == versionID {
-					return nil
-				}
-			}
-		}
-	}
-}
-
-// getControllerVersion returns the version from environment variable (set by Helm from image.tag)
+// getControllerVersion returns the version, preferring build-time injection over environment variable
 func getControllerVersion() string {
-	if version := os.Getenv("CONTROLLER_VERSION"); version != "" {
+	// First check if version was injected at build time
+	if Version != "" && Version != "unknown" {
+		return Version
+	}
+	// Fall back to environment variable (set by Helm from image.tag)
+	if version := os.Getenv(controllerVersionEnvKey); version != "" {
 		return version
 	}
 	return "unknown"
@@ -97,8 +38,18 @@ func getControllerVersion() string {
 
 // getControllerIdentity returns the identity from environment variable (set by Helm)
 func getControllerIdentity() string {
-	if identity := os.Getenv("CONTROLLER_IDENTITY"); identity != "" {
+	if identity := os.Getenv(controllerIdentityEnvKey); identity != "" {
 		return identity
 	}
-	return defaultControllerIdentity
+	return defaults.ControllerIdentity
+}
+
+func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
+	if maxStr := os.Getenv(ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey); maxStr != "" {
+		i, err := strconv.Atoi(maxStr)
+		if err == nil {
+			return int32(i)
+		}
+	}
+	return defaults.MaxVersionsIneligibleForDeletion
 }

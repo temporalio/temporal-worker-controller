@@ -3,7 +3,7 @@
 > ⚠️ This project is 100% experimental. Please do not attempt to install the controller in any production and/or shared environment.
 
 The goal of the Temporal Worker Controller is to make it easy to run workers on Kubernetes while leveraging
-[Worker Versioning](https://docs.temporal.io/workers#worker-versioning).
+[Worker Deployments](https://docs.temporal.io/production-deployment/worker-deployments).
 
 ## Why
 
@@ -33,9 +33,9 @@ Temporal APIs to update the routing config of Temporal Worker Deployments to rou
 ## Terminology
 Note that in Temporal, **Worker Deployment** is sometimes referred to as **Deployment**, but since the controller makes
 significant references to Kubernetes Deployment resource, within this repository we will stick to these terms:
-- **Worker Deployment Version**: A version of a deployment or service. It can have multiple Workers, but they all run the same build. Sometimes shortened to "version" or "deployment version."
-- **Worker Deployment**: A deployment or service across multiple versions. In a rainbow deploy, a worker deployment can have multiple active deployment versions running at once.
-- **Deployment**: A Kubernetes Deployment resource. A Deployment is "versioned" if it is running versioned Temporal workers/pollers.
+- **Worker Deployment Version**: A version of a deployment or service that runs [Temporal Workers](https://docs.temporal.io/workers). It can have multiple Workers, but they all run the same build. Sometimes shortened to "version" or "deployment version."
+- **Worker Deployment**: A deployment or service across multiple deployment versions. In a rainbow deploy, a Worker Deployment can have multiple active Deployment Versions running at once.
+- **Deployment**: A [Kubernetes Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) resource. A Deployment is "versioned" if it is running versioned Temporal workers/pollers.
 
 ## Features
 
@@ -45,30 +45,24 @@ significant references to Kubernetes Deployment resource, within this repository
 - [x] `Manual`, `AllAtOnce`, and `Progressive` rollouts of new versions
 - [x] Ability to specify a "gate" workflow that must succeed on the new version before routing real traffic to that version
 - [ ] Autoscaling of versioned Deployments
-- [ ] Canary analysis of new worker versions
-- [ ] Optional cancellation after timeout for workflows on old versions
-- [ ] Passing `ContinueAsNew` signal to workflows on old versions
-
 
 ## Usage
 
 In order to be compatible with this controller, workers need to be configured using these standard environment
 variables:
 
-- `TEMPORAL_HOST_PORT`: The host and port of the Temporal server, e.g. `default.foo.tmprl.cloud:7233`
+- `TEMPORAL_ADDRESS`: The host and port of the Temporal server, e.g. `default.foo.tmprl.cloud:7233`
 - `TEMPORAL_NAMESPACE`: The Temporal namespace to connect to, e.g. `default`
 - `TEMPORAL_DEPLOYMENT_NAME`: The name of the worker deployment. This must be unique to the worker deployment and should not
   change between versions.
-- `WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
+- `TEMPORAL_WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
 
 Each of these will be automatically set by the controller, and must not be manually specified in the worker's pod template.
 
 ## How It Works
 
-Note: These sequence diagrams have not been fully converted to versioning v0.31 terminology.
-
-Every `TemporalWorkerDeployment` resource manages one or more standard `Deployment` resources. Each deployment manages pods
-which in turn poll Temporal for tasks routed to their respective versions.
+Every `TemporalWorkerDeployment` resource manages one or more standard `Deployment` resources. Each Deployment manages pods
+which in turn poll Temporal for tasks routed to their respective worker versions.
 
 ```mermaid
 flowchart TD
@@ -76,7 +70,7 @@ flowchart TD
       twd[TemporalWorkerDeployment 'foo']
       
       subgraph "Current/default version"
-        d5["Deployment foo-v5 (Version foo/ns.v5)"]
+        d5["Deployment foo-v5, Version{DeploymentName: foo/ns, BuildId: v5}"]
         rs5["ReplicaSet foo-v5"]
         p5a["Pod foo-v5-a"]
         p5b["Pod foo-v5-b"]
@@ -88,7 +82,7 @@ flowchart TD
       end
 
       subgraph "Deprecated versions"
-        d1["Deployment foo-v1 (Version foo/ns.v1)"]
+        d1["Deployment foo-v1 Version{DeploymentName: foo/ns, BuildId: v1}"]
         rs1["ReplicaSet foo-v1"]
         p1a["Pod foo-v1-a"]
         p1b["Pod foo-v1-b"]
@@ -104,12 +98,12 @@ flowchart TD
     twd --> dN
     twd --> d5
 
-    p1a -. "poll version foo/ns.v1" .-> server
-    p1b -. "poll version foo/ns.v1" .-> server
+    p1a -. "poll version {foo/ns, v1}" .-> server
+    p1b -. "poll version {foo/ns, v1}" .-> server
 
-    p5a -. "poll version foo/ns.v5" .-> server
-    p5b -. "poll version foo/ns.v5" .-> server
-    p5c -. "poll version foo/ns.v5" .-> server
+    p5a -. "poll version {foo/ns, v5}" .-> server
+    p5b -. "poll version {foo/ns, v5}" .-> server
+    p5c -. "poll version {foo/ns, v5}" .-> server
 
     server["Temporal Server"]
 ```
@@ -117,15 +111,15 @@ flowchart TD
 ### Worker Lifecycle
 
 When a new worker deployment version is deployed, the worker controller detects it and automatically begins the process
-of making that version the new **current** (aka default) version of the worker deployment it is a part of. This could happen
-immediately if `cutover.strategy = AllAtOnce`, or gradually if `cutover.strategy = Progressive`.
+of making that version the new **Current Version** of the worker deployment it is a part of. This could happen
+immediately if `rollout.strategy = AllAtOnce`, or gradually if `rollout.strategy = Progressive`.
 
-As older pinned workflows finish executing and deprecated deployment versions become drained, the worker controller also
-frees up resources by sunsetting the `Deployment` resources polling those versions.
+As older pinned workflows finish executing and deprecated deployment versions become **Drained**, the worker controller
+frees up resources by sunsetting the `Deployment` resources running workers that poll those versions.
 
 Here is an example of a progressive cut-over strategy gated on the success of the `HelloWorld` workflow:
 ```yaml
-  cutover:
+  rollout:
     strategy: Progressive
     steps:
       - rampPercentage: 1
@@ -147,14 +141,14 @@ sequenceDiagram
     Dev->>K8s: Create TemporalWorkerDeployment "foo" (v1)
     K8s-->>Ctl: Notify TemporalWorkerDeployment "foo" created
     Ctl->>K8s: Create Deployment "foo-v1"
-    Ctl->>T: Register "foo/ns.v1" as new current version of "foo/ns"
+    Ctl->>T: Register build "v1" as new current version of "foo/ns"
     Dev->>K8s: Update TemporalWorker "foo" (v2)
     K8s-->>Ctl: Notify TemporalWorker "foo" updated
     Ctl->>K8s: Create Deployment "foo-v2"
-    Ctl->>T: Register "foo/ns.v2" as new current version of "foo/ns"
+    Ctl->>T: Register build "v2" as new current version of "foo/ns"
     
     loop Poll Temporal API
-        Ctl-->>T: Wait for "foo/ns.v1" to be drained (no open pinned wfs)
+        Ctl-->>T: Wait for version {foo/ns, v1} to be drained (no open pinned wfs)
     end
     
     Ctl->>K8s: Delete Deployment "foo-v1"
@@ -166,9 +160,9 @@ This project is in very early stages; as such external code contributions are no
 
 Bug reports and feature requests are welcome! Please [file an issue](https://github.com/jlegrone/worker-controller/issues/new).
 
-You may also reach out to `@jlegrone` on the [Temporal Slack](https://t.mp/slack) if you have questions, suggestions, or are
-interested in making other contributions.
+You may also reach out to [#safe-deploys](https://temporalio.slack.com/archives/C07MDJ6S3HP) or @jlegrone on the 
+[Temporal Slack](https://t.mp/slack) if you have questions, suggestions, or are interested in making other contributions.
 
 ## Development
 
-For local development setup and running the controller locally, see the [development guide](internal/README.md).
+For local development setup and running the controller locally, see the [local demo guide](internal/demo/README.md).

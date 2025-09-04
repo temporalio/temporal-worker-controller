@@ -1,0 +1,73 @@
+version: 2
+
+before:
+  hooks:
+    - go mod download
+
+announce:
+  skip: true
+
+changelog:
+  disable: true
+
+release:
+  disable: true
+
+builds:
+  - id: nix
+    dir: cmd
+    binary: temporal-worker-controller
+    ldflags:
+      - -s -w -X github.com/temporalio/temporal-worker-controller/internal/controller.Version={{.Version}}
+    goarch:
+      - amd64
+      - arm64
+    goos:
+      - linux
+    env:
+      - CGO_ENABLED=0
+
+checksum:
+  disable: true
+
+# Only build Docker images with 'main' tag
+dockers:
+  - image_templates:
+      - "temporalio/temporal-worker-controller:main-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - --platform=linux/amd64
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.description=Temporal Worker Controller for Kubernetes
+      - --label=org.opencontainers.image.url=https://github.com/temporalio/temporal-worker-controller
+      - --label=org.opencontainers.image.source=https://github.com/temporalio/temporal-worker-controller
+      - --label=org.opencontainers.image.version=main
+      - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses=MIT
+    extra_files:
+      - LICENSE
+
+  - image_templates:
+      - "temporalio/temporal-worker-controller:main-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - --platform=linux/arm64
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.description=Temporal Worker Controller for Kubernetes
+      - --label=org.opencontainers.image.url=https://github.com/temporalio/temporal-worker-controller
+      - --label=org.opencontainers.image.source=https://github.com/temporalio/temporal-worker-controller
+      - --label=org.opencontainers.image.version=main
+      - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses=MIT
+    extra_files:
+      - LICENSE
+
+docker_manifests:
+  - name_template: "temporalio/temporal-worker-controller:main"
+    image_templates:
+      - "temporalio/temporal-worker-controller:main-amd64"
+      - "temporalio/temporal-worker-controller:main-arm64"

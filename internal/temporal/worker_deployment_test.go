@@ -5,58 +5,63 @@
 package temporal
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/api/enums/v1"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	enumspb "go.temporal.io/api/enums/v1"
+	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/worker"
+	"go.temporal.io/server/temporaltest"
 )
 
 func TestMapWorkflowStatus(t *testing.T) {
 	tests := []struct {
 		name           string
-		status         enums.WorkflowExecutionStatus
+		status         enumspb.WorkflowExecutionStatus
 		expectedStatus temporaliov1alpha1.WorkflowExecutionStatus
 	}{
 		{
 			name:           "running",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_RUNNING,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusRunning,
 		},
 		{
 			name:           "continued as new",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusRunning,
 		},
 		{
 			name:           "completed",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusCompleted,
 		},
 		{
 			name:           "failed",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_FAILED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_FAILED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusFailed,
 		},
 		{
 			name:           "canceled",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_CANCELED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusCanceled,
 		},
 		{
 			name:           "terminated",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_TERMINATED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusTerminated,
 		},
 		{
 			name:           "timed out",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusTimedOut,
 		},
 		{
 			name:           "unspecified",
-			status:         enums.WORKFLOW_EXECUTION_STATUS_UNSPECIFIED,
+			status:         enumspb.WORKFLOW_EXECUTION_STATUS_UNSPECIFIED,
 			expectedStatus: temporaliov1alpha1.WorkflowExecutionStatusRunning,
 		},
 	}
@@ -73,30 +78,91 @@ func TestGetTestWorkflowID(t *testing.T) {
 	tests := []struct {
 		name           string
 		deploymentName string
+		buildID        string
 		taskQueue      string
-		versionID      string
 		expected       string
 	}{
 		{
 			name:           "basic test",
 			deploymentName: "worker",
+			buildID:        "v1",
 			taskQueue:      "queue1",
-			versionID:      "worker.v1",
-			expected:       "test-worker-queue1-worker.v1",
+			expected:       "test-worker:v1-queue1",
 		},
 		{
 			name:           "with dots",
 			deploymentName: "worker.app",
+			buildID:        "v2",
 			taskQueue:      "queue.main",
-			versionID:      "worker.app.v2",
-			expected:       "test-worker.app-queue.main-worker.app.v2",
+			expected:       "test-worker.app:v2-queue.main",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := getTestWorkflowID(tt.deploymentName, tt.taskQueue, tt.versionID)
+			id := GetTestWorkflowID(tt.deploymentName, tt.buildID, tt.taskQueue)
 			assert.Equal(t, tt.expected, id)
 		})
+	}
+}
+
+func TestGetIgnoreLastModifier(t *testing.T) {
+	ctx := context.Background()
+	deploymentName := "test-dep"
+	buildId := "v1"
+	tq := "test-tq"
+
+	ts := temporaltest.NewServer(temporaltest.WithT(t))
+
+	// create version
+	w, stopFunc, err := testhelpers.NewWorker(ctx, deploymentName, buildId, tq, ts.GetFrontendHostPort(), ts.GetDefaultNamespace(), true)
+	if err != nil {
+		t.Error(err)
+	}
+	if err = w.Start(); err != nil {
+		t.Errorf("error starting unversioned worker %v", err)
+	}
+	defer stopFunc()
+
+	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(deploymentName)
+
+	eventually(t, 5*time.Second, 100*time.Millisecond, func() error {
+		_, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
+			Version: worker.WorkerDeploymentVersion{
+				DeploymentName: deploymentName,
+				BuildId:        buildId,
+			},
+			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
+				UpsertEntries: map[string]interface{}{
+					IgnoreLastModifierKey: "true",
+				},
+			},
+		})
+		return err
+	})
+
+	shouldIgnore, err := getShouldIgnoreLastModifier(ctx, deploymentHandler, buildId)
+	if err != nil {
+		t.Error(err)
+	}
+	if !shouldIgnore {
+		t.Error("expected true, got false")
+	}
+
+}
+
+func eventually(t *testing.T, timeout, interval time.Duration, check func() error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		err := check()
+		if err == nil {
+			return // Success!
+		}
+		lastErr = err
+		time.Sleep(interval)
+	}
+	if lastErr != nil {
+		t.Fatalf("eventually failed after %s: %v", timeout, lastErr)
 	}
 }

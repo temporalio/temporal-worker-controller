@@ -2,26 +2,35 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package k8s
+package k8s_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"go.temporal.io/sdk/contrib/envconfig"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 )
 
 func TestIsDeploymentHealthy(t *testing.T) {
@@ -38,7 +47,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:               appsv1.DeploymentAvailable,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastTransitionTime: metav1.NewTime(time.Now()),
 						},
 					},
@@ -54,7 +63,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 					Conditions: []appsv1.DeploymentCondition{
 						{
 							Type:   appsv1.DeploymentAvailable,
-							Status: v1.ConditionFalse,
+							Status: corev1.ConditionFalse,
 						},
 					},
 				},
@@ -76,7 +85,7 @@ func TestIsDeploymentHealthy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			healthy, healthySince := IsDeploymentHealthy(tt.deployment)
+			healthy, healthySince := k8s.IsDeploymentHealthy(tt.deployment)
 			assert.Equal(t, tt.expectedHealthy, healthy)
 			if tt.expectedTimeNil {
 				assert.Nil(t, healthySince)
@@ -109,7 +118,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v1",
 			Namespace: "default",
 			Labels: map[string]string{
-				BuildIDLabel: "v1",
+				k8s.BuildIDLabel: "v1",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
@@ -129,7 +138,7 @@ func TestGetDeploymentState(t *testing.T) {
 			Name:      "worker-v2",
 			Namespace: "default",
 			Labels: map[string]string{
-				BuildIDLabel: "v2",
+				k8s.BuildIDLabel: "v2",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			OwnerReferences: []metav1.OwnerReference{
@@ -164,13 +173,13 @@ func TestGetDeploymentState(t *testing.T) {
 	// Create scheme and fake client with field indexer
 	scheme := runtime.NewScheme()
 	_ = appsv1.AddToScheme(scheme)
-	_ = v1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
 	_ = temporaliov1alpha1.AddToScheme(scheme)
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(owner, deploy1, deploy2, deployWithoutLabel).
-		WithIndex(&appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
+		WithIndex(&appsv1.Deployment{}, k8s.DeployOwnerKey, func(rawObj client.Object) []string {
 			deploy := rawObj.(*appsv1.Deployment)
 			owner := metav1.GetControllerOf(deploy)
 			if owner == nil {
@@ -184,7 +193,7 @@ func TestGetDeploymentState(t *testing.T) {
 		Build()
 
 	// Test the GetDeploymentState function
-	state, err := GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
+	state, err := k8s.GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
 	require.NoError(t, err)
 
 	// Verify the state is constructed correctly
@@ -194,16 +203,16 @@ func TestGetDeploymentState(t *testing.T) {
 	assert.Equal(t, 2, len(state.DeploymentRefs))
 
 	// Verify the content of the maps
-	assert.Equal(t, "worker-v1", state.Deployments["test-worker.v1"].Name)
-	assert.Equal(t, "worker-v2", state.Deployments["test-worker.v2"].Name)
+	assert.Equal(t, "worker-v1", state.Deployments["v1"].Name)
+	assert.Equal(t, "worker-v2", state.Deployments["v2"].Name)
 
 	// Verify the deployments are sorted by creation time (oldest first)
 	assert.Equal(t, "worker-v1", state.DeploymentsByTime[0].Name)
 	assert.Equal(t, "worker-v2", state.DeploymentsByTime[1].Name)
 
 	// Verify refs are correctly created
-	assert.Equal(t, "worker-v1", state.DeploymentRefs["test-worker.v1"].Name)
-	assert.Equal(t, "worker-v2", state.DeploymentRefs["test-worker.v2"].Name)
+	assert.Equal(t, "worker-v1", state.DeploymentRefs["v1"].Name)
+	assert.Equal(t, "worker-v2", state.DeploymentRefs["v2"].Name)
 }
 
 func TestGenerateBuildID(t *testing.T) {
@@ -219,14 +228,14 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same image different pod specs",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod1 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "1"})
-				pod2 := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, map[string]string{"pod": "2"})
+				pod1 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "1"}, "")
+				pod2 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "2"}, "")
 
-				twd1 := testhelpers.MakeTWD(1, pod1, nil, nil, nil)
-				twd2 := testhelpers.MakeTWD(1, pod2, nil, nil, nil)
+				twd1 := testhelpers.MakeTWD("", "", 1, pod1, nil, nil, nil)
+				twd2 := testhelpers.MakeTWD("", "", 1, pod2, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my-test-image",
+			expectedPrefix:  "my.test-image",
 			expectedHashLen: 4,
 			expectEquality:  false, // should be different
 		},
@@ -234,20 +243,19 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "same pod specs different TWD spec",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
-				pod := testhelpers.MakePodSpec([]v1.Container{{Image: img}}, nil)
-
-				twd1 := testhelpers.MakeTWD(1, pod, nil, nil, nil)
-				twd2 := testhelpers.MakeTWD(2, pod, nil, nil, nil)
+				pod := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, nil, "")
+				twd1 := testhelpers.MakeTWD("", "", 1, pod, nil, nil, nil)
+				twd2 := testhelpers.MakeTWD("", "", 2, pod, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my-test-image",
+			expectedPrefix:  "my.test-image",
 			expectedHashLen: 4,
 			expectEquality:  true, // should be the same
 		},
 		{
 			name: "no containers",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
-				twd := testhelpers.MakeTWD(1, testhelpers.MakePodSpec(nil, nil), nil, nil, nil)
+				twd := testhelpers.MakeTWD("", "", 1, testhelpers.MakePodSpec(nil, nil, ""), nil, nil, nil)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",
@@ -257,7 +265,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "empty image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
-				twd := testhelpers.MakeTWDWithImage("")
+				twd := testhelpers.MakeTWDWithImage("", "", "")
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",
@@ -268,7 +276,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "tagged digest image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				taggedDigestImg := "docker.io/library/busybox:latest@sha256:" + digest
-				twd := testhelpers.MakeTWDWithImage(taggedDigestImg)
+				twd := testhelpers.MakeTWDWithImage("", "", taggedDigestImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "latest",
@@ -279,7 +287,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "tagged named image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				taggedNamedImg := "docker.io/library/busybox:latest"
-				twd := testhelpers.MakeTWDWithImage(taggedNamedImg)
+				twd := testhelpers.MakeTWDWithImage("", "", taggedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "latest",
@@ -290,10 +298,10 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "digested image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				digestedImg := "docker.io@sha256:" + digest
-				twd := testhelpers.MakeTWDWithImage(digestedImg)
+				twd := testhelpers.MakeTWDWithImage("", "", digestedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -301,10 +309,10 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "digested named image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				digestedNamedImg := "docker.io/library/busybo@sha256:" + digest
-				twd := testhelpers.MakeTWDWithImage(digestedNamedImg)
+				twd := testhelpers.MakeTWDWithImage("", "", digestedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:maxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -312,7 +320,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "named image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				namedImg := "docker.io/library/busybox"
-				twd := testhelpers.MakeTWDWithImage(namedImg)
+				twd := testhelpers.MakeTWDWithImage("", "", namedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "library-busybox",
@@ -323,10 +331,10 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "illegal chars image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				illegalCharsImg := "this.is.my_weird/image"
-				twd := testhelpers.MakeTWDWithImage(illegalCharsImg)
+				twd := testhelpers.MakeTWDWithImage("", "", illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  "this-is-my-weird-image",
+			expectedPrefix:  "this.is.my-weird-image",
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -334,10 +342,10 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "long image",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				longImg := "ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage" // 101 chars
-				twd := testhelpers.MakeTWDWithImage(longImg)
+				twd := testhelpers.MakeTWDWithImage("", "", longImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  cleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:maxBuildIdLen-5], -1),
+			expectedPrefix:  k8s.CleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIdLen-5], -1),
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -349,11 +357,11 @@ func TestGenerateBuildID(t *testing.T) {
 
 			var build1, build2 string
 			if twd1 != nil {
-				build1 = ComputeBuildID(twd1)
+				build1 = k8s.ComputeBuildID(twd1)
 				verifyBuildId(t, build1, tt.expectedPrefix, tt.expectedHashLen)
 			}
 			if twd2 != nil {
-				build2 = ComputeBuildID(twd2)
+				build2 = k8s.ComputeBuildID(twd2)
 				verifyBuildId(t, build2, tt.expectedPrefix, tt.expectedHashLen)
 			}
 
@@ -369,8 +377,434 @@ func TestGenerateBuildID(t *testing.T) {
 
 func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen int) {
 	assert.Truef(t, strings.HasPrefix(build, expectedPrefix), "expected prefix %s in build %s", expectedPrefix, build)
-	assert.LessOrEqual(t, len(build), maxBuildIdLen)
-	assert.Equalf(t, cleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
-	split := strings.Split(build, k8sResourceNameSeparator)
+	assert.LessOrEqual(t, len(build), k8s.MaxBuildIdLen)
+	assert.Equalf(t, k8s.CleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
+	split := strings.Split(build, k8s.K8sResourceNameSeparator)
 	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
+}
+
+func TestComputeVersionedDeploymentName(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseName     string
+		buildID      string
+		expectedName string
+	}{
+		{
+			name:         "simple base and build ID",
+			baseName:     "worker-name.default",
+			buildID:      "abc123",
+			expectedName: "worker-name.default-abc123",
+		},
+		{
+			name:         "build ID with dots/dashes",
+			baseName:     "worker-name.production",
+			buildID:      "image-v2.1.0-a1b2c3d4",
+			expectedName: "worker-name.production-image-v2.1.0-a1b2c3d4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := k8s.ComputeVersionedDeploymentName(tt.baseName, tt.buildID)
+			assert.Equal(t, tt.expectedName, result)
+
+			// Verify the format is always baseName-buildID
+			expectedSeparator := tt.baseName + "-" + tt.buildID
+			assert.Equal(t, expectedSeparator, result)
+
+			// Verify it ends with the build ID
+			assert.True(t, strings.HasSuffix(result, "-"+tt.buildID),
+				"versioned deployment name should end with '-buildID'")
+
+			// Verify it starts with the base name
+			assert.True(t, strings.HasPrefix(result, tt.baseName),
+				"versioned deployment name should start with baseName")
+		})
+	}
+}
+
+func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T) {
+	// Integration test showing the naming pipeline from TemporalWorkerDeployment to final K8s Deployment name
+	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "hello-world",
+			Namespace: "demo",
+		},
+		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Image: "temporal/hello-world:v1.0.0",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Test the full pipeline: TemporalWorkerDeployment -> worker deployment name -> versioned deployment name
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(twd)
+	buildID := k8s.ComputeBuildID(twd)
+	versionedName := k8s.ComputeVersionedDeploymentName(workerDeploymentName, buildID)
+
+	// Verify the expected formats
+	assert.Equal(t, "demo"+k8s.WorkerDeploymentNameSeparator+"hello-world", workerDeploymentName)
+	assert.True(t, strings.HasPrefix(versionedName, "demo"+k8s.WorkerDeploymentNameSeparator+"hello-world-"))
+	assert.True(t, strings.Contains(versionedName, "v1.0.0"), "versioned name should contain cleaned image tag")
+}
+
+// TestNewDeploymentWithPodAnnotations tests that every new pod created has a connection spec hash annotation
+func TestNewDeploymentWithPodAnnotations(t *testing.T) {
+	connection := temporaliov1alpha1.TemporalConnectionSpec{
+		HostPort:        "localhost:7233",
+		MutualTLSSecret: "my-secret",
+	}
+
+	deployment := k8s.NewDeploymentWithOwnerRef(
+		&metav1.TypeMeta{},
+		&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		&temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+		"test-deployment",
+		"build123",
+		connection,
+	)
+
+	expectedHash := k8s.ComputeConnectionSpecHash(connection)
+	actualHash := deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation]
+
+	assert.Equal(t, expectedHash, actualHash, "Deployment should have correct connection spec hash annotation")
+}
+
+func TestComputeConnectionSpecHash(t *testing.T) {
+	t.Run("generates non-empty hash for valid connection spec", func(t *testing.T) {
+		spec := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "my-tls-secret",
+		}
+
+		result := k8s.ComputeConnectionSpecHash(spec)
+		assert.NotEmpty(t, result, "Hash should not be empty for valid spec")
+		assert.Len(t, result, 64, "SHA256 hash should be 64 characters") // hex encoded SHA256
+	})
+
+	t.Run("returns empty hash when hostport is empty", func(t *testing.T) {
+		spec := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "",
+			MutualTLSSecret: "secret",
+		}
+
+		result := k8s.ComputeConnectionSpecHash(spec)
+		assert.Empty(t, result, "Hash should be empty when hostport is empty")
+	})
+
+	t.Run("is deterministic - same input produces same hash", func(t *testing.T) {
+		spec := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "my-secret",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec)
+		hash2 := k8s.ComputeConnectionSpecHash(spec)
+
+		assert.Equal(t, hash1, hash2, "Same input should produce identical hashes")
+	})
+
+	t.Run("different hostports produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "same-secret",
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "different-host:7233",
+			MutualTLSSecret: "same-secret",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different hostports should produce different hashes")
+	})
+
+	t.Run("different mTLS secrets produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "secret1",
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "secret2",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different mTLS secrets should produce different hashes")
+	})
+
+	t.Run("empty mTLS secret vs non-empty produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "",
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:        "localhost:7233",
+			MutualTLSSecret: "some-secret",
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty mTLS secret should produce different hashes")
+		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty mTLS secret")
+	})
+}
+
+func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) {
+	tests := map[string]struct {
+		connection        temporaliov1alpha1.TemporalConnectionSpec
+		expectedEnvVars   map[string]string
+		unexpectedEnvVars []string
+	}{
+		"without mTLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort: "localhost:7233",
+			},
+			expectedEnvVars: map[string]string{
+				"TEMPORAL_ADDRESS":         "localhost:7233",
+				"TEMPORAL_NAMESPACE":       "test-namespace",
+				"TEMPORAL_DEPLOYMENT_NAME": "test-deployment",
+				"TEMPORAL_WORKER_BUILD_ID": "test-build-id",
+			},
+			unexpectedEnvVars: []string{"TEMPORAL_TLS", "TEMPORAL_TLS_CLIENT_KEY_PATH", "TEMPORAL_TLS_CLIENT_CERT_PATH"},
+		},
+		"with mTLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "mtls.localhost:7233",
+				MutualTLSSecret: "my-tls-secret",
+			},
+			expectedEnvVars: map[string]string{
+				"TEMPORAL_ADDRESS":              "mtls.localhost:7233",
+				"TEMPORAL_NAMESPACE":            "test-namespace",
+				"TEMPORAL_DEPLOYMENT_NAME":      "test-deployment",
+				"TEMPORAL_WORKER_BUILD_ID":      "test-build-id",
+				"TEMPORAL_TLS":                  "true",
+				"TEMPORAL_TLS_CLIENT_KEY_PATH":  "/etc/temporal/tls/tls.key",
+				"TEMPORAL_TLS_CLIENT_CERT_PATH": "/etc/temporal/tls/tls.crt",
+			},
+			unexpectedEnvVars: []string{},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "worker",
+								Image: "temporal/worker:latest",
+							},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+				},
+			}
+
+			deployment := k8s.NewDeploymentWithOwnerRef(
+				&metav1.TypeMeta{},
+				&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				spec,
+				"test-deployment",
+				"test-build-id",
+				tt.connection,
+			)
+
+			// Verify expected environment variables are present
+			container := deployment.Spec.Template.Spec.Containers[0]
+			envMap := make(map[string]string)
+			for _, env := range container.Env {
+				envMap[env.Name] = env.Value
+			}
+
+			for expectedKey, expectedValue := range tt.expectedEnvVars {
+				actualValue, exists := envMap[expectedKey]
+				assert.True(t, exists, "Environment variable %s should be present", expectedKey)
+				assert.Equal(t, expectedValue, actualValue, "Environment variable %s should have correct value", expectedKey)
+			}
+
+			// Verify unexpected environment variables are not present
+			for _, unexpectedKey := range tt.unexpectedEnvVars {
+				value, exists := envMap[unexpectedKey]
+				assert.False(t, exists, "Environment variable %s should not be present, but found value: %s", unexpectedKey, value)
+			}
+
+			// For mTLS case, verify volume mounts and volumes are configured
+			if tt.connection.MutualTLSSecret != "" {
+				assert.Len(t, container.VolumeMounts, 1)
+				assert.Equal(t, "temporal-tls", container.VolumeMounts[0].Name)
+				assert.Equal(t, "/etc/temporal/tls", container.VolumeMounts[0].MountPath)
+
+				assert.Len(t, deployment.Spec.Template.Spec.Volumes, 1)
+				assert.Equal(t, "temporal-tls", deployment.Spec.Template.Spec.Volumes[0].Name)
+				assert.Equal(t, tt.connection.MutualTLSSecret, deployment.Spec.Template.Spec.Volumes[0].VolumeSource.Secret.SecretName)
+			}
+		})
+	}
+}
+
+// createTestCerts generates a self-signed certificate and private key for testing purposes.
+// WARNING: This uses a lighter-weight 1024-bit RSA key for faster test execution.
+// DO NOT copy this for production use - use 2048-bit or higher keys for security.
+func createTestCerts(t *testing.T) (certPath, keyPath string) {
+	t.Helper()
+
+	// Create temp directory for certificate files
+	tempDir := t.TempDir()
+	certPath = filepath.Join(tempDir, "client.pem")
+	keyPath = filepath.Join(tempDir, "client.key")
+
+	// Generate a self-signed certificate for testing (using 2048-bit for security)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "test",
+		},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(time.Hour),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+
+	// Write certificate file directly
+	certFile, err := os.Create(certPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, certFile.Close()) })
+	require.NoError(t, pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+
+	// Write private key file directly
+	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	keyFile, err := os.Create(keyPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, keyFile.Close()) })
+	require.NoError(t, pem.Encode(keyFile, &pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+
+	return certPath, keyPath
+}
+
+func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
+	// Test that the environment variables injected by the controller
+	// can be parsed by the official Temporal SDK envconfig package
+	tests := map[string]struct {
+		connection temporaliov1alpha1.TemporalConnectionSpec
+		namespace  string
+	}{
+		"without TLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort: "test.temporal.example:9999",
+			},
+			namespace: "test-namespace-no-tls",
+		},
+		"with TLS": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:        "mtls.temporal.example:8888",
+				MutualTLSSecret: "test-tls-secret",
+			},
+			namespace: "test-namespace-with-tls",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "worker",
+								Image: "temporal/worker:latest",
+							},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: tt.namespace,
+				},
+			}
+
+			deployment := k8s.NewDeploymentWithOwnerRef(
+				&metav1.TypeMeta{},
+				&metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				spec,
+				"test-deployment",
+				"test-build-id",
+				tt.connection,
+			)
+
+			// Extract environment variables from the deployment
+			container := deployment.Spec.Template.Spec.Containers[0]
+
+			// Infer whether TLS is expected from connection spec
+			expectTLS := tt.connection.MutualTLSSecret != ""
+
+			if expectTLS {
+				// Create temporary test certificate files
+				certPath, keyPath := createTestCerts(t)
+
+				// First assert that certificate paths match expected volume mount paths.
+				// Then override the paths in the spec since we have to use a temp dir in tests.
+				for i := range container.Env {
+					if container.Env[i].Name == "TEMPORAL_TLS_CLIENT_CERT_PATH" {
+						assert.Equal(t, "/etc/temporal/tls/tls.crt", container.Env[i].Value, "Certificate path should match volume mount")
+						container.Env[i].Value = certPath
+					}
+					if container.Env[i].Name == "TEMPORAL_TLS_CLIENT_KEY_PATH" {
+						assert.Equal(t, "/etc/temporal/tls/tls.key", container.Env[i].Value, "Key path should match volume mount")
+						container.Env[i].Value = keyPath
+					}
+				}
+			}
+
+			// Set environment variables using t.Setenv() to simulate the runtime environment
+			for _, env := range container.Env {
+				t.Setenv(env.Name, env.Value)
+			}
+
+			// Use the envconfig package to load client options for TLS case
+			clientOptions, err := envconfig.LoadDefaultClientOptions()
+			require.NoError(t, err, "envconfig should successfully parse environment variables")
+
+			// Verify that the parsed client options match our expectations
+			assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
+			assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+
+			// Verify other client option fields that should have default/empty values
+			assert.Empty(t, clientOptions.Identity, "Identity should be empty when not set via env vars")
+			assert.Nil(t, clientOptions.Logger, "Logger should be nil when not set")
+			assert.Nil(t, clientOptions.MetricsHandler, "MetricsHandler should be nil when not set")
+			assert.Empty(t, clientOptions.Interceptors, "Interceptors should be empty when not set")
+
+			if expectTLS {
+				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
+			} else {
+				assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
+			}
+
+			// Note: TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID are not part of client options
+			// but are used by the worker for versioning - they should still be available as env vars
+			assert.Equal(t, "test-deployment", os.Getenv("TEMPORAL_DEPLOYMENT_NAME"), "TEMPORAL_DEPLOYMENT_NAME should be set")
+			assert.Equal(t, "test-build-id", os.Getenv("TEMPORAL_WORKER_BUILD_ID"), "TEMPORAL_WORKER_BUILD_ID should be set")
+		})
+	}
 }

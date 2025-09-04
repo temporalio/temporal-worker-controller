@@ -6,50 +6,36 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-logr/logr"
-	temporalClient "go.temporal.io/sdk/client"
-	ctrl "sigs.k8s.io/controller-runtime"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	temporalclient "go.temporal.io/sdk/client"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
-
-const controllerIdentity = "temporal-worker-controller"
 
 func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	ctx context.Context,
 	l logr.Logger,
-	temporalClient temporalClient.Client,
+	temporalClient temporalclient.Client,
 	req ctrl.Request,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
 	temporalState *temporal.TemporalWorkerState,
+	k8sState *k8s.DeploymentState,
 ) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
-	targetVersionID := k8s.ComputeVersionID(workerDeploy)
-
-	// Fetch Kubernetes deployment state
-	k8sState, err := k8s.GetDeploymentState(
-		ctx,
-		r.Client,
-		req.Namespace,
-		req.Name,
-		workerDeploymentName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get Kubernetes deployment state: %w", err)
-	}
+	targetBuildID := k8s.ComputeBuildID(workerDeploy)
 
 	// Fetch test workflow status for the desired version
-	if targetVersionID != temporalState.CurrentVersionID {
+	if targetBuildID != temporalState.CurrentBuildID {
 		testWorkflows, err := temporal.GetTestWorkflowStatus(
 			ctx,
 			temporalClient,
 			workerDeploymentName,
-			targetVersionID,
+			targetBuildID,
 			workerDeploy,
+			temporalState,
 		)
 		if err != nil {
 			l.Error(err, "error getting test workflow status")
@@ -57,14 +43,16 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 		}
 
 		// Add test workflow status to version info if it doesn't exist
-		if versionInfo, exists := temporalState.Versions[targetVersionID]; exists {
+		if versionInfo, exists := temporalState.Versions[targetBuildID]; exists {
 			versionInfo.TestWorkflows = append(versionInfo.TestWorkflows, testWorkflows...)
 		}
 	}
 
+	// Target build ID already computed above
+
 	// Use the state mapper to convert state objects to CRD status
-	stateMapper := newStateMapper(k8sState, temporalState)
-	status := stateMapper.mapToStatus(targetVersionID)
+	stateMapper := newStateMapper(k8sState, temporalState, workerDeploymentName)
+	status := stateMapper.mapToStatus(targetBuildID)
 
 	return status, nil
 }

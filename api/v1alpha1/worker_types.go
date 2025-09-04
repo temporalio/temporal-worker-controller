@@ -5,7 +5,7 @@
 package v1alpha1
 
 import (
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -37,7 +37,7 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
-	Template v1.PodTemplateSpec `json:"template"`
+	Template corev1.PodTemplateSpec `json:"template"`
 
 	// Minimum number of seconds for which a newly created pod should be ready
 	// without any of its container crashing, for it to be considered available.
@@ -52,26 +52,14 @@ type TemporalWorkerDeploymentSpec struct {
 	// not be estimated during the time a deployment is paused. Defaults to 600s.
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
 
-	// How to cut over new workflow executions to the target version.
-	RolloutStrategy RolloutStrategy `json:"cutover"`
+	// How to rollout new workflow executions to the target version.
+	RolloutStrategy RolloutStrategy `json:"rollout"`
 
 	// How to manage sunsetting drained versions.
 	SunsetStrategy SunsetStrategy `json:"sunset"`
 
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
-
-	// MaxVersions defines the maximum number of worker deployment versions allowed.
-	// This helps prevent hitting Temporal's default limit of 100 versions per deployment.
-	// Defaults to 75. Users can override this by explicitly setting a higher value in
-	// the CRD, but should exercise caution: once the server's version limit is reached,
-	// Temporal attempts to delete an eligible version. If no version is eligible for deletion,
-	// new deployments get blocked which prevents the controller from making progress.
-	// This limit can be adjusted server-side by setting `matching.maxVersionsInDeployment`
-	// in dynamicconfig.
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	MaxVersions *int32 `json:"maxVersions,omitempty"`
 }
 
 // VersionStatus indicates the status of a version.
@@ -176,9 +164,8 @@ type TaskQueue struct {
 
 // BaseWorkerDeploymentVersion contains fields common to all worker deployment version types
 type BaseWorkerDeploymentVersion struct {
-	// The string representation of the deployment version.
-	// Currently, this is always `deployment_name.build_id`.
-	VersionID string `json:"versionID"`
+	// BuildID is the unique identifier for this version of the worker deployment.
+	BuildID string `json:"buildID"`
 
 	// Status indicates whether workers in this version may
 	// be eligible to receive tasks from the Temporal server.
@@ -190,7 +177,7 @@ type BaseWorkerDeploymentVersion struct {
 
 	// A pointer to the version's managed k8s deployment.
 	// +optional
-	Deployment *v1.ObjectReference `json:"deployment"`
+	Deployment *corev1.ObjectReference `json:"deployment"`
 
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
@@ -241,6 +228,12 @@ type DeprecatedWorkerDeploymentVersion struct {
 	// Only set when Status is VersionStatusDrained.
 	// +optional
 	DrainedSince *metav1.Time `json:"drainedSince"`
+
+	// A Version is eligible for deletion if it is drained and has no pollers on any task queue.
+	// After pollers stop polling, the server will still consider them present until `matching.PollerHistoryTTL`
+	// has passed.
+	// +optional
+	EligibleForDeletion bool `json:"eligibleForDeletion,omitempty"`
 }
 
 // DefaultVersionUpdateStrategy describes how to cut over new workflow executions
@@ -249,10 +242,20 @@ type DeprecatedWorkerDeploymentVersion struct {
 type DefaultVersionUpdateStrategy string
 
 const (
+	// UpdateManual scales worker resources up or down, but does not update the current or ramping worker deployment version.
 	UpdateManual DefaultVersionUpdateStrategy = "Manual"
 
+	// UpdateAllAtOnce starts 100% of new workflow executions on the new worker deployment version as soon as it's healthy.
 	UpdateAllAtOnce DefaultVersionUpdateStrategy = "AllAtOnce"
 
+	// UpdateProgressive ramps up the percentage of new workflow executions targeting the new worker deployment version over time.
+	//
+	// Note: If the Current Version of a Worker Deployment is nil and the controller cannot confirm that all Task Queues
+	// in the Target Version have at least one unversioned poller, the controller will immediately set the new worker
+	// deployment version to be Current and ignore the Progressive rollout steps.
+	// Sending a percentage of traffic to a "nil" version means that traffic will be sent to unversioned workers. If
+	// there are no unversioned workers, those tasks will get stuck. This behavior ensures that all traffic on the task
+	// queues in this worker deployment can be handled by an active poller.
 	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
 )
 
@@ -264,9 +267,9 @@ type GateWorkflowConfig struct {
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
 	// Valid values are:
-	// - "Manual": do not automatically update the default worker deployment version;
-	// - "AllAtOnce": start 100% of new workflow executions on the new worker deployment version as soon as it's healthy;
-	// - "Progressive": ramp up the percentage of new workflow executions targeting the new worker deployment version over time.
+	// - "Manual"
+	// - "AllAtOnce"
+	// - "Progressive"
 	Strategy DefaultVersionUpdateStrategy `json:"strategy"`
 
 	// Gate specifies a workflow type that must run once to completion on the new worker deployment version before
@@ -323,8 +326,8 @@ type QueueStatistics struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
-//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.versionID",description="Current Version for new workflows"
-//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.versionID",description="Version of the current worker template"
+//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current Version Build ID"
+//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Build ID of the target worker (based on the pod template)"
 //+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

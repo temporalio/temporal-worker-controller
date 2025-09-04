@@ -1,0 +1,113 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test-integration:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+        cache: true
+        
+    - name: Install Temporal CLI
+      run: |
+        curl -sSf https://temporal.download/cli.sh | sh
+        echo "$HOME/.temporalio/bin" >> "$GITHUB_PATH"
+        
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+        
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.14.3'
+        
+    - name: Install controller-gen
+      run: |
+        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.2
+        
+    - name: Install envtest
+      run: |
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run integration tests
+      run: make test-integration
+      
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: |
+          cover.out
+          bin/
+        retention-days: 7
+
+  unit-test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+        cache: true
+        
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run unit tests
+      run: make test-unit
+      
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results
+        path: |
+          cover.out
+          bin/
+        retention-days: 7 
+
+  go-vet:
+    name: Run Go Vet
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+        cache: true
+        
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run go vet
+      run: go vet ./...

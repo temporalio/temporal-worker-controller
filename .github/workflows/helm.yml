@@ -1,0 +1,102 @@
+name: Package and Publish Helm Chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Type of version bump to perform'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.TEMPORAL_CICD_APP_ID }}
+          private-key: ${{ secrets.TEMPORAL_CICD_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.12.0
+
+      - name: Bump Chart Version
+        id: bump_version
+        run: |
+          # Get current version from Chart.yaml
+          CURRENT_VERSION=$(grep 'version:' helm/temporal-worker-controller/Chart.yaml | awk '{print $2}')
+          echo "Current version: $CURRENT_VERSION"
+
+          # Split version into parts
+          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
+          MAJOR=${VERSION_PARTS[0]}
+          MINOR=${VERSION_PARTS[1]}
+          PATCH=${VERSION_PARTS[2]}
+
+          # Increment version based on input
+          if [[ "${{ inputs.version_bump }}" == "major" ]]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [[ "${{ inputs.version_bump }}" == "minor" ]]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "New version: $NEW_VERSION"
+
+          # Update Chart.yaml with new version
+          sed -i "s/version: $CURRENT_VERSION/version: $NEW_VERSION/g" helm/temporal-worker-controller/Chart.yaml
+
+          # Set output variable for use in later steps
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Commit the change
+          git add helm/temporal-worker-controller/Chart.yaml
+          git commit -m "Bump chart version to $NEW_VERSION [skip ci]"
+          git push
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PAT}}
+
+      - name: Package and Push Helm chart
+        run: |
+          # Use version from previous step
+          VERSION=${{ steps.bump_version.outputs.version }}
+          echo "Chart version: $VERSION"
+
+          # Package the chart
+          helm package ./helm/temporal-worker-controller
+
+          # Push to Docker Hub
+          helm push temporal-worker-controller-${VERSION}.tgz oci://docker.io/temporalio
+
+          echo "✅ Chart pushed successfully to oci://docker.io/temporalio/temporal-worker-controller:${VERSION}"

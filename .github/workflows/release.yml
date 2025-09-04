@@ -1,0 +1,137 @@
+name: release
+
+on:
+  workflow_dispatch:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.TEMPORAL_CICD_APP_ID }}
+          private-key: ${{ secrets.TEMPORAL_CICD_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        with:
+          go-version-file: "go.mod"
+          check-latest: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PAT}}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
+        with:
+          version: v2.11.2
+          args: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  helm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.TEMPORAL_CICD_APP_ID }}
+          private-key: ${{ secrets.TEMPORAL_CICD_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          echo ${{ steps.generate_token.outputs.token }} | gh auth login --with-token
+          gh auth status -a
+          git config --global user.name "temporal-cicd[bot]"
+          git config --global user.email "gh-action@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.12.0
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PAT}}
+
+      - name: Bump Helm Chart Version
+        id: bump_version
+        run: |
+          # Get current version from Chart.yaml
+          CURRENT_VERSION=$(grep 'version:' helm/temporal-worker-controller/Chart.yaml | awk '{print $2}')
+          echo "Current version: $CURRENT_VERSION"
+
+          # Split version into parts
+          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
+          MAJOR=${VERSION_PARTS[0]}
+          MINOR=${VERSION_PARTS[1]}
+          PATCH=${VERSION_PARTS[2]}
+
+          MINOR=$((MINOR + 1))
+          PATCH=0
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "New version: $NEW_VERSION"
+
+          # Update Chart.yaml with new version and appVersion
+          sed -i "s/version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller/Chart.yaml
+          sed -i "s/appVersion: .*/appVersion: ${GITHUB_REF_NAME#v}/" helm/temporal-worker-controller/Chart.yaml
+
+          # Set output variable for use in later steps
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Commit the change
+          git add helm/temporal-worker-controller/Chart.yaml
+          git commit -m "Bump chart version to $NEW_VERSION [skip ci]"
+          git push
+
+      - name: Package and Push Helm chart
+        run: |
+          # Use version from previous step
+          VERSION=${{ steps.bump_version.outputs.version }}
+          echo "Chart version: $VERSION"
+
+          # Package the chart
+          helm package ./helm/temporal-worker-controller
+
+          # Push to Docker Hub
+          helm push temporal-worker-controller-${VERSION}.tgz oci://docker.io/temporalio
+
+          echo "✅ Chart pushed successfully to oci://docker.io/temporalio/temporal-worker-controller:${VERSION}"

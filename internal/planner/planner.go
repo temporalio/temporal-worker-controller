@@ -8,32 +8,34 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Plan holds the actions to execute during reconciliation
 type Plan struct {
 	// Which actions to take
 	DeleteDeployments      []*appsv1.Deployment
-	ScaleDeployments       map[*v1.ObjectReference]uint32
+	ScaleDeployments       map[*corev1.ObjectReference]uint32
+	UpdateDeployments      []*appsv1.Deployment
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
+	// Build IDs of versions from which the controller should
+	// remove IgnoreLastModifierKey from the version metadata
+	RemoveIgnoreLastModifierBuilds []string
 }
 
 // VersionConfig defines version configuration for Temporal
 type VersionConfig struct {
 	// Token to use for conflict detection
 	ConflictToken []byte
-	// Version ID for which this config applies
-	VersionID string
+	// Build ID for the version
+	BuildID string
 
 	// One of RampPercentage OR SetCurrent must be set to a non-zero value.
 
@@ -47,7 +49,7 @@ type VersionConfig struct {
 type WorkflowConfig struct {
 	WorkflowType string
 	WorkflowID   string
-	VersionID    string
+	BuildID      string
 	TaskQueue    string
 }
 
@@ -64,27 +66,124 @@ func GeneratePlan(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
 	temporalState *temporal.TemporalWorkerState,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
 	config *Config,
+	workerDeploymentName string,
+	maxVersionsIneligibleForDeletion int32,
 ) (*Plan, error) {
 	plan := &Plan{
-		ScaleDeployments: make(map[*v1.ObjectReference]uint32),
+		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
 	}
 
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
-	plan.ShouldCreateDeployment = shouldCreateDeployment(status, spec)
+	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
+	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, connection)
 
 	// Determine if we need to start any test workflows
-	plan.TestWorkflows = getTestWorkflows(status, config)
+	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName)
 
 	// Determine version config changes
-	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config)
+	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
+
+	// Only remove the IgnoreLastModifier metadata after it's been used to make a version config change, which will
+	// make the controller the LastModifier again
+	if temporalState != nil && temporalState.IgnoreLastModifier && plan.VersionConfig != nil {
+		if temporalState.RampingBuildID != "" {
+			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.RampingBuildID)
+		}
+		if temporalState.CurrentBuildID != "" {
+			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.CurrentBuildID)
+		}
+	}
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
 	return plan, nil
+}
+
+// checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
+// out-of-date with respect to the provided TemporalConnectionSpec. If an update is required, it mutates
+// the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
+// the Deployment does not exist, it returns nil.
+func checkAndUpdateDeploymentConnectionSpec(
+	buildID string,
+	k8sState *k8s.DeploymentState,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[buildID]
+	if !exists {
+		return nil
+	}
+
+	// If the connection spec hash has changed, update the deployment
+	currentHash := k8s.ComputeConnectionSpecHash(connection)
+	if currentHash != existingDeployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
+
+		// Update the deployment in-place with new connection info
+		updateDeploymentWithConnection(existingDeployment, connection)
+		return existingDeployment // Return the modified deployment
+	}
+
+	return nil
+}
+
+// updateDeploymentWithConnection updates an existing deployment with new TemporalConnectionSpec
+func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection temporaliov1alpha1.TemporalConnectionSpec) {
+	// Update the connection spec hash annotation
+	deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
+
+	// Update secret volume if mTLS is enabled
+	if connection.MutualTLSSecret != "" {
+		for i, volume := range deployment.Spec.Template.Spec.Volumes {
+			if volume.Name == "temporal-tls" && volume.Secret != nil {
+				deployment.Spec.Template.Spec.Volumes[i].Secret.SecretName = connection.MutualTLSSecret
+				break
+			}
+		}
+	}
+
+	// Update any environment variables that reference the connection
+	for i, container := range deployment.Spec.Template.Spec.Containers {
+		for j, env := range container.Env {
+			if env.Name == "TEMPORAL_ADDRESS" {
+				deployment.Spec.Template.Spec.Containers[i].Env[j].Value = connection.HostPort
+			}
+		}
+	}
+}
+
+func getUpdateDeployments(
+	k8sState *k8s.DeploymentState,
+	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+) []*appsv1.Deployment {
+	var updateDeployments []*appsv1.Deployment
+
+	// Check target version deployment if it has an expired connection spec hash
+	if status.TargetVersion.BuildID != "" {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.BuildID, k8sState, connection); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+		}
+	}
+
+	// Check current version deployment if it has an expired connection spec hash
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID != "" {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.BuildID, k8sState, connection); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+		}
+	}
+
+	// Check deprecated versions for expired connection spec hashes
+	for _, version := range status.DeprecatedVersions {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(version.BuildID, k8sState, connection); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+		}
+	}
+
+	return updateDeployments
 }
 
 // getDeleteDeployments determines which deployments should be deleted
@@ -100,8 +199,8 @@ func getDeleteDeployments(
 			continue
 		}
 
-		// Look up the deployment
-		d, exists := k8sState.Deployments[version.VersionID]
+		// Look up the deployment using buildID
+		d, exists := k8sState.Deployments[version.BuildID]
 		if !exists {
 			continue
 		}
@@ -118,7 +217,7 @@ func getDeleteDeployments(
 		case temporaliov1alpha1.VersionStatusNotRegistered:
 			// NotRegistered versions are versions that the server doesn't know about.
 			// Only delete if it's not the target version.
-			if status.TargetVersion.VersionID != version.VersionID {
+			if status.TargetVersion.BuildID != version.BuildID {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}
@@ -132,14 +231,14 @@ func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
-) map[*v1.ObjectReference]uint32 {
-	scaleDeployments := make(map[*v1.ObjectReference]uint32)
+) map[*corev1.ObjectReference]uint32 {
+	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
 	replicas := *spec.Replicas
 
 	// Scale the current version if needed
 	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
 		ref := status.CurrentVersion.Deployment
-		if d, exists := k8sState.Deployments[status.CurrentVersion.VersionID]; exists {
+		if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
 			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 				scaleDeployments[ref] = uint32(replicas)
 			}
@@ -147,9 +246,9 @@ func getScaleDeployments(
 	}
 
 	// Scale the target version if it exists, and isn't current
-	if (status.CurrentVersion == nil || status.CurrentVersion.VersionID != status.TargetVersion.VersionID) &&
+	if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
 		status.TargetVersion.Deployment != nil {
-		if d, exists := k8sState.Deployments[status.TargetVersion.VersionID]; exists {
+		if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
 			if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
 				scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
 			}
@@ -162,16 +261,22 @@ func getScaleDeployments(
 			continue
 		}
 
-		d, exists := k8sState.Deployments[version.VersionID]
+		d, exists := k8sState.Deployments[version.BuildID]
 		if !exists {
 			continue
 		}
 
 		switch version.Status {
-		case temporaliov1alpha1.VersionStatusInactive,
-			temporaliov1alpha1.VersionStatusRamping,
-			temporaliov1alpha1.VersionStatusCurrent:
-			// TODO(carlydf): Consolidate scale up cases and verify that scale up is the correct action for inactive versions
+		case temporaliov1alpha1.VersionStatusInactive:
+			// Scale down inactive versions that are not the target
+			if status.TargetVersion.BuildID == version.BuildID {
+				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+					scaleDeployments[version.Deployment] = uint32(replicas)
+				}
+			} else if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
+				scaleDeployments[version.Deployment] = 0
+			}
+		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
 			// Scale up these deployments
 			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 				scaleDeployments[version.Deployment] = uint32(replicas)
@@ -193,20 +298,22 @@ func getScaleDeployments(
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	maxVersionsIneligibleForDeletion int32,
 ) bool {
 	// Check if target version already has a deployment
 	if status.TargetVersion.Deployment != nil {
 		return false
 	}
 
-	// Check if we're at the version limit
-	maxVersions := int32(75) // Default from defaults.MaxVersions
-	if spec.MaxVersions != nil {
-		maxVersions = *spec.MaxVersions
+	versionCountIneligibleForDeletion := int32(0)
+
+	for _, v := range status.DeprecatedVersions {
+		if !v.EligibleForDeletion {
+			versionCountIneligibleForDeletion++
+		}
 	}
 
-	if status.VersionCount >= maxVersions {
+	if versionCountIneligibleForDeletion >= maxVersionsIneligibleForDeletion {
 		return false
 	}
 
@@ -217,13 +324,16 @@ func shouldCreateDeployment(
 func getTestWorkflows(
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	config *Config,
+	workerDeploymentName string,
 ) []WorkflowConfig {
 	var testWorkflows []WorkflowConfig
 
-	// Skip if there's no gate workflow defined or if the target version is already the current
+	// Skip if there's no gate workflow defined, if the target version is already the current, or if the target
+	// version is not yet registered in temporal
 	if config.RolloutStrategy.Gate == nil ||
 		status.CurrentVersion == nil ||
-		status.CurrentVersion.VersionID == status.TargetVersion.VersionID {
+		status.CurrentVersion.BuildID == status.TargetVersion.BuildID ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
 		return nil
 	}
 
@@ -240,8 +350,8 @@ func getTestWorkflows(
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
 				WorkflowType: config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:   getTestWorkflowID(tq.Name, targetVersion.VersionID),
-				VersionID:    targetVersion.VersionID,
+				WorkflowID:   temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
+				BuildID:      targetVersion.BuildID,
 				TaskQueue:    tq.Name,
 			})
 		}
@@ -250,23 +360,24 @@ func getTestWorkflows(
 	return testWorkflows
 }
 
-// getTestWorkflowID generates an ID for a test workflow
-func getTestWorkflowID(taskQueue, versionID string) string {
-	return "test-" + versionID + "-" + taskQueue
-}
-
 // getVersionConfigDiff determines the version configuration based on the rollout strategy
 func getVersionConfigDiff(
 	l logr.Logger,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	temporalState *temporal.TemporalWorkerState,
 	config *Config,
+	workerDeploymentName string,
 ) *VersionConfig {
 	strategy := config.RolloutStrategy
 	conflictToken := status.VersionConflictToken
 
-	// Do nothing if target version's deployment is not healthy yet
-	if status.TargetVersion.HealthySince == nil {
+	if strategy.Strategy == temporaliov1alpha1.UpdateManual {
+		return nil
+	}
+
+	// Do nothing if target version's deployment is not healthy yet, or if the version is not yet registered in temporal
+	if status.TargetVersion.HealthySince == nil ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
 		return nil
 	}
 
@@ -287,20 +398,23 @@ func getVersionConfigDiff(
 
 	vcfg := &VersionConfig{
 		ConflictToken: conflictToken,
-		VersionID:     status.TargetVersion.VersionID,
+		BuildID:       status.TargetVersion.BuildID,
 	}
 
-	// If there is no current version, set the target version as the current version
-	if status.CurrentVersion == nil {
+	// If there is no current version and presence of unversioned pollers is not confirmed for all
+	// target version task queues, set the target version as the current version right away.
+	if status.CurrentVersion == nil &&
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusInactive &&
+		!temporalState.Versions[status.TargetVersion.BuildID].AllTaskQueuesHaveUnversionedPoller {
 		vcfg.SetCurrent = true
 		return vcfg
 	}
 
 	// If the current version is the target version
-	if status.CurrentVersion.VersionID == status.TargetVersion.VersionID {
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
 		// Reset ramp if needed, this would happen if a ramp has been rolled back before completing
-		if temporalState.RampingVersionID != "" {
-			vcfg.VersionID = ""
+		if temporalState.RampingBuildID != "" {
+			vcfg.BuildID = ""
 			vcfg.RampPercentage = 0
 			return vcfg
 		}
@@ -360,13 +474,15 @@ func handleProgressiveRollout(
 	}
 
 	// Move to the next step if it has been long enough since the last update
-	if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
-		if i < len(steps)-1 {
-			vcfg.RampPercentage = steps[i+1].RampPercentage
-			return vcfg
-		} else {
-			vcfg.SetCurrent = true
-			return vcfg
+	if rampLastModifiedAt != nil {
+		if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
+			if i < len(steps)-1 {
+				vcfg.RampPercentage = steps[i+1].RampPercentage
+				return vcfg
+			} else {
+				vcfg.SetCurrent = true
+				return vcfg
+			}
 		}
 	}
 

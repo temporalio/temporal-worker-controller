@@ -19,12 +19,12 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Current Version for new workflows
-      jsonPath: .status.currentVersion.versionID
+    - description: Current Version Build ID
+      jsonPath: .status.currentVersion.buildID
       name: Current
       type: string
-    - description: Version of the current worker template
-      jsonPath: .status.targetVersion.versionID
+    - description: Build ID of the target worker (based on the pod template)
+      jsonPath: .status.targetVersion.buildID
       name: Target
       type: string
     - description: Percentage of new workflows starting on Target Version
@@ -46,7 +46,16 @@ spec:
             type: object
           spec:
             properties:
-              cutover:
+              minReadySeconds:
+                format: int32
+                type: integer
+              progressDeadlineSeconds:
+                format: int32
+                type: integer
+              replicas:
+                format: int32
+                type: integer
+              rollout:
                 properties:
                   gate:
                     properties:
@@ -76,15 +85,6 @@ spec:
                 required:
                 - strategy
                 type: object
-              minReadySeconds:
-                format: int32
-                type: integer
-              progressDeadlineSeconds:
-                format: int32
-                type: integer
-              replicas:
-                format: int32
-                type: integer
               selector:
                 properties:
                   matchExpressions:
@@ -819,6 +819,8 @@ spec:
                                       - port
                                       type: object
                                   type: object
+                                stopSignal:
+                                  type: string
                               type: object
                             livenessProbe:
                               properties:
@@ -1529,6 +1531,8 @@ spec:
                                       - port
                                       type: object
                                   type: object
+                                stopSignal:
+                                  type: string
                               type: object
                             livenessProbe:
                               properties:
@@ -2253,6 +2257,8 @@ spec:
                                       - port
                                       type: object
                                   type: object
+                                stopSignal:
+                                  type: string
                               type: object
                             livenessProbe:
                               properties:
@@ -2757,6 +2763,39 @@ spec:
                         x-kubernetes-list-map-keys:
                         - name
                         x-kubernetes-list-type: map
+                      resources:
+                        properties:
+                          claims:
+                            items:
+                              properties:
+                                name:
+                                  type: string
+                                request:
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            type: object
+                        type: object
                       restartPolicy:
                         type: string
                       runtimeClassName:
@@ -2799,6 +2838,8 @@ spec:
                           runAsUser:
                             format: int64
                             type: integer
+                          seLinuxChangePolicy:
+                            type: string
                           seLinuxOptions:
                             properties:
                               level:
@@ -3756,7 +3797,7 @@ spec:
                 - temporalNamespace
                 type: object
             required:
-            - cutover
+            - rollout
             - sunset
             - template
             - workerOptions
@@ -3765,6 +3806,8 @@ spec:
             properties:
               currentVersion:
                 properties:
+                  buildID:
+                    type: string
                   deployment:
                     properties:
                       apiVersion:
@@ -3799,15 +3842,15 @@ spec:
                       - name
                       type: object
                     type: array
-                  versionID:
-                    type: string
                 required:
+                - buildID
                 - status
-                - versionID
                 type: object
               deprecatedVersions:
                 items:
                   properties:
+                    buildID:
+                      type: string
                     deployment:
                       properties:
                         apiVersion:
@@ -3829,6 +3872,8 @@ spec:
                     drainedSince:
                       format: date-time
                       type: string
+                    eligibleForDeletion:
+                      type: boolean
                     healthySince:
                       format: date-time
                       type: string
@@ -3845,17 +3890,17 @@ spec:
                         - name
                         type: object
                       type: array
-                    versionID:
-                      type: string
                   required:
+                  - buildID
                   - status
-                  - versionID
                   type: object
                 type: array
               lastModifierIdentity:
                 type: string
               targetVersion:
                 properties:
+                  buildID:
+                    type: string
                   deployment:
                     properties:
                       apiVersion:
@@ -3916,15 +3961,16 @@ spec:
                       - workflowID
                       type: object
                     type: array
-                  versionID:
-                    type: string
                 required:
+                - buildID
                 - status
-                - versionID
                 type: object
               versionConflictToken:
                 format: byte
                 type: string
+              versionCount:
+                format: int32
+                type: integer
             required:
             - targetVersion
             type: object

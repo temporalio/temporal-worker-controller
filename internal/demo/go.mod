@@ -8,10 +8,12 @@ require (
 	go.temporal.io/api v1.44.1
 	go.temporal.io/sdk v1.33.0
 	go.temporal.io/sdk/contrib/datadog v0.4.0
+	go.temporal.io/sdk/contrib/envconfig v0.1.0
 	go.temporal.io/sdk/contrib/tally v0.2.0
 )
 
 require (
+	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/DataDog/appsec-internal-go v1.9.0 // indirect
 	github.com/DataDog/datadog-agent/pkg/obfuscate v0.58.0 // indirect
 	github.com/DataDog/datadog-agent/pkg/proto v0.58.0 // indirect

@@ -1,8 +1,11 @@
 .idea
 
 bin
+dist
 
 secret.env
 certs
 
 .DS_Store
+
+.claude
