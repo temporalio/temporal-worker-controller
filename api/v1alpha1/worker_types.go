@@ -219,13 +219,14 @@ type TargetWorkerDeploymentVersion struct {
 	// +optional
 	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
 
-	// RampPercentage is the percentage of new workflow executions that are
-	// configured to start on this version. Only set when Status is VersionStatusRamping.
+	// RampPercentageBasisPoints is the percentage of new workflow executions that are
+	// configured to start on this version, expressed in basis points (1/100th of a percent).
+	// For example, 150 basis points = 1.5%. Only set when Status is VersionStatusRamping.
 	//
-	// Acceptable range is [0,100].
+	// Acceptable range is [0,10000] (0% to 100%).
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=100
-	RampPercentage *int32 `json:"rampPercentage,omitempty"`
+	// +kubebuilder:validation:Maximum=10000
+	RampPercentageBasisPoints *int32 `json:"rampPercentageBasisPoints,omitempty"`
 
 	// RampingSince is time when the version first started ramping.
 	// Only set when Status is VersionStatusRamping.
@@ -317,13 +318,14 @@ type SunsetStrategy struct {
 type AllAtOnceRolloutStrategy struct{}
 
 type RolloutStep struct {
-	// RampPercentage indicates what percentage of new workflow executions should be
-	// routed to the new worker deployment version while this step is active.
+	// RampPercentageBasisPoints indicates what percentage of new workflow executions should be
+	// routed to the new worker deployment version while this step is active, expressed in basis points (1/100th of a percent).
+	// For example, 150 basis points = 1.5%.
 	//
-	// Acceptable range is [0,100].
+	// Acceptable range is [0,10000] (0% to 100%).
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=100
-	RampPercentage int32 `json:"rampPercentage"`
+	// +kubebuilder:validation:Maximum=10000
+	RampPercentageBasisPoints int32 `json:"rampPercentageBasisPoints"`
 
 	// PauseDuration indicates how long to pause before progressing to the next step.
 	PauseDuration metav1.Duration `json:"pauseDuration"`
@@ -331,32 +333,12 @@ type RolloutStep struct {
 
 type ManualRolloutStrategy struct{}
 
-type QueueStatistics struct {
-	// The approximate number of tasks backlogged in this task queue. May count expired tasks but eventually converges
-	// to the right value.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=9007199254740991
-	ApproximateBacklogCount int64 `json:"approximateBacklogCount,omitempty"`
-	// Approximate age of the oldest task in the backlog based on the creation timestamp of the task at the head of the queue.
-	ApproximateBacklogAge metav1.Duration `json:"approximateBacklogAge,omitempty"`
-	// Approximate tasks per second added to the task queue based on activity within a fixed window. This includes both backlogged and
-	// sync-matched tasks. Rate is expressed as tasks per second multiplied by 1000 for millisecond precision.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=9007199254740991
-	TasksAddRateMillis int64 `json:"tasksAddRateMillis,omitempty"`
-	// Approximate tasks per second dispatched to workers based on activity within a fixed window. This includes both backlogged and
-	// sync-matched tasks. Rate is expressed as tasks per second multiplied by 1000 for millisecond precision.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=9007199254740991
-	TasksDispatchRateMillis int64 `json:"tasksDispatchRateMillis,omitempty"`
-}
-
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
 //+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current Version Build ID"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Build ID of the target worker (based on the pod template)"
-//+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
+//+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentageBasisPoints",description="Basis points of new workflows starting on Target Version (100 basis points = 1%)"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
