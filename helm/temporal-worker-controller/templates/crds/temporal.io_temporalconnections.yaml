@@ -11,10 +11,26 @@ spec:
     kind: TemporalConnection
     listKind: TemporalConnectionList
     plural: temporalconnections
+    shortNames:
+    - tc
+    - tconn
+    - temporalconn
     singular: temporalconnection
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: Temporal server host and port
+      jsonPath: .spec.hostPort
+      name: Host
+      type: string
+    - description: Connection readiness status
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -27,13 +43,62 @@ spec:
           spec:
             properties:
               hostPort:
+                pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
                 type: string
-              mutualTLSSecret:
-                type: string
+              mutualTLSSecretRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
             required:
             - hostPort
             type: object
           status:
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastConnectionTime:
+                format: date-time
+                type: string
+              serverVersion:
+                type: string
             type: object
         type: object
     served: true
