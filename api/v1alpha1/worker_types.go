@@ -20,7 +20,6 @@ type WorkerOptions struct {
 
 // TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment
 type TemporalWorkerDeploymentSpec struct {
-	// Important: Run "make" to regenerate code after modifying this file
 
 	// Number of desired pods. This is a pointer to distinguish between explicit
 	// zero and not specified. Defaults to 1.
@@ -58,7 +57,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// How to manage sunsetting drained versions.
 	SunsetStrategy SunsetStrategy `json:"sunset"`
 
-	// TODO(jlegrone): add godoc
+	// WorkerOptions configures the worker's connection to Temporal.
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
