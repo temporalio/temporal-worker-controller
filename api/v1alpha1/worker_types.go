@@ -127,6 +127,7 @@ type TemporalWorkerDeploymentStatus struct {
 	// VersionCount is the total number of versions currently known by the worker deployment.
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional
+	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
 
 	// Conditions represent the latest available observations of the deployment's current state.
@@ -319,6 +320,7 @@ type ManualRolloutStrategy struct{}
 type QueueStatistics struct {
 	// The approximate number of tasks backlogged in this task queue. May count expired tasks but eventually converges
 	// to the right value.
+	// +kubebuilder:validation:Minimum=0
 	ApproximateBacklogCount int64 `json:"approximateBacklogCount,omitempty"`
 	// Approximate age of the oldest task in the backlog based on the creation timestamp of the task at the head of the queue.
 	ApproximateBacklogAge metav1.Duration `json:"approximateBacklogAge,omitempty"`
