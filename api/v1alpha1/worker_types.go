@@ -340,11 +340,15 @@ type QueueStatistics struct {
 	// Approximate age of the oldest task in the backlog based on the creation timestamp of the task at the head of the queue.
 	ApproximateBacklogAge metav1.Duration `json:"approximateBacklogAge,omitempty"`
 	// Approximate tasks per second added to the task queue based on activity within a fixed window. This includes both backlogged and
-	// sync-matched tasks.
-	TasksAddRate float32 `json:"tasksAddRate,omitempty"`
+	// sync-matched tasks. Rate is expressed as tasks per second multiplied by 1000 for millisecond precision.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=9007199254740991
+	TasksAddRateMillis int64 `json:"tasksAddRateMillis,omitempty"`
 	// Approximate tasks per second dispatched to workers based on activity within a fixed window. This includes both backlogged and
-	// sync-matched tasks.
-	TasksDispatchRate float32 `json:"tasksDispatchRate,omitempty"`
+	// sync-matched tasks. Rate is expressed as tasks per second multiplied by 1000 for millisecond precision.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=9007199254740991
+	TasksDispatchRateMillis int64 `json:"tasksDispatchRateMillis,omitempty"`
 }
 
 //+kubebuilder:object:root=true
