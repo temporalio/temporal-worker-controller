@@ -13,8 +13,10 @@ import (
 
 type WorkerOptions struct {
 	// The name of a TemporalConnection in the same namespace as the TemporalWorkerDeployment.
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TemporalConnection string `json:"connection"`
 	// The Temporal namespace for the worker to connect to.
+	// +kubebuilder:validation:MinLength=1
 	TemporalNamespace string `json:"temporalNamespace"`
 }
 
