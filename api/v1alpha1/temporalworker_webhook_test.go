@@ -45,7 +45,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 				obj.Spec.RolloutStrategy.Steps = nil
 				return obj
 			}),
-			errorMsg: "spec.rollout.steps: Invalid value: []v1alpha1.RolloutStep(nil): steps are required for Progressive rollout",
+			errorMsg: "spec.rollout.steps: Invalid value: null: steps are required for Progressive rollout",
 		},
 		"ramp value for step <= previous step": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
