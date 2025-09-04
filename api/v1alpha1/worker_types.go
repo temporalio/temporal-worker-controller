@@ -129,6 +129,10 @@ type TemporalWorkerDeploymentStatus struct {
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional
 	VersionCount int32 `json:"versionCount,omitempty"`
+
+	// Conditions represent the latest available observations of the deployment's current state.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
