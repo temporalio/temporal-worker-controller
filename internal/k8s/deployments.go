@@ -217,7 +217,7 @@ func NewDeploymentWithOwnerRef(
 	}
 
 	// Add TLS config if mTLS is enabled
-	if connection.MutualTLSSecret != "" {
+	if connection.MutualTLSSecretRef != nil {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
@@ -243,7 +243,7 @@ func NewDeploymentWithOwnerRef(
 			Name: "temporal-tls",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName: connection.MutualTLSSecret,
+					SecretName: connection.MutualTLSSecretRef.Name,
 				},
 			},
 		})
@@ -302,7 +302,9 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 
 	// Hash connection spec fields in deterministic order
 	_, _ = hasher.Write([]byte(connection.HostPort))
-	_, _ = hasher.Write([]byte(connection.MutualTLSSecret))
+	if connection.MutualTLSSecretRef != nil {
+		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
+	}
 
 	return hex.EncodeToString(hasher.Sum(nil))
 }
