@@ -11,9 +11,18 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// TemporalConnectionReference contains the name of a TemporalConnection resource
+// in the same namespace as the TemporalWorkerDeployment.
+type TemporalConnectionReference struct {
+	// Name of the TemporalConnection resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+}
+
 type WorkerOptions struct {
 	// The name of a TemporalConnection in the same namespace as the TemporalWorkerDeployment.
-	TemporalConnectionRef corev1.LocalObjectReference `json:"connectionRef"`
+	TemporalConnectionRef TemporalConnectionReference `json:"connectionRef"`
 	// The Temporal namespace for the worker to connect to.
 	// +kubebuilder:validation:MinLength=1
 	TemporalNamespace string `json:"temporalNamespace"`

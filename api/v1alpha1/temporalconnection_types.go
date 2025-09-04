@@ -5,11 +5,18 @@
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+
+// SecretReference contains the name of a Secret resource in the same namespace.
+type SecretReference struct {
+	// Name of the Secret resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+}
 
 // TemporalConnectionSpec defines the desired state of TemporalConnection
 type TemporalConnectionSpec struct {
@@ -24,7 +31,7 @@ type TemporalConnectionSpec struct {
 	// More information about creating a TLS secret:
 	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
 	// +optional
-	MutualTLSSecretRef *corev1.LocalObjectReference `json:"mutualTLSSecretRef,omitempty"`
+	MutualTLSSecretRef *SecretReference `json:"mutualTLSSecretRef,omitempty"`
 }
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
