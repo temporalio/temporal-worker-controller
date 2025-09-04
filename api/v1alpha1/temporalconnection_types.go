@@ -26,8 +26,17 @@ type TemporalConnectionSpec struct {
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
 type TemporalConnectionStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represent the latest available observations of the connection's current state.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// LastConnectionTime is the timestamp of the last successful connection attempt.
+	// +optional
+	LastConnectionTime *metav1.Time `json:"lastConnectionTime,omitempty"`
+
+	// ServerVersion is the version of the connected Temporal server.
+	// +optional
+	ServerVersion string `json:"serverVersion,omitempty"`
 }
 
 //+kubebuilder:object:root=true
