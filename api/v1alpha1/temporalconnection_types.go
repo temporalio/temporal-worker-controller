@@ -13,6 +13,7 @@ import (
 // TemporalConnectionSpec defines the desired state of TemporalConnection
 type TemporalConnectionSpec struct {
 	// The host and port of the Temporal server.
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
 	HostPort string `json:"hostPort"`
 
 	// MutualTLSSecret is the name of the Secret that contains the TLS certificate and key
@@ -21,6 +22,8 @@ type TemporalConnectionSpec struct {
 	//
 	// More information about creating a TLS secret:
 	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +optional
 	MutualTLSSecret string `json:"mutualTLSSecret,omitempty"`
 }
 
