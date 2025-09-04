@@ -42,7 +42,7 @@ make changes to the spec of your `TemporalWorkerDeployment` Custom Resource, and
 Worker deployment versions progress through various states during their lifecycle:
 
 ### NotRegistered
-The version has been specified in the `TemporalWorkerDeployment` resource but hasn't been registered with Temporal yet. This typically happens when:
+The version has been specified in the `TemporalWorkerDeployment` custom resource but hasn't been registered with Temporal yet. This typically happens when:
 - The worker pods are still starting up
 - There are connectivity issues to Temporal
 - The worker code has errors preventing registration
@@ -92,7 +92,7 @@ Gradually increases the percentage of new workflow executions routed to the new 
 
 ### Worker Options
 Configuration that tells the controller how to connect to the same Temporal cluster and namespace that the worker is connected to:
-- **connection**: Reference to a `TemporalConnection` resource
+- **connection**: Reference to a `TemporalConnection` custom resource
 - **temporalNamespace**: The Temporal namespace to connect to
 - **deploymentName**: The logical deployment name in Temporal (auto-generated if not specified)
 
@@ -115,7 +115,7 @@ The pod template used for the target version of this worker deployment. Similar 
 The controller automatically sets these environment variables for all worker pods:
 
 ### TEMPORAL_HOST_PORT
-The host and port of the Temporal server, derived from the `TemporalConnection` resource.
+The host and port of the Temporal server, derived from the `TemporalConnection` custom resource.
 The worker must connect to this Temporal endpoint, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that endpoint if it already knows the endpoint another way.
 
 ### TEMPORAL_NAMESPACE
@@ -158,7 +158,7 @@ The process of bringing existing manually-managed worker deployments under contr
 4. Enabling automated rollouts
 
 ### Single Resource Requirement
-The critical principle that each Temporal Worker Deployment must be managed by exactly one `TemporalWorkerDeployment` CRD resource. You cannot split a single logical deployment across multiple CRD resources.
+The critical principle that each Temporal Worker Deployment must be managed by exactly one `TemporalWorkerDeployment` custom resource. You cannot split a single logical deployment across multiple custom resources.
 
 ### Legacy Version Handling
 The process of ensuring that existing worker versions continue running during migration, maintaining workflow determinism while transitioning to controller management.

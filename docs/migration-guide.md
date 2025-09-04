@@ -120,7 +120,7 @@ spec:
 
 **New Deployment Process:**
 1. Build new worker image  
-2. Update `TemporalWorkerDeployment` CRD with new image
+2. Update `TemporalWorkerDeployment` custom resource with new image
 3. Controller creates new Kubernetes `Deployment` for the new version
 4. Controller gradually routes new workflows and existing AutoUpgrade workflows to new version
 5. Old version continues handling existing Pinned workflows until they complete
@@ -156,7 +156,7 @@ The migration from unversioned to versioned workflows requires careful planning 
 
 #### Phase 2: Initial Migration
 1. **Choose lowest-risk worker** to migrate first
-2. **Create `TemporalWorkerDeployment` CRD** with Manual strategy
+2. **Create `TemporalWorkerDeployment` custom resource** with Manual strategy
 3. **Validate controller management** works correctly
 4. **Update deployment pipeline** for this worker
 
@@ -234,7 +234,7 @@ worker := worker.New(client, "my-task-queue", workerOptions)
 
 ### Step 4: Create Your First TemporalWorkerDeployment
 
-Start with your lowest-risk worker. Convert your existing unversioned Deployment to a `TemporalWorkerDeployment` CRD:
+Start with your lowest-risk worker. Convert your existing unversioned Deployment to a `TemporalWorkerDeployment` custom resource:
 
 **Existing Unversioned Deployment:**
 ```yaml
@@ -256,7 +256,7 @@ spec:
           value: "production"
 ```
 
-**New TemporalWorkerDeployment CRD (IMPORTANT: Use Manual strategy initially):**
+**New TemporalWorkerDeployment custom resource (IMPORTANT: Use Manual strategy initially):**
 ```yaml
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
