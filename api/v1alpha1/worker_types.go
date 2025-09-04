@@ -13,7 +13,6 @@ import (
 
 // TemporalConnectionReference contains the name of a TemporalConnection resource
 // in the same namespace as the TemporalWorkerDeployment.
-// TODO(jlegrone): Add table-driven unit test cases for this
 type TemporalConnectionReference struct {
 	// Name of the TemporalConnection resource.
 	// +kubebuilder:validation:Required
@@ -42,8 +41,9 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// Label selector for pods. Existing ReplicaSets whose pods are
 	// selected by this will be the ones affected by this deployment.
-	// It must match the pod template's labels.
-	Selector *metav1.LabelSelector `json:"selector" protobuf:"bytes,2,opt,name=selector"`
+	// If not specified, defaults to the pod template's labels.
+	// +optional
+	Selector *metav1.LabelSelector `json:"selector,omitempty" protobuf:"bytes,2,opt,name=selector"`
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
@@ -337,8 +337,11 @@ type ManualRolloutStrategy struct{}
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
-// TODO(jlegrone): Add print column annotations following Kubernetes conventions
-// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#metadata
+//+kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.conditions[?(@.type=='Available')].status",description="Available replicas"
+//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
+//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
+//+kubebuilder:printcolumn:name="Ramp %",type="integer",JSONPath=".status.targetVersion.rampPercentageBasisPoints",description="Ramp percentage in basis points"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
 type TemporalWorkerDeployment struct {

@@ -57,6 +57,13 @@ func (s *TemporalWorkerDeploymentSpec) Default(ctx context.Context) error {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
 	}
 
+	// If no selector is specified, default to the pod template's labels
+	if s.Selector == nil && s.Template.Labels != nil {
+		s.Selector = &v1.LabelSelector{
+			MatchLabels: s.Template.Labels,
+		}
+	}
+
 	return nil
 }
 
