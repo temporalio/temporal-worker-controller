@@ -97,15 +97,15 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
 		} else {
-			if vcfg.RampPercentage > 0 {
-				l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
+			if vcfg.RampPercentageBasisPoints > 0 {
+				l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentageBasisPoints)
 			} else {
 				l.Info("deleting ramp", "buildID", vcfg.BuildID)
 			}
 
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 				BuildID:       vcfg.BuildID,
-				Percentage:    vcfg.RampPercentage,
+				Percentage:    float32(vcfg.RampPercentageBasisPoints) / 100,
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      getControllerIdentity(),
 			}); err != nil {

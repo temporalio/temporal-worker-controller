@@ -108,7 +108,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Verify that a connection is configured
-	if workerDeploy.Spec.WorkerOptions.TemporalConnection == "" {
+	if workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name == "" {
 		err := fmt.Errorf("TemporalConnection must be set")
 		l.Error(err, "")
 		return ctrl.Result{}, err
@@ -117,7 +117,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// Fetch the connection parameters
 	var temporalConnection temporaliov1alpha1.TemporalConnection
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnection,
+		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name,
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
 		l.Error(err, "unable to fetch TemporalConnection")
@@ -128,8 +128,8 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
 		HostPort:        temporalConnection.Spec.HostPort,
 		Namespace:       workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		MutualTLSSecret: temporalConnection.Spec.MutualTLSSecret,
-	}, temporalConnection.Spec.MutualTLSSecret != "")
+		MutualTLSSecret: temporalConnection.Spec.MutualTLSSecretRef.Name,
+	}, temporalConnection.Spec.MutualTLSSecretRef != nil)
 	if !ok {
 		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
@@ -264,7 +264,7 @@ func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context
 
 	// Filter to ones using this connection
 	for _, twd := range twds.Items {
-		if twd.Spec.WorkerOptions.TemporalConnection == tc.GetName() {
+		if twd.Spec.WorkerOptions.TemporalConnectionRef.Name == tc.GetName() {
 			// Enqueue a reconcile request for this TWD
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{

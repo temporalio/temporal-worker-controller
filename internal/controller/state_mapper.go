@@ -49,8 +49,8 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 		// TODO(Shivam): Temporal server is not emitting the right value for RampLastModifiedAt.
 		// This is going to be fixed by https://github.com/temporalio/temporal/pull/8089.
 		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt
-		rampPercentage := m.temporalState.RampPercentage
-		status.TargetVersion.RampPercentage = &rampPercentage
+		rampPercentageBasisPoints := int32(m.temporalState.RampPercentage * 100)
+		status.TargetVersion.RampPercentageBasisPoints = &rampPercentageBasisPoints
 	}
 
 	// Add deprecated versions
@@ -141,7 +141,8 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 		// TODO(carlydf): Support setting any ramp in [0,100]
 		// NOTE(rob): We are now setting any ramp > 0, is that correct?
 		if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
-			version.RampPercentage = &m.temporalState.RampPercentage
+			rampPercentageBasisPoints := int32(m.temporalState.RampPercentage * 100)
+			version.RampPercentageBasisPoints = &rampPercentageBasisPoints
 		}
 
 		// Set task queues
