@@ -210,7 +210,9 @@ type TargetWorkerDeploymentVersion struct {
 	// configured to start on this version. Only set when Status is VersionStatusRamping.
 	//
 	// Acceptable range is [0,100].
-	RampPercentage *float32 `json:"rampPercentage,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	RampPercentage *int32 `json:"rampPercentage,omitempty"`
 
 	// RampingSince is time when the version first started ramping.
 	// Only set when Status is VersionStatusRamping.
@@ -304,7 +306,9 @@ type RolloutStep struct {
 	// routed to the new worker deployment version while this step is active.
 	//
 	// Acceptable range is [0,100].
-	RampPercentage float32 `json:"rampPercentage"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	RampPercentage int32 `json:"rampPercentage"`
 
 	// PauseDuration indicates how long to pause before progressing to the next step.
 	PauseDuration metav1.Duration `json:"pauseDuration"`
