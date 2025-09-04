@@ -28,6 +28,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// This field makes TemporalWorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
 	// TODO(jlegrone): Configure min replicas per thousand workflow/activity tasks?
 	// +optional
+	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
 	// Label selector for pods. Existing ReplicaSets whose pods are
@@ -44,6 +45,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// without any of its container crashing, for it to be considered available.
 	// Defaults to 0 (pod will be considered available as soon as it is ready)
 	// +optional
+	// +kubebuilder:default=0
 	MinReadySeconds int32 `json:"minReadySeconds,omitempty"`
 
 	// The maximum time in seconds for a deployment to make progress before it
@@ -51,6 +53,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// process failed deployments and a condition with a ProgressDeadlineExceeded
 	// reason will be surfaced in the deployment status. Note that progress will
 	// not be estimated during the time a deployment is paused. Defaults to 600s.
+	// +kubebuilder:default=600
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
 
 	// How to rollout new workflow executions to the target version.
@@ -294,11 +297,13 @@ type SunsetStrategy struct {
 	// ScaledownDelay specifies how long to wait after a version is drained before scaling its Deployment to zero.
 	// Defaults to 1 hour.
 	// +optional
+	// +kubebuilder:default="1h"
 	ScaledownDelay *metav1.Duration `json:"scaledownDelay"`
 
 	// DeleteDelay specifies how long to wait after a version is drained before deleting its Deployment.
 	// Defaults to 24 hours.
 	// +optional
+	// +kubebuilder:default="24h"
 	DeleteDelay *metav1.Duration `json:"deleteDelay"`
 }
 
