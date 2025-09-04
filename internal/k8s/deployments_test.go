@@ -458,8 +458,8 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 // TestNewDeploymentWithPodAnnotations tests that every new pod created has a connection spec hash annotation
 func TestNewDeploymentWithPodAnnotations(t *testing.T) {
 	connection := temporaliov1alpha1.TemporalConnectionSpec{
-		HostPort:        "localhost:7233",
-		MutualTLSSecret: "my-secret",
+		HostPort:           "localhost:7233",
+		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-secret"},
 	}
 
 	deployment := k8s.NewDeploymentWithOwnerRef(
@@ -480,8 +480,8 @@ func TestNewDeploymentWithPodAnnotations(t *testing.T) {
 func TestComputeConnectionSpecHash(t *testing.T) {
 	t.Run("generates non-empty hash for valid connection spec", func(t *testing.T) {
 		spec := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "localhost:7233",
-			MutualTLSSecret: "my-tls-secret",
+			HostPort:           "localhost:7233",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-tls-secret"},
 		}
 
 		result := k8s.ComputeConnectionSpecHash(spec)
@@ -491,8 +491,8 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 
 	t.Run("returns empty hash when hostport is empty", func(t *testing.T) {
 		spec := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "",
-			MutualTLSSecret: "secret",
+			HostPort:           "",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "secret"},
 		}
 
 		result := k8s.ComputeConnectionSpecHash(spec)
@@ -501,8 +501,8 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 
 	t.Run("is deterministic - same input produces same hash", func(t *testing.T) {
 		spec := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "localhost:7233",
-			MutualTLSSecret: "my-secret",
+			HostPort:           "localhost:7233",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-secret"},
 		}
 
 		hash1 := k8s.ComputeConnectionSpecHash(spec)
@@ -513,12 +513,12 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 
 	t.Run("different hostports produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "localhost:7233",
-			MutualTLSSecret: "same-secret",
+			HostPort:           "localhost:7233",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "same-secret"},
 		}
 		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "different-host:7233",
-			MutualTLSSecret: "same-secret",
+			HostPort:           "different-host:7233",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "same-secret"},
 		}
 
 		hash1 := k8s.ComputeConnectionSpecHash(spec1)
@@ -529,12 +529,12 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 
 	t.Run("different mTLS secrets produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "localhost:7233",
-			MutualTLSSecret: "secret1",
+			HostPort:           "localhost:7233",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "secret1"},
 		}
 		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "localhost:7233",
-			MutualTLSSecret: "secret2",
+			HostPort:           "localhost:7233",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "secret2"},
 		}
 
 		hash1 := k8s.ComputeConnectionSpecHash(spec1)
@@ -545,12 +545,12 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 
 	t.Run("empty mTLS secret vs non-empty produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "localhost:7233",
-			MutualTLSSecret: "",
+			HostPort:           "localhost:7233",
+			MutualTLSSecretRef: nil,
 		}
 		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort:        "localhost:7233",
-			MutualTLSSecret: "some-secret",
+			HostPort:           "localhost:7233",
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "some-secret"},
 		}
 
 		hash1 := k8s.ComputeConnectionSpecHash(spec1)
@@ -581,8 +581,8 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 		},
 		"with mTLS": {
 			connection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        "mtls.localhost:7233",
-				MutualTLSSecret: "my-tls-secret",
+				HostPort:           "mtls.localhost:7233",
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-tls-secret"},
 			},
 			expectedEnvVars: map[string]string{
 				"TEMPORAL_ADDRESS":              "mtls.localhost:7233",
@@ -644,14 +644,14 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 			}
 
 			// For mTLS case, verify volume mounts and volumes are configured
-			if tt.connection.MutualTLSSecret != "" {
+			if tt.connection.MutualTLSSecretRef != nil {
 				assert.Len(t, container.VolumeMounts, 1)
 				assert.Equal(t, "temporal-tls", container.VolumeMounts[0].Name)
 				assert.Equal(t, "/etc/temporal/tls", container.VolumeMounts[0].MountPath)
 
 				assert.Len(t, deployment.Spec.Template.Spec.Volumes, 1)
 				assert.Equal(t, "temporal-tls", deployment.Spec.Template.Spec.Volumes[0].Name)
-				assert.Equal(t, tt.connection.MutualTLSSecret, deployment.Spec.Template.Spec.Volumes[0].VolumeSource.Secret.SecretName)
+				assert.Equal(t, tt.connection.MutualTLSSecretRef.Name, deployment.Spec.Template.Spec.Volumes[0].VolumeSource.Secret.SecretName)
 			}
 		})
 	}
@@ -718,8 +718,8 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 		},
 		"with TLS": {
 			connection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        "mtls.temporal.example:8888",
-				MutualTLSSecret: "test-tls-secret",
+				HostPort:           "mtls.temporal.example:8888",
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "test-tls-secret"},
 			},
 			namespace: "test-namespace-with-tls",
 		},
@@ -756,7 +756,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 			container := deployment.Spec.Template.Spec.Containers[0]
 
 			// Infer whether TLS is expected from connection spec
-			expectTLS := tt.connection.MutualTLSSecret != ""
+			expectTLS := tt.connection.MutualTLSSecretRef != nil
 
 			if expectTLS {
 				// Create temporary test certificate files
