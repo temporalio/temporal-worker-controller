@@ -235,7 +235,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd2 := testhelpers.MakeTWD("", "", 1, pod2, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my.test-image",
+			expectedPrefix:  "my.test_image",
 			expectedHashLen: 4,
 			expectEquality:  false, // should be different
 		},
@@ -248,7 +248,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd2 := testhelpers.MakeTWD("", "", 2, pod, nil, nil, nil)
 				return twd1, twd2
 			},
-			expectedPrefix:  "my.test-image",
+			expectedPrefix:  "my.test_image",
 			expectedHashLen: 4,
 			expectEquality:  true, // should be the same
 		},
@@ -323,7 +323,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", namedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  "library-busybox",
+			expectedPrefix:  "library/busybox",
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -334,7 +334,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  "this.is.my-weird-image",
+			expectedPrefix:  "this.is.my_weird/image",
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -345,7 +345,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", longImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  k8s.CleanAndTruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIdLen-5], -1),
+			expectedPrefix:  k8s.TruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIdLen-5], -1),
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -378,7 +378,7 @@ func TestGenerateBuildID(t *testing.T) {
 func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen int) {
 	assert.Truef(t, strings.HasPrefix(build, expectedPrefix), "expected prefix %s in build %s", expectedPrefix, build)
 	assert.LessOrEqual(t, len(build), k8s.MaxBuildIdLen)
-	assert.Equalf(t, k8s.CleanAndTruncateString(build, -1), build, "expected build %s to be cleaned", build)
+	assert.Equalf(t, k8s.TruncateString(build, -1), build, "expected build %s to be truncated", build)
 	split := strings.Split(build, k8s.K8sResourceNameSeparator)
 	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
 }
@@ -392,15 +392,15 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 	}{
 		{
 			name:         "simple base and build ID",
-			baseName:     "worker-name.default",
+			baseName:     "worker-name",
 			buildID:      "abc123",
-			expectedName: "worker-name.default-abc123",
+			expectedName: "worker-name-abc123",
 		},
 		{
 			name:         "build ID with dots/dashes",
-			baseName:     "worker-name.production",
+			baseName:     "worker-name",
 			buildID:      "image-v2.1.0-a1b2c3d4",
-			expectedName: "worker-name.production-image-v2.1.0-a1b2c3d4",
+			expectedName: "worker-name-image-v2-1-0-a1b2c3d4",
 		},
 	}
 
@@ -410,16 +410,19 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 			assert.Equal(t, tt.expectedName, result)
 
 			// Verify the format is always baseName-buildID
-			expectedSeparator := tt.baseName + "-" + tt.buildID
-			assert.Equal(t, expectedSeparator, result)
+			expected := tt.baseName + k8s.K8sResourceNameSeparator + k8s.CleanStringForDNS(tt.buildID)
+			assert.Equal(t, expected, result)
 
 			// Verify it ends with the build ID
-			assert.True(t, strings.HasSuffix(result, "-"+tt.buildID),
-				"versioned deployment name should end with '-buildID'")
+			assert.True(t, strings.HasSuffix(result, k8s.K8sResourceNameSeparator+k8s.CleanStringForDNS(tt.buildID)),
+				"versioned deployment name should end with '-cleaned(buildID)'")
 
 			// Verify it starts with the base name
 			assert.True(t, strings.HasPrefix(result, tt.baseName),
 				"versioned deployment name should start with baseName")
+
+			// Verify it is cleaned for DNS
+			assert.Equal(t, result, k8s.CleanStringForDNS(result))
 		})
 	}
 }
@@ -447,12 +450,12 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 	// Test the full pipeline: TemporalWorkerDeployment -> worker deployment name -> versioned deployment name
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(twd)
 	buildID := k8s.ComputeBuildID(twd)
-	versionedName := k8s.ComputeVersionedDeploymentName(workerDeploymentName, buildID)
+	versionedName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
 
 	// Verify the expected formats
 	assert.Equal(t, "demo"+k8s.WorkerDeploymentNameSeparator+"hello-world", workerDeploymentName)
-	assert.True(t, strings.HasPrefix(versionedName, "demo"+k8s.WorkerDeploymentNameSeparator+"hello-world-"))
-	assert.True(t, strings.Contains(versionedName, "v1.0.0"), "versioned name should contain cleaned image tag")
+	assert.True(t, strings.HasPrefix(versionedName, "hello-world-"))
+	assert.True(t, strings.Contains(versionedName, k8s.CleanStringForDNS("v1.0.0")), "versioned name should contain cleaned image tag")
 }
 
 // TestNewDeploymentWithPodAnnotations tests that every new pod created has a connection spec hash annotation
