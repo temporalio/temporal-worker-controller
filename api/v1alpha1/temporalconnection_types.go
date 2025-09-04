@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -16,15 +17,14 @@ type TemporalConnectionSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
 	HostPort string `json:"hostPort"`
 
-	// MutualTLSSecret is the name of the Secret that contains the TLS certificate and key
+	// MutualTLSSecretRef is the name of the Secret that contains the TLS certificate and key
 	// for mutual TLS authentication. The secret must be `type: kubernetes.io/tls` and exist
 	// in the same Kubernetes namespace as the TemporalConnection resource.
 	//
 	// More information about creating a TLS secret:
 	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +optional
-	MutualTLSSecret string `json:"mutualTLSSecret,omitempty"`
+	MutualTLSSecretRef *corev1.LocalObjectReference `json:"mutualTLSSecretRef,omitempty"`
 }
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
