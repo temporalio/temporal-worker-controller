@@ -13,6 +13,7 @@ import (
 
 // TemporalConnectionReference contains the name of a TemporalConnection resource
 // in the same namespace as the TemporalWorkerDeployment.
+// TODO(jlegrone): Add table-driven unit test cases for this
 type TemporalConnectionReference struct {
 	// Name of the TemporalConnection resource.
 	// +kubebuilder:validation:Required
@@ -336,10 +337,8 @@ type ManualRolloutStrategy struct{}
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
-//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current Version Build ID"
-//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Build ID of the target worker (based on the pod template)"
-//+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentageBasisPoints",description="Basis points of new workflows starting on Target Version (100 basis points = 1%)"
-//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// TODO(jlegrone): Add print column annotations following Kubernetes conventions
+// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#metadata
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
 type TemporalWorkerDeployment struct {

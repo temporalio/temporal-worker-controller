@@ -11,6 +11,7 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // SecretReference contains the name of a Secret resource in the same namespace.
+// TODO(jlegrone): Add table-driven unit test cases for this
 type SecretReference struct {
 	// Name of the Secret resource.
 	// +kubebuilder:validation:Required
@@ -51,10 +52,9 @@ type TemporalConnectionStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=tc;tconn;temporalconn
-//+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server host and port"
-//+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Connection readiness status"
-//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:resource:shortName=tconn
+// TODO(jlegrone): Add print column annotations following Kubernetes conventions
+// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#metadata
 
 // TemporalConnection is the Schema for the temporalconnections API
 type TemporalConnection struct {
