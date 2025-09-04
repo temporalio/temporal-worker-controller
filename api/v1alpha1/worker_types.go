@@ -177,11 +177,11 @@ type BaseWorkerDeploymentVersion struct {
 
 	// Healthy indicates whether the deployment version is healthy.
 	// +optional
-	HealthySince *metav1.Time `json:"healthySince"`
+	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 
 	// A pointer to the version's managed k8s deployment.
 	// +optional
-	Deployment *corev1.ObjectReference `json:"deployment"`
+	Deployment *corev1.ObjectReference `json:"deployment,omitempty"`
 
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
@@ -218,7 +218,7 @@ type TargetWorkerDeploymentVersion struct {
 	// RampingSince is time when the version first started ramping.
 	// Only set when Status is VersionStatusRamping.
 	// +optional
-	RampingSince *metav1.Time `json:"rampingSince"`
+	RampingSince *metav1.Time `json:"rampingSince,omitempty"`
 
 	// RampLastModifiedAt is the time when the ramp percentage was last changed for the target version.
 	// +optional
@@ -233,7 +233,7 @@ type DeprecatedWorkerDeploymentVersion struct {
 	// DrainedSince is the time at which the version became drained.
 	// Only set when Status is VersionStatusDrained.
 	// +optional
-	DrainedSince *metav1.Time `json:"drainedSince"`
+	DrainedSince *metav1.Time `json:"drainedSince,omitempty"`
 
 	// A Version is eligible for deletion if it is drained and has no pollers on any task queue.
 	// After pollers stop polling, the server will still consider them present until `matching.PollerHistoryTTL`
