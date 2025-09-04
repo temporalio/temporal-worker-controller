@@ -335,6 +335,7 @@ type QueueStatistics struct {
 	// The approximate number of tasks backlogged in this task queue. May count expired tasks but eventually converges
 	// to the right value.
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=9007199254740991
 	ApproximateBacklogCount int64 `json:"approximateBacklogCount,omitempty"`
 	// Approximate age of the oldest task in the backlog based on the creation timestamp of the task at the head of the queue.
 	ApproximateBacklogAge metav1.Duration `json:"approximateBacklogAge,omitempty"`
