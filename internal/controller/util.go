@@ -6,12 +6,18 @@ package controller
 
 import (
 	"os"
+	"strconv"
+
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 )
 
 const (
-	controllerIdentityKey     = "temporal.io/controller"
-	controllerVersionKey      = "temporal.io/controller-version"
-	DefaultControllerIdentity = "temporal-worker-controller"
+	controllerIdentityMetadataKey = "temporal.io/controller"
+	controllerVersionMetadataKey  = "temporal.io/controller-version"
+
+	controllerVersionEnvKey                                    = "CONTROLLER_VERSION"
+	controllerIdentityEnvKey                                   = "CONTROLLER_IDENTITY"
+	ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 )
 
 // Version is set by goreleaser via ldflags at build time
@@ -24,7 +30,7 @@ func getControllerVersion() string {
 		return Version
 	}
 	// Fall back to environment variable (set by Helm from image.tag)
-	if version := os.Getenv("CONTROLLER_VERSION"); version != "" {
+	if version := os.Getenv(controllerVersionEnvKey); version != "" {
 		return version
 	}
 	return "unknown"
@@ -32,8 +38,18 @@ func getControllerVersion() string {
 
 // getControllerIdentity returns the identity from environment variable (set by Helm)
 func getControllerIdentity() string {
-	if identity := os.Getenv("CONTROLLER_IDENTITY"); identity != "" {
+	if identity := os.Getenv(controllerIdentityEnvKey); identity != "" {
 		return identity
 	}
-	return DefaultControllerIdentity
+	return defaults.ControllerIdentity
+}
+
+func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
+	if maxStr := os.Getenv(ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey); maxStr != "" {
+		i, err := strconv.Atoi(maxStr)
+		if err == nil {
+			return int32(i)
+		}
+	}
+	return defaults.MaxVersionsIneligibleForDeletion
 }

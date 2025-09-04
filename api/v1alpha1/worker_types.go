@@ -60,18 +60,6 @@ type TemporalWorkerDeploymentSpec struct {
 
 	// TODO(jlegrone): add godoc
 	WorkerOptions WorkerOptions `json:"workerOptions"`
-
-	// MaxVersions defines the maximum number of worker deployment versions allowed.
-	// This helps prevent hitting Temporal's default limit of 100 versions per deployment.
-	// Defaults to 75. Users can override this by explicitly setting a higher value in
-	// the CRD, but should exercise caution: once the server's version limit is reached,
-	// Temporal attempts to delete an eligible version. If no version is eligible for deletion,
-	// new deployments get blocked which prevents the controller from making progress.
-	// This limit can be adjusted server-side by setting `matching.maxVersionsInDeployment`
-	// in dynamicconfig.
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	MaxVersions *int32 `json:"maxVersions,omitempty"`
 }
 
 // VersionStatus indicates the status of a version.
@@ -240,6 +228,12 @@ type DeprecatedWorkerDeploymentVersion struct {
 	// Only set when Status is VersionStatusDrained.
 	// +optional
 	DrainedSince *metav1.Time `json:"drainedSince"`
+
+	// A Version is eligible for deletion if it is drained and has no pollers on any task queue.
+	// After pollers stop polling, the server will still consider them present until `matching.PollerHistoryTTL`
+	// has passed.
+	// +optional
+	EligibleForDeletion bool `json:"eligibleForDeletion,omitempty"`
 }
 
 // DefaultVersionUpdateStrategy describes how to cut over new workflow executions
@@ -248,10 +242,20 @@ type DeprecatedWorkerDeploymentVersion struct {
 type DefaultVersionUpdateStrategy string
 
 const (
+	// UpdateManual scales worker resources up or down, but does not update the current or ramping worker deployment version.
 	UpdateManual DefaultVersionUpdateStrategy = "Manual"
 
+	// UpdateAllAtOnce starts 100% of new workflow executions on the new worker deployment version as soon as it's healthy.
 	UpdateAllAtOnce DefaultVersionUpdateStrategy = "AllAtOnce"
 
+	// UpdateProgressive ramps up the percentage of new workflow executions targeting the new worker deployment version over time.
+	//
+	// Note: If the Current Version of a Worker Deployment is nil and the controller cannot confirm that all Task Queues
+	// in the Target Version have at least one unversioned poller, the controller will immediately set the new worker
+	// deployment version to be Current and ignore the Progressive rollout steps.
+	// Sending a percentage of traffic to a "nil" version means that traffic will be sent to unversioned workers. If
+	// there are no unversioned workers, those tasks will get stuck. This behavior ensures that all traffic on the task
+	// queues in this worker deployment can be handled by an active poller.
 	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
 )
 
@@ -263,15 +267,9 @@ type GateWorkflowConfig struct {
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
 	// Valid values are:
-	// - "Manual": scale worker resources up or down, but do not update the current or ramping worker deployment version;
-	// - "AllAtOnce": start 100% of new workflow executions on the new worker deployment version as soon as it's healthy;
-	// - "Progressive": ramp up the percentage of new workflow executions targeting the new worker deployment version over time;
-	//
-	// Note: If the Current Version of a Worker Deployment is nil, the controller will ignore any Progressive Rollout
-	// Steps and immediately set the new worker deployment version to be Current.
-	// Sending a percentage of traffic to a "nil" version means that traffic will be sent to unversioned workers. If
-	// there are no unversioned workers, those tasks will get stuck. This behavior ensures that all traffic on the task
-	// queues in this worker deployment can be handled by an active poller.
+	// - "Manual"
+	// - "AllAtOnce"
+	// - "Progressive"
 	Strategy DefaultVersionUpdateStrategy `json:"strategy"`
 
 	// Gate specifies a workflow type that must run once to completion on the new worker deployment version before

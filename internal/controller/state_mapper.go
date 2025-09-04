@@ -160,11 +160,17 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 		return nil
 	}
 
+	eligibleForDeletion := false
+	if vInfo, exists := m.temporalState.Versions[buildID]; exists {
+		eligibleForDeletion = vInfo.Status == v1alpha1.VersionStatusDrained && vInfo.NoTaskQueuesHaveVersionedPoller
+	}
+
 	version := &v1alpha1.DeprecatedWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: v1alpha1.BaseWorkerDeploymentVersion{
 			BuildID: buildID,
 			Status:  v1alpha1.VersionStatusNotRegistered,
 		},
+		EligibleForDeletion: eligibleForDeletion,
 	}
 
 	// Set deployment reference if it exists

@@ -7,6 +7,7 @@ import (
 	"github.com/pborman/uuid"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"go.temporal.io/server/common/worker_versioning"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -135,7 +136,7 @@ func MakeTWDWithName(name, namespace string) *temporaliov1alpha1.TemporalWorkerD
 }
 
 func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDeployment bool) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
-	if imageName == "" { // empty build id == nil current version == unversioned
+	if imageName == worker_versioning.UnversionedVersionId { // empty build id == nil current version == unversioned
 		return nil
 	}
 	ret := &temporaliov1alpha1.CurrentWorkerDeploymentVersion{

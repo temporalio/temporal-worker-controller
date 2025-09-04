@@ -6,7 +6,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
@@ -23,21 +22,10 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	req ctrl.Request,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
 	temporalState *temporal.TemporalWorkerState,
+	k8sState *k8s.DeploymentState,
 ) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
 	targetBuildID := k8s.ComputeBuildID(workerDeploy)
-
-	// Fetch Kubernetes deployment state
-	k8sState, err := k8s.GetDeploymentState(
-		ctx,
-		r.Client,
-		req.Namespace,
-		req.Name,
-		workerDeploymentName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get Kubernetes deployment state: %w", err)
-	}
 
 	// Fetch test workflow status for the desired version
 	if targetBuildID != temporalState.CurrentBuildID {

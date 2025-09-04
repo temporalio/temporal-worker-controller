@@ -9,17 +9,12 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-)
-
-const (
-	testShortPollerHistoryTTL         = time.Second
-	testDrainageVisibilityGracePeriod = time.Second
-	testDrainageRefreshInterval       = time.Second
 )
 
 // TestIntegration runs integration tests for the Temporal Worker Controller
@@ -77,18 +72,17 @@ func TestIntegration(t *testing.T) {
 					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
 					WithCurrentVersion("v1.0", true, false),
 			),
-		//// TODO(carlydf): this won't work until the controller detects unversioned pollers
-		// "progressive-rollout-yes-unversioned-pollers-expect-first-step": testhelpers.NewTestCase().
-		//	WithInput(
-		//		testhelpers.NewTemporalWorkerDeploymentBuilder().
-		//			WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-		//			WithTargetTemplate("v1.0"),
-		//	).
-		//	WithSetupFunction(setupUnversionedPoller).
-		//	WithExpectedStatus(
-		//		testhelpers.NewStatusBuilder().
-		//			WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
-		//	),
+		"progressive-rollout-yes-unversioned-pollers-expect-first-step": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+					WithTargetTemplate("v1"),
+			).
+			WithSetupFunction(setupUnversionedPollers).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
+			),
 		"nth-progressive-rollout-expect-first-step": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -191,6 +185,50 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewDeploymentInfo("v1.0", 0),
 				testhelpers.NewDeploymentInfo("v2.0", 1),
 			),
+		"nth-rollout-blocked-at-max-replicas": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithTargetTemplate("v5").
+					WithStatus(
+						testhelpers.NewStatusBuilder().
+							WithTargetVersion("v4", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+							WithCurrentVersion("v4", true, true).
+							WithDeprecatedVersions( // drained AND has no pollers -> eligible for deletion
+								testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+								testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+								testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+								testhelpers.NewDeprecatedVersionInfo("v3", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+							),
+					),
+			).
+			WithExistingDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+				testhelpers.NewDeploymentInfo("v1", 1),
+				testhelpers.NewDeploymentInfo("v2", 1),
+				testhelpers.NewDeploymentInfo("v3", 1),
+				testhelpers.NewDeploymentInfo("v4", 1),
+			).
+			WithWaitTime(5*time.Second).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
+								WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+								WithCurrentVersion("v4", true, false).
+								WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v3", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+					),
+			).
+			WithExpectedDeployments(
+				testhelpers.NewDeploymentInfo("v0", 1),
+				testhelpers.NewDeploymentInfo("v1", 1),
+				testhelpers.NewDeploymentInfo("v2", 1),
+				testhelpers.NewDeploymentInfo("v3", 1),
+				testhelpers.NewDeploymentInfo("v4", 1),
+				testhelpers.NewDeploymentInfo("v5", 1),
+			),
 		"nth-rollout-blocked-by-modifier": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -210,7 +248,7 @@ func TestIntegration(t *testing.T) {
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
 					WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
-					WithCurrentVersion("", false, false).
+					WithCurrentVersion(worker_versioning.UnversionedVersionId, false, false).
 					WithDeprecatedVersions(testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true)),
 			).
 			WithExpectedDeployments(
@@ -264,6 +302,51 @@ func TestIntegration(t *testing.T) {
 	)
 	testsShortPollerTTL := map[string]*testhelpers.TestCaseBuilder{
 		// Note: Add tests that require pollers to expire quickly here
+		"nth-rollout-unblocked-after-pollers-die": testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithTargetTemplate("v5").
+					WithStatus(
+						testhelpers.NewStatusBuilder().
+							WithTargetVersion("v4", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+							WithCurrentVersion("v4", true, true).
+							WithDeprecatedVersions( // drained AND has no pollers -> eligible for deletion
+								testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+								testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+								testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+								testhelpers.NewDeprecatedVersionInfo("v3", temporaliov1alpha1.VersionStatusDrained, true, true, true),
+							),
+					),
+			).
+			WithExistingDeployments(
+				testhelpers.NewDeploymentInfo("v0", 0), // 0 replicas -> no pollers
+				testhelpers.NewDeploymentInfo("v1", 1),
+				testhelpers.NewDeploymentInfo("v2", 1),
+				testhelpers.NewDeploymentInfo("v3", 1),
+				testhelpers.NewDeploymentInfo("v4", 1),
+			).
+			WithWaitTime(5*time.Second).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v5", temporaliov1alpha1.VersionStatusCurrent, -1, false, false).
+					WithCurrentVersion("v5", true, false).
+					WithDeprecatedVersions( // drained AND has pollers -> eligible for deletion
+						testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v3", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v4", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+					),
+			).
+			WithExpectedDeployments(
+				testhelpers.NewDeploymentInfo("v0", 0), // 0 replicas -> no pollers
+				testhelpers.NewDeploymentInfo("v1", 1),
+				testhelpers.NewDeploymentInfo("v2", 1),
+				testhelpers.NewDeploymentInfo("v3", 1),
+				testhelpers.NewDeploymentInfo("v4", 1),
+				testhelpers.NewDeploymentInfo("v5", 1),
+			),
 	}
 
 	for testName, tc := range testsShortPollerTTL {
@@ -318,7 +401,7 @@ func testTemporalWorkerDeploymentCreation(
 
 	// apply post-status setup function
 	if f := tc.GetSetupFunc(); f != nil {
-		tc.GetSetupFunc()(t, ctx, tc, env)
+		f(t, ctx, tc, env)
 	}
 
 	t.Log("Creating a TemporalWorkerDeployment")
@@ -328,9 +411,13 @@ func testTemporalWorkerDeploymentCreation(
 
 	t.Log("Waiting for the controller to reconcile")
 	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
-	waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
-	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
-	defer handleStopFuncs(workerStopFuncs)
+
+	// only wait for and create the deployment if it is expected
+	if expectedStatus.TargetVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
+		waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
+		workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+		defer handleStopFuncs(workerStopFuncs)
+	}
 
 	if wait := tc.GetWaitTime(); wait != nil {
 		time.Sleep(*wait)

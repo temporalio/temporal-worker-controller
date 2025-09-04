@@ -100,6 +100,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		connection,
 		plannerConfig,
 		workerDeploymentName,
+		r.MaxDeploymentVersionsIneligibleForDeletion,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)

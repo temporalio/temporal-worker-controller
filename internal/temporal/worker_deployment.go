@@ -14,8 +14,11 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -31,6 +34,20 @@ type VersionInfo struct {
 	DrainedSince   *time.Time
 	TaskQueues     []temporaliov1alpha1.TaskQueue
 	TestWorkflows  []temporaliov1alpha1.WorkflowExecution
+
+	// True if all task queues in this version have at least one unversioned poller.
+	// False could just mean unknown / not checked / not checked successfully.
+	// Only checked for Target Version when Current Version is nil and strategy is Progressive.
+	// Used to decide whether to fast track the rollout; rollout will be AllAtOnce if:
+	//   - Current Version is nil
+	//   - Strategy is Progressive, and
+	//   - Presence of unversioned pollers in all task queues of target version cannot be confirmed.
+	AllTaskQueuesHaveUnversionedPoller bool
+	// True if all task queues in this version have no versioned pollers.
+	// False could just mean unknown / not checked / not checked successfully.
+	// Only checked for Drained versions that don't have controller-managed Deployments.
+	// Used to compute status.VersionCountIneligibleForDeletion.
+	NoTaskQueuesHaveVersionedPoller bool
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -54,6 +71,9 @@ func GetWorkerDeploymentState(
 	client temporalClient.Client,
 	workerDeploymentName string,
 	namespace string,
+	k8sDeployments map[string]*appsv1.Deployment,
+	targetBuildId string,
+	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
 	controllerIdentity string,
 ) (*TemporalWorkerState, error) {
 	state := &TemporalWorkerState{
@@ -137,15 +157,56 @@ func GetWorkerDeploymentState(
 			if err == nil {
 				drainedSince := versionResp.Info.DrainageInfo.LastChangedTime
 				versionInfo.DrainedSince = &drainedSince
+				// If the deployment exists and has replicas, we assume there are versioned pollers, no need to check
+				deployment, ok := k8sDeployments[version.Version.BuildId]
+				if !ok || deployment.Status.Replicas == 0 { //revive:disable-line:max-control-nesting
+					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, versionResp.Info.TaskQueuesInfos)
+				}
 			}
 		} else {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
+			// get unversioned poller info to decide whether to fast-track rollout
+			if version.Version.BuildId == targetBuildId &&
+				routingConfig.CurrentVersion == nil &&
+				strategy == temporaliov1alpha1.UpdateProgressive {
+				var desc temporalClient.WorkerDeploymentVersionDescription
+				describeVersion := func() error {
+					desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+						BuildID: version.Version.BuildId,
+					})
+					return err
+				}
+				// At first, version is found in DeploymentInfo.VersionSummaries but not ready for describe, so we have
+				// to describe with backoff.
+				//
+				// Note: We can only check whether the task queues that we know of have unversioned pollers.
+				//       If, later on, a poll request arrives tying a new task queue to the target version, we
+				//       don't know whether that task queue has unversioned pollers.
+				if err = withBackoff(10*time.Second, 1*time.Second, describeVersion); err == nil { //revive:disable-line:max-control-nesting
+					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
+				}
+			}
+
 		}
 
 		state.Versions[version.Version.BuildId] = versionInfo
 	}
 
 	return state, nil
+}
+
+func withBackoff(timeout time.Duration, tick time.Duration, fn func() error) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		time.Sleep(tick)
+	}
+	return lastErr
 }
 
 // GetTestWorkflowStatus queries Temporal to get the status of test workflows for a version
@@ -248,6 +309,24 @@ func GetTestWorkflowID(deploymentName, buildID, taskQueue string) string {
 	return fmt.Sprintf("test-%s:%s-%s", deploymentName, buildID, taskQueue)
 }
 
+func HasUnversionedPoller(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) (bool, error) {
+	pollers, err := getPollers(ctx, client, taskQueueInfo)
+	if err != nil {
+		return false, fmt.Errorf("unable to confirm presence of unversioned pollers: %w", err)
+	}
+	for _, p := range pollers {
+		switch p.GetDeploymentOptions().GetWorkerVersioningMode() {
+		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
+			return true, nil
+		case temporalClient.WorkerVersioningModeVersioned:
+		}
+	}
+	return false, nil
+}
+
 func DeploymentShouldIgnoreLastModifier(
 	ctx context.Context,
 	deploymentHandler temporalClient.WorkerDeploymentHandle,
@@ -288,4 +367,70 @@ func getShouldIgnoreLastModifier(
 		}
 	}
 	return false, nil
+}
+
+func HasNoVersionedPollers(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) (bool, error) {
+	pollers, err := getPollers(ctx, client, taskQueueInfo)
+	if err != nil {
+		return false, fmt.Errorf("unable to confirm absence of versioned pollers: %w", err)
+	}
+	for _, p := range pollers {
+		switch p.GetDeploymentOptions().GetWorkerVersioningMode() {
+		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
+		case temporalClient.WorkerVersioningModeVersioned:
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func getPollers(ctx context.Context,
+	client temporalClient.Client,
+	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
+) ([]*taskqueuepb.PollerInfo, error) {
+	var resp *workflowservice.DescribeTaskQueueResponse
+	var err error
+	switch taskQueueInfo.Type {
+	case temporalClient.TaskQueueTypeWorkflow:
+		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeWorkflow)
+	case temporalClient.TaskQueueTypeActivity:
+		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeActivity)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
+	}
+	return resp.GetPollers(), nil
+}
+
+func noTaskQueuesHaveVersionedPollers(
+	ctx context.Context,
+	client temporalClient.Client,
+	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
+) bool {
+	countHasNoVersionedPollers := 0
+	for _, tqInfo := range tqs {
+		hasNoVersionedPollers, _ := HasNoVersionedPollers(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
+		if hasNoVersionedPollers {
+			countHasNoVersionedPollers++
+		}
+	}
+	return countHasNoVersionedPollers == len(tqs)
+}
+
+func allTaskQueuesHaveUnversionedPoller(
+	ctx context.Context,
+	client temporalClient.Client,
+	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
+) bool {
+	countHasUnversionedPoller := 0
+	for _, tqInfo := range tqs {
+		hasUnversionedPoller, _ := HasUnversionedPoller(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
+		if hasUnversionedPoller {
+			countHasUnversionedPoller++
+		}
+	}
+	return countHasUnversionedPoller == len(tqs)
 }

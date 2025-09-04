@@ -91,6 +91,7 @@ func main() {
 			}))),
 			mgr.GetClient(),
 		),
+		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TemporalWorkerDeployment")
 		os.Exit(1)

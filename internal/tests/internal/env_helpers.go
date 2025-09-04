@@ -36,6 +36,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
+const (
+	testShortPollerHistoryTTL            = time.Second
+	testDrainageVisibilityGracePeriod    = time.Second
+	testDrainageRefreshInterval          = time.Second
+	testMaxVersionsIneligibleForDeletion = 5
+)
+
 // setupKubebuilderAssets sets up the KUBEBUILDER_ASSETS environment variable if not already set
 func setupKubebuilderAssets() error {
 	if os.Getenv("KUBEBUILDER_ASSETS") != "" {
@@ -92,6 +99,9 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		t.Skip("Skipping because KUBEBUILDER_ASSETS not set")
 	}
 
+	// set max versions value for testing
+	t.Setenv(controller.ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey, fmt.Sprintf("%d", testMaxVersionsIneligibleForDeletion))
+
 	// Setup kubebuilder assets for IDE testing
 	if err := setupKubebuilderAssets(); err != nil {
 		t.Logf("Warning: Could not setup kubebuilder assets automatically: %v", err)
@@ -144,6 +154,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		Scheme:              mgr.GetScheme(),
 		TemporalClientPool:  clientPool,
 		DisableRecoverPanic: true,
+		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 	}
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {
@@ -193,14 +204,18 @@ func cleanupTestNamespace(t *testing.T, cfg *rest.Config, k8sClient client.Clien
 	}
 }
 
-func setupUnversionedPoller(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+func setupUnversionedPollers(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 	w, _, err := testhelpers.NewWorker(ctx, "", "", tc.GetTWD().Name, env.Ts.GetFrontendHostPort(), env.Ts.GetDefaultNamespace(), false)
+	if err != nil {
+		t.Errorf("failed to setup worker: %v", err)
+	}
 
 	// Register a dummy workflow and activity so the worker has something to poll for
 	w.RegisterWorkflowWithOptions(func(ctx workflow.Context) (string, error) { return "hi", nil }, workflow.RegisterOptions{Name: "dummyWorkflow"})
 	w.RegisterActivity(func(ctx context.Context) (string, error) { return "hi", nil })
 
 	err = w.Start()
+	t.Log("started unversioned worker")
 	if err != nil {
 		t.Errorf("error starting unversioned worker %v", err)
 	}
@@ -227,6 +242,7 @@ func setupUnversionedPoller(t *testing.T, ctx context.Context, tc testhelpers.Te
 		}
 		return nil
 	})
+	t.Logf("confirmed that task queue %v has unversioned workflow and activity pollers", tc.GetTWD().Name)
 }
 
 func hasUnversionedPoller(ctx context.Context,

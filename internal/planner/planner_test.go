@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
@@ -24,20 +25,21 @@ import (
 
 func TestGeneratePlan(t *testing.T) {
 	testCases := []struct {
-		name                    string
-		k8sState                *k8s.DeploymentState
-		status                  *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec                    *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		state                   *temporal.TemporalWorkerState
-		config                  *Config
-		expectDelete            int
-		expectCreate            bool
-		expectScale             int
-		expectUpdate            int
-		expectWorkflow          int
-		expectConfig            bool
-		expectConfigSetCurrent  *bool    // pointer so we can test nil
-		expectConfigRampPercent *float32 // pointer so we can test nil
+		name                             string
+		k8sState                         *k8s.DeploymentState
+		status                           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		spec                             *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		state                            *temporal.TemporalWorkerState
+		config                           *Config
+		expectDelete                     int
+		expectCreate                     bool
+		expectScale                      int
+		expectUpdate                     int
+		expectWorkflow                   int
+		expectConfig                     bool
+		expectConfigSetCurrent           *bool    // pointer so we can test nil
+		expectConfigRampPercent          *float32 // pointer so we can test nil
+		maxVersionsIneligibleForDeletion *int32   // set by env if non-nil, else default 75
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -211,7 +213,41 @@ func TestGeneratePlan(t *testing.T) {
 			expectConfigRampPercent: func() *float32 { f := float32(0); return &f }(), // Should reset ramp to 0
 		},
 		{
-			name: "should not create deployment when version limit is reached",
+			name: "should not create deployment when version limit (ineligible for deletion) is reached",
+			k8sState: &k8s.DeploymentState{
+				Deployments:       map[string]*appsv1.Deployment{},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*corev1.ObjectReference{},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+						Deployment: nil,
+					},
+				},
+				DeprecatedVersions: func() []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+					// default is NOT eligible for deletion, so 5 empty Deprecated Versions should block rollout
+					r := make([]*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion, 5)
+					for i := range r {
+						r[i] = &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{}
+					}
+					return r
+				}(),
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectCreate:                     false,
+			maxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
+		},
+		{
+			name: "should create deployment when version limit (ineligible for deletion) is not reached",
 			k8sState: &k8s.DeploymentState{
 				Deployments:       map[string]*appsv1.Deployment{},
 				DeploymentsByTime: []*appsv1.Deployment{},
@@ -226,16 +262,23 @@ func TestGeneratePlan(t *testing.T) {
 						Deployment: nil,
 					},
 				},
+				DeprecatedVersions: func() []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+					r := make([]*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion, 4)
+					for i := range r {
+						r[i] = &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{}
+					}
+					return r
+				}(),
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				MaxVersions: func() *int32 { i := int32(5); return &i }(),
-				Replicas:    func() *int32 { r := int32(1); return &r }(),
+				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
-			expectCreate: false,
+			expectCreate:                     true,
+			maxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
 		},
 		{
 			name: "update deployment when target version, with an existing deployment, has an expired connection spec hash",
@@ -353,7 +396,12 @@ func TestGeneratePlan(t *testing.T) {
 			if tc.status == nil {
 				tc.status = &temporaliov1alpha1.TemporalWorkerDeploymentStatus{}
 			}
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace")
+			maxV := defaults.MaxVersionsIneligibleForDeletion
+			if tc.maxVersionsIneligibleForDeletion != nil {
+				maxV = *tc.maxVersionsIneligibleForDeletion
+			}
+
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -722,10 +770,11 @@ func TestGetScaleDeployments(t *testing.T) {
 
 func TestShouldCreateDeployment(t *testing.T) {
 	testCases := []struct {
-		name          string
-		status        *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec          *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		expectCreates bool
+		name                             string
+		status                           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		spec                             *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		expectCreates                    bool
+		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
 	}{
 		{
 			name: "existing deployment should not create",
@@ -760,9 +809,8 @@ func TestShouldCreateDeployment(t *testing.T) {
 			expectCreates: true,
 		},
 		{
-			name: "should not create when version limit is reached (default limit)",
+			name: "should not create when version limit ineligible for deletion is reached (default limit)",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				VersionCount: 75, // Default limit is 75
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -770,17 +818,24 @@ func TestShouldCreateDeployment(t *testing.T) {
 						Deployment: nil,
 					},
 				},
+				DeprecatedVersions: func() []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+					// default is NOT eligible for deletion, so 75 empty Deprecated Versions should block rollout
+					r := make([]*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion, 75)
+					for i := range r {
+						r[i] = &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{}
+					}
+					return r
+				}(),
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				// MaxVersions is nil, so uses default of 75
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			expectCreates: false,
+			expectCreates:                    false,
+			maxVersionsIneligibleForDeletion: nil, // MaxVersions is nil, so uses default of 75
 		},
 		{
-			name: "should not create when version limit is reached (custom limit)",
+			name: "should not create when version limit ineligible for deletion is reached (custom limit)",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				VersionCount: 5,
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -788,12 +843,20 @@ func TestShouldCreateDeployment(t *testing.T) {
 						Deployment: nil,
 					},
 				},
+				DeprecatedVersions: func() []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+					// default is NOT eligible for deletion, so 5 empty Deprecated Versions should block rollout
+					r := make([]*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion, 5)
+					for i := range r {
+						r[i] = &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{}
+					}
+					return r
+				}(),
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				MaxVersions: func() *int32 { i := int32(5); return &i }(),
-				Replicas:    func() *int32 { r := int32(1); return &r }(),
+				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			expectCreates: false,
+			expectCreates:                    false,
+			maxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
 		},
 		{
 			name: "should create when below version limit",
@@ -806,18 +869,29 @@ func TestShouldCreateDeployment(t *testing.T) {
 						Deployment: nil,
 					},
 				},
+				DeprecatedVersions: func() []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+					r := make([]*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion, 4)
+					for i := range r {
+						r[i] = &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{}
+					}
+					return r
+				}(),
 			},
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-				MaxVersions: func() *int32 { i := int32(5); return &i }(),
-				Replicas:    func() *int32 { r := int32(1); return &r }(),
+				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			expectCreates: true,
+			expectCreates:                    true,
+			maxVersionsIneligibleForDeletion: func() *int32 { i := int32(5); return &i }(),
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			creates := shouldCreateDeployment(tc.status, tc.spec)
+			maxV := defaults.MaxVersionsIneligibleForDeletion
+			if tc.maxVersionsIneligibleForDeletion != nil {
+				maxV = *tc.maxVersionsIneligibleForDeletion
+			}
+			creates := shouldCreateDeployment(tc.status, maxV)
 			assert.Equal(t, tc.expectCreates, creates, "unexpected create decision")
 		})
 	}
@@ -1779,7 +1853,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace")
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
