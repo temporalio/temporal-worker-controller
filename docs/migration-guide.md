@@ -472,32 +472,6 @@ sunset:
   deleteDelay: 24h      # Wait 24 hours after draining before deleting
 ```
 
-### Resource Management
-
-**CPU and Memory:**
-```yaml
-template:
-  spec:
-    containers:
-    - name: worker
-      resources:
-        requests:
-          memory: "1Gi"
-          cpu: "500m"
-        limits:
-          memory: "2Gi" 
-          cpu: "1"
-```
-
-**Pod Annotations and Labels:**
-```yaml
-template:
-  metadata:
-    labels:
-      team: payments
-      environment: production
-```
-
 ## Testing and Validation
 
 ### Pre-Migration Testing
