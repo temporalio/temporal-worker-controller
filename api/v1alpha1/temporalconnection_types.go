@@ -10,28 +10,52 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// SecretReference contains the name of a Secret resource in the same namespace.
+type SecretReference struct {
+	// Name of the Secret resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+}
+
 // TemporalConnectionSpec defines the desired state of TemporalConnection
 type TemporalConnectionSpec struct {
 	// The host and port of the Temporal server.
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
 	HostPort string `json:"hostPort"`
 
-	// MutualTLSSecret is the name of the Secret that contains the TLS certificate and key
+	// MutualTLSSecretRef is the name of the Secret that contains the TLS certificate and key
 	// for mutual TLS authentication. The secret must be `type: kubernetes.io/tls` and exist
 	// in the same Kubernetes namespace as the TemporalConnection resource.
 	//
 	// More information about creating a TLS secret:
 	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
-	MutualTLSSecret string `json:"mutualTLSSecret,omitempty"`
+	// +optional
+	MutualTLSSecretRef *SecretReference `json:"mutualTLSSecretRef,omitempty"`
 }
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
 type TemporalConnectionStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represent the latest available observations of the connection's current state.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// LastConnectionTime is the timestamp of the last successful connection attempt.
+	// +optional
+	LastConnectionTime *metav1.Time `json:"lastConnectionTime,omitempty"`
+
+	// ServerVersion is the version of the connected Temporal server.
+	// +optional
+	ServerVersion string `json:"serverVersion,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=tconn
+//+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server endpoint"
+//+kubebuilder:printcolumn:name="TLS",type="string",JSONPath=".spec.mutualTLSSecretRef.name",description="mTLS secret name"
+//+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Ready status"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // TemporalConnection is the Schema for the temporalconnections API
 type TemporalConnection struct {

@@ -47,12 +47,15 @@ spec:
           spec:
             properties:
               minReadySeconds:
+                default: 0
                 format: int32
                 type: integer
               progressDeadlineSeconds:
+                default: 600
                 format: int32
                 type: integer
               replicas:
+                default: 1
                 format: int32
                 type: integer
               rollout:
@@ -70,7 +73,10 @@ spec:
                         pauseDuration:
                           type: string
                         rampPercentage:
-                          type: number
+                          format: int32
+                          maximum: 100
+                          minimum: 0
+                          type: integer
                       required:
                       - pauseDuration
                       - rampPercentage
@@ -114,8 +120,10 @@ spec:
               sunset:
                 properties:
                   deleteDelay:
+                    default: 24h
                     type: string
                   scaledownDelay:
+                    default: 1h
                     type: string
                 type: object
               template:
@@ -3929,22 +3937,66 @@ spec:
                 type: object
               workerOptions:
                 properties:
-                  connection:
-                    type: string
+                  connectionRef:
+                    properties:
+                      name:
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - name
+                    type: object
                   temporalNamespace:
+                    minLength: 1
                     type: string
                 required:
-                - connection
+                - connectionRef
                 - temporalNamespace
                 type: object
             required:
             - rollout
+            - selector
             - sunset
             - template
             - workerOptions
             type: object
           status:
             properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
               currentVersion:
                 properties:
                   buildID:
@@ -4069,7 +4121,10 @@ spec:
                     format: date-time
                     type: string
                   rampPercentage:
-                    type: number
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
                   rampingSince:
                     format: date-time
                     type: string
@@ -4111,6 +4166,7 @@ spec:
                 type: string
               versionCount:
                 format: int32
+                minimum: 0
                 type: integer
             required:
             - targetVersion

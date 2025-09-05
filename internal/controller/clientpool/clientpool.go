@@ -91,10 +91,10 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 	var expiryTime time.Time
 
 	// Get the connection secret if it exists
-	if opts.Spec.MutualTLSSecret != "" {
+	if opts.Spec.MutualTLSSecretRef != nil {
 		var secret corev1.Secret
 		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
-			Name:      opts.Spec.MutualTLSSecret,
+			Name:      opts.Spec.MutualTLSSecretRef.Name,
 			Namespace: opts.K8sNamespace,
 		}, &secret); err != nil {
 			return nil, err
@@ -142,10 +142,14 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 	cp.mux.Lock()
 	defer cp.mux.Unlock()
 
+	var mutualTLSSecret string
+	if opts.Spec.MutualTLSSecretRef != nil {
+		mutualTLSSecret = opts.Spec.MutualTLSSecretRef.Name
+	}
 	key := ClientPoolKey{
 		HostPort:        opts.Spec.HostPort,
 		Namespace:       opts.TemporalNamespace,
-		MutualTLSSecret: opts.Spec.MutualTLSSecret,
+		MutualTLSSecret: mutualTLSSecret,
 	}
 	cp.clients[key] = ClientInfo{
 		client:     c,
