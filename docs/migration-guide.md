@@ -353,11 +353,7 @@ Now you need to carefully transition from your old unversioned deployment to the
 
 4. **Scale down the original unversioned deployment:**
    ```bash
-   # Gradually reduce replicas of the original deployment
-   kubectl scale deployment payment-processor --replicas=1
-   
-   # Monitor that workflows continue to work correctly
-   # Once confident, scale to zero
+   # Scale down the original deployment
    kubectl scale deployment payment-processor --replicas=0
    ```
 
