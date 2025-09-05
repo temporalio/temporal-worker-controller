@@ -539,7 +539,7 @@ Here are common scenarios when migrating from unversioned to versioned workflows
 
 ### Pattern 1: Microservices Architecture
 
-If you have multiple services with their own workers, migrate each service independently:
+If you have multiple services with their own workers, and each service is versioned and patched separately, migrate each service independently:
 
 ```yaml
 # Payment service worker
