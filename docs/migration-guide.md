@@ -99,7 +99,7 @@ spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: production
-  cutover:
+  rollout:
     strategy: Progressive  # Gradual rollout of new versions
     steps:
       - rampPercentage: 10
@@ -373,7 +373,7 @@ Once the initial migration is complete and validated, enable automated rollouts 
 # Update the TemporalWorkerDeployment custom resource to use Progressive strategy
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{
   "spec": {
-    "cutover": {
+    "rollout": {
       "strategy": "Progressive",
       "steps": [
         {"rampPercentage": 10, "pauseDuration": "5m"},
@@ -435,21 +435,21 @@ See the [Concepts](concepts.md) document for detailed explanations of rollout st
 
 **Manual Strategy (Default Behavior):**
 ```yaml
-cutover:
+rollout:
   strategy: Manual
 # Requires manual intervention to promote versions
 ```
 
-**Immediate Cutover:**
+**Immediate Rollout:**
 ```yaml
-cutover:
+rollout:
   strategy: AllAtOnce
 # Immediately routes 100% traffic to new version when healthy
 ```
 
 **Progressive Rollout:**
 ```yaml
-cutover:
+rollout:
   strategy: Progressive
   steps:
     - rampPercentage: 1
@@ -550,7 +550,7 @@ spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: payments
-  cutover:
+  rollout:
     strategy: Progressive
     steps:
       - rampPercentage: 5
@@ -569,7 +569,7 @@ spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: notifications
-  cutover:
+  rollout:
     strategy: AllAtOnce  # Lower risk, faster rollouts acceptable
   # ... rest of config
 ```
@@ -589,7 +589,7 @@ spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: production
-  cutover:
+  rollout:
     strategy: Progressive
     steps:
       - rampPercentage: 10
@@ -609,8 +609,8 @@ spec:
   workerOptions:
     connection: staging-temporal
     temporalNamespace: staging
-  cutover:
-    strategy: AllAtOnce  # Immediate cutover for faster iteration
+  rollout:
+    strategy: AllAtOnce  # Immediate rollout for faster iteration
 ```
 
 ### Pattern 3: Gradual Team Migration
