@@ -160,7 +160,7 @@ func TruncateString(s string, n int) string {
 }
 
 func CleanStringForDNS(s string) string {
-	// Keep only letters, numbers, and dashes (no dots to avoid pod name warnings)
+	// Keep only letters, numbers, and dashes.
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 	return re.ReplaceAllString(s, ResourceNameSeparator)
 }
