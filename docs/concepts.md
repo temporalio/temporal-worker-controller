@@ -69,7 +69,6 @@ Requires explicit human intervention to promote versions. New versions remain in
 
 **Use cases:**
 - During migration from manual deployment systems
-- High-risk production environments requiring human approval
 - Testing and validation scenarios
 
 ### AllAtOnce Strategy
@@ -143,22 +142,6 @@ The automated process of:
 
 ### Controller-Managed Resources
 Resources that are created, updated, and deleted automatically by the controller:
+- `TemporalWorkerDeployment` custom resources, to update their status
 - Kubernetes `Deployment` resources for each version
-- ConfigMaps and Secrets as needed
-- Service accounts and RBAC resources
 - Labels and annotations for tracking and management
-
-## Migration Concepts
-
-### Import Process
-The process of bringing existing manually-managed worker deployments under controller management. This involves:
-1. Creating a `TemporalWorkerDeployment` custom resource with Manual strategy
-2. Sequentially updating the target pod template in the `TemporalWorkerDeployment` spec to prompt the controller to create a Kubernetes Deployment with that pod spec that is owned and tracked by the controller. Do this for each of your existing Deployments.
-3. Cleaning up original non-worker-controller-managed Kubernetes `Deployment` resources
-4. Enabling automated rollouts
-
-### Single Resource Requirement
-The critical principle that each Temporal Worker Deployment must be managed by exactly one `TemporalWorkerDeployment` custom resource. You cannot split a single logical deployment across multiple custom resources.
-
-### Legacy Version Handling
-The process of ensuring that existing worker versions continue running during migration, maintaining workflow determinism while transitioning to controller management.
