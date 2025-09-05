@@ -572,7 +572,7 @@ spec:
     connection: production-temporal
     temporalNamespace: notifications
   rollout:
-    strategy: AllAtOnce  # Lower risk, faster rollouts acceptable
+    strategy: AllAtOnce  # Lower risk, faster rollouts desired
   # ... rest of config
 ```
 
