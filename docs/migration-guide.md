@@ -110,10 +110,10 @@ spec:
     scaledownDelay: 1h
     deleteDelay: 24h
   template:
-    spec:
+    spec: # Any changes to this spec will trigger the controller to deploy a new version.
       containers:
       - name: worker
-        image: my-worker:v1.2.4  # Update this to deploy new versions
+        image: my-worker:v1.2.4  # This is the most common value to change, as you roll out a new worker image.
         # Note: Controller automatically adds versioning environment variables:
         # TEMPORAL_HOST_PORT, TEMPORAL_NAMESPACE, TEMPORAL_DEPLOYMENT_NAME, WORKER_BUILD_ID
 ```
