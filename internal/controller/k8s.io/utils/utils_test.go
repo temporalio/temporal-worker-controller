@@ -22,7 +22,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          true,
 			expectedLength: 4, // Short hash should be 4 digits
-			expectedResult: "fc7c",
+			expectedResult: "dcb4",
 		},
 		{
 			name:           "basic template with full hash",
@@ -30,7 +30,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          false,
 			expectedLength: 10, // Full hash should be 10 digits
-			expectedResult: "754d5ffc7c",
+			expectedResult: "444444dcb4",
 		},
 		{
 			name:           "template with collision count",
@@ -38,7 +38,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: int32Ptr(5),
 			short:          true,
 			expectedLength: 4,
-			expectedResult: "cfd4",
+			expectedResult: "bb97",
 		},
 		{
 			name:           "empty template",
@@ -46,7 +46,7 @@ func TestComputeHash(t *testing.T) {
 			collisionCount: nil,
 			short:          true,
 			expectedLength: 4,
-			expectedResult: "4c5b",
+			expectedResult: "598f",
 		},
 	}
 

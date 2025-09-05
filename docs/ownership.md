@@ -11,7 +11,7 @@ authorized to resume making changes to the Routing Config of the Worker Deployme
 
 ## Solution
 
-_Once it is available in OSS v1.29, the controller will be able to coordinate with other users via the `OwnerIdentity`
+_Once it is available in OSS v1.29, the controller will be able to coordinate with other users via the `ManagerIdentity`
 field of a Worker Deployment. This runbook will be updated when that is available and implemented by the controller._
 
 In the meantime, the controller will watch the `LastModifierIdentity` field of a Worker Deployment to detect whether 

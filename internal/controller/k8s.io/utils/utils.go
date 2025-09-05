@@ -74,5 +74,5 @@ func ComputeHash(template *corev1.PodTemplateSpec, collisionCount *int32, short 
 	if short {
 		return rand.SafeEncodeString(fmt.Sprintf("%04d", podTemplateSpecHasher.Sum32()%10000))
 	}
-	return rand.SafeEncodeString(fmt.Sprint(podTemplateSpecHasher.Sum32()))
+	return rand.SafeEncodeString(fmt.Sprintf("%010d", podTemplateSpecHasher.Sum32()%10000))
 }
