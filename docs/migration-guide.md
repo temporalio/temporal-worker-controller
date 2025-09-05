@@ -50,7 +50,7 @@ Your workers are likely configured with basic environment variables like:
 ```bash
 TEMPORAL_HOST_PORT=your-temporal-namespace.tmprl.cloud:7233
 TEMPORAL_NAMESPACE=your-temporal-namespace
-# No TEMPORAL_DEPLOYMENT_NAME or WORKER_BUILD_ID yet
+# No TEMPORAL_DEPLOYMENT_NAME or TEMPORAL_WORKER_BUILD_ID yet
 ```
 
 The controller will automatically add the versioning-related environment variables during migration.
@@ -115,7 +115,7 @@ spec:
       - name: worker
         image: my-worker:v1.2.4  # This is the most common value to change, as you roll out a new worker image.
         # Note: Controller automatically adds versioning environment variables:
-        # TEMPORAL_HOST_PORT, TEMPORAL_NAMESPACE, TEMPORAL_DEPLOYMENT_NAME, WORKER_BUILD_ID
+        # TEMPORAL_HOST_PORT, TEMPORAL_NAMESPACE, TEMPORAL_DEPLOYMENT_NAME, TEMPORAL_WORKER_BUILD_ID
 ```
 
 **New Deployment Process:**
@@ -654,7 +654,7 @@ status:
 - Verify TemporalConnection configuration  
 - Ensure TLS secrets are properly configured
 - Verify network connectivity to Temporal server
-- Check that worker code properly handles `WORKER_BUILD_ID` environment variable
+- Check that worker code properly handles `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` environment variables
 
 **2. New Workflows Still Going to Unversioned Workers**
 
