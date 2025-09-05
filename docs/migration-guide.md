@@ -220,17 +220,19 @@ worker := worker.New(client, "my-task-queue", worker.Options{})
 
 **After (Versioned):**
 ```go
-// Worker must use the build ID from environment, this is for the deployment by the controller
-buildID := os.Getenv("WORKER_BUILD_ID")
-if buildID == "" {
+// Worker must use the build ID/deployment name from environment
+// These are set on the deployment by the controller
+buildID := os.Getenv("TEMPORAL_WORKER_BUILD_ID")
+deploymentName := os.Getenv("TEMPORAL_DEPLOYMENT_NAME")
+if buildID == "" || deploymentName == "" {
   // exit with an error
 }
 workerOptions := worker.Options{}
 workerOptions.DeploymentOptions = worker.DeploymentOptions{
   UseVersioning: true,
   Version: worker.WorkerDeploymentVersion{
-    DeploymentName: mustGetEnv("TEMPORAL_DEPLOYMENT_NAME"),
-    BuildId:        mustGetEnv("TEMPORAL_WORKER_BUILD_ID"),
+    DeploymentName: deploymentName,
+    BuildId:        buildId,
   },
 }
 worker := worker.New(client, "my-task-queue", workerOptions)
