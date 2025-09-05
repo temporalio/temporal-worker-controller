@@ -220,17 +220,21 @@ worker := worker.New(client, "my-task-queue", worker.Options{})
 
 **After (Versioned):**
 ```go
-// Worker can optionally use build ID from environment
+// Worker must use the build ID from environment, this is for the deployment by the controller
 buildID := os.Getenv("WORKER_BUILD_ID")
+if buildID == "" {
+  // exit with an error
+}
 workerOptions := worker.Options{}
-if buildID != "" {
-    workerOptions.BuildID = buildID
-    workerOptions.UseBuildIDForVersioning = true
+workerOptions.DeploymentOptions = worker.DeploymentOptions{
+  UseVersioning: true,
+  Version: worker.WorkerDeploymentVersion{
+    DeploymentName: mustGetEnv("TEMPORAL_DEPLOYMENT_NAME"),
+    BuildId:        mustGetEnv("TEMPORAL_WORKER_BUILD_ID"),
+  },
 }
 worker := worker.New(client, "my-task-queue", workerOptions)
 ```
-
-> **Note**: The controller automatically sets `WORKER_BUILD_ID` environment variable, so most workers will work without code changes.
 
 ### Step 4: Create Your First TemporalWorkerDeployment
 
