@@ -150,7 +150,7 @@ The migration from unversioned to versioned workflows requires careful planning 
 
 #### Phase 1: Preparation
 1. **Install the controller** in non-production environments
-2. **Update worker code** to support versioning (if needed)
+2. **Update worker code** to support versioning
 3. **Test migration process** with non-critical workers
 4. **Prepare CI/CD pipeline changes** for new deployment method
 
@@ -208,9 +208,9 @@ spec:
   mutualTLSSecret: temporal-cloud-mtls
 ```
 
-### Step 3: Prepare Your Worker Code (If Needed)
+### Step 3: Prepare Your Worker Code
 
-Most workers will work without changes, but you may need to update your worker initialization code to properly handle versioning:
+Update your worker initialization code to properly handle versioning:
 
 **Before (Unversioned):**
 ```go
@@ -218,7 +218,7 @@ Most workers will work without changes, but you may need to update your worker i
 worker := worker.New(client, "my-task-queue", worker.Options{})
 ```
 
-**After (Versioned - Optional Enhancement):**
+**After (Versioned):**
 ```go
 // Worker can optionally use build ID from environment
 buildID := os.Getenv("WORKER_BUILD_ID")
