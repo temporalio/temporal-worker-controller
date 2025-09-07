@@ -215,25 +215,6 @@ gate:
 
 ## Advanced Configuration
 
-### Resource Limits and Requests
-
-Configure Kubernetes resource limits for worker pods:
-
-```yaml
-template:
-  spec:
-    containers:
-    - name: worker
-      image: my-worker:latest
-      resources:
-        requests:
-          memory: "512Mi"
-          cpu: "250m"
-        limits:
-          memory: "1Gi"
-          cpu: "500m"
-```
-
 ### Environment-Specific Configurations
 
 **Production Configuration:**
@@ -287,23 +268,6 @@ spec:
   sunset:
     scaledownDelay: 30m
     deleteDelay: 4h
-```
-
-### Labels and Annotations
-
-Add custom labels and annotations to managed resources:
-
-```yaml
-template:
-  metadata:
-    labels:
-      app: my-worker
-      team: platform
-      environment: production
-    annotations:
-      deployment.kubernetes.io/revision: "1"
-  spec:
-    # ... container spec
 ```
 
 ### Multiple Task Queues
