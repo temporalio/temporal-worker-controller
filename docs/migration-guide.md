@@ -20,18 +20,7 @@ This guide uses specific terminology that is defined in the [Concepts](concepts.
 
 ## Why Migrate to Versioned Workflows
 
-If you're currently running unversioned Temporal workflows, you may be experiencing challenges with deployments:
-
-- **Deployment Risk**: Code changes can break running workflows if they're not backward compatible
-- **Rollback Complexity**: Rolling back deployments can disrupt in-flight workflows
-- **Workflow Determinism Issues**: Changes to workflow logic can cause non-deterministic errors
-
-Versioned workflows with the Temporal Worker Controller solve these problems by:
-
-- ✅ **Safe Deployments**: New versions run alongside old ones, ensuring running workflows complete successfully
-- ✅ **Automated Rollouts**: Progressive rollout strategies reduce risk of new deployments
-- ✅ **Easy Rollbacks**: Can instantly route new workflows back to previous versions
-- ✅ **Workflow Continuity**: Running workflows can continue on their original version until completion
+If you're currently running unversioned Temporal workflows, you may be experiencing challenges with deployments. Versioned workflows with the Temporal Worker Controller can solve these problems. For details on the benefits of Worker Versioning, see the [Temporal documentation](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning).
 
 ## Prerequisites
 
@@ -48,7 +37,7 @@ Before starting the migration, ensure you have:
 Your workers are likely configured with basic environment variables like:
 
 ```bash
-TEMPORAL_HOST_PORT=your-temporal-namespace.tmprl.cloud:7233
+TEMPORAL_ADDRESS=your-temporal-namespace.tmprl.cloud:7233
 TEMPORAL_NAMESPACE=your-temporal-namespace
 # No TEMPORAL_DEPLOYMENT_NAME or TEMPORAL_WORKER_BUILD_ID yet
 ```
@@ -73,7 +62,7 @@ spec:
       - name: worker
         image: my-worker:v1.2.3
         env:
-        - name: TEMPORAL_HOST_PORT
+        - name: TEMPORAL_ADDRESS
           value: "production.tmprl.cloud:7233"
         - name: TEMPORAL_NAMESPACE
           value: "production"
@@ -115,7 +104,7 @@ spec:
       - name: worker
         image: my-worker:v1.2.4  # This is the most common value to change, as you roll out a new worker image.
         # Note: Controller automatically adds versioning environment variables:
-        # TEMPORAL_HOST_PORT, TEMPORAL_NAMESPACE, TEMPORAL_DEPLOYMENT_NAME, TEMPORAL_WORKER_BUILD_ID
+        # TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_DEPLOYMENT_NAME, TEMPORAL_WORKER_BUILD_ID
 ```
 
 **New Deployment Process:**
@@ -620,7 +609,7 @@ status:
 ```
 
 *Solutions:*
-- Check worker logs for connection errors
+- Check worker logs for connection/initialization errors
 - Verify TemporalConnection configuration  
 - Ensure TLS secrets are properly configured
 - Verify network connectivity to Temporal server

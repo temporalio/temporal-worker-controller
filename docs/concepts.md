@@ -12,7 +12,6 @@ A logical grouping in Temporal that represents a collection of workers that are 
 - Can have multiple concurrent worker versions running simultaneously
 - Versions of a Worker Deployment are identified by Build IDs (e.g., "v1.5.1", "v1.5.2")
 - Temporal routes workflow executions to appropriate worker versions based on the `RoutingConfig` of the Worker Deployment that the versions are in.
-- Temporal routes workflow executions to appropriate versions based on compatibility rules
 
 ### `TemporalWorkerDeployment` CRD
 The Kubernetes Custom Resource Definition that manages one Temporal Worker Deployment. This is the primary resource you interact with when using the Temporal Worker Controller.
@@ -24,18 +23,16 @@ The Kubernetes Custom Resource Definition that manages one Temporal Worker Deplo
 - Controller creates and manages multiple Kubernetes `Deployment` resources based on this spec
 
 The actual Kubernetes `Deployment` resources that run worker pods. The controller automatically creates these - you don't manage them directly.
-The actual Kubernetes Deployment resources that run worker pods. The controller automatically creates these - you don't manage them directly.
 
 **Key characteristics:**
 - Multiple Kubernetes `Deployment` resources per `TemporalWorkerDeployment` Custom Resource (one per version)
-- Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `payment-processor/staging-v1.5.1`)
-- Managed entirely by the controller - created, updated, and deleted automatically
+- Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `staging/payment-processor-v1.5.1`)
 - Each runs a specific version of your worker code
 
 ### Key Relationship
 **One `TemporalWorkerDeployment` Custom Resource → Multiple Kubernetes `Deployment` resources (managed by controller)**
 
-make changes to the spec of your `TemporalWorkerDeployment` Custom Resource, and the controller handles all the underlying Kubernetes `Deployment` resources for different versions.
+Make changes to the spec of your `TemporalWorkerDeployment` Custom Resource, and the controller handles all the underlying Kubernetes `Deployment` resources for different versions.
 
 ## Version States
 
@@ -107,16 +104,15 @@ Defines how Drained versions are cleaned up:
 - **deleteDelay**: How long to wait after a version has been Drained before deleting the Kubernetes `Deployment`
 
 ### Template
-The pod template used for the target version of this worker deployment. Similar to a standard Kubernetes Deployment template but managed by the controller.
+The pod template used for the target version of this worker deployment. Similar to the pod template used in a standar Kubernetes `Deployment`, but managed by the controller.
 
 ## Environment Variables
 
 The controller automatically sets these environment variables for all worker pods:
 
-### TEMPORAL_HOST_PORT
+### TEMPORAL_ADDRESS
 The host and port of the Temporal server, derived from the `TemporalConnection` custom resource.
 The worker must connect to this Temporal endpoint, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that endpoint if it already knows the endpoint another way.
-
 ### TEMPORAL_NAMESPACE
 The Temporal namespace the worker should connect to, from `spec.workerOptions.temporalNamespace`.
 The worker must connect to this Temporal namespace, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that namespace if it already knows the namespace another way.
@@ -125,7 +121,7 @@ The worker must connect to this Temporal namespace, but since this is user provi
 The worker deployment name in Temporal, auto-generated from the `TemporalWorkerDeployment` name and Kubernetes namespace.
 The worker *must* use this to configure its `worker.DeploymentOptions`.
 
-### WORKER_BUILD_ID
+### TEMPORAL_WORKER_BUILD_ID
 The build ID for this specific version, derived from the container image tag and hash of the target pod template.
 The worker *must* use this to configure its `worker.DeploymentOptions`.
 
