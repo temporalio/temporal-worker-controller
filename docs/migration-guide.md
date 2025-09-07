@@ -18,6 +18,8 @@ This guide uses specific terminology that is defined in the [Concepts](concepts.
 8. [Common Migration Patterns](#common-migration-patterns)
 9. [Troubleshooting](#troubleshooting)
 
+For detailed configuration options, see the [Configuration Reference](configuration.md) document.
+
 ## Why Migrate to Versioned Workflows
 
 If you're currently running unversioned Temporal workflows, you may be experiencing challenges with deployments. Versioned workflows with the Temporal Worker Controller can solve these problems. For details on the benefits of Worker Versioning, see the [Temporal documentation](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning).
@@ -229,7 +231,7 @@ worker := worker.New(client, "my-task-queue", workerOptions)
 
 ### Step 4: Create Your First TemporalWorkerDeployment
 
-Start with your lowest-risk worker. Convert your existing unversioned Deployment to a `TemporalWorkerDeployment` custom resource:
+Start with your lowest-risk worker. Make a copy of your existing unversioned Deployment and convert it to a `TemporalWorkerDeployment` custom resource:
 
 **Existing Unversioned Deployment:**
 ```yaml
@@ -423,53 +425,16 @@ Deploy a new version to validate the entire flow:
 
 ## Configuration Reference
 
-### Rollout Strategies
+For comprehensive configuration options including rollout strategies, sunset configuration, worker options, and advanced settings, see the [Configuration Reference](configuration.md) document.
 
-See the [Concepts](concepts.md) document for detailed explanations of rollout strategies. Here are the basic configuration patterns:
+Key configuration patterns for migration:
 
-**Manual Strategy (Advanced Use Cases):**
-```yaml
-rollout:
-  strategy: Manual
-# Requires manual intervention to promote versions
-# Only recommended for special cases requiring full manual control
-```
+- **Progressive Strategy (Recommended)**: Start with conservative ramp percentages (1%, 5%, 25%) for initial migrations
+- **AllAtOnce Strategy**: For development/staging environments where speed is preferred over gradual rollout  
+- **Manual Strategy**: Only for advanced use cases requiring full manual control
+- **Sunset Configuration**: Configure delays for scaling down and deleting old versions
 
-**Immediate Rollout:**
-```yaml
-rollout:
-  strategy: AllAtOnce
-# Immediately routes 100% traffic to new version when healthy
-```
-
-**Progressive Rollout (Recommended):**
-```yaml
-rollout:
-  strategy: Progressive
-  steps:
-    # Conservative initial migration settings
-    - rampPercentage: 1
-      pauseDuration: 10m
-    - rampPercentage: 5  
-      pauseDuration: 15m
-    - rampPercentage: 25
-      pauseDuration: 20m
-    # Can be optimized to faster ramps after validation:
-    # - rampPercentage: 10
-    #   pauseDuration: 5m
-    # - rampPercentage: 50
-    #   pauseDuration: 10m
-  gate:
-    workflowType: "HealthCheck"  # Optional validation workflow
-```
-
-### Sunset Configuration
-
-```yaml
-sunset:
-  scaledownDelay: 1h    # Wait 1 hour after draining before scaling to 0
-  deleteDelay: 24h      # Wait 24 hours after draining before deleting
-```
+See [Configuration Reference](configuration.md) for detailed examples and advanced configuration options.
 
 ## Testing and Validation
 
@@ -606,8 +571,6 @@ Migrate teams/services based on their readiness and risk tolerance:
 - Customer-facing workflows
 - Payment processing
 - Critical business operations
-
-
 
 ## Troubleshooting
 

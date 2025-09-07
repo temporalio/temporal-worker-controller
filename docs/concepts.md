@@ -51,7 +51,7 @@ The version is registered with Temporal but isn't automatically receiving any ne
 The version is receiving a percentage of new workflow executions. If managed by a Progressive rollout, the percentage gradually increases according to the configured rollout steps. If the rollout is Manual, the user is responsible for setting the ramp percentage and ramping version.
 
 ### Current
-The version is receiving 100% of new workflow executions. This is the "stable" version that handles all new workflows and all existing AutoUpgrade workflows running on the task queues in this Worker Deployment.
+The current version receives all new workflow executions except those routed to the Ramping version. This is the "stable" version that handles the majority of traffic - all new workflows not being ramped to a newer version, plus all existing AutoUpgrade workflows running on the task queues in this Worker Deployment.
 
 ### Draining
 The version is no longer receiving new workflow executions but may still be processing existing workflows.
@@ -113,6 +113,7 @@ The controller automatically sets these environment variables for all worker pod
 ### TEMPORAL_ADDRESS
 The host and port of the Temporal server, derived from the `TemporalConnection` custom resource.
 The worker must connect to this Temporal endpoint, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that endpoint if it already knows the endpoint another way.
+
 ### TEMPORAL_NAMESPACE
 The Temporal namespace the worker should connect to, from `spec.workerOptions.temporalNamespace`.
 The worker must connect to this Temporal namespace, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that namespace if it already knows the namespace another way.
