@@ -130,7 +130,7 @@ func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment)
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
 func ComputeVersionedDeploymentName(baseName, buildID string) string {
-	return baseName + "-" + buildID
+	return CleanStringForDNS(baseName + K8sResourceNameSeparator + buildID)
 }
 
 func computeImagePrefix(s string, maxLen int) string {
@@ -146,18 +146,21 @@ func computeImagePrefix(s string, maxLen int) string {
 		default:
 		}
 	}
-	return CleanAndTruncateString(s, maxLen)
+	return TruncateString(s, maxLen)
 }
 
-// CleanAndTruncateString truncates string to the first n characters, and then replaces characters that can't be in a
-// kubernetes resource name with a `-` character which can be.
+// TruncateString truncates string to the first n characters.
 // Pass n = -1 to skip truncation.
-func CleanAndTruncateString(s string, n int) string {
+func TruncateString(s string, n int) string {
 	if len(s) > n && n > 0 {
 		s = s[:n]
 	}
-	// Keep only letters, numbers, dashes, and dots
-	re := regexp.MustCompile(`[^a-zA-Z0-9-.]+`)
+	return s
+}
+
+func CleanStringForDNS(s string) string {
+	// Keep only letters, numbers, and dashes.
+	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 	return re.ReplaceAllString(s, K8sResourceNameSeparator)
 }
 
