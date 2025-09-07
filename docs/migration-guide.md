@@ -68,6 +68,10 @@ spec:
           value: "production.tmprl.cloud:7233"
         - name: TEMPORAL_NAMESPACE
           value: "production"
+        - name: TEMPORAL_TLS_CLIENT_CERT_PATH
+          value: "/path/to/temporal.cert"
+        - name: TEMPORAL_TLS_CLIENT_KEY_PATH
+          value: "/path/to/temporal.key"
         # No versioning environment variables
 ```
 
