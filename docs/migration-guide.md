@@ -129,11 +129,11 @@ spec:
 The migration from unversioned to versioned workflows requires careful planning to avoid disrupting running workflows. The key is to transition gradually while maintaining workflow continuity.
 
 **Key Principles:**
-- **Start with Manual strategy** - Prevents automatic promotions during initial setup
+- **Start with Progressive strategy with conservative settings** - Experience the controller's main value while maintaining safety
 - **Migrate one worker deployment at a time** - Reduces risk and allows learning
 - **Test thoroughly in non-production** - Validate the approach before production migration
 - **Preserve running workflows** - Ensure in-flight workflows complete successfully
-- **Enable automation gradually** - Move to Progressive rollouts only after validation
+- **Use very conservative ramp percentages initially** - Start with 1-5% ramps to minimize risk
 
 ### Migration Phases
 
@@ -251,7 +251,7 @@ spec:
           value: "production"
 ```
 
-**New TemporalWorkerDeployment custom resource (IMPORTANT: Use Manual strategy initially):**
+**New TemporalWorkerDeployment custom resource (IMPORTANT: Use Progressive strategy with conservative settings initially):**
 ```yaml
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
@@ -264,9 +264,16 @@ spec:
   workerOptions:
     connection: production-temporal
     temporalNamespace: production
-  # CRITICAL: Use Manual during initial migration
+  # Start with Progressive strategy using conservative ramp percentages
   rollout:
-    strategy: Manual
+    strategy: Progressive
+    steps:
+      - rampPercentage: 1
+        pauseDuration: 10m
+      - rampPercentage: 5
+        pauseDuration: 15m
+      - rampPercentage: 25
+        pauseDuration: 20m
   sunset:
     scaledownDelay: 30m
     deleteDelay: 2h
@@ -352,12 +359,12 @@ Now you need to carefully transition from your old unversioned deployment to the
    kubectl delete deployment payment-processor
    ```
 
-### Step 7: Enable Automated Rollouts
+### Step 7: Optimize Rollout Settings
 
-Once the initial migration is complete and validated, enable automated rollouts for future deployments:
+Once the initial migration is complete and validated, you can optimize rollout settings for faster deployments:
 
 ```bash
-# Update the TemporalWorkerDeployment custom resource to use Progressive strategy
+# Update the TemporalWorkerDeployment custom resource to use faster Progressive rollout
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{
   "spec": {
     "rollout": {
@@ -420,11 +427,12 @@ Deploy a new version to validate the entire flow:
 
 See the [Concepts](concepts.md) document for detailed explanations of rollout strategies. Here are the basic configuration patterns:
 
-**Manual Strategy (Default Behavior):**
+**Manual Strategy (Advanced Use Cases):**
 ```yaml
 rollout:
   strategy: Manual
 # Requires manual intervention to promote versions
+# Only recommended for special cases requiring full manual control
 ```
 
 **Immediate Rollout:**
@@ -434,17 +442,23 @@ rollout:
 # Immediately routes 100% traffic to new version when healthy
 ```
 
-**Progressive Rollout:**
+**Progressive Rollout (Recommended):**
 ```yaml
 rollout:
   strategy: Progressive
   steps:
+    # Conservative initial migration settings
     - rampPercentage: 1
-      pauseDuration: 5m
-    - rampPercentage: 10  
       pauseDuration: 10m
-    - rampPercentage: 50
+    - rampPercentage: 5  
       pauseDuration: 15m
+    - rampPercentage: 25
+      pauseDuration: 20m
+    # Can be optimized to faster ramps after validation:
+    # - rampPercentage: 10
+    #   pauseDuration: 5m
+    # - rampPercentage: 50
+    #   pauseDuration: 10m
   gate:
     workflowType: "HealthCheck"  # Optional validation workflow
 ```
@@ -571,7 +585,7 @@ spec:
     connection: staging-temporal
     temporalNamespace: staging
   rollout:
-    strategy: AllAtOnce  # Immediate rollout for faster iteration
+    strategy: AllAtOnce  # Faster rollout
 ```
 
 ### Pattern 3: Gradual Team Migration
@@ -684,10 +698,10 @@ kubectl get events --field-selector involvedObject.kind=TemporalWorkerDeployment
 ## Migration Summary
 
 🎯 **Key principles for unversioned to versioned migration**: 
-- **Start with Manual strategy** to maintain control during initial migration
+- **Start with Progressive strategy using conservative ramp percentages** to experience the controller's value while maintaining safety
 - **Run both unversioned and versioned workers** during transition period
 - **Wait for existing workflows to complete** before scaling down unversioned workers
-- **Enable Progressive rollouts** only after validating the migration process
+- **Begin with very conservative ramp percentages (1-5%)** and optimize after validating the migration process
 - **Migrate one service at a time** to reduce risk and enable learning
 
 See the [Concepts](concepts.md) document for detailed explanations of the resource relationships and terminology.
