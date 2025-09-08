@@ -39,12 +39,6 @@ type TemporalWorkerDeploymentSpec struct {
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
-	// Label selector for pods. Existing ReplicaSets whose pods are
-	// selected by this will be the ones affected by this deployment.
-	// If not specified, defaults to the pod template's labels.
-	// +optional
-	Selector *metav1.LabelSelector `json:"selector,omitempty" protobuf:"bytes,2,opt,name=selector"`
-
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
 	Template corev1.PodTemplateSpec `json:"template"`

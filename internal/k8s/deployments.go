@@ -13,22 +13,24 @@ import (
 	"sort"
 
 	"github.com/distribution/reference"
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
 )
 
 const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel                  = "temporal.io/build-id"
+	twdNameLabel                  = "temporal.io/deployment-name"
 	WorkerDeploymentNameSeparator = "/"
-	K8sResourceNameSeparator      = "-"
+	ResourceNameSeparator         = "-"
 	MaxBuildIdLen                 = 63
 	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
 )
@@ -113,7 +115,7 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
-			shortHashSuffix := K8sResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
+			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
 			maxImgLen := MaxBuildIdLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
 			return imagePrefix + shortHashSuffix
@@ -130,7 +132,7 @@ func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment)
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
 func ComputeVersionedDeploymentName(baseName, buildID string) string {
-	return CleanStringForDNS(baseName + K8sResourceNameSeparator + buildID)
+	return CleanStringForDNS(baseName + ResourceNameSeparator + buildID)
 }
 
 func computeImagePrefix(s string, maxLen int) string {
@@ -159,9 +161,9 @@ func TruncateString(s string, n int) string {
 }
 
 func CleanStringForDNS(s string) string {
-	// Keep only letters, numbers, and dashes.
-	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
-	return re.ReplaceAllString(s, K8sResourceNameSeparator)
+	// Keep only letters, numbers, dashes, and dots
+	re := regexp.MustCompile(`[^a-zA-Z0-9-.]+`)
+	return re.ReplaceAllString(s, ResourceNameSeparator)
 }
 
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
@@ -173,14 +175,10 @@ func NewDeploymentWithOwnerRef(
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
-	selectorLabels := map[string]string{}
-	// Merge labels from TemporalWorker with build ID
-	if spec.Selector != nil {
-		for k, v := range spec.Selector.MatchLabels {
-			selectorLabels[k] = v
-		}
+	selectorLabels := map[string]string{
+		twdNameLabel: workerDeploymentName,
+		BuildIDLabel: buildID,
 	}
-	selectorLabels[BuildIDLabel] = buildID
 
 	// Set pod labels
 	podLabels := make(map[string]string)

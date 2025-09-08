@@ -379,7 +379,7 @@ func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen i
 	assert.Truef(t, strings.HasPrefix(build, expectedPrefix), "expected prefix %s in build %s", expectedPrefix, build)
 	assert.LessOrEqual(t, len(build), k8s.MaxBuildIdLen)
 	assert.Equalf(t, k8s.TruncateString(build, -1), build, "expected build %s to be truncated", build)
-	split := strings.Split(build, k8s.K8sResourceNameSeparator)
+	split := strings.Split(build, k8s.ResourceNameSeparator)
 	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
 }
 
