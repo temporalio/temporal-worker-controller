@@ -19,10 +19,6 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Available replicas
-      jsonPath: .status.conditions[?(@.type=='Available')].status
-      name: Ready
-      type: integer
     - description: Current build ID
       jsonPath: .status.currentVersion.buildID
       name: Current
@@ -95,32 +91,6 @@ spec:
                 required:
                 - strategy
                 type: object
-              selector:
-                properties:
-                  matchExpressions:
-                    items:
-                      properties:
-                        key:
-                          type: string
-                        operator:
-                          type: string
-                        values:
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    type: object
-                type: object
-                x-kubernetes-map-type: atomic
               sunset:
                 properties:
                   deleteDelay:
