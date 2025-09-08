@@ -115,12 +115,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		}, nil
 	}
 
-	// Verify that a connection is configured
-	if workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name == "" {
-		err := fmt.Errorf("TemporalConnection must be set")
-		l.Error(err, "")
-		return ctrl.Result{}, err
-	}
+	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
 
 	// Fetch the connection parameters
 	var temporalConnection temporaliov1alpha1.TemporalConnection
