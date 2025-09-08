@@ -60,7 +60,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 				}
 				return obj
 			}),
-			errorMsg: "[spec.rollout.steps[2].rampPercentageBasisPoints: Invalid value: 9: rampPercentageBasisPoints must increase between each step, spec.rollout.steps[4].rampPercentageBasisPoints: Invalid value: 50: rampPercentageBasisPoints must increase between each step]",
+			errorMsg: "[spec.rollout.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.rollout.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
 		},
 		"pause duration < 30s": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {

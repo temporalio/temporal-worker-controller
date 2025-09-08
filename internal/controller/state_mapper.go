@@ -47,8 +47,8 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 	if rampingBuildID == targetBuildID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
 		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt
-		rampPercentageBasisPoints := int32(m.temporalState.RampPercentage * 100)
-		status.TargetVersion.RampPercentageBasisPoints = &rampPercentageBasisPoints
+		rampPercentage := m.temporalState.RampPercentage
+		status.TargetVersion.RampPercentage = &rampPercentage
 	}
 
 	// Add deprecated versions
@@ -137,8 +137,8 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 
 		// Set ramp percentage if this is a ramping version
 		if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
-			rampPercentageBasisPoints := int32(m.temporalState.RampPercentage * 100)
-			version.RampPercentageBasisPoints = &rampPercentageBasisPoints
+			rampPercentage := m.temporalState.RampPercentage
+			version.RampPercentage = &rampPercentage
 		}
 
 		// Set task queues

@@ -373,7 +373,7 @@ func testTemporalWorkerDeploymentCreation(
 	t.Log("Creating a TemporalConnection")
 	temporalConnection := &temporaliov1alpha1.TemporalConnection{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      twd.Spec.WorkerOptions.TemporalConnection,
+			Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
 			Namespace: twd.Namespace,
 		},
 		Spec: temporaliov1alpha1.TemporalConnectionSpec{

@@ -441,8 +441,8 @@ func (tcb *TestCaseBuilder) BuildWithValues(name, k8sNamespace, temporalNamespac
 // ProgressiveStep creates a progressive rollout step
 func ProgressiveStep(rampPercentageBasisPoints int32, pauseDuration time.Duration) temporaliov1alpha1.RolloutStep {
 	return temporaliov1alpha1.RolloutStep{
-		RampPercentageBasisPoints: rampPercentageBasisPoints,
-		PauseDuration:             metav1.Duration{Duration: pauseDuration},
+		RampPercentage: int(rampPercentageBasisPoints / 100),
+		PauseDuration:  metav1.Duration{Duration: pauseDuration},
 	}
 }
 

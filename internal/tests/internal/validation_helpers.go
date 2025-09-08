@@ -169,13 +169,15 @@ func verifyTemporalStateMatchesStatusEventually(
 						return fmt.Errorf("expected build id '%s' to be Ramping, but was '%s' was ramping instead", tv.BuildID, rc.RampingVersion.BuildId)
 					}
 				}
-				if tv.RampPercentage == nil {
+				if tv.RampPercentageBasisPoints == nil {
 					if rc.RampingVersionPercentage != 0 {
-						return fmt.Errorf("expected RampPercentage to be nil, but was %v", rc.RampingVersionPercentage)
+						return fmt.Errorf("expected RampPercentageBasisPoints to be nil, but temporal percentage was %v", rc.RampingVersionPercentage)
 					}
 				} else {
-					if rc.RampingVersionPercentage != *tv.RampPercentage {
-						return fmt.Errorf("expected RampPercentage to be %v, but was %v", *tv.RampPercentage, rc.RampingVersionPercentage)
+					expectedPercentage := float32(*tv.RampPercentageBasisPoints) / 100
+					if rc.RampingVersionPercentage != expectedPercentage {
+						return fmt.Errorf("expected RampPercentageBasisPoints to be %v basis points (%.2f%%), but temporal percentage was %.2f%%", 
+							*tv.RampPercentageBasisPoints, expectedPercentage, rc.RampingVersionPercentage)
 					}
 				}
 			case temporaliov1alpha1.VersionStatusCurrent:
@@ -275,20 +277,20 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 					expectedDeploymentStatus.TargetVersion.Status,
 					twd.Status.TargetVersion.Status)
 			}
-			if expectedDeploymentStatus.TargetVersion.RampPercentage != nil {
-				if twd.Status.TargetVersion.RampPercentage == nil {
+			if expectedDeploymentStatus.TargetVersion.RampPercentageBasisPoints != nil {
+				if twd.Status.TargetVersion.RampPercentageBasisPoints == nil {
 					return fmt.Errorf("expected ramp percentage to be '%v', got nil",
-						*expectedDeploymentStatus.TargetVersion.RampPercentage)
+						*expectedDeploymentStatus.TargetVersion.RampPercentageBasisPoints)
 				}
-				if *twd.Status.TargetVersion.RampPercentage != *expectedDeploymentStatus.TargetVersion.RampPercentage {
+				if *twd.Status.TargetVersion.RampPercentageBasisPoints != *expectedDeploymentStatus.TargetVersion.RampPercentageBasisPoints {
 					return fmt.Errorf("expected ramp percentage to be '%v', got '%v'",
-						*expectedDeploymentStatus.TargetVersion.RampPercentage,
-						*twd.Status.TargetVersion.RampPercentage)
+						*expectedDeploymentStatus.TargetVersion.RampPercentageBasisPoints,
+						*twd.Status.TargetVersion.RampPercentageBasisPoints)
 				}
 			} else {
-				if twd.Status.TargetVersion.RampPercentage != nil {
+				if twd.Status.TargetVersion.RampPercentageBasisPoints != nil {
 					return fmt.Errorf("expected ramp percentage to be nil, got '%v'",
-						*twd.Status.TargetVersion.RampPercentage)
+						*twd.Status.TargetVersion.RampPercentageBasisPoints)
 				}
 			}
 		}

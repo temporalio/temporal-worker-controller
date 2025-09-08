@@ -1062,7 +1062,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
 					{
-						RampPercentageBasisPoints: 2500,
+						RampPercentage: 25,
 						PauseDuration: metav1.Duration{
 							Duration: 1 * time.Hour,
 						},
@@ -1078,7 +1078,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 							Time: time.Now().Add(-30 * time.Minute),
 						},
 					},
-					RampPercentageBasisPoints: nil,
+					RampPercentage: nil,
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-30 * time.Minute),
 					},
@@ -1201,9 +1201,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
-					{RampPercentageBasisPoints: 2500, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
-					{RampPercentageBasisPoints: 5000, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
-					{RampPercentageBasisPoints: 7500, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 75, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -1224,7 +1224,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
-					RampPercentageBasisPoints: int32Ptr(7500),
+					RampPercentage: float32Ptr(7500 / 100.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
@@ -1237,7 +1237,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
-					{RampPercentageBasisPoints: 2500, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -1265,8 +1265,8 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
-					{RampPercentageBasisPoints: 2500, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
-					{RampPercentageBasisPoints: 5000, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -1285,7 +1285,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour),
 					},
-					RampPercentageBasisPoints: int32Ptr(2500),
+					RampPercentage: float32Ptr(2500 / 100.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-1 * time.Hour), // Exactly at step boundary
 					},
@@ -1299,9 +1299,9 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
-					{RampPercentageBasisPoints: 2500, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
-					{RampPercentageBasisPoints: 0, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
-					{RampPercentageBasisPoints: 5000, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
+					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
+					{RampPercentage: 0, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
+					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -1333,8 +1333,8 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
-					{RampPercentageBasisPoints: 2500, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
-					{RampPercentageBasisPoints: 5000, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
+					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
@@ -1353,7 +1353,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
-					RampPercentageBasisPoints: int32Ptr(5000),
+					RampPercentage: float32Ptr(5000 / 100.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
@@ -1368,8 +1368,8 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Steps: []temporaliov1alpha1.RolloutStep{
 					{
-						RampPercentageBasisPoints: 1000,
-						PauseDuration:             metav1.Duration{Duration: 30 * time.Second},
+						RampPercentage: 10,
+						PauseDuration:  metav1.Duration{Duration: 30 * time.Second},
 					},
 				},
 			},
@@ -1389,8 +1389,8 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second),
 					},
-					RampPercentageBasisPoints: int32Ptr(1000),
-					RampLastModifiedAt:        nil, // nil rampLastModifiedAt should not cause a panic!
+					RampPercentage:     float32Ptr(1000 / 100.0),
+					RampLastModifiedAt: nil, // nil rampLastModifiedAt should not cause a panic!
 				},
 			},
 			expectConfig:      false,
@@ -2150,14 +2150,18 @@ func int32Ptr(v int32) *int32 {
 	return &v
 }
 
+func float32Ptr(v float32) *float32 {
+	return &v
+}
+
 func metav1Duration(d time.Duration) metav1.Duration {
 	return metav1.Duration{Duration: d}
 }
 
 func rolloutStep(ramp int32, d time.Duration) temporaliov1alpha1.RolloutStep {
 	return temporaliov1alpha1.RolloutStep{
-		RampPercentageBasisPoints: ramp,
-		PauseDuration:             metav1Duration(d),
+		RampPercentage: int(ramp / 100),
+		PauseDuration:  metav1Duration(d),
 	}
 }
 

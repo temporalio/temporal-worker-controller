@@ -156,7 +156,8 @@ func MakeTargetVersion(namespace, twdName, imageName string, status temporaliov1
 	}
 
 	if rampPercentageBasisPoints >= 0 {
-		ret.RampPercentageBasisPoints = &rampPercentageBasisPoints
+		rampPercentage := float32(rampPercentageBasisPoints) / 100.0
+		ret.RampPercentage = &rampPercentage
 	}
 
 	if healthy {

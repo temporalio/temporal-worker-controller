@@ -430,7 +430,12 @@ func getVersionConfigDiff(
 		vcfg.SetCurrent = true
 		return vcfg
 	case temporaliov1alpha1.UpdateProgressive:
-		return handleProgressiveRollout(strategy.Steps, time.Now(), status.TargetVersion.RampLastModifiedAt, status.TargetVersion.RampPercentageBasisPoints, vcfg)
+		var targetRampBasisPoints *int32
+		if status.TargetVersion.RampPercentage != nil {
+			basisPoints := int32(*status.TargetVersion.RampPercentage * 100)
+			targetRampBasisPoints = &basisPoints
+		}
+		return handleProgressiveRollout(strategy.Steps, time.Now(), status.TargetVersion.RampLastModifiedAt, targetRampBasisPoints, vcfg)
 	}
 
 	return nil
@@ -460,7 +465,7 @@ func handleProgressiveRollout(
 	// If this is the first step and there is no ramp percentage set, set the ramp percentage
 	// to the step's ramp percentage.
 	if targetRampPercentageBasisPoints == nil {
-		vcfg.RampPercentageBasisPoints = currentStep.RampPercentageBasisPoints
+		vcfg.RampPercentageBasisPoints = int32(currentStep.RampPercentage * 100)
 		return vcfg
 	}
 
@@ -468,8 +473,8 @@ func handleProgressiveRollout(
 	// is reset immediately. This might be considered overly conservative, but it guarantees that
 	// rollouts resume from the earliest possible step, and that at least the last step is always
 	// respected (both % and duration).
-	if *targetRampPercentageBasisPoints != currentStep.RampPercentageBasisPoints {
-		vcfg.RampPercentageBasisPoints = currentStep.RampPercentageBasisPoints
+	if *targetRampPercentageBasisPoints != int32(currentStep.RampPercentage*100) {
+		vcfg.RampPercentageBasisPoints = int32(currentStep.RampPercentage * 100)
 		return vcfg
 	}
 
@@ -477,7 +482,7 @@ func handleProgressiveRollout(
 	if rampLastModifiedAt != nil {
 		if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
 			if i < len(steps)-1 {
-				vcfg.RampPercentageBasisPoints = steps[i+1].RampPercentageBasisPoints
+				vcfg.RampPercentageBasisPoints = int32(steps[i+1].RampPercentage * 100)
 				return vcfg
 			} else {
 				vcfg.SetCurrent = true
@@ -498,7 +503,7 @@ func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPerce
 	var result int
 	for i, s := range steps {
 		// Break if ramp percentage is greater than current (use last index)
-		if s.RampPercentageBasisPoints > *targetRampPercentageBasisPoints {
+		if int32(s.RampPercentage*100) > *targetRampPercentageBasisPoints {
 			break
 		}
 		result = i

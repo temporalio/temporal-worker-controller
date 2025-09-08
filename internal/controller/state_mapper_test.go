@@ -161,8 +161,8 @@ func TestMapToStatus(t *testing.T) {
 	actualRampingStatus := string(status.TargetVersion.Status)
 	assert.Equal(t, expectedRampingStatus, actualRampingStatus)
 
-	assert.NotNil(t, status.TargetVersion.RampPercentageBasisPoints)
-	assert.Equal(t, int32(2500), *status.TargetVersion.RampPercentageBasisPoints)
+	assert.NotNil(t, status.TargetVersion.RampPercentage)
+	assert.Equal(t, float32(25.0), *status.TargetVersion.RampPercentage)
 	assert.Equal(t, rampingSince.Time.Unix(), status.TargetVersion.RampingSince.Time.Unix())
 	assert.Equal(t, 1, len(status.TargetVersion.TaskQueues))
 	assert.Equal(t, "queue1", status.TargetVersion.TaskQueues[0].Name)

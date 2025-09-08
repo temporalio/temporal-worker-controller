@@ -119,7 +119,7 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 				field.Invalid(field.NewPath("spec.rollout.steps"), rolloutSteps, "steps are required for Progressive rollout"),
 			)
 		}
-		var lastRamp int32
+		var lastRamp int
 		for i, s := range rolloutSteps {
 			// Check duration >= 30s
 			if s.PauseDuration.Duration < 30*time.Second {
@@ -129,12 +129,12 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 			}
 
 			// Check ramp value greater than last
-			if s.RampPercentageBasisPoints <= lastRamp {
+			if s.RampPercentage <= lastRamp {
 				allErrs = append(allErrs,
-					field.Invalid(field.NewPath(fmt.Sprintf("spec.rollout.steps[%d].rampPercentageBasisPoints", i)), s.RampPercentageBasisPoints, "rampPercentageBasisPoints must increase between each step"),
+					field.Invalid(field.NewPath(fmt.Sprintf("spec.rollout.steps[%d].rampPercentage", i)), s.RampPercentage, "rampPercentage must increase between each step"),
 				)
 			}
-			lastRamp = s.RampPercentageBasisPoints
+			lastRamp = s.RampPercentage
 		}
 	}
 

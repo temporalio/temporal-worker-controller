@@ -37,7 +37,7 @@ const (
 )
 
 // getMutualTLSSecretName extracts the mutual TLS secret name from a secret reference
-func getMutualTLSSecretName(secretRef *temporaliov1alpha1.LocalObjectReference) (string, bool) {
+func getMutualTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, bool) {
 	if secretRef != nil {
 		return secretRef.Name, true
 	}

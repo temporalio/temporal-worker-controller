@@ -210,9 +210,9 @@ func (in *TargetWorkerDeploymentVersion) DeepCopyInto(out *TargetWorkerDeploymen
 		*out = make([]WorkflowExecution, len(*in))
 		copy(*out, *in)
 	}
-	if in.RampPercentageBasisPoints != nil {
-		in, out := &in.RampPercentageBasisPoints, &out.RampPercentageBasisPoints
-		*out = new(int32)
+	if in.RampPercentage != nil {
+		in, out := &in.RampPercentage, &out.RampPercentage
+		*out = new(float32)
 		**out = **in
 	}
 	if in.RampingSince != nil {
