@@ -31,10 +31,10 @@ spec:
       jsonPath: .status.targetVersion.buildID
       name: Target
       type: string
-    - description: Ramp percentage in basis points
-      jsonPath: .status.targetVersion.rampPercentageBasisPoints
+    - description: Ramp percentage
+      jsonPath: .status.targetVersion.rampPercentage
       name: Ramp %
-      type: integer
+      type: number
     - description: Age
       jsonPath: .metadata.creationTimestamp
       name: Age
@@ -77,14 +77,13 @@ spec:
                       properties:
                         pauseDuration:
                           type: string
-                        rampPercentageBasisPoints:
-                          format: int32
-                          maximum: 10000
+                        rampPercentage:
+                          maximum: 100
                           minimum: 0
                           type: integer
                       required:
                       - pauseDuration
-                      - rampPercentageBasisPoints
+                      - rampPercentage
                       type: object
                     type: array
                   strategy:
@@ -4088,11 +4087,10 @@ spec:
                   rampLastModifiedAt:
                     format: date-time
                     type: string
-                  rampPercentageBasisPoints:
-                    format: int32
-                    maximum: 10000
+                  rampPercentage:
+                    maximum: 100
                     minimum: 0
-                    type: integer
+                    type: number
                   rampingSince:
                     format: date-time
                     type: string
