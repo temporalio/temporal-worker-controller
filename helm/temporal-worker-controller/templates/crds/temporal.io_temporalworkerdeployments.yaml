@@ -19,19 +19,24 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Current Version Build ID
+    - description: Available replicas
+      jsonPath: .status.conditions[?(@.type=='Available')].status
+      name: Ready
+      type: integer
+    - description: Current build ID
       jsonPath: .status.currentVersion.buildID
       name: Current
       type: string
-    - description: Build ID of the target worker (based on the pod template)
+    - description: Target build ID
       jsonPath: .status.targetVersion.buildID
       name: Target
       type: string
-    - description: Percentage of new workflows starting on Target Version
-      jsonPath: .status.targetVersion.rampPercentage
-      name: Target-Ramp
-      type: number
-    - jsonPath: .metadata.creationTimestamp
+    - description: Ramp percentage in basis points
+      jsonPath: .status.targetVersion.rampPercentageBasisPoints
+      name: Ramp %
+      type: integer
+    - description: Age
+      jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
@@ -72,14 +77,14 @@ spec:
                       properties:
                         pauseDuration:
                           type: string
-                        rampPercentage:
+                        rampPercentageBasisPoints:
                           format: int32
-                          maximum: 100
+                          maximum: 10000
                           minimum: 0
                           type: integer
                       required:
                       - pauseDuration
-                      - rampPercentage
+                      - rampPercentageBasisPoints
                       type: object
                     type: array
                   strategy:
@@ -3954,49 +3959,12 @@ spec:
                 type: object
             required:
             - rollout
-            - selector
             - sunset
             - template
             - workerOptions
             type: object
           status:
             properties:
-              conditions:
-                items:
-                  properties:
-                    lastTransitionTime:
-                      format: date-time
-                      type: string
-                    message:
-                      maxLength: 32768
-                      type: string
-                    observedGeneration:
-                      format: int64
-                      minimum: 0
-                      type: integer
-                    reason:
-                      maxLength: 1024
-                      minLength: 1
-                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
-                      type: string
-                    status:
-                      enum:
-                      - "True"
-                      - "False"
-                      - Unknown
-                      type: string
-                    type:
-                      maxLength: 316
-                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
-                      type: string
-                  required:
-                  - lastTransitionTime
-                  - message
-                  - reason
-                  - status
-                  - type
-                  type: object
-                type: array
               currentVersion:
                 properties:
                   buildID:
@@ -4120,9 +4088,9 @@ spec:
                   rampLastModifiedAt:
                     format: date-time
                     type: string
-                  rampPercentage:
+                  rampPercentageBasisPoints:
                     format: int32
-                    maximum: 100
+                    maximum: 10000
                     minimum: 0
                     type: integer
                   rampingSince:

@@ -46,8 +46,6 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 	status.TargetVersion = m.mapTargetWorkerDeploymentVersionByBuildID(targetBuildID)
 	if rampingBuildID == targetBuildID {
 		status.TargetVersion.RampingSince = m.temporalState.RampingSince
-		// TODO(Shivam): Temporal server is not emitting the right value for RampLastModifiedAt.
-		// This is going to be fixed by https://github.com/temporalio/temporal/pull/8089.
 		status.TargetVersion.RampLastModifiedAt = m.temporalState.RampLastModifiedAt
 		rampPercentageBasisPoints := int32(m.temporalState.RampPercentage * 100)
 		status.TargetVersion.RampPercentageBasisPoints = &rampPercentageBasisPoints
@@ -138,8 +136,6 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 		version.Status = temporalVersion.Status
 
 		// Set ramp percentage if this is a ramping version
-		// TODO(carlydf): Support setting any ramp in [0,100]
-		// NOTE(rob): We are now setting any ramp > 0, is that correct?
 		if temporalVersion.Status == v1alpha1.VersionStatusRamping && m.temporalState.RampPercentage > 0 {
 			rampPercentageBasisPoints := int32(m.temporalState.RampPercentage * 100)
 			version.RampPercentageBasisPoints = &rampPercentageBasisPoints

@@ -12,22 +12,25 @@ spec:
     listKind: TemporalConnectionList
     plural: temporalconnections
     shortNames:
-    - tc
     - tconn
-    - temporalconn
     singular: temporalconnection
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Temporal server host and port
+    - description: Temporal server endpoint
       jsonPath: .spec.hostPort
       name: Host
       type: string
-    - description: Connection readiness status
+    - description: mTLS secret name
+      jsonPath: .spec.mutualTLSSecretRef.name
+      name: TLS
+      type: string
+    - description: Ready status
       jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
-    - jsonPath: .metadata.creationTimestamp
+    - description: Age
+      jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
@@ -96,8 +99,6 @@ spec:
                 type: array
               lastConnectionTime:
                 format: date-time
-                type: string
-              serverVersion:
                 type: string
             type: object
         type: object
