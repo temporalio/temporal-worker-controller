@@ -143,9 +143,8 @@ type TemporalWorkerDeploymentStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
 
-	// Conditions represent the latest available observations of the deployment's current state.
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.

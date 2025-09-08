@@ -44,14 +44,13 @@ type TemporalConnectionStatus struct {
 	// +optional
 	LastConnectionTime *metav1.Time `json:"lastConnectionTime,omitempty"`
 
-	// ServerVersion is the version of the connected Temporal server.
-	// +optional
-	ServerVersion string `json:"serverVersion,omitempty"`
+	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=tconn
+//+kubebuilder:resource:shortName=tconn
 //+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server endpoint"
 //+kubebuilder:printcolumn:name="TLS",type="string",JSONPath=".spec.mutualTLSSecretRef.name",description="mTLS secret name"
 //+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Ready status"
