@@ -36,14 +36,6 @@ type TemporalConnectionSpec struct {
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
 type TemporalConnectionStatus struct {
-	// Conditions represent the latest available observations of the connection's current state.
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// LastConnectionTime is the timestamp of the last successful connection attempt.
-	// +optional
-	LastConnectionTime *metav1.Time `json:"lastConnectionTime,omitempty"`
-
 	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
 	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
 }
@@ -53,7 +45,6 @@ type TemporalConnectionStatus struct {
 //+kubebuilder:resource:shortName=tconn
 //+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server endpoint"
 //+kubebuilder:printcolumn:name="TLS",type="string",JSONPath=".spec.mutualTLSSecretRef.name",description="mTLS secret name"
-//+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Ready status"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // TemporalConnection is the Schema for the temporalconnections API

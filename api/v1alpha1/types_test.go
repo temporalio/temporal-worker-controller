@@ -11,7 +11,6 @@ import (
 
 func TestTemporalWorkerDeploymentSpec_Default(t *testing.T) {
 	tests := map[string]struct {
-		name      string
 		inputSpec *TemporalWorkerDeploymentSpec
 	}{
 		"basic default behavior": {

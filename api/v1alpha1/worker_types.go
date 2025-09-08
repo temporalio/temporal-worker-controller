@@ -330,7 +330,6 @@ type ManualRolloutStrategy struct{}
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
-//+kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.conditions[?(@.type=='Available')].status",description="Available replicas"
 //+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
 //+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
