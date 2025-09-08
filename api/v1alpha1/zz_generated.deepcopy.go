@@ -437,11 +437,6 @@ func (in *TemporalWorkerDeploymentSpec) DeepCopyInto(out *TemporalWorkerDeployme
 		*out = new(int32)
 		**out = **in
 	}
-	if in.Selector != nil {
-		in, out := &in.Selector, &out.Selector
-		*out = new(v1.LabelSelector)
-		(*in).DeepCopyInto(*out)
-	}
 	in.Template.DeepCopyInto(&out.Template)
 	if in.ProgressDeadlineSeconds != nil {
 		in, out := &in.ProgressDeadlineSeconds, &out.ProgressDeadlineSeconds
