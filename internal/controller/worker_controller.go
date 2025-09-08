@@ -36,6 +36,14 @@ const (
 	buildIDLabel   = "temporal.io/build-id"
 )
 
+// getMutualTLSSecretName extracts the mutual TLS secret name from a secret reference
+func getMutualTLSSecretName(secretRef *temporaliov1alpha1.LocalObjectReference) (string, bool) {
+	if secretRef != nil {
+		return secretRef.Name, true
+	}
+	return "", false
+}
+
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
 type TemporalWorkerDeploymentReconciler struct {
 	client.Client
@@ -125,11 +133,12 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Get or update temporal client for connection
+	mutualTLSSecretName, hasMutualTLS := getMutualTLSSecretName(temporalConnection.Spec.MutualTLSSecretRef)
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
 		HostPort:        temporalConnection.Spec.HostPort,
 		Namespace:       workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		MutualTLSSecret: temporalConnection.Spec.MutualTLSSecretRef.Name,
-	}, temporalConnection.Spec.MutualTLSSecretRef != nil)
+		MutualTLSSecret: mutualTLSSecretName,
+	}, hasMutualTLS)
 	if !ok {
 		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
