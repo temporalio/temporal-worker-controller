@@ -318,14 +318,14 @@ type SunsetStrategy struct {
 type AllAtOnceRolloutStrategy struct{}
 
 type RolloutStep struct {
-	// RampPercentageBasisPoints indicates what percentage of new workflow executions should be
-	// routed to the new worker deployment version while this step is active, expressed in basis points (1/100th of a percent).
-	// For example, 150 basis points = 1.5%.
+	// RampPercentage indicates what percentage of new workflow executions should be
+	// routed to the new worker deployment version while this step is active.
+	// For example, 15 means 15%.
 	//
-	// Acceptable range is [0,10000] (0% to 100%).
+	// Acceptable range is [0,100] (0% to 100%).
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=10000
-	RampPercentageBasisPoints int32 `json:"rampPercentageBasisPoints"`
+	// +kubebuilder:validation:Maximum=100
+	RampPercentage int `json:"rampPercentage"`
 
 	// PauseDuration indicates how long to pause before progressing to the next step.
 	PauseDuration metav1.Duration `json:"pauseDuration"`
