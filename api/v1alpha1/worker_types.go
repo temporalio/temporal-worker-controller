@@ -219,14 +219,14 @@ type TargetWorkerDeploymentVersion struct {
 	// +optional
 	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
 
-	// RampPercentageBasisPoints is the percentage of new workflow executions that are
-	// configured to start on this version, expressed in basis points (1/100th of a percent).
-	// For example, 150 basis points = 1.5%. Only set when Status is VersionStatusRamping.
+	// RampPercentage is the percentage of new workflow executions that are
+	// configured to start on this version. For example, 1.5 means 1.5%.
+	// Only set when Status is VersionStatusRamping.
 	//
-	// Acceptable range is [0,10000] (0% to 100%).
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=10000
-	RampPercentageBasisPoints *int32 `json:"rampPercentageBasisPoints,omitempty"`
+	// Acceptable range is [0.0,100.0] (0% to 100%).
+	// +kubebuilder:validation:Minimum=0.0
+	// +kubebuilder:validation:Maximum=100.0
+	RampPercentage *float32 `json:"rampPercentage,omitempty"`
 
 	// RampingSince is time when the version first started ramping.
 	// Only set when Status is VersionStatusRamping.
@@ -339,7 +339,7 @@ type ManualRolloutStrategy struct{}
 //+kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.conditions[?(@.type=='Available')].status",description="Available replicas"
 //+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
-//+kubebuilder:printcolumn:name="Ramp %",type="integer",JSONPath=".status.targetVersion.rampPercentageBasisPoints",description="Ramp percentage in basis points"
+//+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
