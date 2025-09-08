@@ -151,15 +151,14 @@ The migration from unversioned to versioned workflows requires careful planning 
 
 #### Phase 2: Initial Migration
 1. **Choose lowest-risk worker** to migrate first
-2. **Create `TemporalWorkerDeployment` custom resource** with Manual strategy
+2. **Create `TemporalWorkerDeployment` custom resource** with a Progressive strategy (conservative intervals recommended)
 3. **Validate controller management** works correctly
 4. **Update deployment pipeline** for this worker
 
 #### Phase 3: Gradual Rollout
 1. **Migrate remaining workers** one at a time
-2. **Enable Progressive rollouts** for validated workers
-3. **Monitor and tune** rollout configurations
-4. **Train team** on new deployment process
+2. **Monitor and tune** rollout configurations
+3. **Train team** on new deployment process
 
 ### Recommended Migration Order
 

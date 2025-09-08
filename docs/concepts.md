@@ -65,8 +65,7 @@ All Pinned workflows on this version have completed. The version is ready for cl
 Requires explicit human intervention to promote versions. New versions remain in the `Inactive` state until manually promoted.
 
 **Use cases:**
-- During migration from manual deployment systems
-- Testing and validation scenarios
+- Advanced deployment scenarios that are not supported by the other strategies (eg. user wants to do custom testing and validation before making changes to how workflow traffic is routed)
 
 ### AllAtOnce Strategy
 Immediately routes 100% of new workflow executions to the target version once it's healthy and registered.
