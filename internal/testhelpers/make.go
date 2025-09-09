@@ -150,14 +150,14 @@ func MakeCurrentVersion(namespace, twdName, imageName string, healthy, createDep
 	return ret
 }
 
-func MakeTargetVersion(namespace, twdName, imageName string, status temporaliov1alpha1.VersionStatus, rampPercentageBasisPoints int32, healthy, createDeployment bool) temporaliov1alpha1.TargetWorkerDeploymentVersion {
+func MakeTargetVersion(namespace, twdName, imageName string, status temporaliov1alpha1.VersionStatus, rampPercentage int32, healthy, createDeployment bool) temporaliov1alpha1.TargetWorkerDeploymentVersion {
 	ret := temporaliov1alpha1.TargetWorkerDeploymentVersion{
 		BaseWorkerDeploymentVersion: MakeBaseVersion(namespace, twdName, imageName, status, createDeployment, true),
 	}
 
-	if rampPercentageBasisPoints >= 0 {
-		rampPercentage := float32(rampPercentageBasisPoints) / 100.0
-		ret.RampPercentage = &rampPercentage
+	if rampPercentage >= 0 {
+		rampPercentageFloat := float32(rampPercentage)
+		ret.RampPercentage = &rampPercentageFloat
 	}
 
 	if healthy {
