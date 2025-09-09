@@ -430,12 +430,7 @@ func getVersionConfigDiff(
 		vcfg.SetCurrent = true
 		return vcfg
 	case temporaliov1alpha1.UpdateProgressive:
-		var targetRampPercentage *int32
-		if status.TargetVersion.RampPercentage != nil {
-			rampPercentage := int32(*status.TargetVersion.RampPercentage)
-			targetRampPercentage = &rampPercentage
-		}
-		return handleProgressiveRollout(strategy.Steps, time.Now(), status.TargetVersion.RampLastModifiedAt, targetRampPercentage, vcfg)
+		return handleProgressiveRollout(strategy.Steps, time.Now(), status.TargetVersion.RampLastModifiedAt, status.TargetVersion.RampPercentage, vcfg)
 	}
 
 	return nil
@@ -446,7 +441,7 @@ func handleProgressiveRollout(
 	steps []temporaliov1alpha1.RolloutStep,
 	currentTime time.Time, // avoid calling time.Now() inside function to make it easier to test
 	rampLastModifiedAt *metav1.Time,
-	targetRampPercentage *int32,
+	targetRampPercentage *float32,
 	vcfg *VersionConfig,
 ) *VersionConfig {
 	// Protect against modifying the current version right away if there are no steps.
@@ -473,7 +468,7 @@ func handleProgressiveRollout(
 	// is reset immediately. This might be considered overly conservative, but it guarantees that
 	// rollouts resume from the earliest possible step, and that at least the last step is always
 	// respected (both % and duration).
-	if *targetRampPercentage != int32(currentStep.RampPercentage) {
+	if *targetRampPercentage != float32(currentStep.RampPercentage) {
 		vcfg.RampPercentage = int32(currentStep.RampPercentage)
 		return vcfg
 	}
@@ -495,7 +490,7 @@ func handleProgressiveRollout(
 	return nil
 }
 
-func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPercentage *int32) int {
+func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPercentage *float32) int {
 	if targetRampPercentage == nil {
 		return 0
 	}
@@ -503,7 +498,7 @@ func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPerce
 	var result int
 	for i, s := range steps {
 		// Break if ramp percentage is greater than current (use last index)
-		if int32(s.RampPercentage) > *targetRampPercentage {
+		if float32(s.RampPercentage) > *targetRampPercentage {
 			break
 		}
 		result = i

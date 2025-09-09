@@ -1502,16 +1502,11 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 				now = ct
 				currentTime := metav1.NewTime(ct)
 
-				var currentRampInt32 *int32
-				if currentRampPercentage != nil {
-					val := int32(*currentRampPercentage)
-					currentRampInt32 = &val
-				}
 				config := handleProgressiveRollout(
 					tc.steps,
 					currentTime.Time,
 					rampLastModified,
-					currentRampInt32,
+					currentRampPercentage,
 					&VersionConfig{},
 				)
 				if config == nil {
