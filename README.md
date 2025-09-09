@@ -1,168 +1,168 @@
 # Temporal Worker Controller
 
-> ⚠️ This project is 100% experimental. Please do not attempt to install the controller in any production and/or shared environment.
+[![License](https://img.shields.io/github/license/temporalio/temporal-worker-controller)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/temporalio/temporal-worker-controller)](https://goreportcard.com/report/github.com/temporalio/temporal-worker-controller)
 
-The goal of the Temporal Worker Controller is to make it easy to run workers on Kubernetes while leveraging
-[Worker Deployments](https://docs.temporal.io/production-deployment/worker-deployments).
+> 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases. Core functionality is complete with stable APIs.
+> 
+> ⚠️ **Load-based Auto-scaling**: Dynamic scaling based on workload demand is not yet implemented. Use fixed replica counts. The controller does automatically scale down worker versions when they're no longer needed (after Pinned workflows running on that version complete).
 
-## Why
+**The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
-Temporal's [deterministic constraints](https://docs.temporal.io/workflows#deterministic-constraints) can cause headaches
-when rolling out or rolling back workflow code changes.
+Instead of worrying about breaking running workflows when you deploy new code, the controller automatically manages multiple versions of your workers so that existing Pinned workflows continue running uninterrupted while new workflows and existing AutoUpgrade workflows use latest version.
 
-The traditional approach to workflow determinism is to gate new behavior behind
-[versioning checks](https://docs.temporal.io/workflows#workflow-versioning), otherwise known as the Patching API. Over time these checks can become a
-source of technical debt, as safely removing them from a codebase is a careful process that often involves querying all
-running workflows.
+## What does it do?
 
-**Worker Versioning** is a Temporal feature that allows you to pin Workflows to individual versions of your workers, which 
-are called **Worker Deployment Versions**. Using pinning, you’ll no longer need to patch most Workflows as part of routine 
-deploys! With this guarantee, you can freely make changes that would have previously caused non-determinism errors had 
-you done them without patching. And provided your Activities and Workflows are running in the same worker deployment version, 
-you also do not need to ensure interface compatibility across versions.
+🔒 **Protected Pinned workflows** - Workflows pinned to a version stay on that version and won't break  
+🎚️ **Controlled rollout for AutoUpgrade workflows** - AutoUpgrade workflows shifted to new versions with configurable safety controls  
+📦 **Automatic version management** - Registers versions with Temporal, manages routing rules, and tracks version lifecycle  
+🎯 **Smart traffic routing** - New workflows automatically get routed to your target worker version  
+🛡️ **Progressive rollouts** - Catch incompatible changes early with small traffic percentages before they spread  
+⚡ **Easy rollbacks** - Instantly route traffic back to a previous version if issues are detected  
 
-This greatly simplifies Workflow upgrades, but the cost is that your deployment system must support multiple versions 
-running simultaneously and allow you to control when they are sunsetted. This is typically known as a [rainbow deploy](https://release.com/blog/rainbow-deployment-why-and-how-to-do-it) 
-(of which a **blue-green deploy** is a special case) and contrasts to a **rolling deploy** in which your Workers are upgraded in
-place without the ability to keep old versions around.
+## 🚀 Quick Example
 
-This project aims to provide automation to enable rainbow deployments of your workers by simplifying the bookkeeping around 
-tracking which versions still have active workflows, managing the lifecycle of versioned worker deployments, and calling 
-Temporal APIs to update the routing config of Temporal Worker Deployments to route workflow traffic to new versions.
+Instead of this traditional approach where deployments can break running workflows:
 
-## Terminology
-Note that in Temporal, **Worker Deployment** is sometimes referred to as **Deployment**, but since the controller makes
-significant references to Kubernetes Deployment resource, within this repository we will stick to these terms:
-- **Worker Deployment Version**: A version of a deployment or service that runs [Temporal Workers](https://docs.temporal.io/workers). It can have multiple Workers, but they all run the same build. Sometimes shortened to "version" or "deployment version."
-- **Worker Deployment**: A deployment or service across multiple deployment versions. In a rainbow deploy, a Worker Deployment can have multiple active Deployment Versions running at once.
-- **Deployment**: A [Kubernetes Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) resource. A Deployment is "versioned" if it is running versioned Temporal workers/pollers.
-
-## Features
-
-- [x] Registration of new Temporal Worker Deployment Versions
-- [x] Creation of versioned Deployment resources (that manage the Pods that run your Temporal pollers)
-- [x] Deletion of resources associated with drained Worker Deployment Versions
-- [x] `Manual`, `AllAtOnce`, and `Progressive` rollouts of new versions
-- [x] Ability to specify a "gate" workflow that must succeed on the new version before routing real traffic to that version
-- [ ] Autoscaling of versioned Deployments
-
-## Usage
-
-In order to be compatible with this controller, workers need to be configured using these standard environment
-variables:
-
-- `TEMPORAL_ADDRESS`: The host and port of the Temporal server, e.g. `default.foo.tmprl.cloud:7233`
-- `TEMPORAL_NAMESPACE`: The Temporal namespace to connect to, e.g. `default`
-- `TEMPORAL_DEPLOYMENT_NAME`: The name of the worker deployment. This must be unique to the worker deployment and should not
-  change between versions.
-- `TEMPORAL_WORKER_BUILD_ID`: The build ID of the worker. This should change with each new worker rollout.
-
-Each of these will be automatically set by the controller, and must not be manually specified in the worker's pod template.
-
-## How It Works
-
-Every `TemporalWorkerDeployment` resource manages one or more standard `Deployment` resources. Each Deployment manages pods
-which in turn poll Temporal for tasks routed to their respective worker versions.
-
-```mermaid
-flowchart TD
-    subgraph "K8s Namespace 'ns'"
-      twd[TemporalWorkerDeployment 'foo']
-      
-      subgraph "Current/default version"
-        d5["Deployment foo-v5, Version{DeploymentName: foo/ns, BuildId: v5}"]
-        rs5["ReplicaSet foo-v5"]
-        p5a["Pod foo-v5-a"]
-        p5b["Pod foo-v5-b"]
-        p5c["Pod foo-v5-c"]
-        d5 --> rs5
-        rs5 --> p5a
-        rs5 --> p5b
-        rs5 --> p5c
-      end
-
-      subgraph "Deprecated versions"
-        d1["Deployment foo-v1 Version{DeploymentName: foo/ns, BuildId: v1}"]
-        rs1["ReplicaSet foo-v1"]
-        p1a["Pod foo-v1-a"]
-        p1b["Pod foo-v1-b"]
-        d1 --> rs1
-        rs1 --> p1a
-        rs1 --> p1b
-
-        dN["Deployment ..."]
-      end
-    end  
-
-    twd --> d1
-    twd --> dN
-    twd --> d5
-
-    p1a -. "poll version {foo/ns, v1}" .-> server
-    p1b -. "poll version {foo/ns, v1}" .-> server
-
-    p5a -. "poll version {foo/ns, v5}" .-> server
-    p5b -. "poll version {foo/ns, v5}" .-> server
-    p5c -. "poll version {foo/ns, v5}" .-> server
-
-    server["Temporal Server"]
-```
-
-### Worker Lifecycle
-
-When a new worker deployment version is deployed, the worker controller detects it and automatically begins the process
-of making that version the new **Current Version** of the worker deployment it is a part of. This could happen
-immediately if `rollout.strategy = AllAtOnce`, or gradually if `rollout.strategy = Progressive`.
-
-As older pinned workflows finish executing and deprecated deployment versions become **Drained**, the worker controller
-frees up resources by sunsetting the `Deployment` resources running workers that poll those versions.
-
-Here is an example of a progressive cut-over strategy gated on the success of the `HelloWorld` workflow:
 ```yaml
+# ❌ Traditional deployment - risky for running workflows
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-worker
+spec:
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: my-worker:v2.0.0  # This change might break existing workflows!
+```
+
+You define your worker like this:
+
+```yaml
+# ✅ Temporal Worker Controller - safe deployments
+apiVersion: temporal.io/v1alpha1
+kind: TemporalWorkerDeployment
+metadata:
+  name: my-worker
+spec:
+  replicas: 3
   rollout:
-    strategy: Progressive
+    strategy: Progressive  # Gradual, safe rollout
     steps:
-      - rampPercentage: 1
-        pauseDuration: 30s
       - rampPercentage: 10
-        pauseDuration: 1m
-    gate:
-      workflowType: "HelloWorld"
+        pauseDuration: 5m
+      - rampPercentage: 50
+        pauseDuration: 10m
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: my-worker:v2.0.0  # Safe to deploy!
 ```
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Dev as Developer
-    participant K8s as Kubernetes
-    participant Ctl as WorkerController
-    participant T as Temporal
+When you update the image, the controller automatically:
+1. 🆕 Creates a new deployment with your updated worker
+2. 📊 Gradually routes new workflows and AutoUpgrade workflows to the new version  
+3. 🔒 Keeps Pinned workflows running on their original version (guaranteed safety)
+4. 🧹 Automatically scales down and cleans up old versions once all Pinned workflows complete
 
-    Dev->>K8s: Create TemporalWorkerDeployment "foo" (v1)
-    K8s-->>Ctl: Notify TemporalWorkerDeployment "foo" created
-    Ctl->>K8s: Create Deployment "foo-v1"
-    Ctl->>T: Register build "v1" as new current version of "foo/ns"
-    Dev->>K8s: Update TemporalWorker "foo" (v2)
-    K8s-->>Ctl: Notify TemporalWorker "foo" updated
-    Ctl->>K8s: Create Deployment "foo-v2"
-    Ctl->>T: Register build "v2" as new current version of "foo/ns"
-    
-    loop Poll Temporal API
-        Ctl-->>T: Wait for version {foo/ns, v1} to be drained (no open pinned wfs)
-    end
-    
-    Ctl->>K8s: Delete Deployment "foo-v1"
+## 🏃‍♂️ Getting Started
+
+### Prerequisites
+
+- Kubernetes cluster (1.19+) 
+- [Temporal Server](https://docs.temporal.io/) (Cloud or self-hosted)
+- Basic familiarity with Temporal [Workers](https://docs.temporal.io/workers) and [Workflows](https://docs.temporal.io/workflows)
+
+### 🔧 Installation
+
+```bash
+# Install using Helm in your preferred namespace
+helm install temporal-worker-controller \
+  oci://docker.io/temporalio/temporal-worker-controller \
+  --namespace <your-namespace>
 ```
 
-## Contributing
+### 📚 Next Steps
 
-This project is in very early stages; as such external code contributions are not yet being solicited.
+**New to worker versioning?** → Start with our [Migration Guide](docs/migration-guide.md) to learn how to safely transition from traditional deployments.
 
-Bug reports and feature requests are welcome! Please [file an issue](https://github.com/jlegrone/worker-controller/issues/new).
+**Ready to dive deeper?** → Check out the [Architecture Guide](docs/architecture.md) to understand how the controller works, or the [Temporal Worker Versioning docs](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) to learn about the underlying Temporal feature.
 
-You may also reach out to [#safe-deploys](https://temporalio.slack.com/archives/C07MDJ6S3HP) or @jlegrone on the 
-[Temporal Slack](https://t.mp/slack) if you have questions, suggestions, or are interested in making other contributions.
+**Need configuration help?** → See the [Configuration Reference](docs/configuration.md) for all available options.
 
-## Development
+## 🎯 Features
 
-For local development setup and running the controller locally, see the [local demo guide](internal/demo/README.md).
+- ✅ **Registration of new Temporal Worker Deployment Versions**
+- ✅ **Creation of versioned Deployment resources** (managing Pods that run your Temporal workers)
+- ✅ **Automatic lifecycle scaling** - Scales down worker versions when no longer needed
+- ✅ **Deletion of resources** associated with drained Worker Deployment Versions
+- ✅ **Multiple rollout strategies**: `Manual`, `AllAtOnce`, and `Progressive` rollouts
+- ✅ **Gate workflows** - Test new versions before routing real traffic to them
+- ⏳ **Load-based auto-scaling** - Not yet implemented (use fixed replica counts)
+
+
+## 💡 Why Use This?
+
+### Manual Worker Versioning is Complex
+
+While Temporal's [Worker Versioning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) feature solves deployment safety problems, using it manually requires:
+
+- **Manual API calls** - Register versions, manage routing rules, track version states
+- **Infrastructure coordination** - Deploy multiple Kubernetes resources for each version  
+- **Lifecycle monitoring** - Watch for drained versions and clean up resources
+- **Rollout orchestration** - Manually control progressive traffic shifting
+
+### The Controller Automates Everything
+
+The Temporal Worker Controller eliminates this operational overhead by automating the entire Worker Versioning lifecycle on Kubernetes:
+
+- **Automatic Temporal integration** - Registers versions and manages routing without manual API calls
+- **Kubernetes-native workflow** - Update a single custom resource, get full rainbow deployments  
+- **Intelligent cleanup** - Monitors version drainage and automatically removes unused resources
+- **Built-in rollout strategies** - Progressive, AllAtOnce, and Manual with configurable safety controls
+
+## 📖 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Migration Guide](docs/migration-guide.md) | Step-by-step guide for migrating from traditional deployments |
+| [Architecture](docs/architecture.md) | Technical deep-dive into how the controller works |
+| [Configuration](docs/configuration.md) | Complete configuration reference |
+| [Concepts](docs/concepts.md) | Key concepts and terminology |
+| [Limits](docs/limits.md) | Technical constraints and limitations |
+
+## 🔧 Worker Configuration
+
+Your workers need these environment variables (automatically set by the controller):
+
+```bash
+TEMPORAL_ADDRESS=your-temporal-server:7233
+TEMPORAL_NAMESPACE=your-namespace  
+TEMPORAL_DEPLOYMENT_NAME=my-worker        # Unique worker deployment name
+TEMPORAL_WORKER_BUILD_ID=v1.2.3          # Version identifier
+```
+
+**Important**: Don't set the above environment variables manually - the controller manages these automatically.
+
+## 🤝 Contributing
+
+This project is in early stages. While external code contributions are not yet being solicited, we welcome:
+
+- 🐛 **Bug reports** - [File an issue](https://github.com/temporalio/temporal-worker-controller/issues/new)
+- 💡 **Feature requests** - Tell us what you'd like to see
+- 💬 **Feedback** - Join [#safe-deploys](https://temporalio.slack.com/archives/C07MDJ6S3HP) on [Temporal Slack](https://t.mp/slack)
+
+## 🛠️ Development
+
+Want to try the controller locally? Check out the [local demo guide](internal/demo/README.md) for development setup.
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+**Questions?** Reach out to [@jlegrone](https://github.com/jlegrone) or the [#safe-deploys](https://temporalio.slack.com/archives/C07MDJ6S3HP) channel on Temporal Slack!
