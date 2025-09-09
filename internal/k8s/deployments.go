@@ -175,7 +175,7 @@ func NewDeploymentWithOwnerRef(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
 	selectorLabels := map[string]string{
-		twdNameLabel: TruncateString(CleanStringForDNS(workerDeploymentName), 63),
+		twdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
 		BuildIDLabel: TruncateString(CleanStringForDNS(buildID), 63),
 	}
 
