@@ -5,7 +5,7 @@
 
 > 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases. Core functionality is complete with stable APIs.
 > 
-> ⚠️ Dynamic auto-scaling based on workflow load is not yet implemented. Use cases must be able to handle fixed worker replica counts.
+> ⚠️ Dynamic auto-scaling based on workflow load is not yet implemented. Use cases must work with fixed worker replica counts.
 
 **The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
@@ -20,7 +20,7 @@ Instead of worrying about breaking running workflows when you deploy new code, t
 🛡️ **Progressive rollouts** - Catch incompatible changes early with small traffic percentages before they spread  
 ⚡ **Easy rollbacks** - Instantly route traffic back to a previous version if issues are detected  
 
-## 🚀 Quick Example
+## Quick Example
 
 Instead of this traditional approach where deployments can break running workflows:
 
@@ -68,7 +68,7 @@ When you update the image, the controller automatically:
 3. 🔒 Keeps Pinned workflows running on their original version (guaranteed safety)
 4. 🧹 Automatically scales down and cleans up old versions once all Pinned workflows complete
 
-## 🏃‍♂️ Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -85,7 +85,7 @@ helm install temporal-worker-controller \
   --namespace <your-namespace>
 ```
 
-### 📚 Next Steps
+### Next Steps
 
 **New to worker versioning?** → Start with our [Migration Guide](docs/migration-guide.md) to learn how to safely transition from traditional deployments.
 
@@ -93,7 +93,7 @@ helm install temporal-worker-controller \
 
 **Need configuration help?** → See the [Configuration Reference](docs/configuration.md) for all available options.
 
-## 🎯 Features
+## Features
 
 - ✅ **Registration of new Temporal Worker Deployment Versions**
 - ✅ **Creation of versioned Deployment resources** (managing Pods that run your Temporal workers)
