@@ -400,7 +400,7 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 			name:         "build ID with dots/dashes",
 			baseName:     "worker-name",
 			buildID:      "image-v2.1.0-a1b2c3d4",
-			expectedName: "worker-name-image-v2-1-0-a1b2c3d4",
+			expectedName: "worker-name-image-v2.1.0-a1b2c3d4",
 		},
 	}
 
@@ -410,11 +410,11 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 			assert.Equal(t, tt.expectedName, result)
 
 			// Verify the format is always baseName-buildID
-			expected := tt.baseName + k8s.K8sResourceNameSeparator + k8s.CleanStringForDNS(tt.buildID)
+			expected := tt.baseName + k8s.ResourceNameSeparator + k8s.CleanStringForDNS(tt.buildID)
 			assert.Equal(t, expected, result)
 
 			// Verify it ends with the build ID
-			assert.True(t, strings.HasSuffix(result, k8s.K8sResourceNameSeparator+k8s.CleanStringForDNS(tt.buildID)),
+			assert.True(t, strings.HasSuffix(result, k8s.ResourceNameSeparator+k8s.CleanStringForDNS(tt.buildID)),
 				"versioned deployment name should end with '-cleaned(buildID)'")
 
 			// Verify it starts with the base name
