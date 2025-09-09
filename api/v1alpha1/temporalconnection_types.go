@@ -44,7 +44,6 @@ type TemporalConnectionStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=tconn
 //+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server endpoint"
-//+kubebuilder:printcolumn:name="TLS",type="string",JSONPath=".spec.mutualTLSSecretRef.name",description="mTLS secret name"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // TemporalConnection is the Schema for the temporalconnections API
