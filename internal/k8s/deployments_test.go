@@ -400,7 +400,7 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 			name:         "build ID with dots/dashes",
 			baseName:     "worker-name",
 			buildID:      "image-v2.1.0-a1b2c3d4",
-			expectedName: "worker-name-image-v2.1.0-a1b2c3d4",
+			expectedName: "worker-name-image-v2-1-0-a1b2c3d4",
 		},
 	}
 

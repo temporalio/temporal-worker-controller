@@ -21,10 +21,6 @@ spec:
       jsonPath: .spec.hostPort
       name: Host
       type: string
-    - description: mTLS secret name
-      jsonPath: .spec.mutualTLSSecretRef.name
-      name: TLS
-      type: string
     - description: Age
       jsonPath: .metadata.creationTimestamp
       name: Age

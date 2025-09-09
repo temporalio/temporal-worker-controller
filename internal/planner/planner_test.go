@@ -38,7 +38,7 @@ func TestGeneratePlan(t *testing.T) {
 		expectWorkflow                   int
 		expectConfig                     bool
 		expectConfigSetCurrent           *bool  // pointer so we can test nil
-		expectConfigRampPercent          *int32 // pointer so we can test nil
+		expectConfigRampPercent          *int32 // pointer so we can test nil, in percentage (0-100)
 		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
 	}{
 		{
@@ -417,7 +417,7 @@ func TestGeneratePlan(t *testing.T) {
 					assert.Equal(t, *tc.expectConfigSetCurrent, plan.VersionConfig.SetCurrent, "unexpected SetCurrent value")
 				}
 				if tc.expectConfigRampPercent != nil {
-					assert.Equal(t, *tc.expectConfigRampPercent, plan.VersionConfig.RampPercentageBasisPoints, "unexpected RampPercentage value")
+					assert.Equal(t, *tc.expectConfigRampPercent, plan.VersionConfig.RampPercentage, "unexpected RampPercentage value")
 				}
 			}
 		})
@@ -1093,7 +1093,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			spec:              &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig:      true,
 			expectSetCurrent:  false,
-			expectRampPercent: int32Ptr(2500),
+			expectRampPercent: int32Ptr(25),
 		},
 		{
 			name: "rollback scenario - target equals current but different version is ramping",
@@ -1181,7 +1181,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				assert.NotNil(t, versionConfig, "expected version config")
 				assert.Equal(t, tc.expectSetCurrent, versionConfig.SetCurrent, "unexpected set current value")
 				if tc.expectRampPercent != nil {
-					assert.Equal(t, *tc.expectRampPercent, versionConfig.RampPercentageBasisPoints, "unexpected ramp percentage")
+					assert.Equal(t, *tc.expectRampPercent, versionConfig.RampPercentage, "unexpected ramp percentage")
 				}
 			}
 		})
@@ -1224,7 +1224,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
-					RampPercentage: float32Ptr(7500 / 100.0),
+					RampPercentage: float32Ptr(75.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
@@ -1258,7 +1258,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			expectConfig:      true,
-			expectRampPercent: 2500, // First step
+			expectRampPercent: 25, // First step
 			expectSetCurrent:  false,
 		},
 		"progressive rollout at exact step boundary": {
@@ -1285,14 +1285,14 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour),
 					},
-					RampPercentage: float32Ptr(2500 / 100.0),
+					RampPercentage: float32Ptr(25.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-1 * time.Hour), // Exactly at step boundary
 					},
 				},
 			},
 			expectConfig:      true,
-			expectRampPercent: 5000, // When set as current, ramp is 0
+			expectRampPercent: 50, // When set as current, ramp is 0
 			expectSetCurrent:  false,
 		},
 		"progressive rollout with zero ramp percentage step": {
@@ -1326,7 +1326,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 				},
 			},
 			expectConfig:      true,
-			expectRampPercent: 2500, // Should maintain previous ramp value
+			expectRampPercent: 25, // Should maintain previous ramp value
 			expectSetCurrent:  false,
 		},
 		"progressive rollout just past exact boundary": {
@@ -1353,7 +1353,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
-					RampPercentage: float32Ptr(5000 / 100.0),
+					RampPercentage: float32Ptr(50.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
@@ -1389,7 +1389,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second),
 					},
-					RampPercentage:     float32Ptr(1000 / 100.0),
+					RampPercentage:     float32Ptr(10.0),
 					RampLastModifiedAt: nil, // nil rampLastModifiedAt should not cause a panic!
 				},
 			},
@@ -1409,7 +1409,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 			if tc.expectConfig {
 				assert.Equal(t, tc.expectSetCurrent, versionConfig.SetCurrent, "unexpected set default value")
 				if !tc.expectSetCurrent {
-					assert.Equal(t, tc.expectRampPercent, versionConfig.RampPercentageBasisPoints, "unexpected ramp percentage")
+					assert.Equal(t, tc.expectRampPercent, versionConfig.RampPercentage, "unexpected ramp percentage")
 				}
 			}
 		})
@@ -1432,9 +1432,9 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 		},
 		"controller keeping up": {
 			steps: []temporaliov1alpha1.RolloutStep{
-				rolloutStep(2500, 5*time.Second),
-				rolloutStep(5000, 10*time.Second),
-				rolloutStep(7500, 30*time.Second),
+				rolloutStep(25, 5*time.Second),
+				rolloutStep(50, 10*time.Second),
+				rolloutStep(75, 30*time.Second),
 			},
 			reconcileFreq:         time.Second,
 			expectRamps:           []float32{25, 50, 75, 100},
@@ -1442,9 +1442,9 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 		},
 		"controller reconciles slower than step durations": {
 			steps: []temporaliov1alpha1.RolloutStep{
-				rolloutStep(2500, 5*time.Second),
-				rolloutStep(5000, 10*time.Second),
-				rolloutStep(7500, 30*time.Second),
+				rolloutStep(25, 5*time.Second),
+				rolloutStep(50, 10*time.Second),
+				rolloutStep(75, 30*time.Second),
 			},
 			reconcileFreq:         time.Minute,
 			expectRamps:           []float32{25, 50, 75, 100},
@@ -1453,25 +1453,25 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 		"pick up ramping from last step that is <= current ramp": {
 			steps: []temporaliov1alpha1.RolloutStep{
 				rolloutStep(5, 10*time.Second),
-				rolloutStep(1000, 10*time.Second),
-				rolloutStep(2500, 10*time.Second),
-				rolloutStep(5000, 10*time.Second),
+				rolloutStep(10, 10*time.Second),
+				rolloutStep(25, 10*time.Second),
+				rolloutStep(50, 10*time.Second),
 			},
 			reconcileFreq: time.Second,
 			// Simulate a ramp value set manually via Temporal CLI
-			initialRamp:           int32Ptr(2000),
+			initialRamp:           int32Ptr(20),
 			expectRamps:           []float32{10, 25, 50, 100},
 			expectRolloutDuration: 30*time.Second + 3*time.Second,
 		},
 		"pick up ramping from first step if current ramp less than all steps": {
 			steps: []temporaliov1alpha1.RolloutStep{
-				rolloutStep(1000, 10*time.Second),
-				rolloutStep(2500, 10*time.Second),
-				rolloutStep(5000, 10*time.Second),
+				rolloutStep(10, 10*time.Second),
+				rolloutStep(25, 10*time.Second),
+				rolloutStep(50, 10*time.Second),
 			},
 			reconcileFreq: time.Second,
 			// Simulate a ramp value set manually via Temporal CLI
-			initialRamp:           int32Ptr(100),
+			initialRamp:           int32Ptr(1),
 			expectRamps:           []float32{10, 25, 50, 100},
 			expectRolloutDuration: 30*time.Second + 3*time.Second,
 		},
@@ -1492,7 +1492,7 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 			// This could happen if the progressive rollout spec was updated, or if the user modified
 			// the current ramp value externally, e.g. via the Temporal CLI/UI.
 			if tc.initialRamp != nil {
-				ramp := float32(*tc.initialRamp) / 100 // Convert basis points to percentage
+				ramp := float32(*tc.initialRamp) // Already in percentage
 				currentRampPercentage = &ramp
 				// Imitate the "worst case" of ramp having just been updated.
 				rampLastModified = &metav1.Time{Time: now}
@@ -1504,7 +1504,7 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 
 				var currentRampInt32 *int32
 				if currentRampPercentage != nil {
-					val := int32(*currentRampPercentage * 100)
+					val := int32(*currentRampPercentage)
 					currentRampInt32 = &val
 				}
 				config := handleProgressiveRollout(
@@ -1522,13 +1522,13 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 				if config.SetCurrent {
 					diffs = append(diffs, 100)
 				} else {
-					diffs = append(diffs, float32(config.RampPercentageBasisPoints)/100)
+					diffs = append(diffs, float32(config.RampPercentage))
 				}
 
 				// Set ramp value and last modified time if it was updated (simulates what Temporal server would return on next reconcile loop)
-				if float32(config.RampPercentageBasisPoints)/100 != 0 {
+				if float32(config.RampPercentage) != 0 {
 					rampLastModified = &currentTime
-					rampPercentage := float32(config.RampPercentageBasisPoints) / 100
+					rampPercentage := float32(config.RampPercentage)
 					currentRampPercentage = &rampPercentage
 				}
 
@@ -2160,7 +2160,7 @@ func metav1Duration(d time.Duration) metav1.Duration {
 
 func rolloutStep(ramp int32, d time.Duration) temporaliov1alpha1.RolloutStep {
 	return temporaliov1alpha1.RolloutStep{
-		RampPercentage: int(ramp / 100),
+		RampPercentage: int(ramp),
 		PauseDuration:  metav1Duration(d),
 	}
 }

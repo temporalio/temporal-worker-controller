@@ -37,12 +37,12 @@ type VersionConfig struct {
 	// Build ID for the version
 	BuildID string
 
-	// One of RampPercentageBasisPoints OR SetCurrent must be set to a non-zero value.
+	// One of RampPercentage OR SetCurrent must be set to a non-zero value.
 
 	// Set this as the build ID for all new executions
 	SetCurrent bool
 	// Acceptable values [0,100]
-	RampPercentageBasisPoints int32
+	RampPercentage int32
 }
 
 // WorkflowConfig defines a workflow to be started
@@ -415,7 +415,7 @@ func getVersionConfigDiff(
 		// Reset ramp if needed, this would happen if a ramp has been rolled back before completing
 		if temporalState.RampingBuildID != "" {
 			vcfg.BuildID = ""
-			vcfg.RampPercentageBasisPoints = 0
+			vcfg.RampPercentage = 0
 			return vcfg
 		}
 		// Otherwise, do nothing
@@ -430,12 +430,12 @@ func getVersionConfigDiff(
 		vcfg.SetCurrent = true
 		return vcfg
 	case temporaliov1alpha1.UpdateProgressive:
-		var targetRampBasisPoints *int32
+		var targetRampPercentage *int32
 		if status.TargetVersion.RampPercentage != nil {
-			basisPoints := int32(*status.TargetVersion.RampPercentage * 100)
-			targetRampBasisPoints = &basisPoints
+			rampPercentage := int32(*status.TargetVersion.RampPercentage)
+			targetRampPercentage = &rampPercentage
 		}
-		return handleProgressiveRollout(strategy.Steps, time.Now(), status.TargetVersion.RampLastModifiedAt, targetRampBasisPoints, vcfg)
+		return handleProgressiveRollout(strategy.Steps, time.Now(), status.TargetVersion.RampLastModifiedAt, targetRampPercentage, vcfg)
 	}
 
 	return nil
@@ -446,7 +446,7 @@ func handleProgressiveRollout(
 	steps []temporaliov1alpha1.RolloutStep,
 	currentTime time.Time, // avoid calling time.Now() inside function to make it easier to test
 	rampLastModifiedAt *metav1.Time,
-	targetRampPercentageBasisPoints *int32,
+	targetRampPercentage *int32,
 	vcfg *VersionConfig,
 ) *VersionConfig {
 	// Protect against modifying the current version right away if there are no steps.
@@ -459,13 +459,13 @@ func handleProgressiveRollout(
 	}
 
 	// Get the currently active step
-	i := getCurrentStepIndex(steps, targetRampPercentageBasisPoints)
+	i := getCurrentStepIndex(steps, targetRampPercentage)
 	currentStep := steps[i]
 
 	// If this is the first step and there is no ramp percentage set, set the ramp percentage
 	// to the step's ramp percentage.
-	if targetRampPercentageBasisPoints == nil {
-		vcfg.RampPercentageBasisPoints = int32(currentStep.RampPercentage * 100)
+	if targetRampPercentage == nil {
+		vcfg.RampPercentage = int32(currentStep.RampPercentage)
 		return vcfg
 	}
 
@@ -473,8 +473,8 @@ func handleProgressiveRollout(
 	// is reset immediately. This might be considered overly conservative, but it guarantees that
 	// rollouts resume from the earliest possible step, and that at least the last step is always
 	// respected (both % and duration).
-	if *targetRampPercentageBasisPoints != int32(currentStep.RampPercentage*100) {
-		vcfg.RampPercentageBasisPoints = int32(currentStep.RampPercentage * 100)
+	if *targetRampPercentage != int32(currentStep.RampPercentage) {
+		vcfg.RampPercentage = int32(currentStep.RampPercentage)
 		return vcfg
 	}
 
@@ -482,7 +482,7 @@ func handleProgressiveRollout(
 	if rampLastModifiedAt != nil {
 		if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
 			if i < len(steps)-1 {
-				vcfg.RampPercentageBasisPoints = int32(steps[i+1].RampPercentage * 100)
+				vcfg.RampPercentage = int32(steps[i+1].RampPercentage)
 				return vcfg
 			} else {
 				vcfg.SetCurrent = true
@@ -495,15 +495,15 @@ func handleProgressiveRollout(
 	return nil
 }
 
-func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPercentageBasisPoints *int32) int {
-	if targetRampPercentageBasisPoints == nil {
+func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPercentage *int32) int {
+	if targetRampPercentage == nil {
 		return 0
 	}
 
 	var result int
 	for i, s := range steps {
 		// Break if ramp percentage is greater than current (use last index)
-		if int32(s.RampPercentage*100) > *targetRampPercentageBasisPoints {
+		if int32(s.RampPercentage) > *targetRampPercentage {
 			break
 		}
 		result = i
