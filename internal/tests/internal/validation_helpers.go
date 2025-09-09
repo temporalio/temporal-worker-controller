@@ -176,7 +176,7 @@ func verifyTemporalStateMatchesStatusEventually(
 				} else {
 					expectedPercentage := float32(*tv.RampPercentageBasisPoints) / 100
 					if rc.RampingVersionPercentage != expectedPercentage {
-						return fmt.Errorf("expected RampPercentageBasisPoints to be %v basis points (%.2f%%), but temporal percentage was %.2f%%", 
+						return fmt.Errorf("expected RampPercentageBasisPoints to be %v basis points (%.2f%%), but temporal percentage was %.2f%%",
 							*tv.RampPercentageBasisPoints, expectedPercentage, rc.RampingVersionPercentage)
 					}
 				}
