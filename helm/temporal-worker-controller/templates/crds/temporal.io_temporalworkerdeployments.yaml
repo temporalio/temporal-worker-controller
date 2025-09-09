@@ -74,8 +74,8 @@ spec:
                         pauseDuration:
                           type: string
                         rampPercentage:
-                          maximum: 100
-                          minimum: 0
+                          maximum: 99
+                          minimum: 1
                           type: integer
                       required:
                       - pauseDuration

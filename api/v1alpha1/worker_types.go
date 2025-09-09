@@ -315,9 +315,9 @@ type RolloutStep struct {
 	// routed to the new worker deployment version while this step is active.
 	// For example, 15 means 15%.
 	//
-	// Acceptable range is [0,100] (0% to 100%).
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=100
+	// Acceptable range is [1,99] (1% to 99%).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=99
 	RampPercentage int `json:"rampPercentage"`
 
 	// PauseDuration indicates how long to pause before progressing to the next step.
