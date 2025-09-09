@@ -161,8 +161,8 @@ func makePreliminaryStatusTrue(
 	if tv := twd.Status.TargetVersion; tv.BuildID != "" {
 		t.Logf("Setting up target version %v with status %v", tv.BuildID, tv.Status)
 		var rampPercentage *float32
-		if tv.RampPercentageBasisPoints != nil {
-			percentage := float32(*tv.RampPercentageBasisPoints) / 100
+		if tv.RampPercentage != nil {
+			percentage := *tv.RampPercentage
 			rampPercentage = &percentage
 		}
 		workerStopFuncs := createStatus(ctx, t, env, twd, tv.BaseWorkerDeploymentVersion, rampPercentage)
