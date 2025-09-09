@@ -3,13 +3,16 @@
 [![License](https://img.shields.io/github/license/temporalio/temporal-worker-controller)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/temporalio/temporal-worker-controller)](https://goreportcard.com/report/github.com/temporalio/temporal-worker-controller)
 
-> 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases. Core functionality is complete with stable APIs.
+> 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases*. Core functionality is complete with stable APIs.
 > 
-> ⚠️ Dynamic auto-scaling based on workflow load is not yet implemented. Use cases must work with fixed worker replica counts.
+> *Dynamic auto-scaling based on workflow load is not yet implemented. Use cases must work with fixed worker replica counts.
 
 **The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
-Instead of worrying about breaking running workflows when you deploy new code, the controller automatically manages multiple versions of your workers so that existing Pinned workflows continue running uninterrupted while new workflows and existing AutoUpgrade workflows use latest version.
+Instead of worrying about breaking running workflows when you deploy new code, the controller automates 
+[rainbow deployments](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#deployment-systems), 
+managing multiple [versions](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) of your
+workers so that existing Pinned workflows continue running uninterrupted while new workflows and existing AutoUpgrade workflows use the latest version.
 
 ## What does it do?
 
@@ -66,15 +69,15 @@ When you update the image, the controller automatically:
 1. 🆕 Creates a new deployment with your updated worker
 2. 📊 Gradually routes new workflows and AutoUpgrade workflows to the new version  
 3. 🔒 Keeps Pinned workflows running on their original version (guaranteed safety)
-4. 🧹 Automatically scales down and cleans up old versions once all Pinned workflows complete
+4. 🧹 Automatically scales down and cleans up old versions once they are [drained](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#sunsetting-an-old-deployment-version)
 
-## Getting Started
+## 🏃‍♂️ Getting Started
 
 ### Prerequisites
 
 - Kubernetes cluster (1.19+) 
-- [Temporal Server](https://docs.temporal.io/) (Cloud or self-hosted)
-- Basic familiarity with Temporal [Workers](https://docs.temporal.io/workers) and [Workflows](https://docs.temporal.io/workflows)
+- [Temporal Server](https://docs.temporal.io/) (Cloud or self-hosted [v1.28.1](https://github.com/temporalio/temporal/releases/tag/v1.28.1))
+- Basic familiarity with Temporal [Workers](https://docs.temporal.io/workers), [Workflows](https://docs.temporal.io/workflows), and [Worker Versioning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning)
 
 ### 🔧 Installation
 
@@ -87,7 +90,7 @@ helm install temporal-worker-controller \
 
 ### Next Steps
 
-**New to worker versioning?** → Start with our [Migration Guide](docs/migration-guide.md) to learn how to safely transition from traditional deployments.
+**New to deploying workers with this controller?** → Start with our [Migration Guide](docs/migration-guide.md) to learn how to safely transition from traditional deployments.
 
 **Ready to dive deeper?** → Check out the [Architecture Guide](docs/architecture.md) to understand how the controller works, or the [Temporal Worker Versioning docs](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) to learn about the underlying Temporal feature.
 
@@ -100,7 +103,7 @@ helm install temporal-worker-controller \
 - ✅ **Automatic lifecycle scaling** - Scales down worker versions when no longer needed
 - ✅ **Deletion of resources** associated with drained Worker Deployment Versions
 - ✅ **Multiple rollout strategies**: `Manual`, `AllAtOnce`, and `Progressive` rollouts
-- ✅ **Gate workflows** - Test new versions before routing real traffic to them
+- ✅ **Gate workflows** - Test new versions with a [pre-deployment test](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#adding-a-pre-deployment-test) before routing real traffic to them
 - ⏳ **Load-based auto-scaling** - Not yet implemented (use fixed replica counts)
 
 
@@ -120,8 +123,8 @@ While Temporal's [Worker Versioning](https://docs.temporal.io/production-deploym
 The Temporal Worker Controller eliminates this operational overhead by automating the entire Worker Versioning lifecycle on Kubernetes:
 
 - **Automatic Temporal integration** - Registers versions and manages routing without manual API calls
-- **Kubernetes-native workflow** - Update a single custom resource, get full rainbow deployments  
-- **Intelligent cleanup** - Monitors version drainage and automatically removes unused resources
+- **Kubernetes-native workflow** - Update a single custom resource, get full [rainbow deployments](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#deployment-systems)  
+- **Intelligent cleanup** - Monitors version [drainage](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#sunsetting-an-old-deployment-version) and automatically removes unused resources
 - **Built-in rollout strategies** - Progressive, AllAtOnce, and Manual with configurable safety controls
 
 ## 📖 Documentation
