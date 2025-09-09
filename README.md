@@ -5,7 +5,7 @@
 
 > 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases. Core functionality is complete with stable APIs.
 > 
-> ⚠️ **Load-based Auto-scaling**: Dynamic scaling based on workload demand is not yet implemented. Use fixed replica counts. The controller does automatically scale down worker versions when they're no longer needed (after Pinned workflows running on that version complete).
+> ⚠️ Dynamic auto-scaling based on workflow load is not yet implemented. Use cases must be able to handle fixed worker replica counts.
 
 **The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
