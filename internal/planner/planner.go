@@ -42,7 +42,7 @@ type VersionConfig struct {
 	// Set this as the build ID for all new executions
 	SetCurrent bool
 	// Acceptable values [0,100]
-	RampPercentage float32
+	RampPercentage int32
 }
 
 // WorkflowConfig defines a workflow to be started
@@ -136,10 +136,10 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 	deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
 
 	// Update secret volume if mTLS is enabled
-	if connection.MutualTLSSecret != "" {
+	if connection.MutualTLSSecretRef != nil {
 		for i, volume := range deployment.Spec.Template.Spec.Volumes {
 			if volume.Name == "temporal-tls" && volume.Secret != nil {
-				deployment.Spec.Template.Spec.Volumes[i].Secret.SecretName = connection.MutualTLSSecret
+				deployment.Spec.Template.Spec.Volumes[i].Secret.SecretName = connection.MutualTLSSecretRef.Name
 				break
 			}
 		}
@@ -460,7 +460,7 @@ func handleProgressiveRollout(
 	// If this is the first step and there is no ramp percentage set, set the ramp percentage
 	// to the step's ramp percentage.
 	if targetRampPercentage == nil {
-		vcfg.RampPercentage = currentStep.RampPercentage
+		vcfg.RampPercentage = int32(currentStep.RampPercentage)
 		return vcfg
 	}
 
@@ -468,8 +468,8 @@ func handleProgressiveRollout(
 	// is reset immediately. This might be considered overly conservative, but it guarantees that
 	// rollouts resume from the earliest possible step, and that at least the last step is always
 	// respected (both % and duration).
-	if *targetRampPercentage != currentStep.RampPercentage {
-		vcfg.RampPercentage = currentStep.RampPercentage
+	if *targetRampPercentage != float32(currentStep.RampPercentage) {
+		vcfg.RampPercentage = int32(currentStep.RampPercentage)
 		return vcfg
 	}
 
@@ -477,7 +477,7 @@ func handleProgressiveRollout(
 	if rampLastModifiedAt != nil {
 		if rampLastModifiedAt.Add(currentStep.PauseDuration.Duration).Before(currentTime) {
 			if i < len(steps)-1 {
-				vcfg.RampPercentage = steps[i+1].RampPercentage
+				vcfg.RampPercentage = int32(steps[i+1].RampPercentage)
 				return vcfg
 			} else {
 				vcfg.SetCurrent = true
@@ -498,7 +498,7 @@ func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPerce
 	var result int
 	for i, s := range steps {
 		// Break if ramp percentage is greater than current (use last index)
-		if s.RampPercentage > *targetRampPercentage {
+		if float32(s.RampPercentage) > *targetRampPercentage {
 			break
 		}
 		result = i

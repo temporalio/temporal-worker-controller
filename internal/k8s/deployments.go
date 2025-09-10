@@ -27,8 +27,9 @@ const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel                  = "temporal.io/build-id"
+	twdNameLabel                  = "temporal.io/deployment-name"
 	WorkerDeploymentNameSeparator = "/"
-	K8sResourceNameSeparator      = "-"
+	ResourceNameSeparator         = "-"
 	MaxBuildIdLen                 = 63
 	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
 )
@@ -113,7 +114,7 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
-			shortHashSuffix := K8sResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
+			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
 			maxImgLen := MaxBuildIdLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
 			return imagePrefix + shortHashSuffix
@@ -130,7 +131,7 @@ func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment)
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
 func ComputeVersionedDeploymentName(baseName, buildID string) string {
-	return CleanStringForDNS(baseName + K8sResourceNameSeparator + buildID)
+	return CleanStringForDNS(baseName + ResourceNameSeparator + buildID)
 }
 
 func computeImagePrefix(s string, maxLen int) string {
@@ -161,7 +162,7 @@ func TruncateString(s string, n int) string {
 func CleanStringForDNS(s string) string {
 	// Keep only letters, numbers, and dashes.
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
-	return re.ReplaceAllString(s, K8sResourceNameSeparator)
+	return re.ReplaceAllString(s, ResourceNameSeparator)
 }
 
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
@@ -173,14 +174,10 @@ func NewDeploymentWithOwnerRef(
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
-	selectorLabels := map[string]string{}
-	// Merge labels from TemporalWorker with build ID
-	if spec.Selector != nil {
-		for k, v := range spec.Selector.MatchLabels {
-			selectorLabels[k] = v
-		}
+	selectorLabels := map[string]string{
+		twdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
+		BuildIDLabel: TruncateString(buildID, 63),
 	}
-	selectorLabels[BuildIDLabel] = buildID
 
 	// Set pod labels
 	podLabels := make(map[string]string)
@@ -217,7 +214,7 @@ func NewDeploymentWithOwnerRef(
 	}
 
 	// Add TLS config if mTLS is enabled
-	if connection.MutualTLSSecret != "" {
+	if connection.MutualTLSSecretRef != nil {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
@@ -243,7 +240,7 @@ func NewDeploymentWithOwnerRef(
 			Name: "temporal-tls",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName: connection.MutualTLSSecret,
+					SecretName: connection.MutualTLSSecretRef.Name,
 				},
 			},
 		})
@@ -302,7 +299,9 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 
 	// Hash connection spec fields in deterministic order
 	_, _ = hasher.Write([]byte(connection.HostPort))
-	_, _ = hasher.Write([]byte(connection.MutualTLSSecret))
+	if connection.MutualTLSSecretRef != nil {
+		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
+	}
 
 	return hex.EncodeToString(hasher.Sum(nil))
 }

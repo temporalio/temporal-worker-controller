@@ -112,7 +112,7 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 				field.Invalid(field.NewPath("spec.rollout.steps"), rolloutSteps, "steps are required for Progressive rollout"),
 			)
 		}
-		var lastRamp float32
+		var lastRamp int
 		for i, s := range rolloutSteps {
 			// Check duration >= 30s
 			if s.PauseDuration.Duration < 30*time.Second {

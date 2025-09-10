@@ -37,9 +37,9 @@ func TestGeneratePlan(t *testing.T) {
 		expectUpdate                     int
 		expectWorkflow                   int
 		expectConfig                     bool
-		expectConfigSetCurrent           *bool    // pointer so we can test nil
-		expectConfigRampPercent          *float32 // pointer so we can test nil
-		maxVersionsIneligibleForDeletion *int32   // set by env if non-nil, else default 75
+		expectConfigSetCurrent           *bool  // pointer so we can test nil
+		expectConfigRampPercent          *int32 // pointer so we can test nil, in percentage (0-100)
+		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -208,9 +208,9 @@ func TestGeneratePlan(t *testing.T) {
 			},
 			expectCreate:            false,
 			expectScale:             0,
-			expectConfig:            true,                                             // Should generate config to reset ramp
-			expectConfigSetCurrent:  func() *bool { b := false; return &b }(),         // Should NOT set current (already current)
-			expectConfigRampPercent: func() *float32 { f := float32(0); return &f }(), // Should reset ramp to 0
+			expectConfig:            true,                                         // Should generate config to reset ramp
+			expectConfigSetCurrent:  func() *bool { b := false; return &b }(),     // Should NOT set current (already current)
+			expectConfigRampPercent: func() *int32 { f := int32(0); return &f }(), // Should reset ramp to 0
 		},
 		{
 			name: "should not create deployment when version limit (ineligible for deletion) is reached",
@@ -1030,7 +1030,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 		state             *temporal.TemporalWorkerState
 		expectConfig      bool
 		expectSetCurrent  bool
-		expectRampPercent *float32
+		expectRampPercent *int32
 	}{
 		{
 			name: "all at once strategy",
@@ -1093,7 +1093,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			spec:              &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig:      true,
 			expectSetCurrent:  false,
-			expectRampPercent: float32Ptr(25),
+			expectRampPercent: int32Ptr(25),
 		},
 		{
 			name: "rollback scenario - target equals current but different version is ramping",
@@ -1166,7 +1166,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			spec:              &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
 			expectConfig:      true,
 			expectSetCurrent:  true,
-			expectRampPercent: func() *float32 { f := float32(0); return &f }(),
+			expectRampPercent: func() *int32 { f := int32(0); return &f }(),
 		},
 	}
 
@@ -1195,7 +1195,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 		state             *temporal.TemporalWorkerState
 		expectConfig      bool
 		expectSetCurrent  bool
-		expectRampPercent float32
+		expectRampPercent int32
 	}{
 		"progressive rollout completes last step": {
 			strategy: temporaliov1alpha1.RolloutStrategy{
@@ -1224,7 +1224,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
-					RampPercentage: float32Ptr(75),
+					RampPercentage: float32Ptr(75.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour), // Past all steps
 					},
@@ -1285,7 +1285,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-4 * time.Hour),
 					},
-					RampPercentage: float32Ptr(25),
+					RampPercentage: float32Ptr(25.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-1 * time.Hour), // Exactly at step boundary
 					},
@@ -1353,7 +1353,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
-					RampPercentage: float32Ptr(50),
+					RampPercentage: float32Ptr(50.0),
 					RampLastModifiedAt: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second), // Just past boundary
 					},
@@ -1389,7 +1389,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					RampingSince: &metav1.Time{
 						Time: time.Now().Add(-2*time.Hour - 1*time.Second),
 					},
-					RampPercentage:     float32Ptr(10),
+					RampPercentage:     float32Ptr(10.0),
 					RampLastModifiedAt: nil, // nil rampLastModifiedAt should not cause a panic!
 				},
 			},
@@ -1420,7 +1420,7 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 	testCases := map[string]struct {
 		steps                 []temporaliov1alpha1.RolloutStep
 		reconcileFreq         time.Duration
-		initialRamp           *float32
+		initialRamp           *int32
 		expectRamps           []float32
 		expectRolloutDuration time.Duration
 	}{
@@ -1459,7 +1459,7 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 			},
 			reconcileFreq: time.Second,
 			// Simulate a ramp value set manually via Temporal CLI
-			initialRamp:           float32Ptr(20),
+			initialRamp:           int32Ptr(20),
 			expectRamps:           []float32{10, 25, 50, 100},
 			expectRolloutDuration: 30*time.Second + 3*time.Second,
 		},
@@ -1471,7 +1471,7 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 			},
 			reconcileFreq: time.Second,
 			// Simulate a ramp value set manually via Temporal CLI
-			initialRamp:           float32Ptr(1),
+			initialRamp:           int32Ptr(1),
 			expectRamps:           []float32{10, 25, 50, 100},
 			expectRolloutDuration: 30*time.Second + 3*time.Second,
 		},
@@ -1492,7 +1492,8 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 			// This could happen if the progressive rollout spec was updated, or if the user modified
 			// the current ramp value externally, e.g. via the Temporal CLI/UI.
 			if tc.initialRamp != nil {
-				currentRampPercentage = tc.initialRamp
+				ramp := float32(*tc.initialRamp) // Already in percentage
+				currentRampPercentage = &ramp
 				// Imitate the "worst case" of ramp having just been updated.
 				rampLastModified = &metav1.Time{Time: now}
 			}
@@ -1516,13 +1517,14 @@ func TestGetVersionConfig_ProgressiveRolloutOverTime(t *testing.T) {
 				if config.SetCurrent {
 					diffs = append(diffs, 100)
 				} else {
-					diffs = append(diffs, config.RampPercentage)
+					diffs = append(diffs, float32(config.RampPercentage))
 				}
 
 				// Set ramp value and last modified time if it was updated (simulates what Temporal server would return on next reconcile loop)
-				if config.RampPercentage != 0 {
+				if float32(config.RampPercentage) != 0 {
 					rampLastModified = &currentTime
-					currentRampPercentage = &config.RampPercentage
+					rampPercentage := float32(config.RampPercentage)
+					currentRampPercentage = &rampPercentage
 				}
 
 				// Exit early if ramping is complete
@@ -1937,8 +1939,8 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			buildID:            "non-existent",
 			existingDeployment: nil,
 			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        "new-host:7233",
-				MutualTLSSecret: "new-secret",
+				HostPort:           "new-host:7233",
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			},
 			expectUpdate: false,
 		},
@@ -1948,13 +1950,13 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v1",
 				temporaliov1alpha1.TemporalConnectionSpec{
-					HostPort:        defaultHostPort(),
-					MutualTLSSecret: defaultMutualTLSSecret(),
+					HostPort:           defaultHostPort(),
+					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
 			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        defaultHostPort(),
-				MutualTLSSecret: defaultMutualTLSSecret(),
+				HostPort:           defaultHostPort(),
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 			},
 			expectUpdate: false,
 		},
@@ -1964,20 +1966,20 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v2",
 				temporaliov1alpha1.TemporalConnectionSpec{
-					HostPort:        defaultHostPort(),
-					MutualTLSSecret: defaultMutualTLSSecret(),
+					HostPort:           defaultHostPort(),
+					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
 			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        defaultHostPort(),
-				MutualTLSSecret: "new-secret",
+				HostPort:           defaultHostPort(),
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			},
 			expectUpdate:      true,
 			expectSecretName:  "new-secret",
 			expectHostPortEnv: defaultHostPort(),
 			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        defaultHostPort(),
-				MutualTLSSecret: "new-secret",
+				HostPort:           defaultHostPort(),
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			}),
 		},
 		{
@@ -1986,20 +1988,20 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v3",
 				temporaliov1alpha1.TemporalConnectionSpec{
-					HostPort:        defaultHostPort(),
-					MutualTLSSecret: defaultMutualTLSSecret(),
+					HostPort:           defaultHostPort(),
+					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
 			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        "new-host:7233",
-				MutualTLSSecret: defaultMutualTLSSecret(),
+				HostPort:           "new-host:7233",
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 			},
 			expectUpdate:      true,
 			expectSecretName:  defaultMutualTLSSecret(),
 			expectHostPortEnv: "new-host:7233",
 			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        "new-host:7233",
-				MutualTLSSecret: defaultMutualTLSSecret(),
+				HostPort:           "new-host:7233",
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 			}),
 		},
 		{
@@ -2008,20 +2010,20 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v4",
 				temporaliov1alpha1.TemporalConnectionSpec{
-					HostPort:        defaultHostPort(),
-					MutualTLSSecret: defaultMutualTLSSecret(),
+					HostPort:           defaultHostPort(),
+					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
 			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        "new-host:7233",
-				MutualTLSSecret: "new-secret",
+				HostPort:           "new-host:7233",
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			},
 			expectUpdate:      true,
 			expectSecretName:  "new-secret",
 			expectHostPortEnv: "new-host:7233",
 			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        "new-host:7233",
-				MutualTLSSecret: "new-secret",
+				HostPort:           "new-host:7233",
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			}),
 		},
 		{
@@ -2030,20 +2032,20 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v5",
 				temporaliov1alpha1.TemporalConnectionSpec{
-					HostPort:        defaultHostPort(),
-					MutualTLSSecret: defaultMutualTLSSecret(),
+					HostPort:           defaultHostPort(),
+					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
 			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        defaultHostPort(),
-				MutualTLSSecret: "",
+				HostPort:           defaultHostPort(),
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: ""},
 			},
 			expectUpdate:      true,
 			expectSecretName:  "", // Should not update secret volume when empty
 			expectHostPortEnv: defaultHostPort(),
 			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort:        defaultHostPort(),
-				MutualTLSSecret: "",
+				HostPort:           defaultHostPort(),
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: ""},
 			}),
 		},
 	}
@@ -2073,7 +2075,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			assert.Equal(t, tt.expectConnectionHash, actualHash, "Connection spec hash should be updated")
 
 			// Check secret volume update (only if mTLS secret is not empty)
-			if tt.newConnection.MutualTLSSecret != "" {
+			if tt.newConnection.MutualTLSSecretRef.Name != "" {
 				found := false
 				for _, volume := range result.Spec.Template.Spec.Volumes {
 					if volume.Name == "temporal-tls" && volume.Secret != nil {
@@ -2139,6 +2141,10 @@ func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deplo
 	}
 }
 
+func int32Ptr(v int32) *int32 {
+	return &v
+}
+
 func float32Ptr(v float32) *float32 {
 	return &v
 }
@@ -2147,9 +2153,9 @@ func metav1Duration(d time.Duration) metav1.Duration {
 	return metav1.Duration{Duration: d}
 }
 
-func rolloutStep(ramp float32, d time.Duration) temporaliov1alpha1.RolloutStep {
+func rolloutStep(ramp int32, d time.Duration) temporaliov1alpha1.RolloutStep {
 	return temporaliov1alpha1.RolloutStep{
-		RampPercentage: ramp,
+		RampPercentage: int(ramp),
 		PauseDuration:  metav1Duration(d),
 	}
 }
@@ -2157,16 +2163,16 @@ func rolloutStep(ramp float32, d time.Duration) temporaliov1alpha1.RolloutStep {
 // Helper function to create a default TemporalConnectionSpec used for testing purposes
 func createDefaultConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
 	return temporaliov1alpha1.TemporalConnectionSpec{
-		HostPort:        defaultHostPort(),
-		MutualTLSSecret: defaultMutualTLSSecret(),
+		HostPort:           defaultHostPort(),
+		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 	}
 }
 
 // Helper function to create a TemporalConnectionSpec with an outdated secret
 func createOutdatedConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
 	return temporaliov1alpha1.TemporalConnectionSpec{
-		HostPort:        defaultHostPort(),
-		MutualTLSSecret: "outdated-secret",
+		HostPort:           defaultHostPort(),
+		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "outdated-secret"},
 	}
 }
 

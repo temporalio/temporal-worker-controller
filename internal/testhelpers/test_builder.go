@@ -82,7 +82,7 @@ func (b *TemporalWorkerDeploymentBuilder) WithTargetTemplate(imageName string) *
 
 // WithTemporalConnection sets the temporal connection name
 func (b *TemporalWorkerDeploymentBuilder) WithTemporalConnection(connectionName string) *TemporalWorkerDeploymentBuilder {
-	b.twd.Spec.WorkerOptions.TemporalConnection = connectionName
+	b.twd.Spec.WorkerOptions.TemporalConnectionRef = temporaliov1alpha1.TemporalConnectionReference{Name: connectionName}
 	return b
 }
 
@@ -111,8 +111,8 @@ func (b *TemporalWorkerDeploymentBuilder) WithStatus(statusBuilder *StatusBuilde
 // Build returns the constructed TemporalWorkerDeployment
 func (b *TemporalWorkerDeploymentBuilder) Build() *temporaliov1alpha1.TemporalWorkerDeployment {
 	// Set defaults if not already set
-	if b.twd.Spec.WorkerOptions.TemporalConnection == "" {
-		b.twd.Spec.WorkerOptions.TemporalConnection = b.twd.Name
+	if b.twd.Spec.WorkerOptions.TemporalConnectionRef.Name == "" {
+		b.twd.Spec.WorkerOptions.TemporalConnectionRef = temporaliov1alpha1.TemporalConnectionReference{Name: b.twd.Name}
 	}
 
 	if b.twd.ObjectMeta.Labels == nil {
@@ -169,7 +169,7 @@ func (sb *StatusBuilder) WithCurrentVersion(imageName string, healthy, createDep
 // WithTargetVersion sets the target version in the status.
 // Set createDeployment to true if the test runner should create the Deployment, or false if you expect the controller to create it..
 // Target Version is required.
-func (sb *StatusBuilder) WithTargetVersion(imageName string, status temporaliov1alpha1.VersionStatus, rampPercentage float32, healthy bool, createDeployment bool) *StatusBuilder {
+func (sb *StatusBuilder) WithTargetVersion(imageName string, status temporaliov1alpha1.VersionStatus, rampPercentage int32, healthy bool, createDeployment bool) *StatusBuilder {
 	sb.targetVersionBuilder = func(twdName string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
 		return MakeTargetVersion(namespace, twdName, imageName, status, rampPercentage, healthy, createDeployment)
 	}
@@ -439,9 +439,9 @@ func (tcb *TestCaseBuilder) BuildWithValues(name, k8sNamespace, temporalNamespac
 }
 
 // ProgressiveStep creates a progressive rollout step
-func ProgressiveStep(rampPercentage float32, pauseDuration time.Duration) temporaliov1alpha1.RolloutStep {
+func ProgressiveStep(rampPercentage int32, pauseDuration time.Duration) temporaliov1alpha1.RolloutStep {
 	return temporaliov1alpha1.RolloutStep{
-		RampPercentage: rampPercentage,
+		RampPercentage: int(rampPercentage),
 		PauseDuration:  metav1.Duration{Duration: pauseDuration},
 	}
 }

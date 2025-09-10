@@ -174,8 +174,10 @@ func verifyTemporalStateMatchesStatusEventually(
 						return fmt.Errorf("expected RampPercentage to be nil, but was %v", rc.RampingVersionPercentage)
 					}
 				} else {
-					if rc.RampingVersionPercentage != *tv.RampPercentage {
-						return fmt.Errorf("expected RampPercentage to be %v, but was %v", *tv.RampPercentage, rc.RampingVersionPercentage)
+					expectedPercentage := *tv.RampPercentage
+					if rc.RampingVersionPercentage != expectedPercentage {
+						return fmt.Errorf("expected RampPercentage to be (%.2f%%), but temporal percentage was %.2f%%",
+							expectedPercentage, rc.RampingVersionPercentage)
 					}
 				}
 			case temporaliov1alpha1.VersionStatusCurrent:

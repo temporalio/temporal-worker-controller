@@ -105,7 +105,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 
 			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 				BuildID:       vcfg.BuildID,
-				Percentage:    vcfg.RampPercentage,
+				Percentage:    float32(vcfg.RampPercentage),
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      getControllerIdentity(),
 			}); err != nil {

@@ -19,19 +19,20 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Current Version Build ID
+    - description: Current build ID
       jsonPath: .status.currentVersion.buildID
       name: Current
       type: string
-    - description: Build ID of the target worker (based on the pod template)
+    - description: Target build ID
       jsonPath: .status.targetVersion.buildID
       name: Target
       type: string
-    - description: Percentage of new workflows starting on Target Version
+    - description: Ramp percentage
       jsonPath: .status.targetVersion.rampPercentage
-      name: Target-Ramp
+      name: Ramp %
       type: number
-    - jsonPath: .metadata.creationTimestamp
+    - description: Age
+      jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
@@ -47,12 +48,15 @@ spec:
           spec:
             properties:
               minReadySeconds:
+                default: 0
                 format: int32
                 type: integer
               progressDeadlineSeconds:
+                default: 600
                 format: int32
                 type: integer
               replicas:
+                default: 1
                 format: int32
                 type: integer
               rollout:
@@ -70,7 +74,9 @@ spec:
                         pauseDuration:
                           type: string
                         rampPercentage:
-                          type: number
+                          maximum: 99
+                          minimum: 1
+                          type: integer
                       required:
                       - pauseDuration
                       - rampPercentage
@@ -85,37 +91,13 @@ spec:
                 required:
                 - strategy
                 type: object
-              selector:
-                properties:
-                  matchExpressions:
-                    items:
-                      properties:
-                        key:
-                          type: string
-                        operator:
-                          type: string
-                        values:
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    type: object
-                type: object
-                x-kubernetes-map-type: atomic
               sunset:
                 properties:
                   deleteDelay:
+                    default: 24h
                     type: string
                   scaledownDelay:
+                    default: 1h
                     type: string
                 type: object
               template:
@@ -3929,12 +3911,19 @@ spec:
                 type: object
               workerOptions:
                 properties:
-                  connection:
-                    type: string
+                  connectionRef:
+                    properties:
+                      name:
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - name
+                    type: object
                   temporalNamespace:
+                    minLength: 1
                     type: string
                 required:
-                - connection
+                - connectionRef
                 - temporalNamespace
                 type: object
             required:
@@ -4069,6 +4058,8 @@ spec:
                     format: date-time
                     type: string
                   rampPercentage:
+                    maximum: 100
+                    minimum: 0
                     type: number
                   rampingSince:
                     format: date-time
@@ -4111,6 +4102,7 @@ spec:
                 type: string
               versionCount:
                 format: int32
+                minimum: 0
                 type: integer
             required:
             - targetVersion

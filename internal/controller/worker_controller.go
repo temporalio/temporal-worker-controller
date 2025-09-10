@@ -36,6 +36,14 @@ const (
 	buildIDLabel   = "temporal.io/build-id"
 )
 
+// getMutualTLSSecretName extracts the mutual TLS secret name from a secret reference
+func getMutualTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, bool) {
+	if secretRef != nil {
+		return secretRef.Name, true
+	}
+	return "", false
+}
+
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
 type TemporalWorkerDeploymentReconciler struct {
 	client.Client
@@ -107,17 +115,12 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		}, nil
 	}
 
-	// Verify that a connection is configured
-	if workerDeploy.Spec.WorkerOptions.TemporalConnection == "" {
-		err := fmt.Errorf("TemporalConnection must be set")
-		l.Error(err, "")
-		return ctrl.Result{}, err
-	}
+	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
 
 	// Fetch the connection parameters
 	var temporalConnection temporaliov1alpha1.TemporalConnection
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnection,
+		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name,
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
 		l.Error(err, "unable to fetch TemporalConnection")
@@ -125,11 +128,12 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Get or update temporal client for connection
+	mutualTLSSecretName, hasMutualTLS := getMutualTLSSecretName(temporalConnection.Spec.MutualTLSSecretRef)
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
 		HostPort:        temporalConnection.Spec.HostPort,
 		Namespace:       workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		MutualTLSSecret: temporalConnection.Spec.MutualTLSSecret,
-	}, temporalConnection.Spec.MutualTLSSecret != "")
+		MutualTLSSecret: mutualTLSSecretName,
+	}, hasMutualTLS)
 	if !ok {
 		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
@@ -264,7 +268,7 @@ func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context
 
 	// Filter to ones using this connection
 	for _, twd := range twds.Items {
-		if twd.Spec.WorkerOptions.TemporalConnection == tc.GetName() {
+		if twd.Spec.WorkerOptions.TemporalConnectionRef.Name == tc.GetName() {
 			// Enqueue a reconcile request for this TWD
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{

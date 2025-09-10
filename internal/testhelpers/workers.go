@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	corev1 "k8s.io/api/core/v1"
@@ -86,7 +89,11 @@ func newClient(ctx context.Context, hostPort, namespace string) (client.Client, 
 		Identity:  "integration-tests",
 		HostPort:  hostPort,
 		Namespace: namespace,
-		Logger:    nil,
+		Logger: log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			AddSource:   false,
+			Level:       slog.LevelWarn, // Set to warn level to reduce noise in tests
+			ReplaceAttr: nil,
+		}))),
 	}
 	c, err := client.Dial(opts)
 	if err != nil {

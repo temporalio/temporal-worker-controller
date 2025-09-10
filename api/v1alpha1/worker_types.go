@@ -11,29 +11,32 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// TemporalConnectionReference contains the name of a TemporalConnection resource
+// in the same namespace as the TemporalWorkerDeployment.
+type TemporalConnectionReference struct {
+	// Name of the TemporalConnection resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+}
+
 type WorkerOptions struct {
 	// The name of a TemporalConnection in the same namespace as the TemporalWorkerDeployment.
-	TemporalConnection string `json:"connection"`
+	TemporalConnectionRef TemporalConnectionReference `json:"connectionRef"`
 	// The Temporal namespace for the worker to connect to.
+	// +kubebuilder:validation:MinLength=1
 	TemporalNamespace string `json:"temporalNamespace"`
 }
 
 // TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment
 type TemporalWorkerDeploymentSpec struct {
-	// Important: Run "make" to regenerate code after modifying this file
 
 	// Number of desired pods. This is a pointer to distinguish between explicit
 	// zero and not specified. Defaults to 1.
 	// This field makes TemporalWorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
-	// TODO(jlegrone): Configure min replicas per thousand workflow/activity tasks?
 	// +optional
+	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
-
-	// Label selector for pods. Existing ReplicaSets whose pods are
-	// selected by this will be the ones affected by this deployment.
-	// It must match the pod template's labels.
-	// +optional
-	Selector *metav1.LabelSelector `json:"selector" protobuf:"bytes,2,opt,name=selector"`
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
@@ -43,6 +46,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// without any of its container crashing, for it to be considered available.
 	// Defaults to 0 (pod will be considered available as soon as it is ready)
 	// +optional
+	// +kubebuilder:default=0
 	MinReadySeconds int32 `json:"minReadySeconds,omitempty"`
 
 	// The maximum time in seconds for a deployment to make progress before it
@@ -50,6 +54,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// process failed deployments and a condition with a ProgressDeadlineExceeded
 	// reason will be surfaced in the deployment status. Note that progress will
 	// not be estimated during the time a deployment is paused. Defaults to 600s.
+	// +kubebuilder:default=600
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
 
 	// How to rollout new workflow executions to the target version.
@@ -58,7 +63,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// How to manage sunsetting drained versions.
 	SunsetStrategy SunsetStrategy `json:"sunset"`
 
-	// TODO(jlegrone): add godoc
+	// WorkerOptions configures the worker's connection to Temporal.
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
@@ -128,7 +133,11 @@ type TemporalWorkerDeploymentStatus struct {
 	// VersionCount is the total number of versions currently known by the worker deployment.
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional
+	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
+
+	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
@@ -173,11 +182,11 @@ type BaseWorkerDeploymentVersion struct {
 
 	// Healthy indicates whether the deployment version is healthy.
 	// +optional
-	HealthySince *metav1.Time `json:"healthySince"`
+	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 
 	// A pointer to the version's managed k8s deployment.
 	// +optional
-	Deployment *corev1.ObjectReference `json:"deployment"`
+	Deployment *corev1.ObjectReference `json:"deployment,omitempty"`
 
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
@@ -204,15 +213,18 @@ type TargetWorkerDeploymentVersion struct {
 	TestWorkflows []WorkflowExecution `json:"testWorkflows,omitempty"`
 
 	// RampPercentage is the percentage of new workflow executions that are
-	// configured to start on this version. Only set when Status is VersionStatusRamping.
+	// configured to start on this version. For example, 1.5 means 1.5%.
+	// Only set when Status is VersionStatusRamping.
 	//
-	// Acceptable range is [0,100].
+	// Acceptable range is [0.0,100.0] (0% to 100%).
+	// +kubebuilder:validation:Minimum=0.0
+	// +kubebuilder:validation:Maximum=100.0
 	RampPercentage *float32 `json:"rampPercentage,omitempty"`
 
 	// RampingSince is time when the version first started ramping.
 	// Only set when Status is VersionStatusRamping.
 	// +optional
-	RampingSince *metav1.Time `json:"rampingSince"`
+	RampingSince *metav1.Time `json:"rampingSince,omitempty"`
 
 	// RampLastModifiedAt is the time when the ramp percentage was last changed for the target version.
 	// +optional
@@ -227,7 +239,7 @@ type DeprecatedWorkerDeploymentVersion struct {
 	// DrainedSince is the time at which the version became drained.
 	// Only set when Status is VersionStatusDrained.
 	// +optional
-	DrainedSince *metav1.Time `json:"drainedSince"`
+	DrainedSince *metav1.Time `json:"drainedSince,omitempty"`
 
 	// A Version is eligible for deletion if it is drained and has no pollers on any task queue.
 	// After pollers stop polling, the server will still consider them present until `matching.PollerHistoryTTL`
@@ -286,11 +298,13 @@ type SunsetStrategy struct {
 	// ScaledownDelay specifies how long to wait after a version is drained before scaling its Deployment to zero.
 	// Defaults to 1 hour.
 	// +optional
+	// +kubebuilder:default="1h"
 	ScaledownDelay *metav1.Duration `json:"scaledownDelay"`
 
 	// DeleteDelay specifies how long to wait after a version is drained before deleting its Deployment.
 	// Defaults to 24 hours.
 	// +optional
+	// +kubebuilder:default="24h"
 	DeleteDelay *metav1.Duration `json:"deleteDelay"`
 }
 
@@ -299,9 +313,12 @@ type AllAtOnceRolloutStrategy struct{}
 type RolloutStep struct {
 	// RampPercentage indicates what percentage of new workflow executions should be
 	// routed to the new worker deployment version while this step is active.
+	// For example, 15 means 15%.
 	//
-	// Acceptable range is [0,100].
-	RampPercentage float32 `json:"rampPercentage"`
+	// Acceptable range is [1,99] (1% to 99%).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=99
+	RampPercentage int `json:"rampPercentage"`
 
 	// PauseDuration indicates how long to pause before progressing to the next step.
 	PauseDuration metav1.Duration `json:"pauseDuration"`
@@ -309,27 +326,13 @@ type RolloutStep struct {
 
 type ManualRolloutStrategy struct{}
 
-type QueueStatistics struct {
-	// The approximate number of tasks backlogged in this task queue. May count expired tasks but eventually converges
-	// to the right value.
-	ApproximateBacklogCount int64 `json:"approximateBacklogCount,omitempty"`
-	// Approximate age of the oldest task in the backlog based on the creation timestamp of the task at the head of the queue.
-	ApproximateBacklogAge metav1.Duration `json:"approximateBacklogAge,omitempty"`
-	// Approximate tasks per second added to the task queue based on activity within a fixed window. This includes both backlogged and
-	// sync-matched tasks.
-	TasksAddRate float32 `json:"tasksAddRate,omitempty"`
-	// Approximate tasks per second dispatched to workers based on activity within a fixed window. This includes both backlogged and
-	// sync-matched tasks.
-	TasksDispatchRate float32 `json:"tasksDispatchRate,omitempty"`
-}
-
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
-//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current Version Build ID"
-//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Build ID of the target worker (based on the pod template)"
-//+kubebuilder:printcolumn:name="Target-Ramp",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Percentage of new workflows starting on Target Version"
-//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+//+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
+//+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
+//+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
 type TemporalWorkerDeployment struct {

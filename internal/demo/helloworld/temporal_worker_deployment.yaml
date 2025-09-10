@@ -8,7 +8,8 @@ metadata:
 spec:
   # Configuration for connecting to Temporal
   workerOptions:
-    connection: dev-server
+    connectionRef:
+      name: dev-server
     #    temporalNamespace: "replay-2025.ktasd"
     temporalNamespace: "worker-controller-test.a2dd6"
 
@@ -68,4 +69,5 @@ metadata:
 spec:
   #  hostPort: "replay-2025.ktasd.tmprl.cloud:7233"
   hostPort: "worker-controller-test.a2dd6.tmprl.cloud:7233"
-  mutualTLSSecret: temporal-cloud-mtls
+  mutualTLSSecretRef:
+    name: temporal-cloud-mtls

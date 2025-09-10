@@ -11,10 +11,21 @@ spec:
     kind: TemporalConnection
     listKind: TemporalConnectionList
     plural: temporalconnections
+    shortNames:
+    - tconn
     singular: temporalconnection
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: Temporal server endpoint
+      jsonPath: .spec.hostPort
+      name: Host
+      type: string
+    - description: Age
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -27,9 +38,16 @@ spec:
           spec:
             properties:
               hostPort:
+                pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
                 type: string
-              mutualTLSSecret:
-                type: string
+              mutualTLSSecretRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
             required:
             - hostPort
             type: object
