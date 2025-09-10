@@ -212,9 +212,9 @@ func TestIntegration(t *testing.T) {
 			WithWaitTime(5*time.Second).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-					WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-					WithCurrentVersion("v4", true, false).
-					WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+								WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+								WithCurrentVersion("v4", true, false).
+								WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 						testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 						testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 						testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
