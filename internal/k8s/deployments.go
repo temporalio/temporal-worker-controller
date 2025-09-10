@@ -176,7 +176,7 @@ func NewDeploymentWithOwnerRef(
 ) *appsv1.Deployment {
 	selectorLabels := map[string]string{
 		twdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
-		BuildIDLabel: TruncateString(CleanStringForDNS(buildID), 63),
+		BuildIDLabel: TruncateString(buildID, 63),
 	}
 
 	// Set pod labels

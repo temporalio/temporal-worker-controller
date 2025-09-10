@@ -42,35 +42,35 @@ func TestIntegration(t *testing.T) {
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithManualStrategy().
-					WithTargetTemplate("v1-0"),
+					WithTargetTemplate("v1.0"),
 			).
 			WithWaitTime(5 * time.Second). // wait before checking to confirm no change
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
 			),
 		"all-at-once-rollout-2-replicas": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithAllAtOnceStrategy().
 					WithReplicas(2).
-					WithTargetTemplate("v1-0"),
+					WithTargetTemplate("v1.0"),
 			).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
-					WithCurrentVersion("v1-0", true, false),
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+					WithCurrentVersion("v1.0", true, false),
 			),
 		"progressive-rollout-no-unversioned-pollers-expect-all-at-once": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-					WithTargetTemplate("v1-0"),
+					WithTargetTemplate("v1.0"),
 			).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
-					WithCurrentVersion("v1-0", true, false),
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+					WithCurrentVersion("v1.0", true, false),
 			),
 		"progressive-rollout-yes-unversioned-pollers-expect-first-step": testhelpers.NewTestCase().
 			WithInput(
@@ -87,7 +87,7 @@ func TestIntegration(t *testing.T) {
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-					WithTargetTemplate("v1-0").
+					WithTargetTemplate("v1.0").
 					WithStatus(
 						testhelpers.NewStatusBuilder().
 							WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
@@ -99,14 +99,14 @@ func TestIntegration(t *testing.T) {
 			).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
 			),
 		"nth-progressive-rollout-with-success-gate": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 					WithGate(true).
-					WithTargetTemplate("v1-0").
+					WithTargetTemplate("v1.0").
 					WithStatus(
 						testhelpers.NewStatusBuilder().
 							WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
@@ -118,14 +118,14 @@ func TestIntegration(t *testing.T) {
 			).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusRamping, 5, true, false),
 			),
 		"nth-progressive-rollout-with-failed-gate": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 					WithGate(false).
-					WithTargetTemplate("v1-0").
+					WithTargetTemplate("v1.0").
 					WithStatus(
 						testhelpers.NewStatusBuilder().
 							WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
@@ -138,7 +138,7 @@ func TestIntegration(t *testing.T) {
 			WithWaitTime(5 * time.Second).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
 					WithCurrentVersion("v0", true, true),
 			),
 		"failed-gate-is-not-scaled-down-while-target": testhelpers.NewTestCase().
@@ -146,21 +146,21 @@ func TestIntegration(t *testing.T) {
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithAllAtOnceStrategy().
 					WithGate(false).
-					WithTargetTemplate("v1-0"),
+					WithTargetTemplate("v1.0"),
 			).
 			WithWaitTime(5 * time.Second).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
 			),
 		"failed-gate-is-scaled-down-when-deprecated": testhelpers.NewTestCase().
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithAllAtOnceStrategy().
-					WithTargetTemplate("v2-0").
+					WithTargetTemplate("v2.0").
 					WithStatus(
 						testhelpers.NewStatusBuilder().
-							WithTargetVersion("v1-0", temporaliov1alpha1.VersionStatusInactive, -1, true, true).
+							WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, true).
 							WithDeprecatedVersions(
 								testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, true, true),
 							),
@@ -168,22 +168,22 @@ func TestIntegration(t *testing.T) {
 			).
 			WithExistingDeployments(
 				testhelpers.NewDeploymentInfo("v0", 1),
-				testhelpers.NewDeploymentInfo("v1-0", 1),
+				testhelpers.NewDeploymentInfo("v1.0", 1),
 			).
 			WithWaitTime(5*time.Second).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v2-0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
-					WithCurrentVersion("v2-0", true, false).
+					WithTargetVersion("v2.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+					WithCurrentVersion("v2.0", true, false).
 					WithDeprecatedVersions(
 						testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
-						testhelpers.NewDeprecatedVersionInfo("v1-0", temporaliov1alpha1.VersionStatusInactive, true, false, true),
+						testhelpers.NewDeprecatedVersionInfo("v1.0", temporaliov1alpha1.VersionStatusInactive, true, false, true),
 					),
 			).
 			WithExpectedDeployments( // note: right now this is only checked for deprecated versions, TODO(carlydf) add for non-deprecated too
 				testhelpers.NewDeploymentInfo("v0", 1),
-				testhelpers.NewDeploymentInfo("v1-0", 0),
-				testhelpers.NewDeploymentInfo("v2-0", 1),
+				testhelpers.NewDeploymentInfo("v1.0", 0),
+				testhelpers.NewDeploymentInfo("v2.0", 1),
 			),
 		"nth-rollout-blocked-at-max-replicas": testhelpers.NewTestCase().
 			WithInput(
@@ -212,9 +212,9 @@ func TestIntegration(t *testing.T) {
 			WithWaitTime(5*time.Second).
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-								WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-								WithCurrentVersion("v4", true, false).
-								WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+					WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+					WithCurrentVersion("v4", true, false).
+					WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 						testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 						testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 						testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
