@@ -117,7 +117,7 @@ func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
 			maxImgLen := MaxBuildIdLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
-			return imagePrefix + shortHashSuffix
+			return cleanBuildID(imagePrefix + shortHashSuffix)
 		}
 	}
 	return utils.ComputeHash(&w.Spec.Template, nil, false)
@@ -162,6 +162,23 @@ func TruncateString(s string, n int) string {
 func CleanStringForDNS(s string) string {
 	// Keep only letters, numbers, and dashes.
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
+	return re.ReplaceAllString(s, ResourceNameSeparator)
+}
+
+// Build ID is used as a label in k8s, and as the build ID for
+// the worker in Temporal. That means it needs to conform to both
+// system's requirements.
+//
+// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
+// Valid label value:
+// - must be 63 characters or less (can be empty),
+// - unless empty, must begin and end with an alphanumeric character ([a-z0-9A-Z]),
+// - could contain dashes (-), underscores (_), dots (.), and alphanumerics between.
+//
+// Temporal build IDs only need to be ASCII.
+func cleanBuildID(s string) string {
+	// Keep only letters, numbers, dashes, and dots.
+	re := regexp.MustCompile(`[^a-zA-Z0-9-._]+`)
 	return re.ReplaceAllString(s, ResourceNameSeparator)
 }
 

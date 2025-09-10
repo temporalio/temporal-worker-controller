@@ -323,7 +323,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", namedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  "library/busybox",
+			expectedPrefix:  "library-busybox",
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -334,7 +334,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  "this.is.my_weird/image",
+			expectedPrefix:  "this.is.my_weird-image",
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
