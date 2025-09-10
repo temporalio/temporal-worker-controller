@@ -42,12 +42,14 @@ func TestIntegration(t *testing.T) {
 			WithInput(
 				testhelpers.NewTemporalWorkerDeploymentBuilder().
 					WithManualStrategy().
-					WithTargetTemplate("v1.0"),
+					// Image name with banned characters (slash, colon) that will be replaced
+					// with hyphens in the build ID. Dots and underscores are preserved.
+					WithTargetTemplate("my.app/test/foo_bar:v1.0"),
 			).
 			WithWaitTime(5 * time.Second). // wait before checking to confirm no change
 			WithExpectedStatus(
 				testhelpers.NewStatusBuilder().
-					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
+					WithTargetVersion("my.app/test/foo_bar:v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
 			),
 		"all-at-once-rollout-2-replicas": testhelpers.NewTestCase().
 			WithInput(
