@@ -9,15 +9,14 @@
 
 **The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
-Instead of worrying about breaking running workflows when you deploy new code, the controller automates 
-[rainbow deployments](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#deployment-systems), 
-managing multiple [versions](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) of your
-workers so that existing Pinned workflows continue running uninterrupted while new workflows and existing AutoUpgrade workflows use the latest version.
+Temporal workflows require deterministic execution, which means updating worker code can break running workflows if the changes aren't backward compatible. Traditional deployment strategies force you to either risk breaking existing workflows or use Temporal's [Patching API](https://docs.temporal.io/patching) to maintain compatibility across versions.
+
+Temporal's [Worker Versioning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) feature solves this dilemma by providing programmatic control over worker versions and traffic routing. The Temporal Worker Controller automates a deployment system that uses Worker Versioning on Kubernetes. When you deploy new code, the controller automatically creates a new worker version while keeping the old version running. Existing workflows continue on the old version while new workflows use the new version. This approach eliminates the need for patches in many cases and ensures running workflows are never disrupted.
 
 ## What does it do?
 
-🔒 **Protected Pinned workflows** - Workflows pinned to a version stay on that version and won't break  
-🎚️ **Controlled rollout for AutoUpgrade workflows** - AutoUpgrade workflows shifted to new versions with configurable safety controls  
+🔒 **Protected [Pinned](https://docs.temporal.io/worker-versioning#pinned) workflows** - Workflows pinned to a version stay on that version and won't break  
+🎚️ **Controlled rollout for [AutoUpgrade](https://docs.temporal.io/worker-versioning#auto-upgrade) workflows** - AutoUpgrade workflows shifted to new versions with configurable safety controls  
 📦 **Automatic version management** - Registers versions with Temporal, manages routing rules, and tracks version lifecycle  
 🎯 **Smart traffic routing** - New workflows automatically get routed to your target worker version  
 🛡️ **Progressive rollouts** - Catch incompatible changes early with small traffic percentages before they spread  
@@ -152,8 +151,9 @@ TEMPORAL_WORKER_BUILD_ID=v1.2.3          # Version identifier
 
 ## 🤝 Contributing
 
-This project is in early stages. While external code contributions are not yet being solicited, we welcome:
+We welcome all contributions! This includes:
 
+- 🔧 **Code contributions** - Please start by [opening an issue](https://github.com/temporalio/temporal-worker-controller/issues/new) to discuss your idea
 - 🐛 **Bug reports** - [File an issue](https://github.com/temporalio/temporal-worker-controller/issues/new)
 - 💡 **Feature requests** - Tell us what you'd like to see
 - 💬 **Feedback** - Join [#safe-deploys](https://temporalio.slack.com/archives/C07MDJ6S3HP) on [Temporal Slack](https://t.mp/slack)

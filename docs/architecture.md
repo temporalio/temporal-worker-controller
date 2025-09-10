@@ -2,6 +2,8 @@
 
 This document provides a detailed technical overview of how the Temporal Worker Controller works, including architecture diagrams, worker lifecycle management, and the relationship between Kubernetes resources and Temporal Worker Deployments.
 
+> **Prerequisites**: This document assumes you've read the [Concepts Guide](concepts.md) first. The concepts document defines key terminology and relationships that are essential for understanding the architecture.
+
 ## How It Works
 
 Every `TemporalWorkerDeployment` resource manages one or more standard `Deployment` resources. Each Deployment manages pods which in turn poll Temporal for tasks routed to their respective worker versions.
