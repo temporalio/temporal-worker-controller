@@ -1,83 +1,77 @@
-name: linters
+name: Lint
+
 on:
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
   lint-actions:
+    name: Actions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: Setup environment
+      uses: ./.github/actions/setup-go
+      with:
+        fetch-depth: '0'
+        download-deps: 'false'
+      
+    - name: Setup actionlint
+      run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+      shell: bash
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-          check-latest: true
-
-      - name: lint actions
-        run: |
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          make lint-actions
-        shell: bash
+    - name: Run Actions linter
+      run: make lint-actions
 
   fmt-imports:
+    name: Format Imports
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: Setup environment
+      uses: ./.github/actions/setup-go
+      with:
+        fetch-depth: '0'
+        download-deps: 'false'
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-          check-latest: true
+    - name: Run import formatter
+      run: make fmt-imports
 
-      - name: format golang import statements
-        run: |
-          make fmt-imports
+    - name: Check for uncommitted changes
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "Detected uncommitted changes after Format Imports."
+          git status
+          git diff
+          exit 1
+        fi
 
-      - name: check-is-dirty
-        run: |
-          if [[ -n $(git status --porcelain) ]]; then
-            echo "Detected uncommitted changes."
-            git status
-            git diff
-            exit 1
-          fi
-
-  golangci:
+  lint-code:
+    name: GolangCI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: Setup environment
+      uses: ./.github/actions/setup-go
+      with:
+        fetch-depth: '0'
+        download-deps: 'false'
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-          check-latest: true
+    - name: Run code linter
+      run: make GOLANGCI_LINT_FIX=false GOLANGCI_LINT_BASE_REV=HEAD~ lint-code
 
-      - name: lint code
-        run: |
-          make GOLANGCI_LINT_FIX=false GOLANGCI_LINT_BASE_REV=HEAD~ lint-code
+    - name: Check for uncommitted changes
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "Detected uncommitted changes after GolangCI."
+          git status
+          git diff
+          exit 1
+        fi
 
-      - name: check-is-dirty
-        run: |
-          if [[ -n $(git status --porcelain) ]]; then
-            echo "Detected uncommitted changes."
-            git status
-            git diff
-            exit 1
-          fi
-
+  # Keep the final success check job as-is since it's needed for branch protection
   linters-succeed:
     name: All Linters Succeed
-    needs:
-      - lint-actions
-      - fmt-imports
-      - golangci
+    needs: [lint-actions, fmt-imports, lint-code]
     runs-on: ubuntu-latest
     if: always()
     env:
