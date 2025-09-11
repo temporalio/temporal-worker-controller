@@ -32,7 +32,11 @@ checksum:
 
 # Only build Docker images with 'main' tag
 dockers:
-  - image_templates:
+  - ids:
+      - nix
+    goos: linux
+    goarch: amd64
+    image_templates:
       - "temporalio/temporal-worker-controller:main-amd64"
     dockerfile: Dockerfile.goreleaser
     use: buildx
@@ -49,7 +53,11 @@ dockers:
     extra_files:
       - LICENSE
 
-  - image_templates:
+  - ids:
+      - nix
+    goos: linux
+    goarch: arm64
+    image_templates:
       - "temporalio/temporal-worker-controller:main-arm64"
     dockerfile: Dockerfile.goreleaser
     use: buildx

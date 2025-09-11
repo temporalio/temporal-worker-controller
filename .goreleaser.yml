@@ -40,7 +40,11 @@ checksum:
   algorithm: sha256
 
 dockers:
-  - image_templates:
+  - ids:
+      - nix
+    goos: linux
+    goarch: amd64
+    image_templates:
       - "temporalio/temporal-worker-controller:{{ .Tag }}-amd64"
       - "temporalio/temporal-worker-controller:v{{ .Major }}.{{ .Minor }}-amd64"
     dockerfile: Dockerfile.goreleaser
@@ -58,7 +62,11 @@ dockers:
     extra_files:
       - LICENSE
 
-  - image_templates:
+  - ids:
+      - nix
+    goos: linux
+    goarch: arm64
+    image_templates:
       - "temporalio/temporal-worker-controller:{{ .Tag }}-arm64"
       - "temporalio/temporal-worker-controller:v{{ .Major }}.{{ .Minor }}-arm64"
     dockerfile: Dockerfile.goreleaser
