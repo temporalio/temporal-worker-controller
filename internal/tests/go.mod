@@ -1,14 +1,12 @@
 module github.com/temporalio/temporal-worker-controller/tests
 
-go 1.24.1
-
-toolchain go1.24.3
+go 1.24.5
 
 require (
 	github.com/temporalio/temporal-worker-controller v0.0.0-20250724125328-fc3f6320f88d
-	go.temporal.io/api v1.50.0
+	go.temporal.io/api v1.50.1
 	go.temporal.io/sdk v1.34.0
-	go.temporal.io/server v1.28.0
+	go.temporal.io/server v1.28.1
 	k8s.io/api v0.33.2
 	k8s.io/apimachinery v0.33.2
 	k8s.io/client-go v0.33.2
