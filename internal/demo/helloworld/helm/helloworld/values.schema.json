@@ -65,18 +65,12 @@
       },
       "required": ["strategy"],
       "additionalProperties": false
-    },
-    "replicas": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Number of worker replicas"
     }
   },
   "required": [
     "image",
     "temporal",
-    "rollout",
-    "replicas"
+    "rollout"
   ],
   "additionalProperties": false
 }

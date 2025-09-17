@@ -30,7 +30,7 @@ spec:
     scaledownDelay: 30s
     deleteDelay: 1m
   # Desired number of worker replicas
-  replicas: {{ .Values.replicas }}
+  replicas: 1
   # Desired specification for worker pods
   template:
     spec:

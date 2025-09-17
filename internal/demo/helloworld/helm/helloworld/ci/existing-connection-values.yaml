@@ -8,5 +8,3 @@ temporal:
 
 rollout:
   strategy: Progressive
-
-replicas: 2

@@ -12,5 +12,3 @@ temporal:
 
 rollout:
   strategy: Progressive
-
-replicas: 1

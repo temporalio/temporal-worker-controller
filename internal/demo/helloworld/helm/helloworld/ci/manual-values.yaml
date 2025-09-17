@@ -9,5 +9,3 @@ temporal:
 
 rollout:
   strategy: Manual
-
-replicas: 1
