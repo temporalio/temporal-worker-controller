@@ -8,11 +8,9 @@ import (
 	"context"
 	"os"
 
-	"go.opentelemetry.io/otel/sdk/metric"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/contrib/envconfig"
-	"go.temporal.io/sdk/contrib/opentelemetry"
 )
 
 func NewClient(buildID string) (c client.Client, stopFunc func()) {
@@ -20,7 +18,7 @@ func NewClient(buildID string) (c client.Client, stopFunc func()) {
 }
 
 func newClient(buildID string) (c client.Client, stopFunc func()) {
-	l, stopFunc := configureObservability(buildID)
+	l, m, stopFunc := configureObservability(buildID)
 
 	// Load client options from environment variables using envconfig
 	opts, err := envconfig.LoadDefaultClientOptions()
@@ -31,9 +29,7 @@ func newClient(buildID string) (c client.Client, stopFunc func()) {
 	// Override with our custom settings
 	opts.Identity = os.Getenv("HOSTNAME")
 	opts.Logger = l
-	opts.MetricsHandler = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
-		Meter: metric.NewMeterProvider().Meter("worker"),
-	})
+	opts.MetricsHandler = m
 
 	l.Debug("Client configured", "identity", opts.Identity, "hostPort", opts.HostPort, "namespace", opts.Namespace)
 

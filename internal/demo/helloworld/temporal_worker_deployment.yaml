@@ -43,9 +43,9 @@ spec:
       containers:
         - name: main
           image: helloworld
-          #          readinessProbe:
-          #            httpGet:
-          #              port: 8080
+          readinessProbe:
+            httpGet:
+              port: 8080
           env:
             - name: TEMPORAL_TASK_QUEUE
               value: "hello_world"

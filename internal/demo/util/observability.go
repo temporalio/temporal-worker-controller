@@ -9,48 +9,26 @@ import (
 	"os"
 	"time"
 
-	prom "github.com/prometheus/client_golang/prometheus"
-	"github.com/uber-go/tally/v4"
-	"github.com/uber-go/tally/v4/prometheus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/metric"
 	"go.temporal.io/sdk/contrib/opentelemetry"
 	"go.temporal.io/sdk/log"
 )
 
-func configureObservability(buildID string) (l log.Logger, stopFunc func()) {
+func configureObservability(buildID string) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
 	l = log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource:   true,
 		Level:       slog.LevelDebug,
 		ReplaceAttr: nil,
 	})))
 
-	return l, func() {
+	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
+		Meter:             metric.NewMeterProvider().Meter("worker"),
+		InitialAttributes: attribute.NewSet(attribute.String("version", buildID)),
+	})
+
+	return l, m, func() {
 		// Wait a few seconds before shutting down to ensure metrics etc have been flushed.
 		time.Sleep(5 * time.Second)
 	}
-}
-
-func newPrometheusScope(l log.Logger, c prometheus.Configuration) (tally.Scope, error) {
-	reporter, err := c.NewReporter(
-		prometheus.ConfigurationOptions{
-			Registry: prom.NewRegistry(),
-			OnError: func(err error) {
-				l.Error("Error in prometheus reporter", "error", err)
-			},
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	scopeOpts := tally.ScopeOptions{
-		CachedReporter:  reporter,
-		Separator:       prometheus.DefaultSeparator,
-		SanitizeOptions: &sdktally.PrometheusSanitizeOptions,
-		Prefix:          "",
-	}
-
-	scope, _ := tally.NewRootScope(scopeOpts, time.Second)
-	scope = sdktally.NewPrometheusNamingScope(scope)
-
-	return scope, nil
 }

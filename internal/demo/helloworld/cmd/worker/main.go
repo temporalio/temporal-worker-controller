@@ -7,9 +7,10 @@ package main
 import (
 	"log"
 
+	"go.temporal.io/sdk/worker"
+
 	"github.com/temporalio/temporal-worker-controller/internal/demo/helloworld"
 	"github.com/temporalio/temporal-worker-controller/internal/demo/util"
-	"go.temporal.io/sdk/worker"
 )
 
 func main() {
