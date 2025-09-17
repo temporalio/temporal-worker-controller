@@ -47,22 +47,9 @@
               "minLength": 1
             }
           },
-          "not": {
-            "anyOf": [
-              {"required": ["hostPort"]},
-              {"required": ["tlsSecretName"]}
-            ]
-          }
+          "required": ["connectionName"]
         },
         {
-          "not": {
-            "properties": {
-              "connectionName": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          },
           "required": ["hostPort", "tlsSecretName"]
         }
       ]
