@@ -1,0 +1,44 @@
+apiVersion: temporal.io/v1alpha1
+kind: TemporalWorkerDeployment
+metadata:
+  name: {{ .Values.name }}
+  labels:
+    app.kubernetes.io/name: hello-world-worker
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  # Configuration for connecting to Temporal
+  workerOptions:
+    connectionRef:
+      name: {{ .Values.temporal.connectionName }}
+    temporalNamespace: "{{ .Values.temporal.namespace }}"
+
+  # How to rollout new workflow executions to the latest worker version
+  rollout:
+    strategy: {{ .Values.rollout.strategy }}
+    steps:
+{{- range .Values.rollout.steps }}
+      - rampPercentage: {{ .rampPercentage }}
+        pauseDuration: {{ .pauseDuration }}
+{{- end }}
+    gate:
+      workflowType: "{{ .Values.rollout.gate.workflowType }}"
+  sunset:
+    scaledownDelay: {{ .Values.sunset.scaledownDelay }}
+    deleteDelay: {{ .Values.sunset.deleteDelay }}
+  # Desired number of worker replicas
+  replicas: {{ .Values.replicas }}
+  # Desired specification for worker pods
+  template:
+    metadata:
+      annotations:
+        force-new-version: "{{ .Values.template.annotations.forceNewVersion }}"
+    spec:
+      containers:
+        - name: main
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          readinessProbe:
+            httpGet:
+              port: {{ .Values.readinessProbe.port }}
+          env:
+            - name: TEMPORAL_TASK_QUEUE
+              value: "{{ .Values.taskQueue }}"

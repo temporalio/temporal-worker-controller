@@ -47,8 +47,15 @@ profiles:
               DD_GIT_REPOSITORY_URL: "github.com/temporalio/temporal-worker-controller"
               WORKER: "helloworld"
     manifests:
-      rawYaml:
-        - internal/demo/helloworld/temporal_worker_deployment.yaml
+      helm:
+        releases:
+          - name: helloworld
+            chartPath: internal/demo/helloworld/helm/helloworld
+            setValues:
+              image.repository: helloworld
+              image.tag: "{{ .IMAGE_TAG }}"
+            valuesFiles:
+              - internal/demo/helloworld/helm/helloworld/values.yaml
 deploy:
   kubeContext: minikube
   kubectl: {}

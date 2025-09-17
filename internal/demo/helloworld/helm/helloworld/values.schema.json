@@ -1,0 +1,159 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Name of the TemporalWorkerDeployment resource"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Container image repository"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Container image tag"
+        }
+      },
+      "required": ["repository", "tag"],
+      "additionalProperties": false
+    },
+    "temporal": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "Temporal namespace"
+        },
+        "connectionName": {
+          "type": "string",
+          "description": "Name of the TemporalConnection resource"
+        },
+        "hostPort": {
+          "type": "string",
+          "description": "Temporal server host and port"
+        },
+        "tlsSecretName": {
+          "type": "string",
+          "description": "Name of the secret containing TLS certificates"
+        }
+      },
+      "required": ["namespace", "connectionName", "hostPort", "tlsSecretName"],
+      "additionalProperties": false
+    },
+    "rollout": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["Progressive"],
+          "description": "Rollout strategy"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rampPercentage": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "Percentage of traffic to route to new version"
+              },
+              "pauseDuration": {
+                "type": "string",
+                "pattern": "^[0-9]+(s|m|h)$",
+                "description": "Duration to pause at this step"
+              }
+            },
+            "required": ["rampPercentage", "pauseDuration"],
+            "additionalProperties": false
+          }
+        },
+        "gate": {
+          "type": "object",
+          "properties": {
+            "workflowType": {
+              "type": "string",
+              "description": "Workflow type for the rollout gate"
+            }
+          },
+          "required": ["workflowType"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["strategy", "steps", "gate"],
+      "additionalProperties": false
+    },
+    "sunset": {
+      "type": "object",
+      "properties": {
+        "scaledownDelay": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m|h)$",
+          "description": "Delay before scaling down old version"
+        },
+        "deleteDelay": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m|h)$",
+          "description": "Delay before deleting old version"
+        }
+      },
+      "required": ["scaledownDelay", "deleteDelay"],
+      "additionalProperties": false
+    },
+    "replicas": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of worker replicas"
+    },
+    "template": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "properties": {
+            "forceNewVersion": {
+              "type": "string",
+              "description": "Annotation to force new version"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["forceNewVersion"],
+      "additionalProperties": false
+    },
+    "readinessProbe": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port for readiness probe"
+        }
+      },
+      "required": ["port"],
+      "additionalProperties": false
+    },
+    "taskQueue": {
+      "type": "string",
+      "description": "Temporal task queue name"
+    }
+  },
+  "required": [
+    "name",
+    "image",
+    "temporal",
+    "rollout",
+    "sunset",
+    "replicas",
+    "readinessProbe",
+    "taskQueue"
+  ],
+  "additionalProperties": false
+}
