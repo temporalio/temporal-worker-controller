@@ -10,8 +10,8 @@ spec:
   workerOptions:
     connectionRef:
       name: dev-server
-    #    temporalNamespace: "replay-2025.ktasd"
-    temporalNamespace: "worker-controller-test.a2dd6"
+    temporalNamespace: "replay-2025.ktasd"
+#    temporalNamespace: "worker-controller-test.a2dd6"
 
   # How to rollout new workflow executions to the latest worker version
   rollout:
