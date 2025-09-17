@@ -1,10 +1,12 @@
+{{- if not .Values.temporal.connectionName }}
 apiVersion: temporal.io/v1alpha1
 kind: TemporalConnection
 metadata:
-  name: {{ .Values.temporal.connectionName }}
+  name: {{ .Release.Name }}
   labels:
     {{- include "helloworld.labels" . | nindent 4 }}
 spec:
   hostPort: "{{ .Values.temporal.hostPort }}"
   mutualTLSSecretRef:
     name: {{ .Values.temporal.tlsSecretName }}
+{{- end }}

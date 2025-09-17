@@ -26,19 +26,46 @@
         },
         "connectionName": {
           "type": "string",
-          "description": "Name of the TemporalConnection resource"
+          "description": "Name of existing TemporalConnection resource (optional)"
         },
         "hostPort": {
           "type": "string",
-          "description": "Temporal server host and port"
+          "description": "Temporal server host and port (required if connectionName is empty)"
         },
         "tlsSecretName": {
           "type": "string",
-          "description": "Name of the secret containing TLS certificates"
+          "description": "Name of the secret containing TLS certificates (required if connectionName is empty)"
         }
       },
-      "required": ["namespace", "connectionName", "hostPort", "tlsSecretName"],
-      "additionalProperties": false
+      "required": ["namespace"],
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "connectionName": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "not": {
+            "anyOf": [
+              {"required": ["hostPort"]},
+              {"required": ["tlsSecretName"]}
+            ]
+          }
+        },
+        {
+          "not": {
+            "properties": {
+              "connectionName": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": ["hostPort", "tlsSecretName"]
+        }
+      ]
     },
     "rollout": {
       "type": "object",

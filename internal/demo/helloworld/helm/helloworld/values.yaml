@@ -4,7 +4,9 @@ image:
 
 temporal:
   namespace: "replay-2025.ktasd"
-  connectionName: dev-server
+  # Use existing connection (leave empty to create new one)
+  # connectionName: dev-server
+  # Connection details (required if connectionName is empty)
   hostPort: "replay-2025.ktasd.tmprl.cloud:7233"
   tlsSecretName: temporal-cloud-mtls
 
