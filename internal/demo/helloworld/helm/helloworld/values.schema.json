@@ -59,7 +59,7 @@
       "properties": {
         "strategy": {
           "type": "string",
-          "enum": ["Progressive"],
+          "enum": ["Progressive", "AllAtOnce", "Manual"],
           "description": "Rollout strategy"
         },
         "steps": {
@@ -84,7 +84,31 @@
           }
         }
       },
-      "required": ["strategy", "steps"],
+      "required": ["strategy"],
+      "anyOf": [
+        {
+          "properties": {
+            "strategy": {
+              "const": "Progressive"
+            }
+          },
+          "required": ["steps"]
+        },
+        {
+          "properties": {
+            "strategy": {
+              "const": "AllAtOnce"
+            }
+          }
+        },
+        {
+          "properties": {
+            "strategy": {
+              "const": "Manual"
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "sunset": {

@@ -13,6 +13,7 @@ spec:
   # How to rollout new workflow executions to the latest worker version
   rollout:
     strategy: {{ .Values.rollout.strategy }}
+{{- if eq .Values.rollout.strategy "Progressive" }}
     steps:
 {{- range .Values.rollout.steps }}
       - rampPercentage: {{ .rampPercentage }}
@@ -20,6 +21,7 @@ spec:
 {{- end }}
     gate:
       workflowType: "HelloWorld"
+{{- end }}
   sunset:
     scaledownDelay: {{ .Values.sunset.scaledownDelay }}
     deleteDelay: {{ .Values.sunset.deleteDelay }}
