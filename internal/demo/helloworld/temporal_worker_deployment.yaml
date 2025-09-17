@@ -55,7 +55,7 @@ kind: TemporalConnection
 metadata:
   name: dev-server
 spec:
-  #  hostPort: "replay-2025.ktasd.tmprl.cloud:7233"
-  hostPort: "worker-controller-test.a2dd6.tmprl.cloud:7233"
+  hostPort: "replay-2025.ktasd.tmprl.cloud:7233"
+#  hostPort: "worker-controller-test.a2dd6.tmprl.cloud:7233"
   mutualTLSSecretRef:
     name: temporal-cloud-mtls
