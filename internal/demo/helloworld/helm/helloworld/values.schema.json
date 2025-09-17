@@ -94,40 +94,6 @@
       "type": "integer",
       "minimum": 0,
       "description": "Number of worker replicas"
-    },
-    "template": {
-      "type": "object",
-      "properties": {
-        "annotations": {
-          "type": "object",
-          "properties": {
-            "forceNewVersion": {
-              "type": "string",
-              "description": "Annotation to force new version"
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "required": ["forceNewVersion"],
-      "additionalProperties": false
-    },
-    "readinessProbe": {
-      "type": "object",
-      "properties": {
-        "port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535,
-          "description": "Port for readiness probe"
-        }
-      },
-      "required": ["port"],
-      "additionalProperties": false
-    },
-    "taskQueue": {
-      "type": "string",
-      "description": "Temporal task queue name"
     }
   },
   "required": [
@@ -135,9 +101,7 @@
     "temporal",
     "rollout",
     "sunset",
-    "replicas",
-    "readinessProbe",
-    "taskQueue"
+    "replicas"
   ],
   "additionalProperties": false
 }

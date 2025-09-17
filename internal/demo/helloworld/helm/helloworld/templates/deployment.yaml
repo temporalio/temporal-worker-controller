@@ -27,16 +27,13 @@ spec:
   replicas: {{ .Values.replicas }}
   # Desired specification for worker pods
   template:
-    metadata:
-      annotations:
-        force-new-version: "{{ .Values.template.annotations.forceNewVersion }}"
     spec:
       containers:
         - name: main
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
           readinessProbe:
             httpGet:
-              port: {{ .Values.readinessProbe.port }}
+              port: 8080
           env:
             - name: TEMPORAL_TASK_QUEUE
-              value: "{{ .Values.taskQueue }}"
+              value: "{{ .Release.Namespace }}-{{ .Release.Name }}"

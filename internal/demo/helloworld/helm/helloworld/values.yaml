@@ -25,12 +25,3 @@ sunset:
   deleteDelay: 1m
 
 replicas: 1
-
-template:
-  annotations:
-    forceNewVersion: ""
-
-readinessProbe:
-  port: 8080
-
-taskQueue: "hello_world"
