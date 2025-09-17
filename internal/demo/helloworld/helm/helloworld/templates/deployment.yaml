@@ -1,7 +1,7 @@
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
-  name: {{ .Values.name }}
+  name: {{ .Release.Name }}
   labels:
     {{- include "helloworld.labels" . | nindent 4 }}
 spec:
@@ -19,7 +19,7 @@ spec:
         pauseDuration: {{ .pauseDuration }}
 {{- end }}
     gate:
-      workflowType: "{{ .Values.rollout.gate.workflowType }}"
+      workflowType: "HelloWorld"
   sunset:
     scaledownDelay: {{ .Values.sunset.scaledownDelay }}
     deleteDelay: {{ .Values.sunset.deleteDelay }}

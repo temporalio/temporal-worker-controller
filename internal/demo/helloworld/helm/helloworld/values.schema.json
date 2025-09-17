@@ -2,10 +2,6 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "name": {
-      "type": "string",
-      "description": "Name of the TemporalWorkerDeployment resource"
-    },
     "image": {
       "type": "object",
       "properties": {
@@ -72,20 +68,9 @@
             "required": ["rampPercentage", "pauseDuration"],
             "additionalProperties": false
           }
-        },
-        "gate": {
-          "type": "object",
-          "properties": {
-            "workflowType": {
-              "type": "string",
-              "description": "Workflow type for the rollout gate"
-            }
-          },
-          "required": ["workflowType"],
-          "additionalProperties": false
         }
       },
-      "required": ["strategy", "steps", "gate"],
+      "required": ["strategy", "steps"],
       "additionalProperties": false
     },
     "sunset": {
@@ -146,7 +131,6 @@
     }
   },
   "required": [
-    "name",
     "image",
     "temporal",
     "rollout",
