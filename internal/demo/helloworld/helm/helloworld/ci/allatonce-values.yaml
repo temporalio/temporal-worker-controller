@@ -1,0 +1,17 @@
+image:
+  repository: helloworld
+  tag: latest
+
+temporal:
+  namespace: "test-namespace"
+  hostPort: "test.tmprl.cloud:7233"
+  tlsSecretName: temporal-cloud-mtls
+
+rollout:
+  strategy: AllAtOnce
+
+sunset:
+  scaledownDelay: 45s
+  deleteDelay: 2m
+
+replicas: 3

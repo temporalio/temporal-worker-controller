@@ -1,0 +1,21 @@
+image:
+  repository: helloworld
+  tag: latest
+
+temporal:
+  namespace: "test-namespace"
+  connectionName: "existing-temporal-connection"
+
+rollout:
+  strategy: Progressive
+  steps:
+    - rampPercentage: 25
+      pauseDuration: 1m
+    - rampPercentage: 75
+      pauseDuration: 2m
+
+sunset:
+  scaledownDelay: 30s
+  deleteDelay: 1m
+
+replicas: 2
