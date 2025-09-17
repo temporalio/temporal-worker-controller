@@ -36,4 +36,4 @@ spec:
               port: 8080
           env:
             - name: TEMPORAL_TASK_QUEUE
-              value: "{{ .Release.Namespace }}-{{ .Release.Name }}"
+              value: "{{ .Release.Namespace }}/{{ .Release.Name }}"
