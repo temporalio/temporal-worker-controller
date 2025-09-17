@@ -8,11 +8,11 @@ import (
 	"context"
 	"os"
 
-	"github.com/uber-go/tally/v4/prometheus"
+	"go.opentelemetry.io/otel/sdk/metric"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/contrib/envconfig"
-	sdktally "go.temporal.io/sdk/contrib/tally"
+	"go.temporal.io/sdk/contrib/opentelemetry"
 )
 
 func NewClient(buildID string) (c client.Client, stopFunc func()) {
@@ -21,15 +21,6 @@ func NewClient(buildID string) (c client.Client, stopFunc func()) {
 
 func newClient(buildID string) (c client.Client, stopFunc func()) {
 	l, stopFunc := configureObservability(buildID)
-
-	promScope, err := newPrometheusScope(l, prometheus.Configuration{
-		ListenAddress: "0.0.0.0:9090",
-		HandlerPath:   "/metrics",
-		TimerType:     "histogram",
-	})
-	if err != nil {
-		panic(err)
-	}
 
 	// Load client options from environment variables using envconfig
 	opts, err := envconfig.LoadDefaultClientOptions()
@@ -40,7 +31,9 @@ func newClient(buildID string) (c client.Client, stopFunc func()) {
 	// Override with our custom settings
 	opts.Identity = os.Getenv("HOSTNAME")
 	opts.Logger = l
-	opts.MetricsHandler = sdktally.NewMetricsHandler(promScope)
+	opts.MetricsHandler = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
+		Meter: metric.NewMeterProvider().Meter("worker"),
+	})
 
 	l.Debug("Client configured", "identity", opts.Identity, "hostPort", opts.HostPort, "namespace", opts.Namespace)
 

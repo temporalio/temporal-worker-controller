@@ -12,7 +12,7 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/uber-go/tally/v4"
 	"github.com/uber-go/tally/v4/prometheus"
-	sdktally "go.temporal.io/sdk/contrib/tally"
+	"go.temporal.io/sdk/contrib/opentelemetry"
 	"go.temporal.io/sdk/log"
 )
 
