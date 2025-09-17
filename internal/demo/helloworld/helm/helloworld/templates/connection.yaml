@@ -2,6 +2,8 @@ apiVersion: temporal.io/v1alpha1
 kind: TemporalConnection
 metadata:
   name: {{ .Values.temporal.connectionName }}
+  labels:
+    {{- include "helloworld.labels" . | nindent 4 }}
 spec:
   hostPort: "{{ .Values.temporal.hostPort }}"
   mutualTLSSecretRef:

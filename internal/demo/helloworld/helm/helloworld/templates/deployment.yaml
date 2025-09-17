@@ -3,15 +3,13 @@ kind: TemporalWorkerDeployment
 metadata:
   name: {{ .Values.name }}
   labels:
-    app.kubernetes.io/name: hello-world-worker
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include "helloworld.labels" . | nindent 4 }}
 spec:
   # Configuration for connecting to Temporal
   workerOptions:
     connectionRef:
       name: {{ .Values.temporal.connectionName }}
     temporalNamespace: "{{ .Values.temporal.namespace }}"
-
   # How to rollout new workflow executions to the latest worker version
   rollout:
     strategy: {{ .Values.rollout.strategy }}
