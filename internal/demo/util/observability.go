@@ -17,26 +17,6 @@ import (
 )
 
 func configureObservability(buildID string) (l log.Logger, stopFunc func()) {
-	// if err := profiler.Start(
-	// 	profiler.WithVersion(buildID),
-	// 	profiler.WithLogStartup(false),
-	// 	profiler.WithProfileTypes(
-	// 		profiler.CPUProfile,
-	// 		profiler.HeapProfile,
-	// 		profiler.BlockProfile,
-	// 		profiler.MutexProfile,
-	// 		profiler.GoroutineProfile,
-	// 	),
-	// ); err != nil {
-	// 	panic(err)
-	// }
-
-	// tracer.Start(
-	// 	tracer.WithUniversalVersion(buildID),
-	// 	tracer.WithLogStartup(false),
-	// 	tracer.WithSampler(tracer.NewAllSampler()),
-	// )
-
 	l = log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource:   true,
 		Level:       slog.LevelDebug,
@@ -44,10 +24,8 @@ func configureObservability(buildID string) (l log.Logger, stopFunc func()) {
 	})))
 
 	return l, func() {
-		//tracer.Stop()
-		//profiler.Stop()
-		// Wait a couple seconds before shutting down to ensure metrics etc have been flushed.
-		time.Sleep(2 * time.Second)
+		// Wait a few seconds before shutting down to ensure metrics etc have been flushed.
+		time.Sleep(5 * time.Second)
 	}
 }
 
