@@ -61,71 +61,9 @@
           "type": "string",
           "enum": ["Progressive", "AllAtOnce", "Manual"],
           "description": "Rollout strategy"
-        },
-        "steps": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "rampPercentage": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 100,
-                "description": "Percentage of traffic to route to new version"
-              },
-              "pauseDuration": {
-                "type": "string",
-                "pattern": "^[0-9]+(s|m|h)$",
-                "description": "Duration to pause at this step"
-              }
-            },
-            "required": ["rampPercentage", "pauseDuration"],
-            "additionalProperties": false
-          }
         }
       },
       "required": ["strategy"],
-      "anyOf": [
-        {
-          "properties": {
-            "strategy": {
-              "const": "Progressive"
-            }
-          },
-          "required": ["steps"]
-        },
-        {
-          "properties": {
-            "strategy": {
-              "const": "AllAtOnce"
-            }
-          }
-        },
-        {
-          "properties": {
-            "strategy": {
-              "const": "Manual"
-            }
-          }
-        }
-      ],
-      "additionalProperties": false
-    },
-    "sunset": {
-      "type": "object",
-      "properties": {
-        "scaledownDelay": {
-          "type": "string",
-          "pattern": "^[0-9]+(s|m|h)$",
-          "description": "Delay before scaling down old version"
-        },
-        "deleteDelay": {
-          "type": "string",
-          "pattern": "^[0-9]+(s|m|h)$",
-          "description": "Delay before deleting old version"
-        }
-      },
-      "required": ["scaledownDelay", "deleteDelay"],
       "additionalProperties": false
     },
     "replicas": {
@@ -138,7 +76,6 @@
     "image",
     "temporal",
     "rollout",
-    "sunset",
     "replicas"
   ],
   "additionalProperties": false

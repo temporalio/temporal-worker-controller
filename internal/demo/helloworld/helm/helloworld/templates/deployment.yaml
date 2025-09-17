@@ -10,21 +10,25 @@ spec:
     connectionRef:
       name: {{ .Values.temporal.connectionName | default .Release.Name }}
     temporalNamespace: "{{ .Values.temporal.namespace }}"
-  # How to rollout new workflow executions to the latest worker version
+  # How to roll out new workflow executions to the latest worker version
   rollout:
     strategy: {{ .Values.rollout.strategy }}
 {{- if eq .Values.rollout.strategy "Progressive" }}
     steps:
-{{- range .Values.rollout.steps }}
-      - rampPercentage: {{ .rampPercentage }}
-        pauseDuration: {{ .pauseDuration }}
+      - rampPercentage: 1
+        pauseDuration: 30s
+      - rampPercentage: 5
+        pauseDuration: 30s
+      - rampPercentage: 10
+        pauseDuration: 30s
+      - rampPercentage: 50
+        pauseDuration: 1m
 {{- end }}
     gate:
       workflowType: "HelloWorld"
-{{- end }}
   sunset:
-    scaledownDelay: {{ .Values.sunset.scaledownDelay }}
-    deleteDelay: {{ .Values.sunset.deleteDelay }}
+    scaledownDelay: 30s
+    deleteDelay: 1m
   # Desired number of worker replicas
   replicas: {{ .Values.replicas }}
   # Desired specification for worker pods

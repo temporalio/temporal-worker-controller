@@ -10,8 +10,4 @@ temporal:
 rollout:
   strategy: AllAtOnce
 
-sunset:
-  scaledownDelay: 45s
-  deleteDelay: 2m
-
 replicas: 3

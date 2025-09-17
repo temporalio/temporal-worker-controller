@@ -10,8 +10,4 @@ temporal:
 rollout:
   strategy: Manual
 
-sunset:
-  scaledownDelay: 60s
-  deleteDelay: 5m
-
 replicas: 1
