@@ -25,7 +25,7 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 	}
 
 	// Sleep for a while
-	if err := workflow.Sleep(ctx, time.Minute); err != nil {
+	if err := workflow.ExecuteActivity(ctx, Sleep, 60).Get(ctx, nil); err != nil {
 		return "", err
 	}
 
@@ -34,11 +34,10 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 }
 
 func GetSubject(ctx context.Context) (string, error) {
-	return "World10", nil
+	return "World", nil
 }
 
 func Sleep(ctx context.Context, seconds uint) error {
 	time.Sleep(time.Duration(seconds) * time.Second)
 	return nil
-	//return temporal.NewNonRetryableApplicationError("oops", "", nil)
 }
