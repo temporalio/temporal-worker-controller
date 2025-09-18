@@ -58,7 +58,14 @@ profiles:
               - internal/demo/helloworld/helm/helloworld/values.yaml
 deploy:
   kubeContext: minikube
-  helm: {}
+  helm:
+    hooks:
+      before:
+        - host:
+            command: ["sh", "-c", "sed -i '' \"s/appVersion: .*/appVersion: \\\"($SKAFFOLD_IMAGE_TAG)\\\"/\" internal/demo/helloworld/helm/helloworld/Chart.yaml"]
+#      after:
+#        - host:
+#            command: ["sh", "-c", "sed -i '' 's/appVersion: .*/appVersion: \"automated\"/' internal/demo/helloworld/helm/helloworld/Chart.yaml"]
 resourceSelector:
   allow:
     - groupKind: "TemporalWorkerDeployment.temporal.io"
