@@ -7,6 +7,7 @@ package helloworld
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"go.temporal.io/sdk/workflow"
@@ -15,17 +16,11 @@ import (
 )
 
 func HelloWorld(ctx workflow.Context) (string, error) {
-	workflow.GetLogger(ctx).Info("HelloWorld workflow started")
 	ctx = util.SetActivityTimeout(ctx, 5*time.Minute)
 
-	// Compute a subject
+	// Get a subject
 	var subject string
 	if err := workflow.ExecuteActivity(ctx, GetSubject).Get(ctx, &subject); err != nil {
-		return "", err
-	}
-
-	// Sleep for a while
-	if err := workflow.Sleep(ctx, time.Minute); err != nil {
 		return "", err
 	}
 
@@ -34,11 +29,8 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 }
 
 func GetSubject(ctx context.Context) (string, error) {
-	return "World10", nil
-}
-
-func Sleep(ctx context.Context, seconds uint) error {
-	time.Sleep(time.Duration(seconds) * time.Second)
-	return nil
-	//return temporal.NewNonRetryableApplicationError("oops", "", nil)
+	// Simulate activity execution latency
+	time.Sleep(time.Duration(rand.Intn(30)) * time.Second)
+	// Return a hardcoded subject
+	return "World", nil
 }

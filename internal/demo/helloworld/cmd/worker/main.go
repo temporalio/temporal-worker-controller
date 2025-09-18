@@ -20,7 +20,6 @@ func main() {
 	// Register activities and workflows
 	w.RegisterWorkflow(helloworld.HelloWorld)
 	w.RegisterActivity(helloworld.GetSubject)
-	w.RegisterActivity(helloworld.Sleep)
 
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatal(err)
