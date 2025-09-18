@@ -52,8 +52,8 @@ profiles:
           - name: helloworld
             chartPath: internal/demo/helloworld/helm/helloworld
             setValueTemplates:
-              image.repository: helloworld
-              image.tag: "{{ .IMAGE_TAG }}"
+              image.repository: "{{ .IMAGE_REPO_helloworld }}"
+              image.tag: "{{ .IMAGE_TAG_helloworld }}"
             valuesFiles:
               - internal/demo/helloworld/helm/helloworld/values.yaml
 deploy:
