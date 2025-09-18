@@ -58,7 +58,7 @@ profiles:
               - internal/demo/helloworld/helm/helloworld/values.yaml
 deploy:
   kubeContext: minikube
-  kubectl: {}
+  helm: {}
 resourceSelector:
   allow:
     - groupKind: "TemporalWorkerDeployment.temporal.io"
