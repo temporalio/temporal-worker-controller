@@ -54,8 +54,9 @@ profiles:
             setValueTemplates:
               image.repository: "{{ .IMAGE_REPO_helloworld }}"
               image.tag: "{{ .IMAGE_TAG_helloworld }}"
+              # These connection settings are meant to be defined in skaffold.env (see skaffold.example.env)
               temporal.namespace: "{{ .TEMPORAL_NAMESPACE }}"
-              temporal.hostPort: "{{ .TEMPORAL_HOST_PORT }}"
+              temporal.address: "{{ .TEMPORAL_ADDRESS }}"
               temporal.mtlsSecretName: "{{ .TEMPORAL_MTLS_SECRET_NAME }}"
             valuesFiles:
               - internal/demo/helloworld/helm/helloworld/values.yaml

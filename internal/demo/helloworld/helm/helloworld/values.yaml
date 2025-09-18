@@ -7,7 +7,7 @@ temporal:
   # Use existing connection (leave empty to create new one)
   connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)
-  hostPort: "" # e.g. <namespace>.tmprl.cloud:7233
+  address: "" # e.g. <namespace>.tmprl.cloud:7233
   mtlsSecretName: "" # e.g. temporal-cloud-mtls
 
 rollout:

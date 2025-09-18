@@ -7,7 +7,7 @@ metadata:
   labels:
     {{- include "helloworld.labels" . | nindent 4 }}
 spec:
-  hostPort: "{{ .Values.temporal.hostPort }}"
+  hostPort: "{{ .Values.temporal.address }}"
   mutualTLSSecretRef:
     name: {{ .Values.temporal.mtlsSecretName }}
 {{- end }}

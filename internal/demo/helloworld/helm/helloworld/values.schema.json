@@ -28,9 +28,9 @@
           "type": "string",
           "description": "Name of existing TemporalConnection resource (optional)"
         },
-        "hostPort": {
+        "address": {
           "type": "string",
-          "description": "Temporal server host and port (required if connectionName is empty)"
+          "description": "Temporal server address (required if connectionName is empty)"
         },
         "mtlsSecretName": {
           "type": "string",
@@ -50,7 +50,7 @@
           "required": ["connectionName"]
         },
         {
-          "required": ["hostPort", "mtlsSecretName"]
+          "required": ["address", "mtlsSecretName"]
         }
       ]
     },
