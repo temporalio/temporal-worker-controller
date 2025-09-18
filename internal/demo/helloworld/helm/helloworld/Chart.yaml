@@ -3,4 +3,4 @@ name: helloworld
 description: A Helm chart for the Temporal helloworld worker demo
 type: application
 version: 0.1.0
-appVersion: "v0.3.1"
+appVersion: "automated"
