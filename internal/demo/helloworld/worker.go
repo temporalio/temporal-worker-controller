@@ -33,6 +33,12 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 	return fmt.Sprintf("Hello %s", subject), nil
 }
 
-func GetSubject(ctx context.Context) (string, error) {
-	return "World", nil
+type GetSubjectResponse struct {
+	Name string
+}
+
+func GetSubject(ctx context.Context) (GetSubjectResponse, error) {
+	return GetSubjectResponse{
+		Name: "World",
+	}, nil
 }
