@@ -22,6 +22,8 @@ spec:
       - rampPercentage: 50
         pauseDuration: 5m
 {{- end }}
+    gate:
+      workflowType: "HelloWorld"
   sunset:
     scaledownDelay: 30s
     deleteDelay: 1m
