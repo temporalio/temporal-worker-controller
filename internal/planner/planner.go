@@ -382,7 +382,8 @@ func getVersionConfigDiff(
 	}
 
 	// Do nothing if the test workflows have not completed successfully
-	if strategy.Gate != nil {
+	// EXCEPTION: On first install (no current version), bypass gate workflows and set current immediately
+	if strategy.Gate != nil && status.CurrentVersion != nil {
 		if len(status.TargetVersion.TaskQueues) == 0 {
 			return nil
 		}

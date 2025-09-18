@@ -8,7 +8,7 @@ temporal:
   connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)
   hostPort: "" # e.g. <namespace>.tmprl.cloud:7233
-  tlsSecretName: "" # e.g. temporal-cloud-mtls
+  mtlsSecretName: "" # e.g. temporal-cloud-mtls
 
 rollout:
   strategy: Progressive

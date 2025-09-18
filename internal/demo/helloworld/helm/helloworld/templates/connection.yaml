@@ -9,5 +9,5 @@ metadata:
 spec:
   hostPort: "{{ .Values.temporal.hostPort }}"
   mutualTLSSecretRef:
-    name: {{ .Values.temporal.tlsSecretName }}
+    name: {{ .Values.temporal.mtlsSecretName }}
 {{- end }}

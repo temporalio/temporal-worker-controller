@@ -56,6 +56,7 @@ profiles:
               image.tag: "{{ .IMAGE_TAG_helloworld }}"
               temporal.namespace: "{{ .TEMPORAL_NAMESPACE }}"
               temporal.hostPort: "{{ .TEMPORAL_NAMESPACE }}.tmprl.cloud:7233"
+              temporal.mtlsSecretName: "{{ .TEMPORAL_MTLS_SECRET_NAME }}"
             valuesFiles:
               - internal/demo/helloworld/helm/helloworld/values.yaml
 deploy:

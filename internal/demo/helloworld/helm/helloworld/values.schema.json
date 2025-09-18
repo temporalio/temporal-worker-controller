@@ -32,9 +32,9 @@
           "type": "string",
           "description": "Temporal server host and port (required if connectionName is empty)"
         },
-        "tlsSecretName": {
+        "mtlsSecretName": {
           "type": "string",
-          "description": "Name of the secret containing TLS certificates (required if connectionName is empty)"
+          "description": "Name of the secret containing mTLS certificates (required if connectionName is empty)"
         }
       },
       "required": ["namespace"],
@@ -50,7 +50,7 @@
           "required": ["connectionName"]
         },
         {
-          "required": ["hostPort", "tlsSecretName"]
+          "required": ["hostPort", "mtlsSecretName"]
         }
       ]
     },

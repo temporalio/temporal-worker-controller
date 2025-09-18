@@ -1169,7 +1169,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			expectRampPercent: func() *int32 { f := int32(0); return &f }(),
 		},
 		{
-			name: "BUG: first install with progressive strategy and gate - should set current but doesn't",
+			name: "FIXED: first install with progressive strategy and gate - now correctly sets current",
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateProgressive,
 				Gate: &temporaliov1alpha1.GateWorkflowConfig{
@@ -1207,8 +1207,8 @@ func TestGetVersionConfigDiff(t *testing.T) {
 				},
 			},
 			spec:             &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
-			expectConfig:     false, // BUG: This should be true but gate blocks it!
-			expectSetCurrent: false, // BUG: This should be true for first install but gate prevents it!
+			expectConfig:     true, // FIXED: Now correctly generates config on first install
+			expectSetCurrent: true, // FIXED: Now correctly sets current on first install
 		},
 		{
 			name: "DESIRED: first install with progressive strategy and gate should set current immediately",
