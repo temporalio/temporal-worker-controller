@@ -19,7 +19,7 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 	ctx = util.SetActivityTimeout(ctx, 5*time.Minute)
 
 	// Compute a subject
-	var subject string
+	var subject GetSubjectResponse
 	if err := workflow.ExecuteActivity(ctx, GetSubject).Get(ctx, &subject); err != nil {
 		return "", err
 	}
@@ -30,7 +30,7 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 	}
 
 	// Return the greeting
-	return fmt.Sprintf("Hello %s", subject), nil
+	return fmt.Sprintf("Hello %s", subject.Name), nil
 }
 
 type GetSubjectResponse struct {

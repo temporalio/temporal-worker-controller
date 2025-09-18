@@ -11,4 +11,4 @@ temporal:
   mtlsSecretName: "" # e.g. temporal-cloud-mtls
 
 rollout:
-  strategy: Progressive
+  strategy: AllAtOnce
