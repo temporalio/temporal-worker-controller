@@ -59,7 +59,6 @@ profiles:
             valuesFiles:
               - internal/demo/helloworld/helm/helloworld/values.yaml
 deploy:
-  kubeContext: minikube
   helm:
     hooks:
       before:

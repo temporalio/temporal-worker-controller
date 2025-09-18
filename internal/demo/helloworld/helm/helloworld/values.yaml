@@ -3,12 +3,12 @@ image:
   tag: latest
 
 temporal:
-  namespace: "replay-2025.ktasd"
+  namespace: "" # e.g. default
   # Use existing connection (leave empty to create new one)
-  # connectionName: dev-server
+  connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)
-  hostPort: "replay-2025.ktasd.tmprl.cloud:7233"
-  tlsSecretName: temporal-cloud-mtls
+  hostPort: "" # e.g. <namespace>.tmprl.cloud:7233
+  tlsSecretName: "" # e.g. temporal-cloud-mtls
 
 rollout:
   strategy: Progressive
