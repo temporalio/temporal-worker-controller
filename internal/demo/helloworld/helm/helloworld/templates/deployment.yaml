@@ -1,10 +1,11 @@
+#file: noinspection KubernetesUnknownResourcesInspection
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "helloworld.labels" . | nindent 4 }}
+    {{ include "helloworld.labels" . | nindent 4 }}
 spec:
   # Configuration for connecting to Temporal
   workerOptions:

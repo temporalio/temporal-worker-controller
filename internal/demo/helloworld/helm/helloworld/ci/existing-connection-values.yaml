@@ -1,3 +1,0 @@
-temporal:
-  namespace: "test-namespace"
-  connectionName: "existing-temporal-connection"
