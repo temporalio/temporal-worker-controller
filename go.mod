@@ -128,6 +128,7 @@ require (
 	github.com/sony/gobreaker v1.0.0 // indirect
 	github.com/spf13/cast v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
+	github.com/spiffe/go-spiffe/v2 v2.5.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/temporalio/ringpop-go v0.0.0-20250130211428-b97329e994f7 // indirect
 	github.com/temporalio/sqlparser v0.0.0-20231115171017-f4060bcfa6cb // indirect
@@ -136,6 +137,7 @@ require (
 	github.com/uber-common/bark v1.3.0 // indirect
 	github.com/uber-go/tally/v4 v4.1.17 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/zeebo/errs v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.34.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0 // indirect
@@ -150,7 +152,6 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
-	go.temporal.io/version v0.3.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.18.0 // indirect
 	go.uber.org/fx v1.23.0 // indirect

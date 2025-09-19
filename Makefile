@@ -37,7 +37,7 @@ TEMPORAL ?= temporal
 
 ## Tool Versions
 HELM_VERSION ?= v3.14.3
-CONTROLLER_TOOLS_VERSION ?= v0.16.2
+CONTROLLER_TOOLS_VERSION ?= v0.19.0
 
 ##### Tools #####
 print-go-version:
