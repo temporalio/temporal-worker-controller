@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Container image repository"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Container image tag"
+        }
+      },
+      "required": ["repository", "tag"],
+      "additionalProperties": false
+    },
+    "temporal": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "Temporal namespace"
+        },
+        "connectionName": {
+          "type": "string",
+          "description": "Name of existing TemporalConnection resource (optional)"
+        },
+        "address": {
+          "type": "string",
+          "description": "Temporal server address (required if connectionName is empty)"
+        },
+        "mtlsSecretName": {
+          "type": "string",
+          "description": "Name of the secret containing mTLS certificates (required if connectionName is empty)"
+        }
+      },
+      "required": ["namespace"],
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "connectionName": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["connectionName"]
+        },
+        {
+          "required": ["address", "mtlsSecretName"]
+        }
+      ]
+    },
+    "rollout": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["Progressive", "AllAtOnce", "Manual"],
+          "description": "Rollout strategy"
+        }
+      },
+      "required": ["strategy"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "image",
+    "temporal",
+    "rollout"
+  ],
+  "additionalProperties": false
+}

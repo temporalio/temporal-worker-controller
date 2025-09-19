@@ -1,0 +1,41 @@
+#file: noinspection KubernetesUnknownResourcesInspection
+apiVersion: temporal.io/v1alpha1
+kind: TemporalWorkerDeployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{ include "helloworld.labels" . | nindent 4 }}
+spec:
+  # Configuration for connecting to Temporal
+  workerOptions:
+    connectionRef:
+      name: {{ .Values.temporal.connectionName | default .Release.Name }}
+    temporalNamespace: "{{ .Values.temporal.namespace }}"
+  # How to roll out new workflow executions to the latest worker version
+  rollout:
+    strategy: {{ .Values.rollout.strategy }}
+{{- if eq .Values.rollout.strategy "Progressive" }}
+    steps:
+      - rampPercentage: 25
+        pauseDuration: 1m
+{{- end }}
+    gate:
+      workflowType: "HelloWorld"
+  sunset:
+    scaledownDelay: 30s
+    deleteDelay: 1m
+  # Desired number of worker replicas
+  replicas: 1
+  # Desired specification for worker pods
+  template:
+    spec:
+      containers:
+        - name: main
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          readinessProbe:
+            httpGet:
+              port: 8080
+          env:
+            - name: TEMPORAL_TASK_QUEUE
+              value: "{{ .Release.Namespace }}/{{ .Release.Name }}"
