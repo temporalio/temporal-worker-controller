@@ -17,10 +17,6 @@ spec:
     strategy: {{ .Values.rollout.strategy }}
 {{- if eq .Values.rollout.strategy "Progressive" }}
     steps:
-      - rampPercentage: 1
-        pauseDuration: 30s
-      - rampPercentage: 5
-        pauseDuration: 30s
       - rampPercentage: 10
         pauseDuration: 30s
       - rampPercentage: 50

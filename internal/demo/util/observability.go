@@ -20,8 +20,8 @@ import (
 )
 
 func configureObservability(buildID string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
-	slogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource:   true,
+	slogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource:   false,
 		Level:       slog.LevelDebug,
 		ReplaceAttr: nil,
 	}))
