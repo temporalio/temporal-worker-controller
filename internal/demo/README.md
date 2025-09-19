@@ -109,4 +109,3 @@ minikube delete --all --purge
 - `--purge`: Completely removes all minikube data, cached images, and configuration files from your machine
 
 This gives you a completely fresh start and frees up disk space used by minikube. 
-
