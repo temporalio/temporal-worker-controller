@@ -35,6 +35,12 @@ jobs:
       run: |
         skaffold build --profile helloworld-worker
 
+    # Verify that the demo worker patch applies successfully and builds.
+    - name: Build helloworld worker image patch
+      run: |
+        git apply internal/demo/helloworld/changes/no-version-gate.patch
+        skaffold build --profile helloworld-worker
+
   test-integration:
     name: Run Integration Tests
     runs-on: ubuntu-latest
