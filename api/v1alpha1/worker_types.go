@@ -136,6 +136,11 @@ type TemporalWorkerDeploymentStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
 
+	// RolloutSummary describes the current rollout status with human-readable messages
+	// like "ramping 10%", "gate failed", "gate running", "complete", etc.
+	// +optional
+	RolloutSummary string `json:"rolloutSummary,omitempty"`
+
 	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
 	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
 }
@@ -331,7 +336,7 @@ type ManualRolloutStrategy struct{}
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
 //+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
-//+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
+//+kubebuilder:printcolumn:name="ROLLOUT",type="string",JSONPath=".status.rolloutSummary",description="Rollout status"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API

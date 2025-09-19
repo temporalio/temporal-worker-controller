@@ -27,10 +27,10 @@ spec:
       jsonPath: .status.targetVersion.buildID
       name: Target
       type: string
-    - description: Ramp percentage
-      jsonPath: .status.targetVersion.rampPercentage
-      name: Ramp %
-      type: number
+    - description: Rollout status
+      jsonPath: .status.rolloutSummary
+      name: ROLLOUT
+      type: string
     - description: Age
       jsonPath: .metadata.creationTimestamp
       name: Age
@@ -4026,6 +4026,8 @@ spec:
                   type: object
                 type: array
               lastModifierIdentity:
+                type: string
+              rolloutSummary:
                 type: string
               targetVersion:
                 properties:
