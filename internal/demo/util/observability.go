@@ -5,74 +5,49 @@
 package util
 
 import (
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
-	prom "github.com/prometheus/client_golang/prometheus"
-	"github.com/uber-go/tally/v4"
-	"github.com/uber-go/tally/v4/prometheus"
-	sdktally "go.temporal.io/sdk/contrib/tally"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.temporal.io/sdk/contrib/opentelemetry"
 	"go.temporal.io/sdk/log"
 )
 
-func configureObservability(buildID string) (l log.Logger, stopFunc func()) {
-	// if err := profiler.Start(
-	// 	profiler.WithVersion(buildID),
-	// 	profiler.WithLogStartup(false),
-	// 	profiler.WithProfileTypes(
-	// 		profiler.CPUProfile,
-	// 		profiler.HeapProfile,
-	// 		profiler.BlockProfile,
-	// 		profiler.MutexProfile,
-	// 		profiler.GoroutineProfile,
-	// 	),
-	// ); err != nil {
-	// 	panic(err)
-	// }
-
-	// tracer.Start(
-	// 	tracer.WithUniversalVersion(buildID),
-	// 	tracer.WithLogStartup(false),
-	// 	tracer.WithSampler(tracer.NewAllSampler()),
-	// )
-
-	l = log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource:   true,
+func configureObservability(buildID string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
+	slogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource:   false,
 		Level:       slog.LevelDebug,
 		ReplaceAttr: nil,
-	})))
+	}))
+	l = log.NewStructuredLogger(slogger)
 
-	return l, func() {
-		//tracer.Stop()
-		//profiler.Stop()
-		// Wait a couple seconds before shutting down to ensure metrics etc have been flushed.
-		time.Sleep(2 * time.Second)
-	}
-}
-
-func newPrometheusScope(l log.Logger, c prometheus.Configuration) (tally.Scope, error) {
-	reporter, err := c.NewReporter(
-		prometheus.ConfigurationOptions{
-			Registry: prom.NewRegistry(),
-			OnError: func(err error) {
-				l.Error("Error in prometheus reporter", "error", err)
-			},
-		},
-	)
+	exporter, err := prometheus.New()
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
+	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
+		Meter:             metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
+		InitialAttributes: attribute.NewSet(attribute.String("version", buildID)),
+	})
 
-	scopeOpts := tally.ScopeOptions{
-		CachedReporter:  reporter,
-		Separator:       prometheus.DefaultSeparator,
-		SanitizeOptions: &sdktally.PrometheusSanitizeOptions,
-		Prefix:          "",
+	go func() {
+		addr := fmt.Sprintf(":%d", metricsPort)
+		slogger.Info("Serving metrics", slog.String("address", fmt.Sprintf("localhost%s/metrics", addr)))
+		http.Handle("/metrics", promhttp.Handler())
+		if err := http.ListenAndServe(addr, nil); err != nil {
+			slogger.Error("error serving http", slog.Any("error", err))
+			return
+		}
+	}()
+
+	return l, m, func() {
+		// Wait a few seconds before shutting down to ensure metrics etc have been flushed.
+		time.Sleep(5 * time.Second)
 	}
-
-	scope, _ := tally.NewRootScope(scopeOpts, time.Second)
-	scope = sdktally.NewPrometheusNamingScope(scope)
-
-	return scope, nil
 }

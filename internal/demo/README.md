@@ -20,7 +20,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    minikube start
    ```
 
-2. Set up Temporal Cloud mTLS certificates:
+2. Set up Temporal Cloud mTLS certificates and update `skaffold.env`:
    - Create a `certs` directory in the project root
    - Save your Temporal Cloud mTLS client certificates as:
      - `certs/client.pem`
@@ -29,17 +29,22 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      ```bash
      make create-cloud-mtls-secret
      ```
+   - Create a `skaffold.env` file:
+     ```bash
+     cp skaffold.example.env skaffold.env
+     ```
+   - Update the value of `TEMPORAL_NAMESPACE` in `skaffold.env` to match your Temporal cloud namespace.
 
 3. Build and deploy the Controller image to the local k8s cluster:
    ```bash
-   skaffold dev --profile worker-controller
+   skaffold run --profile worker-controller
    ```
 
 ### Testing Progressive Deployments
 
 4. **Deploy the v1 worker**:
    ```bash
-   skaffold dev --profile helloworld-worker
+   skaffold run --profile helloworld-worker
    ```
    This deploys a TemporalWorkerDeployment and TemporalConnection Custom Resource using the **Progressive strategy**. Note that when there is no current version (as in an initial versioned worker deployment), the progressive steps are skipped and v1 becomes the current version immediately. All new workflow executions will now start on v1.
    
@@ -58,9 +63,9 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 7. **Deploy a non-replay-safe workflow change**:
    ```bash
    git apply internal/demo/helloworld/changes/no-version-gate.patch
+   skaffold run --profile helloworld-worker
    ```
-   This applies a **non-replay-safe change** (switching from custom Sleep activity to built-in `workflow.Sleep`). 
-   Skaffold automatically detects the change and deploys worker v2.
+   This applies a **non-replay-safe change** (switching an activity response type from string to a struct).
 
 8. **Observe the progressive rollout managing incompatible versions**:
    - New workflow executions gradually shift from v1 to v2 following the configured rollout steps (1% → 5% → 10% → 50% → 100%)
@@ -73,14 +78,8 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 
 You can monitor the controller's logs and the worker's status using:
 ```bash
-# Fetch the controller pod name
-minikube kubectl -- get pods -n temporal-worker-controller -w
-
-# Describe the controller pod's status
-minikube kubectl -- describe pod <pod-name> -n temporal-worker-controller
-
 # Output the controller pod's logs
-minikube kubectl -- logs -n temporal-system -f pod/<pod-name>
+kubectl logs -n temporal-system deployments/temporal-worker-controller-manager -f
 
 # View TemporalWorkerDeployment status
 kubectl get twd
@@ -109,4 +108,3 @@ minikube delete --all --purge
 - `--purge`: Completely removes all minikube data, cached images, and configuration files from your machine
 
 This gives you a completely fresh start and frees up disk space used by minikube. 
-

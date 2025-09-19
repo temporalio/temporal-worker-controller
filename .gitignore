@@ -4,6 +4,7 @@ bin
 dist
 
 secret.env
+skaffold.env
 certs
 
 .DS_Store

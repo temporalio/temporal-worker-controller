@@ -17,9 +17,9 @@ func main() {
 	defer stopFunc()
 
 	// Register activities and workflows
+	w.RegisterWorkflow(helloworld.RolloutGate)
 	w.RegisterWorkflow(helloworld.HelloWorld)
 	w.RegisterActivity(helloworld.GetSubject)
-	w.RegisterActivity(helloworld.Sleep)
 
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatal(err)

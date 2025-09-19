@@ -37,7 +37,7 @@ TEMPORAL ?= temporal
 
 ## Tool Versions
 HELM_VERSION ?= v3.14.3
-CONTROLLER_TOOLS_VERSION ?= v0.16.2
+CONTROLLER_TOOLS_VERSION ?= v0.19.0
 
 ##### Tools #####
 print-go-version:
@@ -161,7 +161,7 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 # source secret.env && make start-sample-workflow TEMPORAL_CLOUD_API_KEY=$TEMPORAL_CLOUD_API_KEY
 .PHONY: start-sample-workflow
 start-sample-workflow: ## Start a sample workflow.
-	@$(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world" \
+	@$(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld" \
       --tls-cert-path certs/client.pem \
       --tls-key-path certs/client.key \
       --address "worker-controller-test.a2dd6.tmprl.cloud:7233" \
@@ -171,7 +171,7 @@ start-sample-workflow: ## Start a sample workflow.
 
 .PHONY: apply-load-sample-workflow
 apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
-	watch --interval 0.1 -- $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "hello_world"
+	watch --interval 0.1 -- $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld"
 
 .PHONY: list-workflow-build-ids
 list-workflow-build-ids: ## List workflow executions and their build IDs.
