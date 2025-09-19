@@ -29,17 +29,17 @@ jobs:
 
     - name: Build worker-controller image
       run: |
-        skaffold build --profile worker-controller
+        skaffold build --profile worker-controller --push=false
 
     - name: Build helloworld worker image
       run: |
-        skaffold build --profile helloworld-worker
+        skaffold build --profile helloworld-worker --push=false
 
     # Verify that the demo worker patch applies successfully and builds.
     - name: Build helloworld worker image patch
       run: |
         git apply internal/demo/helloworld/changes/no-version-gate.patch
-        skaffold build --profile helloworld-worker
+        skaffold build --profile helloworld-worker --push=false
 
   test-integration:
     name: Run Integration Tests
