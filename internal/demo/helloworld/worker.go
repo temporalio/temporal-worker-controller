@@ -7,24 +7,21 @@ package helloworld
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"strings"
 	"time"
 
-	"github.com/temporalio/temporal-worker-controller/internal/demo/util"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/temporalio/temporal-worker-controller/internal/demo/util"
 )
 
 func HelloWorld(ctx workflow.Context) (string, error) {
-	workflow.GetLogger(ctx).Info("HelloWorld workflow started")
 	ctx = util.SetActivityTimeout(ctx, 5*time.Minute)
 
-	// Compute a subject
+	// Get a subject
 	var subject string
 	if err := workflow.ExecuteActivity(ctx, GetSubject).Get(ctx, &subject); err != nil {
-		return "", err
-	}
-
-	// Sleep for a while
-	if err := workflow.ExecuteActivity(ctx, Sleep, 60).Get(ctx, nil); err != nil {
 		return "", err
 	}
 
@@ -33,11 +30,25 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 }
 
 func GetSubject(ctx context.Context) (string, error) {
-	return "World10", nil
+	// Simulate activity execution latency
+	time.Sleep(time.Duration(rand.Intn(30)) * time.Second)
+	// Return a hardcoded subject
+	return "World", nil
 }
 
-func Sleep(ctx context.Context, seconds uint) error {
-	time.Sleep(time.Duration(seconds) * time.Second)
+func RolloutGate(ctx workflow.Context) error {
+	// Ensure that deploys fail fast rather than waiting forever if child workflow is blocked.
+	ctx = workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+		WorkflowExecutionTimeout: time.Minute,
+	})
+
+	var greeting string
+	if err := workflow.ExecuteChildWorkflow(ctx, HelloWorld).Get(ctx, &greeting); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(greeting, "Hello ") {
+		return fmt.Errorf(`greeting does not have expect prefix "Hello "; got: %q`, greeting)
+	}
+
 	return nil
-	//return temporal.NewNonRetryableApplicationError("oops", "", nil)
 }
