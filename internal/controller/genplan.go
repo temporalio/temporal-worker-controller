@@ -86,6 +86,18 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		rolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
 	}
 
+	// Debug logging before planning
+	l.Info("DEBUG: About to generate plan",
+		"targetBuildID", targetBuildID,
+		"hasTemporalState", temporalState != nil,
+		"rolloutStrategy", rolloutStrategy.Strategy)
+	if temporalState != nil {
+		l.Info("DEBUG: Temporal state details",
+			"currentBuildID", temporalState.CurrentBuildID,
+			"rampingBuildID", temporalState.RampingBuildID,
+			"ignoreLastModifier", temporalState.IgnoreLastModifier)
+	}
+
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
 		RolloutStrategy: rolloutStrategy,

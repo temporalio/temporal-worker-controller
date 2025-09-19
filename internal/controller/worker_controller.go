@@ -100,6 +100,17 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Debug logging for version status investigation
+	l.Info("DEBUG: Worker deployment status",
+		"hasCurrentVersion", workerDeploy.Status.CurrentVersion != nil,
+		"targetVersionBuildID", workerDeploy.Status.TargetVersion.BuildID,
+		"versionCount", workerDeploy.Status.VersionCount)
+	if workerDeploy.Status.CurrentVersion != nil {
+		l.Info("DEBUG: Current version details",
+			"currentBuildID", workerDeploy.Status.CurrentVersion.BuildID,
+			"currentStatus", workerDeploy.Status.CurrentVersion.Status)
+	}
+
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
 		l.Error(err, "TemporalWorkerDeployment defaulter failed")

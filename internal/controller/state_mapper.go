@@ -5,6 +5,8 @@
 package controller
 
 import (
+	"fmt"
+
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -68,6 +70,9 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 
 	// Set version count from temporal state (directly from VersionSummaries via Versions map)
 	status.VersionCount = int32(len(m.temporalState.Versions))
+
+	// Set rollout summary
+	status.RolloutSummary = m.computeRolloutSummary(currentBuildID, rampingBuildID, targetBuildID)
 
 	return status
 }
@@ -196,4 +201,62 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 	}
 
 	return version
+}
+
+// computeRolloutSummary determines the human-readable rollout summary
+func (m *stateMapper) computeRolloutSummary(currentBuildID, rampingBuildID, targetBuildID string) string {
+	// Check if there's a target version
+	if targetBuildID == "" {
+		return ""
+	}
+
+	// Get target version info from temporal state
+	targetVersion, targetExists := m.temporalState.Versions[targetBuildID]
+	if !targetExists {
+		return "not registered"
+	}
+
+	// Check for gate workflow failures
+	for _, testWorkflow := range targetVersion.TestWorkflows {
+		if testWorkflow.Status == v1alpha1.WorkflowExecutionStatusFailed {
+			return "gate failed"
+		}
+	}
+
+	// Determine status based on target version state
+	switch targetVersion.Status {
+	case v1alpha1.VersionStatusNotRegistered:
+		return "not registered"
+	case v1alpha1.VersionStatusInactive:
+		// Check if we have test workflows running
+		hasRunningTests := false
+		for _, testWorkflow := range targetVersion.TestWorkflows {
+			if testWorkflow.Status == v1alpha1.WorkflowExecutionStatusRunning {
+				hasRunningTests = true
+				break
+			}
+		}
+		if hasRunningTests {
+			return "gate running"
+		}
+		return "inactive"
+	case v1alpha1.VersionStatusRamping:
+		if rampingBuildID == targetBuildID {
+			rampPercentage := int(m.temporalState.RampPercentage)
+			return fmt.Sprintf("ramping %d%%", rampPercentage)
+		}
+		return "ramping"
+	case v1alpha1.VersionStatusCurrent:
+		// If target is current, rollout is complete
+		if currentBuildID == targetBuildID {
+			return "complete"
+		}
+		return "current"
+	case v1alpha1.VersionStatusDraining:
+		return "draining"
+	case v1alpha1.VersionStatusDrained:
+		return "drained"
+	default:
+		return "unknown"
+	}
 }

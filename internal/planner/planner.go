@@ -382,7 +382,8 @@ func getVersionConfigDiff(
 	}
 
 	// Do nothing if the test workflows have not completed successfully
-	if strategy.Gate != nil {
+	// EXCEPTION: On first install (no current version), bypass gate workflows and set current immediately
+	if strategy.Gate != nil && status.CurrentVersion != nil {
 		if len(status.TargetVersion.TaskQueues) == 0 {
 			return nil
 		}
@@ -403,9 +404,26 @@ func getVersionConfigDiff(
 
 	// If there is no current version and presence of unversioned pollers is not confirmed for all
 	// target version task queues, set the target version as the current version right away.
+	l.Info("DEBUG: Checking SetCurrent conditions",
+		"hasCurrentVersion", status.CurrentVersion != nil,
+		"targetVersionStatus", status.TargetVersion.Status,
+		"targetVersionBuildID", status.TargetVersion.BuildID)
+
+	if temporalState != nil && temporalState.Versions != nil {
+		if version, exists := temporalState.Versions[status.TargetVersion.BuildID]; exists {
+			l.Info("DEBUG: Target version temporal state",
+				"allTaskQueuesHaveUnversionedPoller", version.AllTaskQueuesHaveUnversionedPoller)
+		} else {
+			l.Info("DEBUG: Target version not found in temporal state")
+		}
+	} else {
+		l.Info("DEBUG: No temporal state or versions available")
+	}
+
 	if status.CurrentVersion == nil &&
 		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusInactive &&
 		!temporalState.Versions[status.TargetVersion.BuildID].AllTaskQueuesHaveUnversionedPoller {
+		l.Info("DEBUG: Setting target version as current")
 		vcfg.SetCurrent = true
 		return vcfg
 	}

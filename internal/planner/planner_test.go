@@ -1168,6 +1168,90 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			expectSetCurrent:  true,
 			expectRampPercent: func() *int32 { f := int32(0); return &f }(),
 		},
+		{
+			name: "FIXED: first install with progressive strategy and gate - now correctly sets current",
+			strategy: temporaliov1alpha1.RolloutStrategy{
+				Strategy: temporaliov1alpha1.UpdateProgressive,
+				Gate: &temporaliov1alpha1.GateWorkflowConfig{
+					WorkflowType: "HelloWorld",
+				},
+				Steps: []temporaliov1alpha1.RolloutStep{
+					{
+						RampPercentage: 1,
+						PauseDuration:  metav1.Duration{Duration: 30 * time.Second},
+					},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				// No CurrentVersion - this is first install
+				CurrentVersion: nil,
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "v0.1.0-dc9f",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "staging/helloworld"},
+						},
+					},
+					// No test workflows have been started yet
+					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{},
+				},
+			},
+			state: &temporal.TemporalWorkerState{
+				CurrentBuildID: "", // No current version in Temporal
+				Versions: map[string]*temporal.VersionInfo{
+					"v0.1.0-dc9f": {
+						AllTaskQueuesHaveUnversionedPoller: false,
+					},
+				},
+			},
+			spec:             &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectConfig:     true, // FIXED: Now correctly generates config on first install
+			expectSetCurrent: true, // FIXED: Now correctly sets current on first install
+		},
+		{
+			name: "DESIRED: first install with progressive strategy and gate should set current immediately",
+			strategy: temporaliov1alpha1.RolloutStrategy{
+				Strategy: temporaliov1alpha1.UpdateProgressive,
+				Gate: &temporaliov1alpha1.GateWorkflowConfig{
+					WorkflowType: "HelloWorld",
+				},
+				Steps: []temporaliov1alpha1.RolloutStep{
+					{
+						RampPercentage: 1,
+						PauseDuration:  metav1.Duration{Duration: 30 * time.Second},
+					},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				// No CurrentVersion - this is first install
+				CurrentVersion: nil,
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "v0.1.0-dc9f",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "staging/helloworld"},
+						},
+					},
+					// No test workflows have been started yet
+					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{},
+				},
+			},
+			state: &temporal.TemporalWorkerState{
+				CurrentBuildID: "", // No current version in Temporal
+				Versions: map[string]*temporal.VersionInfo{
+					"v0.1.0-dc9f": {
+						AllTaskQueuesHaveUnversionedPoller: false,
+					},
+				},
+			},
+			spec:             &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectConfig:     true, // DESIRED: Should generate config for first install even with gate
+			expectSetCurrent: true, // DESIRED: Should set current immediately on first install
+		},
 	}
 
 	for _, tc := range testCases {
