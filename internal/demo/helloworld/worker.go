@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"go.temporal.io/sdk/workflow"
-
 	"github.com/temporalio/temporal-worker-controller/internal/demo/util"
+	"go.temporal.io/sdk/workflow"
 )
 
 func HelloWorld(ctx workflow.Context) (string, error) {
