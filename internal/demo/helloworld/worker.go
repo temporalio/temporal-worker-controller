@@ -32,7 +32,7 @@ func GetSubject(ctx context.Context) (*GetSubjectResponse, error) {
 	go util.AutoHeartbeat(ctx)
 
 	// Get user via API
-	subject, err := fetchUser(ctx, "jsonplaceholder.typicode.com")
+	subject, err := fetchUser(ctx, "https://jsonplaceholder.typicode.com")
 	if err != nil {
 		return nil, err
 	}
