@@ -86,11 +86,6 @@ func GetWorkerDeploymentState(
 	// Describe the worker deployment
 	resp, err := deploymentHandler.Describe(ctx, temporalClient.WorkerDeploymentDescribeOptions{})
 	if err != nil {
-		var notFound *serviceerror.NotFound
-		if errors.As(err, &notFound) {
-			// If deployment not found, return empty state
-			return state, nil
-		}
 		return nil, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
 	}
 
