@@ -1,4 +1,5 @@
-#file: noinspection KubernetesUnknownResourcesInspection
+# This template creates a TemporalWorkerDeployment custom resource that manages
+# the lifecycle of Temporal worker pods, including progressive rollouts and scaling
 apiVersion: temporal.io/v1alpha1
 kind: TemporalWorkerDeployment
 metadata:

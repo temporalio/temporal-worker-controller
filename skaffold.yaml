@@ -65,7 +65,7 @@ deploy:
     hooks:
       before:
         - host:
-            command: ["./hack/update_chart_version.sh"]
+            command: ["./internal/demo/scripts/update_chart_version.sh"]
       after:
         - host:
             command: ["sh", "-c", "sed -i '' 's/appVersion: .*/appVersion: \"automated\"/' internal/demo/helloworld/helm/helloworld/Chart.yaml"]

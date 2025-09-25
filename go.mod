@@ -14,7 +14,7 @@ require (
 	go.temporal.io/api v1.53.0
 	go.temporal.io/sdk v1.35.0
 	go.temporal.io/sdk/contrib/envconfig v0.1.0
-	go.temporal.io/server v1.29.0-142.0
+	go.temporal.io/server v1.28.1
 	k8s.io/api v0.34.0
 	k8s.io/apimachinery v0.34.0
 	k8s.io/client-go v0.34.0
@@ -152,6 +152,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
+	go.temporal.io/version v0.3.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.18.0 // indirect
 	go.uber.org/fx v1.23.0 // indirect
