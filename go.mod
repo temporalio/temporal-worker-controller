@@ -11,7 +11,7 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/pborman/uuid v1.2.1
 	github.com/stretchr/testify v1.10.0
-	go.temporal.io/api v1.53.0
+	go.temporal.io/api v1.50.1
 	go.temporal.io/sdk v1.35.0
 	go.temporal.io/sdk/contrib/envconfig v0.1.0
 	go.temporal.io/server v1.28.1

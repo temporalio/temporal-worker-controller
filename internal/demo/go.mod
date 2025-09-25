@@ -1,14 +1,14 @@
 module github.com/temporalio/temporal-worker-controller/internal/demo
 
-go 1.25.0
+go 1.24.0
 
 require (
-	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_golang v1.23.0
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.60.0
 	go.opentelemetry.io/otel/sdk/metric v1.38.0
-	go.temporal.io/api v1.53.0
-	go.temporal.io/sdk v1.36.0
+	go.temporal.io/api v1.44.1
+	go.temporal.io/sdk v1.33.0
 	go.temporal.io/sdk/contrib/envconfig v0.1.0
 	go.temporal.io/sdk/contrib/opentelemetry v0.6.0
 )
@@ -24,11 +24,11 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853 // indirect
-	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 // indirect
+	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nexus-rpc/sdk-go v0.4.0 // indirect
+	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
