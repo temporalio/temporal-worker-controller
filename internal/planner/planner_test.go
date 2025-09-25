@@ -426,12 +426,13 @@ func TestGeneratePlan(t *testing.T) {
 
 func TestGetDeleteDeployments(t *testing.T) {
 	testCases := []struct {
-		name          string
-		k8sState      *k8s.DeploymentState
-		status        *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec          *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		config        *Config
-		expectDeletes int
+		name                      string
+		k8sState                  *k8s.DeploymentState
+		status                    *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		spec                      *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		config                    *Config
+		expectDeletes             int
+		foundDeploymentInTemporal bool
 	}{
 		{
 			name: "drained version should be deleted",
@@ -463,7 +464,8 @@ func TestGetDeleteDeployments(t *testing.T) {
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
-			expectDeletes: 1,
+			expectDeletes:             1,
+			foundDeploymentInTemporal: true,
 		},
 		{
 			name: "not yet drained long enough",
@@ -492,7 +494,8 @@ func TestGetDeleteDeployments(t *testing.T) {
 				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			expectDeletes: 0,
+			expectDeletes:             0,
+			foundDeploymentInTemporal: true,
 		},
 		{
 			name: "not registered version should be deleted",
@@ -523,7 +526,40 @@ func TestGetDeleteDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			expectDeletes: 1,
+			expectDeletes:             1,
+			foundDeploymentInTemporal: true,
+		},
+		{
+			name: "not registered version should NOT be deleted, deployment not found in temporal",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"123": createDeploymentWithDefaultConnectionSpecHash(1),
+					"456": createDeploymentWithDefaultConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "123",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "456",
+							Status:     temporaliov1alpha1.VersionStatusNotRegistered,
+							Deployment: &corev1.ObjectReference{Name: "test-456"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			expectDeletes:             0,
+			foundDeploymentInTemporal: false,
 		},
 	}
 
@@ -531,7 +567,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.spec.Default(context.Background())
 			require.NoError(t, err)
-			deletes := getDeleteDeployments(tc.k8sState, tc.status, tc.spec)
+			deletes := getDeleteDeployments(tc.k8sState, tc.status, tc.spec, tc.foundDeploymentInTemporal)
 			assert.Equal(t, tc.expectDeletes, len(deletes), "unexpected number of deletes")
 		})
 	}

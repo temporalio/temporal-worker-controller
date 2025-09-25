@@ -75,8 +75,13 @@ func GeneratePlan(
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
 	}
 
+	// If Deployment was not found in temporal, which always happens on the first worker deployment version
+	// and sometimes happens transiently thereafter, the versions list will be empty. If the deployment
+	// exists and was found, there will always be at least one version in the list.
+	foundDeploymentInTemporal := temporalState != nil && len(temporalState.Versions) > 0
+
 	// Add delete/scale operations based on version status
-	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec)
+	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, connection)
@@ -191,6 +196,7 @@ func getDeleteDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	foundDeploymentInTemporal bool,
 ) []*appsv1.Deployment {
 	var deleteDeployments []*appsv1.Deployment
 
@@ -215,9 +221,11 @@ func getDeleteDeployments(
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		case temporaliov1alpha1.VersionStatusNotRegistered:
-			// NotRegistered versions are versions that the server doesn't know about.
-			// Only delete if it's not the target version.
-			if status.TargetVersion.BuildID != version.BuildID {
+			// Only delete Deployments of NotRegistered versions if temporalState was not empty
+			if foundDeploymentInTemporal &&
+				// NotRegistered versions are versions that the server doesn't know about.
+				// Only delete if it's not the target version.
+				status.TargetVersion.BuildID != version.BuildID {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}

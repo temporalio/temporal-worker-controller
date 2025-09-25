@@ -88,7 +88,7 @@ func GetWorkerDeploymentState(
 	if err != nil {
 		var notFound *serviceerror.NotFound
 		if errors.As(err, &notFound) {
-			// If deployment not found, return empty state
+			// If deployment not found, return empty state. Need to scale up workers in order to create Deployment Temporal-side
 			return state, nil
 		}
 		return nil, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
