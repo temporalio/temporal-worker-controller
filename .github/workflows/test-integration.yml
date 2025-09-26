@@ -6,6 +6,42 @@ on:
   pull_request:
 
 jobs:
+  skaffold-build:
+    name: Test Skaffold Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Install Skaffold
+      run: |
+        curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+        sudo install skaffold /usr/local/bin/
+        skaffold config set --global collect-metrics false
+
+    - name: Build worker-controller image
+      run: |
+        skaffold build --profile worker-controller --push=false
+
+    - name: Build helloworld worker image
+      run: |
+        skaffold build --profile helloworld-worker --push=false
+
+    # Verify that the demo worker patch applies successfully and builds.
+    - name: Build helloworld worker image patch
+      run: |
+        git apply internal/demo/helloworld/changes/no-version-gate.patch
+        skaffold build --profile helloworld-worker --push=false
+
   test-integration:
     name: Run Integration Tests
     runs-on: ubuntu-latest
@@ -38,7 +74,7 @@ jobs:
         
     - name: Install controller-gen
       run: |
-        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.2
+        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
         
     - name: Install envtest
       run: |

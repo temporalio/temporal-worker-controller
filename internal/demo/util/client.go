@@ -8,30 +8,17 @@ import (
 	"context"
 	"os"
 
-	"github.com/uber-go/tally/v4/prometheus"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/contrib/datadog/tracing"
 	"go.temporal.io/sdk/contrib/envconfig"
-	sdktally "go.temporal.io/sdk/contrib/tally"
-	"go.temporal.io/sdk/interceptor"
 )
 
-func NewClient(buildID string) (c client.Client, stopFunc func()) {
-	return newClient(buildID)
+func NewClient(buildID string, metricsPort int) (c client.Client, stopFunc func()) {
+	return newClient(buildID, metricsPort)
 }
 
-func newClient(buildID string) (c client.Client, stopFunc func()) {
-	l, stopFunc := configureObservability(buildID)
-
-	promScope, err := newPrometheusScope(l, prometheus.Configuration{
-		ListenAddress: "0.0.0.0:9090",
-		HandlerPath:   "/metrics",
-		TimerType:     "histogram",
-	})
-	if err != nil {
-		panic(err)
-	}
+func newClient(buildID string, metricsPort int) (c client.Client, stopFunc func()) {
+	l, m, stopFunc := configureObservability(buildID, metricsPort)
 
 	// Load client options from environment variables using envconfig
 	opts, err := envconfig.LoadDefaultClientOptions()
@@ -42,13 +29,7 @@ func newClient(buildID string) (c client.Client, stopFunc func()) {
 	// Override with our custom settings
 	opts.Identity = os.Getenv("HOSTNAME")
 	opts.Logger = l
-	opts.Interceptors = []interceptor.ClientInterceptor{
-		tracing.NewTracingInterceptor(tracing.TracerOptions{
-			DisableSignalTracing: false,
-			DisableQueryTracing:  false,
-		}),
-	}
-	opts.MetricsHandler = sdktally.NewMetricsHandler(promScope)
+	opts.MetricsHandler = m
 
 	l.Debug("Client configured", "identity", opts.Identity, "hostPort", opts.HostPort, "namespace", opts.Namespace)
 

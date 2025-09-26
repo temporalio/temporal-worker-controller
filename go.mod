@@ -1,8 +1,6 @@
 module github.com/temporalio/temporal-worker-controller
 
-go 1.24.5
-
-toolchain go1.24.6
+go 1.25.0
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
@@ -130,6 +128,7 @@ require (
 	github.com/sony/gobreaker v1.0.0 // indirect
 	github.com/spf13/cast v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
+	github.com/spiffe/go-spiffe/v2 v2.5.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/temporalio/ringpop-go v0.0.0-20250130211428-b97329e994f7 // indirect
 	github.com/temporalio/sqlparser v0.0.0-20231115171017-f4060bcfa6cb // indirect
@@ -138,6 +137,7 @@ require (
 	github.com/uber-common/bark v1.3.0 // indirect
 	github.com/uber-go/tally/v4 v4.1.17 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/zeebo/errs v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.34.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0 // indirect
@@ -176,8 +176,8 @@ require (
 	google.golang.org/genproto v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250303144028-a0af3efb3deb // indirect
-	google.golang.org/grpc v1.71.0 // indirect
-	google.golang.org/protobuf v1.36.5 // indirect
+	google.golang.org/grpc v1.72.2 // indirect
+	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/validator.v2 v2.0.1 // indirect
