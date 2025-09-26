@@ -21,16 +21,48 @@ import (
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type AuthMode string
+
+const (
+	AuthModeTLS     AuthMode = "TLS"
+	AuthModeAPIKey  AuthMode = "API_KEY"
+	AuthModeUnknown AuthMode = "UNKNOWN"
+	// Add more auth modes here as they are supported
+)
+
 type ClientPoolKey struct {
-	HostPort        string
-	Namespace       string
-	MutualTLSSecret string // Include secret name in key to invalidate cache when the secret name changes
+	HostPort   string
+	Namespace  string
+	SecretName string   // Include secret name in key to invalidate cache when the secret name changes
+	AuthMode   AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
+}
+
+// type ClientInfo struct {
+// 	client     sdkclient.Client
+// 	tls        *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
+// 	expiryTime time.Time   // Effective expiration time (cert.NotAfter - buffer) for efficient expiration checking
+// }
+
+type MTLSAuth struct {
+	tlsConfig  *tls.Config
+	expiryTime time.Time // cert NotAfter - buffer
+}
+
+type APIKeyProvider func() (string, error)
+
+type APIKeyAuth struct {
+	provider APIKeyProvider // returns latest key; no expiry tracking
+}
+
+type ClientAuth struct {
+	mode   AuthMode
+	mTLS   *MTLSAuth   // non-nil when mode == AuthMTLS
+	apiKey *APIKeyAuth // non-nil when mode == AuthAPIKey
 }
 
 type ClientInfo struct {
-	client     sdkclient.Client
-	tls        *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
-	expiryTime time.Time   // Effective expiration time (cert.NotAfter - buffer) for efficient expiration checking
+	client sdkclient.Client
+	auth   ClientAuth
 }
 
 type ClientPool struct {
@@ -48,7 +80,7 @@ func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	}
 }
 
-func (cp *ClientPool) GetSDKClient(key ClientPoolKey, withMTLS bool) (sdkclient.Client, bool) {
+func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 	cp.mux.RLock()
 	defer cp.mux.RUnlock()
 
@@ -57,9 +89,9 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey, withMTLS bool) (sdkclient.
 		return nil, false
 	}
 
-	if withMTLS {
+	if key.AuthMode == AuthModeTLS {
 		// Check if any certificate is expired
-		expired, err := isCertificateExpired(info.expiryTime)
+		expired, err := isCertificateExpired(info.auth.mTLS.expiryTime)
 		if err != nil {
 			cp.logger.Error("Error checking certificate expiration", "error", err)
 			return nil, false
@@ -147,14 +179,18 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 		mutualTLSSecret = opts.Spec.MutualTLSSecretRef.Name
 	}
 	key := ClientPoolKey{
-		HostPort:        opts.Spec.HostPort,
-		Namespace:       opts.TemporalNamespace,
-		MutualTLSSecret: mutualTLSSecret,
+		HostPort:   opts.Spec.HostPort,
+		Namespace:  opts.TemporalNamespace,
+		SecretName: mutualTLSSecret,
+		AuthMode:   AuthModeTLS,
 	}
 	cp.clients[key] = ClientInfo{
-		client:     c,
-		tls:        clientOpts.ConnectionOptions.TLS,
-		expiryTime: expiryTime,
+		client: c,
+		auth: ClientAuth{
+			mode:   AuthModeTLS,
+			mTLS:   &MTLSAuth{tlsConfig: clientOpts.ConnectionOptions.TLS, expiryTime: expiryTime},
+			apiKey: nil,
+		},
 	}
 
 	return c, nil

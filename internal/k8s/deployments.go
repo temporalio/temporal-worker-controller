@@ -268,6 +268,7 @@ func NewDeploymentWithOwnerRef(
 	for k, v := range spec.Template.Annotations {
 		podAnnotations[k] = v
 	}
+	// TODO (Shivam): Add API key hash annotation
 	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
 	blockOwnerDeletion := true
 
