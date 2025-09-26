@@ -1015,6 +1015,28 @@ func TestGetTestWorkflows(t *testing.T) {
 			expectWorkflows: 0,
 		},
 		{
+			name: "gate workflow without current version",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "123",
+						Status:  temporaliov1alpha1.VersionStatusInactive,
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+						},
+					},
+				},
+				CurrentVersion: nil,
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Gate: &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: "TestWorkflow"},
+				},
+			},
+			// should not start gate workflows if current version is not set. This happens when there is no initial deployment version present.
+			expectWorkflows: 0,
+		},
+		{
 			name: "all test workflows already running",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
@@ -1203,6 +1225,33 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			expectConfig:      true,
 			expectSetCurrent:  true,
 			expectRampPercent: func() *int32 { f := int32(0); return &f }(),
+		},
+		{
+			name: "gate configured with no current version should set current immediately",
+			strategy: temporaliov1alpha1.RolloutStrategy{
+				Strategy: temporaliov1alpha1.UpdateProgressive,
+				Gate:     &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: "TestWorkflow"},
+				Steps: []temporaliov1alpha1.RolloutStep{
+					{RampPercentage: 1, PauseDuration: metav1Duration(30 * time.Second)},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "123",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: time.Now()},
+					},
+				},
+				// CurrentVersion intentionally nil to simulate bootstrap
+			},
+			state: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"123": {BuildID: "123", AllTaskQueuesHaveUnversionedPoller: false},
+				},
+			},
+			expectConfig:     true,
+			expectSetCurrent: true,
 		},
 	}
 
