@@ -339,8 +339,7 @@ func getTestWorkflows(
 	// Skip if there's no gate workflow defined, if the target version is already the current, or if the target
 	// version is not yet registered in temporal
 	if config.RolloutStrategy.Gate == nil ||
-		status.CurrentVersion == nil ||
-		status.CurrentVersion.BuildID == status.TargetVersion.BuildID ||
+		(status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID) ||
 		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
 		return nil
 	}
@@ -390,7 +389,7 @@ func getVersionConfigDiff(
 	}
 
 	// Do nothing if the test workflows have not completed successfully
-	if strategy.Gate != nil && status.CurrentVersion != nil {
+	if strategy.Gate != nil {
 		if len(status.TargetVersion.TaskQueues) == 0 {
 			return nil
 		}

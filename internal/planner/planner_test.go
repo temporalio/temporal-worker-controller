@@ -1015,28 +1015,6 @@ func TestGetTestWorkflows(t *testing.T) {
 			expectWorkflows: 0,
 		},
 		{
-			name: "gate workflow without current version",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID: "123",
-						Status:  temporaliov1alpha1.VersionStatusInactive,
-						TaskQueues: []temporaliov1alpha1.TaskQueue{
-							{Name: "queue1"},
-						},
-					},
-				},
-				CurrentVersion: nil,
-			},
-			config: &Config{
-				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
-					Gate: &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: "TestWorkflow"},
-				},
-			},
-			// should not start gate workflows if current version is not set. This happens when there is no initial deployment version present.
-			expectWorkflows: 0,
-		},
-		{
 			name: "all test workflows already running",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
@@ -1241,9 +1219,18 @@ func TestGetVersionConfigDiff(t *testing.T) {
 						BuildID:      "123",
 						Status:       temporaliov1alpha1.VersionStatusInactive,
 						HealthySince: &metav1.Time{Time: time.Now()},
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+						},
+					},
+					TestWorkflows: []temporaliov1alpha1.WorkflowExecution{
+						{
+							TaskQueue: "queue1",
+							Status:    temporaliov1alpha1.WorkflowExecutionStatusCompleted,
+						},
 					},
 				},
-				// CurrentVersion intentionally nil to simulate bootstrap
+				CurrentVersion: nil,
 			},
 			state: &temporal.TemporalWorkerState{
 				Versions: map[string]*temporal.VersionInfo{
