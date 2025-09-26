@@ -3,12 +3,12 @@ image:
   tag: latest
 
 temporal:
-  namespace: "" # e.g. default
+  namespace: ss-worker-controller-with-api-keys.a2dd6 # e.g. default
   # Use existing connection (leave empty to create new one)
   connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)
-  address: "" # e.g. <namespace>.tmprl.cloud:7233
-  mtlsSecretName: "" # e.g. temporal-cloud-mtls
+  address: ss-worker-controller-with-api-keys.a2dd6.tmprl.cloud:7233 # e.g. <namespace>.tmprl.cloud:7233
+  mtlsSecretName: temporal-cloud-mtls # e.g. temporal-cloud-mtls
 
 rollout:
   strategy: Progressive
