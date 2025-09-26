@@ -12,11 +12,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const (
-	// VersionIDSeparator is used to separate the deployment name from the build ID in version strings
-	VersionIDSeparator = "."
-)
-
 func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) {
 	go func() {
 		// Delay pod readiness by 5 seconds. During demos this provides time to talk through how
@@ -40,7 +35,7 @@ func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) 
 		DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 	}
 
-	c, stopClient := NewClient(mustGetEnv("TEMPORAL_WORKER_BUILD_ID"))
+	c, stopClient := NewClient(mustGetEnv("TEMPORAL_WORKER_BUILD_ID"), 9090)
 
 	w = worker.New(c, temporalTaskQueue, opts)
 
