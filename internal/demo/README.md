@@ -53,7 +53,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      TEMPORAL_MTLS_SECRET_NAME=""
      ```
    - Note: Do not set both mTLS and API key for the same connection. If both present, the controller 
-   connects to the namespace using mTLS.
+   connects to the namespace using the API key you have configured.
 
 3. Create the `skaffold.env` file:
    - Update the value of `TEMPORAL_NAMESPACE`, `TEMPORAL_ADDRESS`  in `skaffold.example.env` to match your configuration.
@@ -76,26 +76,26 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    ```
    This deploys a TemporalWorkerDeployment and TemporalConnection Custom Resource using the **Progressive strategy**. Note that when there is no current version (as in an initial versioned worker deployment), the progressive steps are skipped and v1 becomes the current version immediately. All new workflow executions will now start on v1.
    
-5. Watch the deployment status:
+6. Watch the deployment status:
    ```bash
    watch kubectl get twd
    ```
 
-6. **Apply load** to the v1 worker to simulate production traffic:
+7. **Apply load** to the v1 worker to simulate production traffic:
     ```bash
     make apply-load-sample-workflow
     ```
 
 #### **Progressive Rollout of v2** (Non-Replay-Safe Change)
 
-7. **Deploy a non-replay-safe workflow change**:
+8. **Deploy a non-replay-safe workflow change**:
    ```bash
    git apply internal/demo/helloworld/changes/no-version-gate.patch
    skaffold run --profile helloworld-worker
    ```
    This applies a **non-replay-safe change** (switching an activity response type from string to a struct).
 
-8. **Observe the progressive rollout managing incompatible versions**:
+9. **Observe the progressive rollout managing incompatible versions**:
    - New workflow executions gradually shift from v1 to v2 following the configured rollout steps (1% → 5% → 10% → 50% → 100%)
    - **Both worker versions run simultaneously** - this is critical since the code changes are incompatible
    - v1 workers continue serving existing workflows (which would fail to replay on v2)
