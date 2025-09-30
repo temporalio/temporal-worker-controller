@@ -32,6 +32,7 @@ const (
 	ResourceNameSeparator         = "-"
 	MaxBuildIdLen                 = 63
 	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
+	APISecretKey                  = "api-key"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -261,6 +262,21 @@ func NewDeploymentWithOwnerRef(
 				},
 			},
 		})
+	} else if connection.APIKeyRef != nil {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env,
+				corev1.EnvVar{
+					Name: "TEMPORAL_API_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: connection.APIKeyRef.Name},
+							Key:                  APISecretKey,
+						},
+					},
+				},
+			)
+			podSpec.Containers[i] = container
+		}
 	}
 
 	// Build pod annotations
@@ -268,7 +284,6 @@ func NewDeploymentWithOwnerRef(
 	for k, v := range spec.Template.Annotations {
 		podAnnotations[k] = v
 	}
-	// TODO (Shivam): Add API key hash annotation
 	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
 	blockOwnerDeletion := true
 
@@ -307,6 +322,7 @@ func NewDeploymentWithOwnerRef(
 	}
 }
 
+// TODO (Shivam): Change hash when secret name is updated as well.
 func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionSpec) string {
 	// HostPort is required, but MutualTLSSecret can be empty for non-mTLS connections
 	if connection.HostPort == "" {
@@ -319,6 +335,8 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 	_, _ = hasher.Write([]byte(connection.HostPort))
 	if connection.MutualTLSSecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
+	} else if connection.APIKeyRef != nil {
+		_, _ = hasher.Write([]byte(connection.APIKeyRef.Name))
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil))

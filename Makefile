@@ -158,20 +158,31 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	GOWORK=off GO111MODULE=on $(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths=./api/... paths=./internal/... paths=./cmd/...
 
-# source secret.env && make start-sample-workflow TEMPORAL_CLOUD_API_KEY=$TEMPORAL_CLOUD_API_KEY
 .PHONY: start-sample-workflow
+.SILENT: start-sample-workflow
 start-sample-workflow: ## Start a sample workflow.
-	@$(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld" \
-      --tls-cert-path certs/client.pem \
-      --tls-key-path certs/client.key \
-      --address "worker-controller-test.a2dd6.tmprl.cloud:7233" \
-      -n "worker-controller-test.a2dd6"
-#      --address replay-2025.ktasd.tmprl.cloud:7233 \
-#      --api-key $(TEMPORAL_CLOUD_API_KEY)
+	@set -e; \
+	# Load env vars from skaffold.env if present so address/namespace aren't hardcoded
+	if [ -f skaffold.env ]; then set -a; . skaffold.env; set +a; fi; \
+	if [ -n "$$TEMPORAL_API_KEY" ]; then \
+	  $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld" \
+	    --address "$$TEMPORAL_ADDRESS" \
+	    -n "$$TEMPORAL_NAMESPACE"; \
+	else \
+	  $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld" \
+	    --tls-cert-path certs/client.pem \
+	    --tls-key-path certs/client.key \
+	    --address "$$TEMPORAL_ADDRESS" \
+	    -n "$$TEMPORAL_NAMESPACE"; \
+	fi
 
 .PHONY: apply-load-sample-workflow
+.SILENT: apply-load-sample-workflow
 apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
-	watch --interval 0.1 -- $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld"
+	@while true; do \
+		$(MAKE) -s start-sample-workflow; \
+		sleep 15; \
+	done
 
 .PHONY: list-workflow-build-ids
 list-workflow-build-ids: ## List workflow executions and their build IDs.
@@ -299,6 +310,11 @@ create-cloud-mtls-secret:
 	kubectl create secret tls temporal-cloud-mtls --namespace default \
       --cert=certs/client.pem \
       --key=certs/client.key
+
+.PHONY: create-api-key-secret
+create-api-key-secret:
+	kubectl create secret generic temporal-api-key --namespace default \
+      --from-file=api-key=certs/api-key.txt
 
 ##### Checks #####
 goimports: fmt-imports $(GOIMPORTS)

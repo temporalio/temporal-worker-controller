@@ -389,7 +389,7 @@ func getVersionConfigDiff(
 	}
 
 	// Do nothing if the test workflows have not completed successfully
-	if strategy.Gate != nil && status.CurrentVersion != nil {
+	if strategy.Gate != nil {
 		if len(status.TargetVersion.TaskQueues) == 0 {
 			return nil
 		}

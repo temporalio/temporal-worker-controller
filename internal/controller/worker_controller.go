@@ -38,21 +38,20 @@ const (
 )
 
 // getSecretName extracts the secret name from a secret reference
-func getSecretName(secretRef *v1alpha1.SecretReference) (string, bool) {
+func getSecretName(secretRef *v1alpha1.SecretReference) string {
 	if secretRef != nil {
-		return secretRef.Name, true
+		return secretRef.Name
 	}
-	return "", false
+	return ""
 }
 
-// TODO (Shivam): Understand if you need to move these two to some other file
-func getAuthMode(temporalConnection *v1alpha1.TemporalConnection) (clientpool.AuthMode, bool) {
+func getAuthMode(temporalConnection *v1alpha1.TemporalConnection) clientpool.AuthMode {
 	if temporalConnection.Spec.MutualTLSSecretRef != nil {
-		return clientpool.AuthModeTLS, true
+		return clientpool.AuthModeTLS
 	} else if temporalConnection.Spec.APIKeyRef != nil {
-		return clientpool.AuthModeAPIKey, true
+		return clientpool.AuthModeAPIKey
 	}
-	return clientpool.AuthModeUnknown, false
+	return clientpool.AuthModeUnknown
 }
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
@@ -139,8 +138,14 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Get the Auth Mode and Secret Name
-	authMode, _ := getAuthMode(&temporalConnection)
-	secretName, _ := getSecretName(temporalConnection.Spec.MutualTLSSecretRef)
+	authMode := getAuthMode(&temporalConnection)
+	var secretName string
+	switch authMode {
+	case clientpool.AuthModeTLS:
+		secretName = getSecretName(temporalConnection.Spec.MutualTLSSecretRef)
+	case clientpool.AuthModeAPIKey:
+		secretName = getSecretName(temporalConnection.Spec.APIKeyRef)
+	}
 
 	// Get or update temporal client for connection
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
@@ -150,7 +155,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		AuthMode:   authMode,
 	})
 	if !ok {
-		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
+		c, err := r.TemporalClientPool.UpsertClient(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
 			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 			Spec:              temporalConnection.Spec,

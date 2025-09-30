@@ -8,7 +8,7 @@ temporal:
   connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)
   address: ss-worker-controller-with-api-keys.a2dd6.tmprl.cloud:7233 # e.g. <namespace>.tmprl.cloud:7233
-  mtlsSecretName: temporal-cloud-mtls # e.g. temporal-cloud-mtls
-
+  apiKeySecretName: temporal-api-key
+  
 rollout:
   strategy: Progressive

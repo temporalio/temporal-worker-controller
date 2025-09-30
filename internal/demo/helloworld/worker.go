@@ -7,7 +7,6 @@ package helloworld
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -19,20 +18,26 @@ func HelloWorld(ctx workflow.Context) (string, error) {
 	ctx = util.SetActivityTimeout(ctx, 5*time.Minute)
 
 	// Get a subject
-	var subject string
+	var subject GetSubjectResponse
 	if err := workflow.ExecuteActivity(ctx, GetSubject).Get(ctx, &subject); err != nil {
 		return "", err
 	}
 
 	// Return the greeting
-	return fmt.Sprintf("Hello %s", subject), nil
+	return fmt.Sprintf("Hello %s", subject.Name), nil
 }
 
-func GetSubject(ctx context.Context) (string, error) {
-	// Simulate activity execution latency
-	time.Sleep(time.Duration(rand.Intn(30)) * time.Second)
-	// Return a hardcoded subject
-	return "World", nil
+func GetSubject(ctx context.Context) (*GetSubjectResponse, error) {
+	// Send heartbeats
+	go util.AutoHeartbeat(ctx)
+
+	// Get user via API
+	subject, err := fetchUser(ctx, "https://jsonplaceholder.typicode.com")
+	if err != nil {
+		return nil, err
+	}
+
+	return &subject, nil
 }
 
 func RolloutGate(ctx workflow.Context) error {

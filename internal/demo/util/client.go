@@ -38,9 +38,9 @@ func newClient(buildID string, metricsPort int) (c client.Client, stopFunc func(
 		panic(err)
 	}
 
-	if _, err := c.CheckHealth(context.Background(), &client.CheckHealthRequest{}); err != nil {
-		panic(err)
-	}
+	// if _, err := c.CheckHealth(context.Background(), &client.CheckHealthRequest{}); err != nil {
+	// 	panic(err)
+	// }
 
 	if _, err := c.ListWorkflow(context.Background(), &workflowservice.ListWorkflowExecutionsRequest{
 		Namespace: opts.Namespace,
