@@ -24,9 +24,9 @@ import (
 type AuthMode string
 
 const (
-	AuthModeTLS     AuthMode = "TLS"
-	AuthModeAPIKey  AuthMode = "API_KEY"
-	AuthModeUnknown AuthMode = "UNKNOWN"
+	AuthModeTLS      AuthMode = "TLS"
+	AuthModeAPIKey   AuthMode = "API_KEY"
+	AuthModeInMemory AuthMode = "IN_MEMORY"
 	// Add more auth modes here as they are supported
 )
 
@@ -202,15 +202,46 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 	return c, nil
 }
 
+func (cp *ClientPool) fetchClientUsingInMemoryConnection(opts NewClientOptions) (sdkclient.Client, error) {
+	clientOpts := sdkclient.Options{
+		Logger:    cp.logger,
+		HostPort:  opts.Spec.HostPort,
+		Namespace: opts.TemporalNamespace,
+	}
+
+	c, err := sdkclient.Dial(clientOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	key := ClientPoolKey{
+		HostPort:   opts.Spec.HostPort,
+		Namespace:  opts.TemporalNamespace,
+		SecretName: "", // no secret name for in-memory connection
+		AuthMode:   AuthModeInMemory,
+	}
+	cp.clients[key] = ClientInfo{
+		client: c,
+		auth: ClientAuth{
+			mode: AuthModeInMemory,
+			mTLS: nil,
+		},
+	}
+
+	return c, nil
+}
+
 func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authMode AuthMode, opts NewClientOptions) (sdkclient.Client, error) {
 
-	// Fetch the secret
+	// Fetch the secret from k8s cluster, if it exists. Otherwise, use an in-memory connection to the server.
 	var secret corev1.Secret
-	if err := cp.k8sClient.Get(ctx, types.NamespacedName{
-		Name:      secretName,
-		Namespace: opts.K8sNamespace,
-	}, &secret); err != nil {
-		return nil, err
+	if secretName != "" {
+		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
+			Name:      secretName,
+			Namespace: opts.K8sNamespace,
+		}, &secret); err != nil {
+			return nil, err
+		}
 	}
 
 	// Check the secret type
@@ -228,6 +259,9 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authM
 			return nil, err
 		}
 		return cp.fetchClientUsingAPIKeySecret(secret, opts)
+
+	case AuthModeInMemory:
+		return cp.fetchClientUsingInMemoryConnection(opts)
 
 	default:
 		return nil, fmt.Errorf("invalid auth mode: %s", authMode)

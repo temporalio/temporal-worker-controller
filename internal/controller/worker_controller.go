@@ -51,7 +51,7 @@ func getAuthMode(temporalConnection *v1alpha1.TemporalConnection) clientpool.Aut
 	} else if temporalConnection.Spec.APIKeyRef != nil {
 		return clientpool.AuthModeAPIKey
 	}
-	return clientpool.AuthModeUnknown
+	return clientpool.AuthModeInMemory
 }
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object

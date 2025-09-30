@@ -394,7 +394,6 @@ func getVersionConfigDiff(
 			return nil
 		}
 		if len(status.TargetVersion.TestWorkflows) < len(status.TargetVersion.TaskQueues) {
-			l.Info("not enough test workflows running to start gate workflow", "buildID", status.TargetVersion.BuildID, "taskQueues", status.TargetVersion.TaskQueues, "testWorkflows", status.TargetVersion.TestWorkflows)
 			return nil
 		}
 		for _, wf := range status.TargetVersion.TestWorkflows {
