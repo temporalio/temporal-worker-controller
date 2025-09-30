@@ -8,6 +8,7 @@ temporal:
   connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)
   address: "" # e.g. <namespace>.tmprl.cloud:7233
+  mtlsSecretName: "" # e.g. temporal-cloud-mtls
   apiKeySecretName: "" # e.g. temporal-api-key
   
 rollout:
