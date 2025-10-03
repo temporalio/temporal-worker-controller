@@ -182,35 +182,6 @@ rollout:
       pauseDuration: 5m
   gate:
     workflowType: "HealthCheck"
-    input: |
-      {
-        "version": "{{.Version}}",
-        "environment": "production"
-      }
-    timeout: 300s
-```
-
-### Gate Workflow Examples
-
-**Simple Health Check:**
-```yaml
-gate:
-  workflowType: "HealthCheck"
-  timeout: 60s
-```
-
-**Complex Validation with Input:**
-```yaml
-gate:
-  workflowType: "ValidationWorkflow"
-  input: |
-    {
-      "deploymentName": "{{.DeploymentName}}",
-      "buildId": "{{.BuildId}}",
-      "rampPercentage": {{.RampPercentage}},
-      "environment": "{{.Environment}}"
-    }
-  timeout: 600s
 ```
 
 ## Advanced Configuration
@@ -240,7 +211,6 @@ spec:
         pauseDuration: 45m
     gate:
       workflowType: "ProductionHealthCheck"
-      timeout: 300s
   sunset:
     scaledownDelay: 2h
     deleteDelay: 48h
