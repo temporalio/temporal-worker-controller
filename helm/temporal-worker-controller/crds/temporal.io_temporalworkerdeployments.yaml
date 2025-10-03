@@ -63,6 +63,36 @@ spec:
                 properties:
                   gate:
                     properties:
+                      input:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      inputFrom:
+                        properties:
+                          configMapKeyRef:
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                              optional:
+                                type: boolean
+                            required:
+                            - key
+                            - name
+                            type: object
+                          secretKeyRef:
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                              optional:
+                                type: boolean
+                            required:
+                            - key
+                            - name
+                            type: object
+                        type: object
                       workflowType:
                         type: string
                     required:
