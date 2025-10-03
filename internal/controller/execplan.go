@@ -7,6 +7,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"encoding/json"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -68,7 +69,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
 	for _, wf := range p.startTestWorkflows {
-		if _, err := temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
+		opts := sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
 			WorkflowExecutionTimeout: time.Hour,
@@ -80,7 +81,14 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 					BuildId:        wf.buildID,
 				},
 			},
-		}, wf.workflowType); err != nil {
+		}
+		var err error
+		if len(wf.input) > 0 {
+			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType, json.RawMessage(wf.input))
+		} else {
+			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType)
+		}
+		if err != nil {
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
 		}
 	}

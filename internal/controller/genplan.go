@@ -15,6 +15,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -45,6 +46,7 @@ type startWorkflowConfig struct {
 	workflowID   string
 	buildID      string
 	taskQueue    string
+	input        []byte
 }
 
 // generatePlan creates a plan for the controller to execute
@@ -117,12 +119,21 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
 
 	// Convert test workflows
+	var gateInput []byte
+	var gateInputErr error
+	if rolloutStrategy.Gate != nil {
+		gateInput, gateInputErr = r.resolveGateInput(ctx, w)
+		if gateInputErr != nil {
+			return nil, fmt.Errorf("unable to resolve gate input: %w", gateInputErr)
+		}
+	}
 	for _, wf := range planResult.TestWorkflows {
 		plan.startTestWorkflows = append(plan.startTestWorkflows, startWorkflowConfig{
 			workflowType: wf.WorkflowType,
 			workflowID:   wf.WorkflowID,
 			buildID:      wf.BuildID,
 			taskQueue:    wf.TaskQueue,
+			input:        gateInput,
 		})
 	}
 
@@ -136,6 +147,56 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	}
 
 	return plan, nil
+}
+
+// resolveGateInput resolves the gate input from inline JSON or from a referenced ConfigMap/Secret
+func (r *TemporalWorkerDeploymentReconciler) resolveGateInput(
+	ctx context.Context,
+	w *temporaliov1alpha1.TemporalWorkerDeployment,
+) ([]byte, error) {
+	gate := w.Spec.RolloutStrategy.Gate
+	if gate == nil {
+		return nil, nil
+	}
+	// If both are set, return error (webhook should prevent this, but double-check)
+	if gate.Input != nil && gate.InputFrom != nil {
+		return nil, fmt.Errorf("both spec.rollout.gate.input and spec.rollout.gate.inputFrom are set")
+	}
+	if gate.Input != nil {
+		return gate.Input.Raw, nil
+	}
+	if gate.InputFrom == nil {
+		return nil, nil
+	}
+	// Exactly one of ConfigMapKeyRef or SecretKeyRef should be set
+	if (gate.InputFrom.ConfigMapKeyRef == nil && gate.InputFrom.SecretKeyRef == nil) ||
+		(gate.InputFrom.ConfigMapKeyRef != nil && gate.InputFrom.SecretKeyRef != nil) {
+		return nil, fmt.Errorf("spec.rollout.gate.inputFrom must set exactly one of configMapKeyRef or secretKeyRef")
+	}
+	if cmRef := gate.InputFrom.ConfigMapKeyRef; cmRef != nil {
+		cm := &corev1.ConfigMap{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: cmRef.Name}, cm); err != nil {
+			return nil, fmt.Errorf("failed to get ConfigMap %s/%s: %w", w.Namespace, cmRef.Name, err)
+		}
+		if val, ok := cm.Data[cmRef.Key]; ok {
+			return []byte(val), nil
+		}
+		if bval, ok := cm.BinaryData[cmRef.Key]; ok {
+			return bval, nil
+		}
+		return nil, fmt.Errorf("key %q not found in ConfigMap %s/%s", cmRef.Key, w.Namespace, cmRef.Name)
+	}
+	if secRef := gate.InputFrom.SecretKeyRef; secRef != nil {
+		sec := &corev1.Secret{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: secRef.Name}, sec); err != nil {
+			return nil, fmt.Errorf("failed to get Secret %s/%s: %w", w.Namespace, secRef.Name, err)
+		}
+		if bval, ok := sec.Data[secRef.Key]; ok {
+			return bval, nil
+		}
+		return nil, fmt.Errorf("key %q not found in Secret %s/%s", secRef.Key, w.Namespace, secRef.Name)
+	}
+	return nil, nil
 }
 
 // Create a new deployment with owner reference
