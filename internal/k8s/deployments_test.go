@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -562,6 +563,54 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty mTLS secret should produce different hashes")
 		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty mTLS secret")
 	})
+
+	t.Run("different API key secrets produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:  "localhost:7233",
+			APIKeyRef: &temporaliov1alpha1.SecretReference{Name: "secret1"},
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:  "localhost:7233",
+			APIKeyRef: &temporaliov1alpha1.SecretReference{Name: "secret2"},
+		}
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different API key secrets should produce different hashes")
+	})
+
+	t.Run("empty API key secret vs non-empty produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:  "localhost:7233",
+			APIKeyRef: nil,
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:  "localhost:7233",
+			APIKeyRef: &temporaliov1alpha1.SecretReference{Name: "some-secret"},
+		}
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty API key secret should produce different hashes")
+		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty API key secret")
+	})
+
+	t.Run("same API key secret name produce the same hash", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:  "localhost:7233",
+			APIKeyRef: &temporaliov1alpha1.SecretReference{Name: "some-secret"},
+		}
+		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+			HostPort:  "localhost:7233",
+			APIKeyRef: &temporaliov1alpha1.SecretReference{Name: "some-secret"},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.Equal(t, hash1, hash2, "Same API key secret name should produce the same hash")
+	})
+
 }
 
 func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) {
@@ -726,6 +775,13 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 			},
 			namespace: "test-namespace-with-tls",
 		},
+		"with API key": {
+			connection: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort:  "test.temporal.example:9999",
+				APIKeyRef: &temporaliov1alpha1.SecretReference{Name: "test-api-key-secret"},
+			},
+			namespace: "test-namespace-with-api-key",
+		},
 	}
 
 	for name, tt := range tests {
@@ -777,6 +833,14 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 						container.Env[i].Value = keyPath
 					}
 				}
+			} else if tt.connection.APIKeyRef != nil {
+				for i := range container.Env {
+					if container.Env[i].Name == "TEMPORAL_API_KEY" {
+						assert.Equal(t, tt.connection.APIKeyRef.Name, container.Env[i].ValueFrom.SecretKeyRef.Name, "API key secret name should match")
+						assert.Equal(t, "api-key", container.Env[i].ValueFrom.SecretKeyRef.Key, "API key secret key should be 'api-key'")
+						container.Env[i].Value = "dummy-token.abc.def"
+					}
+				}
 			}
 
 			// Set environment variables using t.Setenv() to simulate the runtime environment
@@ -791,6 +855,9 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 			// Verify that the parsed client options match our expectations
 			assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
 			assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
+			if tt.connection.APIKeyRef != nil {
+				assert.Equal(t, "dummy-token.abc.def", os.Getenv("TEMPORAL_API_KEY"), "API key should be parsed from TEMPORAL_API_KEY")
+			}
 
 			// Verify other client option fields that should have default/empty values
 			assert.Empty(t, clientOptions.Identity, "Identity should be empty when not set via env vars")
@@ -800,8 +867,11 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 			if expectTLS {
 				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
+			} else if tt.connection.APIKeyRef != nil {
+				// An empty TLS config is configured when an API key is used without mTLS secrets
+				assert.Equal(t, clientOptions.ConnectionOptions.TLS, &tls.Config{}, "Empty TLS config should be configured for API key connection")
 			} else {
-				assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS should not be configured for non-mTLS connection")
+				assert.Nil(t, clientOptions.ConnectionOptions.TLS, "TLS config should not be configured for non-mTLS connection")
 			}
 
 			// Note: TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID are not part of client options

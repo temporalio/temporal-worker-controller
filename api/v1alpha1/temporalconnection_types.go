@@ -32,6 +32,11 @@ type TemporalConnectionSpec struct {
 	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
 	// +optional
 	MutualTLSSecretRef *SecretReference `json:"mutualTLSSecretRef,omitempty"`
+
+	// APIKeyRef is the name of the Secret that contains the API key. The secret must be `type: kubernetes.io/opaque` and exist
+	// in the same Kubernetes namespace as the TemporalConnection resource.
+	// +optional
+	APIKeyRef *SecretReference `json:"apiKeyRef,omitempty"`
 }
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
@@ -36,12 +37,21 @@ const (
 	buildIDLabel   = "temporal.io/build-id"
 )
 
-// getMutualTLSSecretName extracts the mutual TLS secret name from a secret reference
-func getMutualTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, bool) {
+// getSecretName extracts the secret name from a secret reference
+func getSecretName(secretRef *v1alpha1.SecretReference) string {
 	if secretRef != nil {
-		return secretRef.Name, true
+		return secretRef.Name
 	}
-	return "", false
+	return ""
+}
+
+func getAuthMode(temporalConnection *v1alpha1.TemporalConnection) clientpool.AuthMode {
+	if temporalConnection.Spec.MutualTLSSecretRef != nil {
+		return clientpool.AuthModeTLS
+	} else if temporalConnection.Spec.APIKeyRef != nil {
+		return clientpool.AuthModeAPIKey
+	}
+	return clientpool.AuthModeInMemory
 }
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
@@ -127,15 +137,25 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
+	// Get the Auth Mode and Secret Name
+	authMode := getAuthMode(&temporalConnection)
+	var secretName string
+	switch authMode {
+	case clientpool.AuthModeTLS:
+		secretName = getSecretName(temporalConnection.Spec.MutualTLSSecretRef)
+	case clientpool.AuthModeAPIKey:
+		secretName = getSecretName(temporalConnection.Spec.APIKeyRef)
+	}
+
 	// Get or update temporal client for connection
-	mutualTLSSecretName, hasMutualTLS := getMutualTLSSecretName(temporalConnection.Spec.MutualTLSSecretRef)
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
-		HostPort:        temporalConnection.Spec.HostPort,
-		Namespace:       workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		MutualTLSSecret: mutualTLSSecretName,
-	}, hasMutualTLS)
+		HostPort:   temporalConnection.Spec.HostPort,
+		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		SecretName: secretName,
+		AuthMode:   authMode,
+	})
 	if !ok {
-		c, err := r.TemporalClientPool.UpsertClient(ctx, clientpool.NewClientOptions{
+		c, err := r.TemporalClientPool.UpsertClient(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
 			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 			Spec:              temporalConnection.Spec,

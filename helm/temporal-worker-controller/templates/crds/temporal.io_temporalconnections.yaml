@@ -37,6 +37,14 @@ spec:
             type: object
           spec:
             properties:
+              apiKeyRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
               hostPort:
                 pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
                 type: string

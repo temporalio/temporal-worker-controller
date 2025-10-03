@@ -21,16 +21,35 @@ import (
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type AuthMode string
+
+const (
+	AuthModeTLS      AuthMode = "TLS"
+	AuthModeAPIKey   AuthMode = "API_KEY"
+	AuthModeInMemory AuthMode = "IN_MEMORY"
+	// Add more auth modes here as they are supported
+)
+
 type ClientPoolKey struct {
-	HostPort        string
-	Namespace       string
-	MutualTLSSecret string // Include secret name in key to invalidate cache when the secret name changes
+	HostPort   string
+	Namespace  string
+	SecretName string   // Include secret name in key to invalidate cache when the secret name changes
+	AuthMode   AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
+}
+
+type MTLSAuth struct {
+	tlsConfig  *tls.Config
+	expiryTime time.Time // cert NotAfter - buffer
+}
+
+type ClientAuth struct {
+	mode AuthMode
+	mTLS *MTLSAuth // non-nil when mode == AuthMTLS, nil when mode == AuthAPIKey
 }
 
 type ClientInfo struct {
-	client     sdkclient.Client
-	tls        *tls.Config // Storing the TLS config associated with the client to check certificate expiration. If the certificate is expired, a new client will be created.
-	expiryTime time.Time   // Effective expiration time (cert.NotAfter - buffer) for efficient expiration checking
+	client sdkclient.Client
+	auth   ClientAuth
 }
 
 type ClientPool struct {
@@ -48,7 +67,7 @@ func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	}
 }
 
-func (cp *ClientPool) GetSDKClient(key ClientPoolKey, withMTLS bool) (sdkclient.Client, bool) {
+func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 	cp.mux.RLock()
 	defer cp.mux.RUnlock()
 
@@ -57,9 +76,9 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey, withMTLS bool) (sdkclient.
 		return nil, false
 	}
 
-	if withMTLS {
+	if key.AuthMode == AuthModeTLS {
 		// Check if any certificate is expired
-		expired, err := isCertificateExpired(info.expiryTime)
+		expired, err := isCertificateExpired(info.auth.mTLS.expiryTime)
 		if err != nil {
 			cp.logger.Error("Error checking certificate expiration", "error", err)
 			return nil, false
@@ -79,56 +98,41 @@ type NewClientOptions struct {
 	Spec              v1alpha1.TemporalConnectionSpec
 }
 
-func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (sdkclient.Client, error) {
+func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (sdkclient.Client, error) {
+
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
-		// TODO(jlegrone): Make API Keys work
 	}
 
 	var pemCert []byte
 	var expiryTime time.Time
 
-	// Get the connection secret if it exists
-	if opts.Spec.MutualTLSSecretRef != nil {
-		var secret corev1.Secret
-		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
-			Name:      opts.Spec.MutualTLSSecretRef.Name,
-			Namespace: opts.K8sNamespace,
-		}, &secret); err != nil {
-			return nil, err
-		}
-		if secret.Type != corev1.SecretTypeTLS {
-			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls", secret.Name)
-			return nil, err
-		}
+	// Extract the certificate to calculate the effective expiration time
+	pemCert = secret.Data["tls.crt"]
 
-		// Extract the certificate to calculate the effective expiration time
-		pemCert = secret.Data["tls.crt"]
-
-		// Check if certificate is expired before creating the client
-		exp, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
-		}
-		expired, err := isCertificateExpired(exp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
-		}
-		if expired {
-			return nil, fmt.Errorf("certificate is expired or is going to expire soon")
-		}
-
-		cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])
-		if err != nil {
-			return nil, err
-		}
-		clientOpts.ConnectionOptions.TLS = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}
-		expiryTime = exp
+	// Check if certificate is expired before creating the client
+	exp, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
 	}
+	expired, err := isCertificateExpired(exp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
+	}
+	if expired {
+		return nil, fmt.Errorf("certificate is expired or is going to expire soon")
+	}
+
+	cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])
+	if err != nil {
+		return nil, err
+	}
+	clientOpts.ConnectionOptions.TLS = &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+	expiryTime = exp
 
 	c, err := sdkclient.Dial(clientOpts)
 	if err != nil {
@@ -142,22 +146,127 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, opts NewClientOptions) (
 	cp.mux.Lock()
 	defer cp.mux.Unlock()
 
-	var mutualTLSSecret string
-	if opts.Spec.MutualTLSSecretRef != nil {
-		mutualTLSSecret = opts.Spec.MutualTLSSecretRef.Name
-	}
 	key := ClientPoolKey{
-		HostPort:        opts.Spec.HostPort,
-		Namespace:       opts.TemporalNamespace,
-		MutualTLSSecret: mutualTLSSecret,
+		HostPort:   opts.Spec.HostPort,
+		Namespace:  opts.TemporalNamespace,
+		SecretName: opts.Spec.MutualTLSSecretRef.Name,
+		AuthMode:   AuthModeTLS,
 	}
 	cp.clients[key] = ClientInfo{
-		client:     c,
-		tls:        clientOpts.ConnectionOptions.TLS,
-		expiryTime: expiryTime,
+		client: c,
+		auth: ClientAuth{
+			mode: AuthModeTLS,
+			mTLS: &MTLSAuth{tlsConfig: clientOpts.ConnectionOptions.TLS, expiryTime: expiryTime},
+		},
 	}
 
 	return c, nil
+}
+
+func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts NewClientOptions) (sdkclient.Client, error) {
+	clientOpts := sdkclient.Options{
+		Logger:    cp.logger,
+		HostPort:  opts.Spec.HostPort,
+		Namespace: opts.TemporalNamespace,
+		ConnectionOptions: sdkclient.ConnectionOptions{
+			TLS: &tls.Config{},
+		},
+	}
+
+	clientOpts.Credentials = sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
+		return string(secret.Data["api-key"]), nil
+	})
+
+	c, err := sdkclient.Dial(clientOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	cp.mux.Lock()
+	defer cp.mux.Unlock()
+
+	key := ClientPoolKey{
+		HostPort:   opts.Spec.HostPort,
+		Namespace:  opts.TemporalNamespace,
+		SecretName: opts.Spec.APIKeyRef.Name,
+		AuthMode:   AuthModeAPIKey,
+	}
+	cp.clients[key] = ClientInfo{
+		client: c,
+		auth: ClientAuth{
+			mode: AuthModeAPIKey,
+			mTLS: nil,
+		},
+	}
+
+	return c, nil
+}
+
+func (cp *ClientPool) fetchClientUsingInMemoryConnection(opts NewClientOptions) (sdkclient.Client, error) {
+	clientOpts := sdkclient.Options{
+		Logger:    cp.logger,
+		HostPort:  opts.Spec.HostPort,
+		Namespace: opts.TemporalNamespace,
+	}
+
+	c, err := sdkclient.Dial(clientOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	key := ClientPoolKey{
+		HostPort:   opts.Spec.HostPort,
+		Namespace:  opts.TemporalNamespace,
+		SecretName: "", // no secret name for in-memory connection
+		AuthMode:   AuthModeInMemory,
+	}
+	cp.clients[key] = ClientInfo{
+		client: c,
+		auth: ClientAuth{
+			mode: AuthModeInMemory,
+			mTLS: nil,
+		},
+	}
+
+	return c, nil
+}
+
+func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authMode AuthMode, opts NewClientOptions) (sdkclient.Client, error) {
+
+	// Fetch the secret from k8s cluster, if it exists. Otherwise, use an in-memory connection to the server.
+	var secret corev1.Secret
+	if secretName != "" {
+		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
+			Name:      secretName,
+			Namespace: opts.K8sNamespace,
+		}, &secret); err != nil {
+			return nil, err
+		}
+	}
+
+	// Check the secret type
+	switch authMode {
+	case AuthModeTLS:
+		if secret.Type != corev1.SecretTypeTLS {
+			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls", secret.Name)
+			return nil, err
+		}
+		return cp.fetchClientUsingMTLSSecret(secret, opts)
+
+	case AuthModeAPIKey:
+		if secret.Type != corev1.SecretTypeOpaque {
+			err := fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
+			return nil, err
+		}
+		return cp.fetchClientUsingAPIKeySecret(secret, opts)
+
+	case AuthModeInMemory:
+		return cp.fetchClientUsingInMemoryConnection(opts)
+
+	default:
+		return nil, fmt.Errorf("invalid auth mode: %s", authMode)
+	}
+
 }
 
 func (cp *ClientPool) Close() {

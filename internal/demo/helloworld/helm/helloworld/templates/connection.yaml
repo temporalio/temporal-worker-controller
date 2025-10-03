@@ -8,6 +8,13 @@ metadata:
     {{- include "helloworld.labels" . | nindent 4 }}
 spec:
   hostPort: "{{ .Values.temporal.address }}"
+  {{- $apiKey := .Values.temporal.apiKeySecretName | default "" | trim }}
+  {{- if and $apiKey (ne $apiKey "null") }}
+  apiKeyRef:
+    name: {{ $apiKey | quote }}
+  {{- end }}
+  {{- if .Values.temporal.mtlsSecretName }}
   mutualTLSSecretRef:
-    name: {{ .Values.temporal.mtlsSecretName }}
+    name: {{ .Values.temporal.mtlsSecretName | quote }}
+  {{- end }}
 {{- end }}
