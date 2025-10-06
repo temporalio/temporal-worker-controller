@@ -182,7 +182,28 @@ rollout:
       pauseDuration: 5m
   gate:
     workflowType: "HealthCheck"
+    # Optionally provide input to the gate workflow:
+    # 1) Inline arbitrary JSON:
+    # input:
+    #   thresholds:
+    #     errorRate: 0.01
+    #     p95LatencyMs: 250
+    # 2) Or reference a key from a ConfigMap or Secret containing JSON:
+    # inputFrom:
+    #   configMapKeyRef:
+    #     name: gate-input
+    #     key: payload.json
+    # inputFrom:
+    #   secretKeyRef:
+    #     name: gate-input
+    #     key: payload.json
 ```
+
+Gate workflow input details:
+- Exactly one of `input` or `inputFrom` may be set.
+- `input` accepts any JSON object and is passed as the first parameter to the gate workflow.
+- `inputFrom` reads a JSON document from the specified `ConfigMap` or `Secret` key.
+- The target workflow should declare a single argument matching the JSON shape (e.g., a struct or `json.RawMessage`).
 
 ## Advanced Configuration
 

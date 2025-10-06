@@ -95,7 +95,15 @@ Configuration that tells the controller how to connect to the same Temporal clus
 Defines how new versions are promoted:
 - **strategy**: Manual, AllAtOnce, or Progressive
 - **steps**: For Progressive strategy, defines ramp percentages and pause durations
-- **gate**: Optional workflow that must succeed on all task queues in the target Worker Deployment Version before promotion continues
+- **gate**: Optional workflow that must succeed on all task queues in the target Worker Deployment Version before promotion continues. Gate can receive an input payload:
+  - `workflowType`: The workflow name/type to execute for validation
+  - `input`: Inline JSON object passed as the first workflow argument
+  - `inputFrom`: Reference to a `ConfigMap` or `Secret` key whose contents are JSON; passed as the first workflow argument
+
+Notes on gate inputs:
+- Exactly one of `input` or `inputFrom` may be set.
+- The value must be a JSON object (not a string containing JSON).
+- Large/sensitive payloads should use `inputFrom.secretKeyRef` or split into smaller documents.
 
 ### Sunset Configuration
 Defines how Drained versions are cleaned up:

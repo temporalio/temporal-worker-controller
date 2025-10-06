@@ -541,6 +541,17 @@ spec:
         pauseDuration: 30m
     gate:
       workflowType: "HealthCheck"  # Validate new version before proceeding
+      # Optional gate input examples
+      # Inline JSON object:
+      # input:
+      #   thresholds:
+      #     errorRate: 0.01
+      #     p95LatencyMs: 250
+      # Or load from a ConfigMap/Secret key containing JSON:
+      # inputFrom:
+      #   configMapKeyRef:
+      #     name: order-processor-gate-input
+      #     key: payload.json
 ---
 # Staging - Fast rollout for testing
 apiVersion: temporal.io/v1alpha1
