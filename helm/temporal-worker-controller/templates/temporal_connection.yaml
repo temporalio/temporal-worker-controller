@@ -1,9 +1,9 @@
 apiVersion: temporal.io/v1alpha1
 kind: TemporalConnection
 metadata:
-  name: {{ .Values.lettaEnv }}-temporal
+  name: {{ .Values.temporal.connectionName }}
   namespace: default
 spec:
-  hostPort: {{ .Values.temporalEndpoint }}
+  hostPort: {{ .Values.temporal.address }}
   mutualTLSSecretRef:
-    name: temporal-cloud-mtls
+    name: {{ .Values.temporal.mtlsSecretName }}
