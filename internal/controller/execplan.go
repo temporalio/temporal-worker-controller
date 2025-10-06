@@ -69,6 +69,27 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
 	for _, wf := range p.startTestWorkflows {
+		// Log workflow start details and a safe preview of input
+		if len(wf.input) > 0 {
+			preview := wf.input
+			if len(preview) > 512 {
+				preview = preview[:512]
+			}
+			l.Info("starting gate workflow",
+				"workflowType", wf.workflowType,
+				"taskQueue", wf.taskQueue,
+				"buildID", wf.buildID,
+				"inputBytes", len(wf.input),
+				"inputPreview", string(preview),
+			)
+		} else {
+			l.Info("starting gate workflow",
+				"workflowType", wf.workflowType,
+				"taskQueue", wf.taskQueue,
+				"buildID", wf.buildID,
+				"inputBytes", 0,
+			)
+		}
 		opts := sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
