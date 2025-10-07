@@ -113,3 +113,9 @@ certmanager:
 # Not yet supported
 prometheus:
   enabled: false
+
+# change to match your environment
+temporal:
+  connectionName: dev-namespace
+  address: dev-namespace.tmhou.tmprl.cloud:7233
+  mtlsSecretName: temporal-cloud-mtls

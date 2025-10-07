@@ -1,0 +1,9 @@
+apiVersion: temporal.io/v1alpha1
+kind: TemporalConnection
+metadata:
+  name: {{ .Values.temporal.connectionName }}
+  namespace: default
+spec:
+  hostPort: {{ .Values.temporal.address }}
+  mutualTLSSecretRef:
+    name: {{ .Values.temporal.mtlsSecretName }}
