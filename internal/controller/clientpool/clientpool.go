@@ -26,7 +26,7 @@ type AuthMode string
 const (
 	AuthModeTLS      AuthMode = "TLS"
 	AuthModeAPIKey   AuthMode = "API_KEY"
-	AuthModeInMemory AuthMode = "IN_MEMORY"
+	AuthModeInMemory AuthMode = "IN_MEMORY" // Local in‑memory backend; no TLS/API keys (dev/test only)
 	// Add more auth modes here as they are supported
 )
 
@@ -39,7 +39,7 @@ type ClientPoolKey struct {
 
 type MTLSAuth struct {
 	tlsConfig  *tls.Config
-	expiryTime time.Time // cert NotAfter - buffer
+	expiryTime time.Time // Time we consider the cert expired (NotAfter minus safety buffer)
 }
 
 type ClientAuth struct {
