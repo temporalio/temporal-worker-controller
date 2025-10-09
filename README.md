@@ -74,7 +74,8 @@ When you update the image, the controller automatically:
 
 ### Prerequisites
 
-- Kubernetes cluster (1.19+) 
+- Kubernetes cluster (1.19+)
+- Helm [v3.0+](https://github.com/helm/helm/releases) if deploying via our Helm chart
 - [Temporal Server](https://docs.temporal.io/) (Cloud or self-hosted [v1.28.1](https://github.com/temporalio/temporal/releases/tag/v1.28.1))
 - Basic familiarity with Temporal [Workers](https://docs.temporal.io/workers), [Workflows](https://docs.temporal.io/workflows), and [Worker Versioning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning)
 
