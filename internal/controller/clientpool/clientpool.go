@@ -24,9 +24,9 @@ import (
 type AuthMode string
 
 const (
-	AuthModeTLS      AuthMode = "TLS"
-	AuthModeAPIKey   AuthMode = "API_KEY"
-	AuthModeInMemory AuthMode = "IN_MEMORY" // Local in‑memory backend; no TLS/API keys (dev/test only)
+	AuthModeTLS           AuthMode = "TLS"
+	AuthModeAPIKey        AuthMode = "API_KEY"
+	AuthModeNoCredentials AuthMode = "NO_CREDENTIALS" // no TLS/API keys
 	// Add more auth modes here as they are supported
 )
 
@@ -202,7 +202,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 	return c, nil
 }
 
-func (cp *ClientPool) fetchClientUsingInMemoryConnection(opts NewClientOptions) (sdkclient.Client, error) {
+func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (sdkclient.Client, error) {
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
@@ -217,13 +217,13 @@ func (cp *ClientPool) fetchClientUsingInMemoryConnection(opts NewClientOptions) 
 	key := ClientPoolKey{
 		HostPort:   opts.Spec.HostPort,
 		Namespace:  opts.TemporalNamespace,
-		SecretName: "", // no secret name for in-memory connection
-		AuthMode:   AuthModeInMemory,
+		SecretName: "",
+		AuthMode:   AuthModeNoCredentials,
 	}
 	cp.clients[key] = ClientInfo{
 		client: c,
 		auth: ClientAuth{
-			mode: AuthModeInMemory,
+			mode: AuthModeNoCredentials,
 			mTLS: nil,
 		},
 	}
@@ -260,8 +260,8 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authM
 		}
 		return cp.fetchClientUsingAPIKeySecret(secret, opts)
 
-	case AuthModeInMemory:
-		return cp.fetchClientUsingInMemoryConnection(opts)
+	case AuthModeNoCredentials:
+		return cp.fetchClientUsingNoCredentials(opts)
 
 	default:
 		return nil, fmt.Errorf("invalid auth mode: %s", authMode)

@@ -20,6 +20,14 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    minikube start
    ```
 
+2. Create the `skaffold.env` file:
+   - Run:
+     ```bash
+     cp skaffold.example.env skaffold.env
+     ```
+
+   - Update the value of `TEMPORAL_NAMESPACE`, `TEMPORAL_ADDRESS`  in `skaffold.example.env` to match your configuration.
+
 2. Set up Temporal Cloud Authentication:
    - Create a `certs` directory in the project root
    - Save your Temporal Cloud mTLS client certificates as:
@@ -29,7 +37,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      ```bash
      make create-cloud-mtls-secret
      ```
-   - In `skaffold.example.env`, set:
+   - In `skaffold.env`, set:
      ```env
      TEMPORAL_API_KEY_SECRET_NAME=""
      TEMPORAL_MTLS_SECRET_NAME=temporal-cloud-mtls-secret
@@ -47,21 +55,13 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      ```bash
      make create-api-key-secret
      ```
-   - In `skaffold.example.env`, set:
+   - In `skaffold.env`, set:
      ```env
      TEMPORAL_API_KEY_SECRET_NAME=temporal-api-key
      TEMPORAL_MTLS_SECRET_NAME=""
      ```
    - Note: Do not set both mTLS and API key for the same connection. If both present, the controller 
    connects to the namespace using the API key you have configured.
-
-3. Create the `skaffold.env` file:
-   - Update the value of `TEMPORAL_NAMESPACE`, `TEMPORAL_ADDRESS`  in `skaffold.example.env` to match your configuration.
-
-   - Then run:
-     ```bash
-     cp skaffold.example.env skaffold.env
-     ```
 
 4. Build and deploy the Controller image to the local k8s cluster:
    ```bash

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
@@ -38,20 +37,20 @@ const (
 )
 
 // getSecretName extracts the secret name from a secret reference
-func getSecretName(secretRef *v1alpha1.SecretReference) string {
+func getSecretName(secretRef *temporaliov1alpha1.SecretReference) string {
 	if secretRef != nil {
 		return secretRef.Name
 	}
 	return ""
 }
 
-func getAuthMode(temporalConnection *v1alpha1.TemporalConnection) clientpool.AuthMode {
+func getAuthMode(temporalConnection *temporaliov1alpha1.TemporalConnection) clientpool.AuthMode {
 	if temporalConnection.Spec.MutualTLSSecretRef != nil {
 		return clientpool.AuthModeTLS
 	} else if temporalConnection.Spec.APIKeyRef != nil {
 		return clientpool.AuthModeAPIKey
 	}
-	return clientpool.AuthModeInMemory
+	return clientpool.AuthModeNoCredentials
 }
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
