@@ -91,8 +91,8 @@ func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client,
 		go testhelpers.RunHelloWorldWorker(ctx, deployment.Spec.Template, workerCallback(i))
 	}
 
-	// wait 10s for all expected workers to be healthy
-	timedOut := waitTimeout(&wg, 10*time.Second)
+	// wait 30s for all expected workers to be healthy (under suite load startup can be slower)
+	timedOut := waitTimeout(&wg, 30*time.Second)
 
 	if timedOut {
 		t.Fatalf("could not start workers, errors were: %+v", workerErrors)

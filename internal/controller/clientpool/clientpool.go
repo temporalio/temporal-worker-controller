@@ -174,7 +174,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 	}
 
 	clientOpts.Credentials = sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
-		return string(secret.Data["api-key"]), nil
+		return string(secret.Data[opts.Spec.APIKeySecretRef.Key]), nil
 	})
 
 	c, err := sdkclient.Dial(clientOpts)
@@ -188,7 +188,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 	key := ClientPoolKey{
 		HostPort:   opts.Spec.HostPort,
 		Namespace:  opts.TemporalNamespace,
-		SecretName: opts.Spec.APIKeyRef.Name,
+		SecretName: opts.Spec.APIKeySecretRef.Name,
 		AuthMode:   AuthModeAPIKey,
 	}
 	cp.clients[key] = ClientInfo{
@@ -233,7 +233,7 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (sdkc
 
 func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authMode AuthMode, opts NewClientOptions) (sdkclient.Client, error) {
 
-	// Fetch the secret from k8s cluster, if it exists. Otherwise, use an in-memory connection to the server.
+	// Fetch the secret from k8s cluster, if it exists. Otherwise, create a connection with the server without using any credentials.
 	var secret corev1.Secret
 	if secretName != "" {
 		if err := cp.k8sClient.Get(ctx, types.NamespacedName{

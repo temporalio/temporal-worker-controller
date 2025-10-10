@@ -14,6 +14,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,18 +37,41 @@ const (
 	buildIDLabel   = "temporal.io/build-id"
 )
 
-// getSecretName extracts the secret name from a secret reference
-func getSecretName(secretRef *temporaliov1alpha1.SecretReference) string {
+// getAPIKeySecretName extracts the secret name from a SecretKeySelector
+func getAPIKeySecretName(secretRef *corev1.SecretKeySelector) (string, error) {
 	if secretRef != nil {
-		return secretRef.Name
+		return secretRef.Name, nil
 	}
-	return ""
+
+	return "", fmt.Errorf("API key secret name is not set")
+}
+
+func getTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, error) {
+	if secretRef != nil {
+		return secretRef.Name, nil
+	}
+
+	return "", fmt.Errorf("TLS secret name is not set")
+}
+
+func resolveAuthSecretName(tc *temporaliov1alpha1.TemporalConnection) (clientpool.AuthMode, string, error) {
+	auth := getAuthMode(tc)
+	switch auth {
+	case clientpool.AuthModeTLS:
+		name, err := getTLSSecretName(tc.Spec.MutualTLSSecretRef)
+		return auth, name, err
+	case clientpool.AuthModeAPIKey:
+		name, err := getAPIKeySecretName(tc.Spec.APIKeySecretRef)
+		return auth, name, err
+	default:
+		return auth, "", nil
+	}
 }
 
 func getAuthMode(temporalConnection *temporaliov1alpha1.TemporalConnection) clientpool.AuthMode {
 	if temporalConnection.Spec.MutualTLSSecretRef != nil {
 		return clientpool.AuthModeTLS
-	} else if temporalConnection.Spec.APIKeyRef != nil {
+	} else if temporalConnection.Spec.APIKeySecretRef != nil {
 		return clientpool.AuthModeAPIKey
 	}
 	return clientpool.AuthModeNoCredentials
@@ -137,13 +161,10 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Get the Auth Mode and Secret Name
-	authMode := getAuthMode(&temporalConnection)
-	var secretName string
-	switch authMode {
-	case clientpool.AuthModeTLS:
-		secretName = getSecretName(temporalConnection.Spec.MutualTLSSecretRef)
-	case clientpool.AuthModeAPIKey:
-		secretName = getSecretName(temporalConnection.Spec.APIKeyRef)
+	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
+	if err != nil {
+		l.Error(err, "unable to resolve auth secret name")
+		return ctrl.Result{}, err
 	}
 
 	// Get or update temporal client for connection

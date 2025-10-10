@@ -37,14 +37,19 @@ spec:
             type: object
           spec:
             properties:
-              apiKeyRef:
+              apiKeySecretRef:
                 properties:
-                  name:
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                  key:
                     type: string
+                  name:
+                    default: ""
+                    type: string
+                  optional:
+                    type: boolean
                 required:
-                - name
+                - key
                 type: object
+                x-kubernetes-map-type: atomic
               hostPort:
                 pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
                 type: string
@@ -59,6 +64,9 @@ spec:
             required:
             - hostPort
             type: object
+            x-kubernetes-validations:
+            - message: Only one of mutualTLSSecretRef or apiKeySecretRef may be set
+              rule: '!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))'
           status:
             type: object
         type: object

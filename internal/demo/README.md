@@ -26,7 +26,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      cp skaffold.example.env skaffold.env
      ```
 
-   - Update the value of `TEMPORAL_NAMESPACE`, `TEMPORAL_ADDRESS`  in `skaffold.example.env` to match your configuration.
+   - Update the value of `TEMPORAL_NAMESPACE`, `TEMPORAL_ADDRESS`  in `skaffold.env` to match your configuration.
 
 2. Set up Temporal Cloud Authentication:
    - Create a `certs` directory in the project root
@@ -51,7 +51,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      ```bash
      echo -n "<YOUR_API_KEY>" > certs/api-key.txt
      ```
-   - Create the Kubernetes Secret (trims any accidental newlines):
+   - Create the Kubernetes Secret:
      ```bash
      make create-api-key-secret
      ```
@@ -60,8 +60,8 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      TEMPORAL_API_KEY_SECRET_NAME=temporal-api-key
      TEMPORAL_MTLS_SECRET_NAME=""
      ```
-   - Note: Do not set both mTLS and API key for the same connection. If both present, the controller 
-   connects to the namespace using the API key you have configured.
+   - Note: Do not set both mTLS and API key for the same connection. If both present, the TemporalConnection Custom Resource
+   Instance will not get installed in the k8s environment.
 
 4. Build and deploy the Controller image to the local k8s cluster:
    ```bash

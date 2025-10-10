@@ -3,13 +3,15 @@ image:
   tag: latest
 
 temporal:
-  namespace: "" # e.g. default
+  namespace: "default" # e.g. default
   # Use existing connection (leave empty to create new one)
   connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)
   address: "" # e.g. <namespace>.tmprl.cloud:7233
   mtlsSecretName: "" # e.g. temporal-cloud-mtls
-  apiKeySecretName: "" # e.g. temporal-api-key
+  apiKey:
+      name: "" # e.g. temporal-api-key
+      key: "" # data key inside the secret
   
 rollout:
   strategy: Progressive

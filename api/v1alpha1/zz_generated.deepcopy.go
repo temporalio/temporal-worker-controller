@@ -332,10 +332,10 @@ func (in *TemporalConnectionSpec) DeepCopyInto(out *TemporalConnectionSpec) {
 		*out = new(SecretReference)
 		**out = **in
 	}
-	if in.APIKeyRef != nil {
-		in, out := &in.APIKeyRef, &out.APIKeyRef
-		*out = new(SecretReference)
-		**out = **in
+	if in.APIKeySecretRef != nil {
+		in, out := &in.APIKeySecretRef, &out.APIKeySecretRef
+		*out = new(v1.SecretKeySelector)
+		(*in).DeepCopyInto(*out)
 	}
 }
 

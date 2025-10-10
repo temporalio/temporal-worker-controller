@@ -164,16 +164,20 @@ start-sample-workflow: ## Start a sample workflow.
 	@set -e; \
 	# Load env vars from skaffold.env if present so address/namespace aren't hardcoded
 	if [ -f skaffold.env ]; then set -a; . skaffold.env; set +a; fi; \
-	if [ -n "$$TEMPORAL_API_KEY" ]; then \
+	API_KEY_VAL=""; \
+	if [ -n "$$TEMPORAL_API_KEY" ]; then API_KEY_VAL="$$TEMPORAL_API_KEY"; \
+	elif [ -f certs/api-key.txt ]; then API_KEY_VAL="$$(tr -d '\r\n' < certs/api-key.txt)"; fi; \
+	if [ -n "$$API_KEY_VAL" ]; then \
 	  $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld" \
 	    --address "$$TEMPORAL_ADDRESS" \
-	    -n "$$TEMPORAL_NAMESPACE"; \
+	    --namespace "$$TEMPORAL_NAMESPACE" \
+	    --api-key "$$API_KEY_VAL"; \
 	else \
 	  $(TEMPORAL) workflow start --type "HelloWorld" --task-queue "default/helloworld" \
 	    --tls-cert-path certs/client.pem \
 	    --tls-key-path certs/client.key \
 	    --address "$$TEMPORAL_ADDRESS" \
-	    -n "$$TEMPORAL_NAMESPACE"; \
+	    --namespace "$$TEMPORAL_NAMESPACE"; \
 	fi
 
 .PHONY: apply-load-sample-workflow
