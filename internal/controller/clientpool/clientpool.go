@@ -99,7 +99,6 @@ type NewClientOptions struct {
 	Spec              v1alpha1.TemporalConnectionSpec
 }
 
-//nolint:revive
 func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (sdkclient.Client, error) {
 
 	clientOpts := sdkclient.Options{

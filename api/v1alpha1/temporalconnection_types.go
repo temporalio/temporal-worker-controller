@@ -35,8 +35,11 @@ type TemporalConnectionSpec struct {
 	// +optional
 	MutualTLSSecretRef *SecretReference `json:"mutualTLSSecretRef,omitempty"`
 
-	// APIKeySecretRef is the name of the Secret that contains the API key. The secret must be `type: kubernetes.io/opaque` and exist
-	// in the same Kubernetes namespace as the TemporalConnection resource.
+	// APIKeySecretRef selects the Secret key that contains the API key used for authentication.
+	// The Secret must be `type: kubernetes.io/opaque` and exist in the same Kubernetes namespace as
+	// the TemporalConnection resource. This is a corev1.SecretKeySelector and encodes both:
+	//   - LocalObjectReference.Name: the name of the Secret resource
+	//   - Key: the data key within Secret.Data whose value is the API key token
 	// +optional
 	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
 }
