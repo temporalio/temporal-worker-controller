@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -26,7 +27,7 @@ type AuthMode string
 const (
 	AuthModeTLS           AuthMode = "TLS"
 	AuthModeAPIKey        AuthMode = "API_KEY"
-	AuthModeNoCredentials AuthMode = "NO_CREDENTIALS" // no TLS/API keys
+	AuthModeNoCredentials AuthMode = "NO_CREDENTIALS"
 	// Add more auth modes here as they are supported
 )
 
@@ -98,6 +99,7 @@ type NewClientOptions struct {
 	Spec              v1alpha1.TemporalConnectionSpec
 }
 
+//nolint:revive
 func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (sdkclient.Client, error) {
 
 	clientOpts := sdkclient.Options{
@@ -115,14 +117,14 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	// Check if certificate is expired before creating the client
 	exp, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
+		return nil, errors.New("failed to check certificate expiration: " + err.Error())
 	}
 	expired, err := isCertificateExpired(exp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check certificate expiration: %v", err)
+		return nil, errors.New("failed to check certificate expiration: " + err.Error())
 	}
 	if expired {
-		return nil, fmt.Errorf("certificate is expired or is going to expire soon")
+		return nil, errors.New("certificate is expired or is going to expire soon")
 	}
 
 	cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])

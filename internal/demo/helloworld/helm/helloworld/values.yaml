@@ -3,7 +3,7 @@ image:
   tag: latest
 
 temporal:
-  namespace: "default" # e.g. default
+  namespace: "" # e.g. default
   # Use existing connection (leave empty to create new one)
   connectionName: "" # e.g. dev-server
   # Connection details (required if connectionName is empty)

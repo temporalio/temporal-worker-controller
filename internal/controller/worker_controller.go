@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,7 +44,7 @@ func getAPIKeySecretName(secretRef *corev1.SecretKeySelector) (string, error) {
 		return secretRef.Name, nil
 	}
 
-	return "", fmt.Errorf("API key secret name is not set")
+	return "", errors.New("API key secret name is not set")
 }
 
 func getTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, error) {
@@ -51,7 +52,7 @@ func getTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, er
 		return secretRef.Name, nil
 	}
 
-	return "", fmt.Errorf("TLS secret name is not set")
+	return "", errors.New("TLS secret name is not set")
 }
 
 func resolveAuthSecretName(tc *temporaliov1alpha1.TemporalConnection) (clientpool.AuthMode, string, error) {

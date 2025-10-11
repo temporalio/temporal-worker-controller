@@ -35,7 +35,7 @@ type TemporalConnectionSpec struct {
 	// +optional
 	MutualTLSSecretRef *SecretReference `json:"mutualTLSSecretRef,omitempty"`
 
-	// APIKeyRef is the name of the Secret that contains the API key. The secret must be `type: kubernetes.io/opaque` and exist
+	// APIKeySecretRef is the name of the Secret that contains the API key. The secret must be `type: kubernetes.io/opaque` and exist
 	// in the same Kubernetes namespace as the TemporalConnection resource.
 	// +optional
 	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
