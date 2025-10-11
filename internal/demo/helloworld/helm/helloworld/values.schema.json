@@ -35,6 +35,20 @@
         "mtlsSecretName": {
           "type": "string",
           "description": "Name of the secret containing mTLS certificates (required if connectionName is empty)"
+        },
+        "apiKey": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the secret containing API key (required if connectionName is empty)"
+            },
+            "key": {
+              "type": "string",
+              "description": "Data key inside the API key secret"
+            }
+          }
         }
       },
       "required": ["namespace"],
@@ -51,6 +65,15 @@
         },
         {
           "required": ["address", "mtlsSecretName"]
+        },
+        {
+          "properties": {
+            "apiKey": {
+              "type": "object",
+              "required": ["name", "key"]
+            }
+          },
+          "required": ["address", "apiKey"]
         }
       ]
     },

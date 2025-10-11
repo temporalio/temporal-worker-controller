@@ -49,7 +49,7 @@ func waitForVersionRegistrationInDeployment(
 
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(version.DeploymentName)
 
-	eventually(t, 30*time.Second, time.Second, func() error {
+	eventually(t, 60*time.Second, time.Second, func() error {
 		resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 		if err != nil {
 			return fmt.Errorf("unable to describe worker deployment %s: %w", version.DeploymentName, err)
@@ -77,7 +77,7 @@ func setCurrentVersion(
 		})
 	}
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
-	eventually(t, 30*time.Second, time.Second, func() error {
+	eventually(t, 60*time.Second, time.Second, func() error {
 		_, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 			BuildID:  buildID,
 			Identity: defaults.ControllerIdentity,

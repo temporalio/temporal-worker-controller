@@ -10,3 +10,4 @@ certs
 .DS_Store
 
 .claude
+.config 

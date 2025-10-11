@@ -58,6 +58,8 @@ profiles:
               temporal.namespace: "{{ .TEMPORAL_NAMESPACE }}"
               temporal.address: "{{ .TEMPORAL_ADDRESS }}"
               temporal.mtlsSecretName: "{{ .TEMPORAL_MTLS_SECRET_NAME }}"
+              temporal.apiKey.name: "{{ .TEMPORAL_API_KEY_SECRET_NAME }}"
+              temporal.apiKey.key: "{{ .TEMPORAL_API_KEY_SECRET_KEY }}"
             valuesFiles:
               - internal/demo/helloworld/helm/helloworld/values.yaml
 deploy:
