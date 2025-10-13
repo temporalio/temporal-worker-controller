@@ -552,6 +552,10 @@ spec:
       #   configMapKeyRef:
       #     name: order-processor-gate-input
       #     key: payload.json
+      # inputFrom:
+      #   secretKeyRef:
+      #     name: gate-input
+      #     key: payload.json
 ---
 # Staging - Fast rollout for testing
 apiVersion: temporal.io/v1alpha1
