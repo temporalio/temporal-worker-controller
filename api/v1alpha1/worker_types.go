@@ -274,23 +274,23 @@ const (
 
 type GateWorkflowConfig struct {
 	WorkflowType string `json:"workflowType"`
-    // Input is an arbitrary JSON object passed as the first parameter to the gate workflow.
-    // +optional
-    Input *apiextensionsv1.JSON `json:"input,omitempty"`
-    // InputFrom references a key in a ConfigMap or Secret whose contents are passed
-    // as the first parameter to the gate workflow. The referenced value should be a JSON document.
-    // +optional
-    InputFrom *GateInputSource `json:"inputFrom,omitempty"`
+	// Input is an arbitrary JSON object passed as the first parameter to the gate workflow.
+	// +optional
+	Input *apiextensionsv1.JSON `json:"input,omitempty"`
+	// InputFrom references a key in a ConfigMap or Secret whose contents are passed
+	// as the first parameter to the gate workflow. The referenced value should be a JSON document.
+	// +optional
+	InputFrom *GateInputSource `json:"inputFrom,omitempty"`
 }
 
 // GateInputSource references a value from a ConfigMap or a Secret
 type GateInputSource struct {
-    // Select a key of a ConfigMap in the same namespace
-    // +optional
-    ConfigMapKeyRef *corev1.ConfigMapKeySelector `json:"configMapKeyRef,omitempty"`
-    // Select a key of a Secret in the same namespace
-    // +optional
-    SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
+	// Select a key of a ConfigMap in the same namespace
+	// +optional
+	ConfigMapKeyRef *corev1.ConfigMapKeySelector `json:"configMapKeyRef,omitempty"`
+	// Select a key of a Secret in the same namespace
+	// +optional
+	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
 }
 
 // RolloutStrategy defines strategy to apply during next rollout

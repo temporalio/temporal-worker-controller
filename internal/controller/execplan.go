@@ -6,8 +6,8 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"

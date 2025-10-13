@@ -95,7 +95,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		var configMapData map[string]string
 		var configMapBinaryData map[string][]byte
 		var secretData map[string][]byte
-		
+
 		if rolloutStrategy.Gate.InputFrom != nil {
 			if cmRef := rolloutStrategy.Gate.InputFrom.ConfigMapKeyRef; cmRef != nil {
 				cm := &corev1.ConfigMap{}
@@ -113,7 +113,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 				secretData = sec.Data
 			}
 		}
-		
+
 		gateInput, err = planner.ResolveGateInput(rolloutStrategy.Gate, w.Namespace, configMapData, configMapBinaryData, secretData)
 		if err != nil {
 			return nil, fmt.Errorf("unable to resolve gate input: %w", err)
@@ -173,7 +173,6 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	return plan, nil
 }
-
 
 // Create a new deployment with owner reference
 func (r *TemporalWorkerDeploymentReconciler) newDeployment(
