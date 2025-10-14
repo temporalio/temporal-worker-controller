@@ -42,11 +42,12 @@ type plan struct {
 
 // startWorkflowConfig defines a workflow to be started
 type startWorkflowConfig struct {
-	workflowType string
-	workflowID   string
-	buildID      string
-	taskQueue    string
-	input        []byte
+	workflowType  string
+	workflowID    string
+	buildID       string
+	taskQueue     string
+	input         []byte
+	isInputSecret bool // indicates if input should be treated as sensitive
 }
 
 // generatePlan creates a plan for the controller to execute
@@ -90,6 +91,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Resolve gate input if gate is configured
 	var gateInput []byte
+	var isGateInputSecret bool
 	if rolloutStrategy.Gate != nil {
 		// Fetch ConfigMap or Secret data if needed
 		var configMapData map[string]string
@@ -114,7 +116,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 			}
 		}
 
-		gateInput, err = planner.ResolveGateInput(rolloutStrategy.Gate, w.Namespace, configMapData, configMapBinaryData, secretData)
+		gateInput, isGateInputSecret, err = planner.ResolveGateInput(rolloutStrategy.Gate, w.Namespace, configMapData, configMapBinaryData, secretData)
 		if err != nil {
 			return nil, fmt.Errorf("unable to resolve gate input: %w", err)
 		}
@@ -136,6 +138,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		workerDeploymentName,
 		r.MaxDeploymentVersionsIneligibleForDeletion,
 		gateInput,
+		isGateInputSecret,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)
@@ -154,11 +157,12 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
 		plan.startTestWorkflows = append(plan.startTestWorkflows, startWorkflowConfig{
-			workflowType: wf.WorkflowType,
-			workflowID:   wf.WorkflowID,
-			buildID:      wf.BuildID,
-			taskQueue:    wf.TaskQueue,
-			input:        []byte(wf.GateInput),
+			workflowType:  wf.WorkflowType,
+			workflowID:    wf.WorkflowID,
+			buildID:       wf.BuildID,
+			taskQueue:     wf.TaskQueue,
+			input:         []byte(wf.GateInput),
+			isInputSecret: wf.IsInputSecret,
 		})
 	}
 

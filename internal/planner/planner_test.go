@@ -402,7 +402,7 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -1052,7 +1052,7 @@ func TestGetTestWorkflows(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			workflows := getTestWorkflows(tc.status, tc.config, "test/namespace", nil)
+			workflows := getTestWorkflows(tc.status, tc.config, "test/namespace", nil, false)
 			assert.Equal(t, tc.expectWorkflows, len(workflows), "unexpected number of test workflows")
 		})
 	}
@@ -1928,7 +1928,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
@@ -2297,6 +2297,7 @@ func TestResolveGateInput(t *testing.T) {
 		configMapBinaryData map[string][]byte
 		secretData          map[string][]byte
 		expected            []byte
+		expectedIsSecret    bool
 		expectedError       string
 	}{
 		{
@@ -2424,7 +2425,8 @@ func TestResolveGateInput(t *testing.T) {
 			secretData: map[string][]byte{
 				"test-key": []byte(`{"secret": "data"}`),
 			},
-			expected: []byte(`{"secret": "data"}`),
+			expected:         []byte(`{"secret": "data"}`),
+			expectedIsSecret: true,
 		},
 		{
 			name: "secretKeyRef with missing key returns error",
@@ -2446,7 +2448,7 @@ func TestResolveGateInput(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ResolveGateInput(tc.gate, tc.namespace, tc.configMapData, tc.configMapBinaryData, tc.secretData)
+			result, isSecret, err := ResolveGateInput(tc.gate, tc.namespace, tc.configMapData, tc.configMapBinaryData, tc.secretData)
 
 			if tc.expectedError != "" {
 				assert.Error(t, err)
@@ -2454,6 +2456,7 @@ func TestResolveGateInput(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tc.expected, result)
+				assert.Equal(t, tc.expectedIsSecret, isSecret)
 			}
 		})
 	}

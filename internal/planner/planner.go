@@ -53,6 +53,9 @@ type WorkflowConfig struct {
 	BuildID      string
 	TaskQueue    string
 	GateInput    string
+	// IsInputSecret indicates whether the GateInput came from a Secret reference
+	// and should be treated as sensitive (not logged)
+	IsInputSecret bool
 }
 
 // Config holds the configuration for planning
@@ -73,6 +76,7 @@ func GeneratePlan(
 	workerDeploymentName string,
 	maxVersionsIneligibleForDeletion int32,
 	gateInput []byte,
+	isGateInputSecret bool,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
@@ -90,7 +94,7 @@ func GeneratePlan(
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, connection)
 
 	// Determine if we need to start any test workflows
-	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName, gateInput)
+	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName, gateInput, isGateInputSecret)
 
 	// Determine version config changes
 	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
@@ -337,6 +341,7 @@ func getTestWorkflows(
 	config *Config,
 	workerDeploymentName string,
 	gateInput []byte,
+	isGateInputSecret bool,
 ) []WorkflowConfig {
 	var testWorkflows []WorkflowConfig
 
@@ -360,11 +365,12 @@ func getTestWorkflows(
 	for _, tq := range targetVersion.TaskQueues {
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
-				WorkflowType: config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:   temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
-				BuildID:      targetVersion.BuildID,
-				TaskQueue:    tq.Name,
-				GateInput:    string(gateInput),
+				WorkflowType:  config.RolloutStrategy.Gate.WorkflowType,
+				WorkflowID:    temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
+				BuildID:       targetVersion.BuildID,
+				TaskQueue:     tq.Name,
+				GateInput:     string(gateInput),
+				IsInputSecret: isGateInputSecret,
 			})
 		}
 	}
@@ -520,45 +526,46 @@ func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPerce
 }
 
 // ResolveGateInput resolves the gate input from inline JSON or from a referenced ConfigMap/Secret
-func ResolveGateInput(gate *temporaliov1alpha1.GateWorkflowConfig, namespace string, configMapData map[string]string, configMapBinaryData map[string][]byte, secretData map[string][]byte) ([]byte, error) {
+// Returns the input bytes and a boolean indicating whether the input came from a Secret
+func ResolveGateInput(gate *temporaliov1alpha1.GateWorkflowConfig, namespace string, configMapData map[string]string, configMapBinaryData map[string][]byte, secretData map[string][]byte) ([]byte, bool, error) {
 	if gate == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	// If both are set, return error (webhook should prevent this, but double-check)
 	if gate.Input != nil && gate.InputFrom != nil {
-		return nil, fmt.Errorf("both spec.rollout.gate.input and spec.rollout.gate.inputFrom are set")
+		return nil, false, fmt.Errorf("both spec.rollout.gate.input and spec.rollout.gate.inputFrom are set")
 	}
 	if gate.Input != nil {
-		return gate.Input.Raw, nil
+		return gate.Input.Raw, false, nil
 	}
 	if gate.InputFrom == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	// Exactly one of ConfigMapKeyRef or SecretKeyRef should be set
 	if (gate.InputFrom.ConfigMapKeyRef == nil && gate.InputFrom.SecretKeyRef == nil) ||
 		(gate.InputFrom.ConfigMapKeyRef != nil && gate.InputFrom.SecretKeyRef != nil) {
-		return nil, fmt.Errorf("spec.rollout.gate.inputFrom must set exactly one of configMapKeyRef or secretKeyRef")
+		return nil, false, fmt.Errorf("spec.rollout.gate.inputFrom must set exactly one of configMapKeyRef or secretKeyRef")
 	}
 	if cmRef := gate.InputFrom.ConfigMapKeyRef; cmRef != nil {
 		if configMapData != nil {
 			if val, ok := configMapData[cmRef.Key]; ok {
-				return []byte(val), nil
+				return []byte(val), false, nil
 			}
 		}
 		if configMapBinaryData != nil {
 			if bval, ok := configMapBinaryData[cmRef.Key]; ok {
-				return bval, nil
+				return bval, false, nil
 			}
 		}
-		return nil, fmt.Errorf("key %q not found in ConfigMap %s/%s", cmRef.Key, namespace, cmRef.Name)
+		return nil, false, fmt.Errorf("key %q not found in ConfigMap %s/%s", cmRef.Key, namespace, cmRef.Name)
 	}
 	if secRef := gate.InputFrom.SecretKeyRef; secRef != nil {
 		if secretData != nil {
 			if bval, ok := secretData[secRef.Key]; ok {
-				return bval, nil
+				return bval, true, nil // true indicates this came from a Secret
 			}
 		}
-		return nil, fmt.Errorf("key %q not found in Secret %s/%s", secRef.Key, namespace, secRef.Name)
+		return nil, false, fmt.Errorf("key %q not found in Secret %s/%s", secRef.Key, namespace, secRef.Name)
 	}
-	return nil, nil
+	return nil, false, nil
 }
