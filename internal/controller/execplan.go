@@ -91,7 +91,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 						}
 					}
 				}
-				
+
 				// Log the input keys for non-secret sources (inline or ConfigMap)
 				l.Info("starting gate workflow",
 					"workflowType", wf.workflowType,
