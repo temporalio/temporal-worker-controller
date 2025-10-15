@@ -56,26 +56,14 @@ func getTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, er
 }
 
 func resolveAuthSecretName(tc *temporaliov1alpha1.TemporalConnection) (clientpool.AuthMode, string, error) {
-	auth := getAuthMode(tc)
-	switch auth {
-	case clientpool.AuthModeTLS:
+	if tc.Spec.MutualTLSSecretRef != nil {
 		name, err := getTLSSecretName(tc.Spec.MutualTLSSecretRef)
-		return auth, name, err
-	case clientpool.AuthModeAPIKey:
+		return clientpool.AuthModeTLS, name, err
+	} else if tc.Spec.APIKeySecretRef != nil {
 		name, err := getAPIKeySecretName(tc.Spec.APIKeySecretRef)
-		return auth, name, err
-	default:
-		return auth, "", nil
+		return clientpool.AuthModeAPIKey, name, err
 	}
-}
-
-func getAuthMode(temporalConnection *temporaliov1alpha1.TemporalConnection) clientpool.AuthMode {
-	if temporalConnection.Spec.MutualTLSSecretRef != nil {
-		return clientpool.AuthModeTLS
-	} else if temporalConnection.Spec.APIKeySecretRef != nil {
-		return clientpool.AuthModeAPIKey
-	}
-	return clientpool.AuthModeNoCredentials
+	return clientpool.AuthModeNoCredentials, "", nil
 }
 
 // TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object

@@ -6,7 +6,7 @@ temporal:
   namespace: "" # e.g. default
   # Use existing connection (leave empty to create new one)
   connectionName: "" # e.g. dev-server
-  # Connection details (required if connectionName is empty)
+  # Connection details (Required if connectionName is empty. Note, only one of APIKey or mtlsSecretName can be set)
   address: "" # e.g. <namespace>.tmprl.cloud:7233
   mtlsSecretName: "" # e.g. temporal-cloud-mtls
   apiKey:
