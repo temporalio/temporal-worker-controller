@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,6 +20,7 @@ type SecretReference struct {
 }
 
 // TemporalConnectionSpec defines the desired state of TemporalConnection
+// +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))",message="Only one of mutualTLSSecretRef or apiKeySecretRef may be set"
 type TemporalConnectionSpec struct {
 	// The host and port of the Temporal server.
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
@@ -32,6 +34,14 @@ type TemporalConnectionSpec struct {
 	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
 	// +optional
 	MutualTLSSecretRef *SecretReference `json:"mutualTLSSecretRef,omitempty"`
+
+	// APIKeySecretRef selects the Secret key that contains the API key used for authentication.
+	// The Secret must be `type: kubernetes.io/opaque` and exist in the same Kubernetes namespace as
+	// the TemporalConnection resource. This is a corev1.SecretKeySelector and encodes both:
+	//   - LocalObjectReference.Name: the name of the Secret resource
+	//   - Key: the data key within Secret.Data whose value is the API key token
+	// +optional
+	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
 }
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
