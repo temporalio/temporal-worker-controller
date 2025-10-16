@@ -43,6 +43,8 @@ jobs:
 
       - name: Bump Chart Version
         id: bump_version
+        env:
+          VERSION_BUMP: ${{ inputs.version_bump }}
         run: |
           # Get current version from Chart.yaml
           CURRENT_VERSION=$(grep 'version:' helm/temporal-worker-controller/Chart.yaml | awk '{print $2}')
@@ -55,11 +57,11 @@ jobs:
           PATCH=${VERSION_PARTS[2]}
 
           # Increment version based on input
-          if [[ "${{ inputs.version_bump }}" == "major" ]]; then
+          if [[ "${VERSION_BUMP}" == "major" ]]; then
             MAJOR=$((MAJOR + 1))
             MINOR=0
             PATCH=0
-          elif [[ "${{ inputs.version_bump }}" == "minor" ]]; then
+          elif [[ "${VERSION_BUMP}" == "minor" ]]; then
             MINOR=$((MINOR + 1))
             PATCH=0
           else
