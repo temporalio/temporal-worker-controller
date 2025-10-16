@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -68,7 +69,47 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
 	for _, wf := range p.startTestWorkflows {
-		if _, err := temporalClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
+		// Log workflow start details
+		if len(wf.input) > 0 {
+			if wf.isInputSecret {
+				// Don't log the actual input if it came from a Secret
+				l.Info("starting gate workflow",
+					"workflowType", wf.workflowType,
+					"taskQueue", wf.taskQueue,
+					"buildID", wf.buildID,
+					"inputBytes", len(wf.input),
+					"inputSource", "SecretRef (contents hidden)",
+				)
+			} else {
+				// For non-secret sources, parse JSON and extract keys
+				var inputKeys []string
+				if len(wf.input) > 0 {
+					var jsonData map[string]interface{}
+					if err := json.Unmarshal(wf.input, &jsonData); err == nil {
+						for key := range jsonData {
+							inputKeys = append(inputKeys, key)
+						}
+					}
+				}
+
+				// Log the input keys for non-secret sources (inline or ConfigMap)
+				l.Info("starting gate workflow",
+					"workflowType", wf.workflowType,
+					"taskQueue", wf.taskQueue,
+					"buildID", wf.buildID,
+					"inputBytes", len(wf.input),
+					"inputKeys", inputKeys,
+				)
+			}
+		} else {
+			l.Info("starting gate workflow",
+				"workflowType", wf.workflowType,
+				"taskQueue", wf.taskQueue,
+				"buildID", wf.buildID,
+				"inputBytes", 0,
+			)
+		}
+		opts := sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
 			WorkflowExecutionTimeout: time.Hour,
@@ -80,7 +121,14 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 					BuildId:        wf.buildID,
 				},
 			},
-		}, wf.workflowType); err != nil {
+		}
+		var err error
+		if len(wf.input) > 0 {
+			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType, json.RawMessage(wf.input))
+		} else {
+			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType)
+		}
+		if err != nil {
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
 		}
 	}

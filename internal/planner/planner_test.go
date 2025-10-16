@@ -20,6 +20,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -401,7 +402,7 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -1051,7 +1052,7 @@ func TestGetTestWorkflows(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			workflows := getTestWorkflows(tc.status, tc.config, "test/namespace")
+			workflows := getTestWorkflows(tc.status, tc.config, "test/namespace", nil, false)
 			assert.Equal(t, tc.expectWorkflows, len(workflows), "unexpected number of test workflows")
 		})
 	}
@@ -1927,7 +1928,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
@@ -2285,4 +2286,178 @@ func createTestDeploymentWithConnection(deploymentName, buildID string, connecti
 		buildID,
 		connection,
 	)
+}
+
+func TestResolveGateInput(t *testing.T) {
+	testCases := []struct {
+		name                string
+		gate                *temporaliov1alpha1.GateWorkflowConfig
+		namespace           string
+		configMapData       map[string]string
+		configMapBinaryData map[string][]byte
+		secretData          map[string][]byte
+		expected            []byte
+		expectedIsSecret    bool
+		expectedError       string
+	}{
+		{
+			name:      "nil gate returns nil",
+			gate:      nil,
+			namespace: "test-ns",
+			expected:  nil,
+		},
+		{
+			name: "inline input returns raw bytes",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				Input: &apiextensionsv1.JSON{
+					Raw: []byte(`{"key": "value"}`),
+				},
+			},
+			namespace: "test-ns",
+			expected:  []byte(`{"key": "value"}`),
+		},
+		{
+			name: "both input and inputFrom set returns error",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				Input: &apiextensionsv1.JSON{
+					Raw: []byte(`{"key": "value"}`),
+				},
+				InputFrom: &temporaliov1alpha1.GateInputSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-cm"},
+						Key:                  "test-key",
+					},
+				},
+			},
+			namespace:     "test-ns",
+			expectedError: "both spec.rollout.gate.input and spec.rollout.gate.inputFrom are set",
+		},
+		{
+			name:      "nil inputFrom returns nil",
+			gate:      &temporaliov1alpha1.GateWorkflowConfig{},
+			namespace: "test-ns",
+			expected:  nil,
+		},
+		{
+			name: "both configMapKeyRef and secretKeyRef set returns error",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				InputFrom: &temporaliov1alpha1.GateInputSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-cm"},
+						Key:                  "test-key",
+					},
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-secret"},
+						Key:                  "test-key",
+					},
+				},
+			},
+			namespace:     "test-ns",
+			expectedError: "spec.rollout.gate.inputFrom must set exactly one of configMapKeyRef or secretKeyRef",
+		},
+		{
+			name: "neither configMapKeyRef nor secretKeyRef set returns error",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				InputFrom: &temporaliov1alpha1.GateInputSource{},
+			},
+			namespace:     "test-ns",
+			expectedError: "spec.rollout.gate.inputFrom must set exactly one of configMapKeyRef or secretKeyRef",
+		},
+		{
+			name: "configMapKeyRef with data returns value",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				InputFrom: &temporaliov1alpha1.GateInputSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-cm"},
+						Key:                  "test-key",
+					},
+				},
+			},
+			namespace: "test-ns",
+			configMapData: map[string]string{
+				"test-key": `{"config": "from-cm"}`,
+			},
+			expected: []byte(`{"config": "from-cm"}`),
+		},
+		{
+			name: "configMapKeyRef with binary data returns value",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				InputFrom: &temporaliov1alpha1.GateInputSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-cm"},
+						Key:                  "test-key",
+					},
+				},
+			},
+			namespace: "test-ns",
+			configMapBinaryData: map[string][]byte{
+				"test-key": []byte(`{"config": "from-cm-binary"}`),
+			},
+			expected: []byte(`{"config": "from-cm-binary"}`),
+		},
+		{
+			name: "configMapKeyRef with missing key returns error",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				InputFrom: &temporaliov1alpha1.GateInputSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-cm"},
+						Key:                  "missing-key",
+					},
+				},
+			},
+			namespace: "test-ns",
+			configMapData: map[string]string{
+				"other-key": `{"config": "value"}`,
+			},
+			expectedError: `key "missing-key" not found in ConfigMap test-ns/test-cm`,
+		},
+		{
+			name: "secretKeyRef with data returns value",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				InputFrom: &temporaliov1alpha1.GateInputSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-secret"},
+						Key:                  "test-key",
+					},
+				},
+			},
+			namespace: "test-ns",
+			secretData: map[string][]byte{
+				"test-key": []byte(`{"secret": "data"}`),
+			},
+			expected:         []byte(`{"secret": "data"}`),
+			expectedIsSecret: true,
+		},
+		{
+			name: "secretKeyRef with missing key returns error",
+			gate: &temporaliov1alpha1.GateWorkflowConfig{
+				InputFrom: &temporaliov1alpha1.GateInputSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-secret"},
+						Key:                  "missing-key",
+					},
+				},
+			},
+			namespace: "test-ns",
+			secretData: map[string][]byte{
+				"other-key": []byte(`{"secret": "value"}`),
+			},
+			expectedError: `key "missing-key" not found in Secret test-ns/test-secret`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, isSecret, err := ResolveGateInput(tc.gate, tc.namespace, tc.configMapData, tc.configMapBinaryData, tc.secretData)
+
+			if tc.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedError)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expected, result)
+				assert.Equal(t, tc.expectedIsSecret, isSecret)
+			}
+		})
+	}
 }

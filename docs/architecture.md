@@ -71,6 +71,28 @@ Here is an example of a progressive cut-over strategy gated on the success of th
       workflowType: "HelloWorld"
 ```
 
+### Gate Input Flow
+
+When `spec.rollout.gate` is configured, the controller starts one test workflow per task queue in the Target Version. If gate input is provided, it is passed as the first workflow argument:
+
+```yaml
+rollout:
+  gate:
+    workflowType: "RolloutGate"
+    # Inline JSON object
+    input:
+      thresholds:
+        errorRate: 0.01
+        p95LatencyMs: 250
+    # Or reference ConfigMap/Secret (JSON document)
+    # inputFrom:
+    #   configMapKeyRef:
+    #     name: my-gate-input
+    #     key: payload.json
+```
+
+Input resolution happens in the controller before invoking the workflow. The payload must be a JSON object and is not logged, except for size and a short preview for debugging.
+
 ## Deployment Flow Diagram
 
 ```mermaid
