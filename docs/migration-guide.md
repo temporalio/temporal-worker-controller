@@ -92,7 +92,8 @@ metadata:
 spec:
   replicas: 3
   workerOptions:
-    connection: production-temporal
+    connectionRef:
+      name: production-temporal
     temporalNamespace: production
   rollout:
     strategy: Progressive  # Gradual rollout of new versions
@@ -190,7 +191,8 @@ metadata:
   namespace: default
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
-  mutualTLSSecret: temporal-cloud-mtls  # If using mTLS
+  mutualTLSSecretRef: 
+    name: temporal-cloud-mtls  # Optional: for mTLS
 ---
 apiVersion: temporal.io/v1alpha1
 kind: TemporalConnection
@@ -199,7 +201,8 @@ metadata:
   namespace: default
 spec:
   hostPort: "staging.abc123.tmprl.cloud:7233"
-  mutualTLSSecret: temporal-cloud-mtls
+  mutualTLSSecretRef: 
+    name: temporal-cloud-mtls
 ```
 
 ### Step 3: Prepare Your Worker Code
@@ -267,7 +270,8 @@ metadata:
 spec:
   replicas: 3
   workerOptions:
-    connection: production-temporal
+    connectionRef:
+      name: production-temporal
     temporalNamespace: production
   # Start with Progressive strategy using conservative ramp percentages
   rollout:
@@ -674,4 +678,4 @@ See the [Concepts](concepts.md) document for detailed explanations of the resour
 
 This approach ensures a safe transition from unversioned to versioned workflows without disrupting running workflows or introducing deployment risks.
 
-The Temporal Worker Controller should significantly improve your deployment safety and reduce the risk of workflow disruptions while providing automated rollout capabilities that weren't possible with unversioned workflows. 
+The Temporal Worker Controller should significantly improve your deployment safety and reduce the risk of workflow disruptions while providing automated rollout capabilities that weren't possible with unversioned workflows.
