@@ -87,7 +87,7 @@ Gradually increases the percentage of new workflow executions routed to the new 
 
 ### Worker Options
 Configuration that tells the controller how to connect to the same Temporal cluster and namespace that the worker is connected to:
-- **connection**: Reference to a `TemporalConnection` custom resource
+- **connectionRef**: A reference to a `TemporalConnection` custom resource. This object contains a `name` field to specify the `TemporalConnection` resource.
 - **temporalNamespace**: The Temporal namespace to connect to
 - **deploymentName**: The logical deployment name in Temporal (auto-generated if not specified)
 
