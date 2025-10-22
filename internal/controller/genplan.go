@@ -15,6 +15,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -41,10 +42,12 @@ type plan struct {
 
 // startWorkflowConfig defines a workflow to be started
 type startWorkflowConfig struct {
-	workflowType string
-	workflowID   string
-	buildID      string
-	taskQueue    string
+	workflowType  string
+	workflowID    string
+	buildID       string
+	taskQueue     string
+	input         []byte
+	isInputSecret bool // indicates if input should be treated as sensitive
 }
 
 // generatePlan creates a plan for the controller to execute
@@ -86,6 +89,39 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		rolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
 	}
 
+	// Resolve gate input if gate is configured
+	var gateInput []byte
+	var isGateInputSecret bool
+	if rolloutStrategy.Gate != nil {
+		// Fetch ConfigMap or Secret data if needed
+		var configMapData map[string]string
+		var configMapBinaryData map[string][]byte
+		var secretData map[string][]byte
+
+		if rolloutStrategy.Gate.InputFrom != nil {
+			if cmRef := rolloutStrategy.Gate.InputFrom.ConfigMapKeyRef; cmRef != nil {
+				cm := &corev1.ConfigMap{}
+				if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: cmRef.Name}, cm); err != nil {
+					return nil, fmt.Errorf("failed to get ConfigMap %s/%s: %w", w.Namespace, cmRef.Name, err)
+				}
+				configMapData = cm.Data
+				configMapBinaryData = cm.BinaryData
+			}
+			if secRef := rolloutStrategy.Gate.InputFrom.SecretKeyRef; secRef != nil {
+				sec := &corev1.Secret{}
+				if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: secRef.Name}, sec); err != nil {
+					return nil, fmt.Errorf("failed to get Secret %s/%s: %w", w.Namespace, secRef.Name, err)
+				}
+				secretData = sec.Data
+			}
+		}
+
+		gateInput, isGateInputSecret, err = planner.ResolveGateInput(rolloutStrategy.Gate, w.Namespace, configMapData, configMapBinaryData, secretData)
+		if err != nil {
+			return nil, fmt.Errorf("unable to resolve gate input: %w", err)
+		}
+	}
+
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
 		RolloutStrategy: rolloutStrategy,
@@ -101,6 +137,8 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		plannerConfig,
 		workerDeploymentName,
 		r.MaxDeploymentVersionsIneligibleForDeletion,
+		gateInput,
+		isGateInputSecret,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)
@@ -119,10 +157,12 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
 		plan.startTestWorkflows = append(plan.startTestWorkflows, startWorkflowConfig{
-			workflowType: wf.WorkflowType,
-			workflowID:   wf.WorkflowID,
-			buildID:      wf.BuildID,
-			taskQueue:    wf.TaskQueue,
+			workflowType:  wf.WorkflowType,
+			workflowID:    wf.WorkflowID,
+			buildID:       wf.BuildID,
+			taskQueue:     wf.TaskQueue,
+			input:         []byte(wf.GateInput),
+			isInputSecret: wf.IsInputSecret,
 		})
 	}
 

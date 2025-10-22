@@ -131,6 +131,27 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 		}
 	}
 
+	// Validate gate input fields
+	if s.Gate != nil {
+		gate := s.Gate
+		if gate.Input != nil && gate.InputFrom != nil {
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.rollout.gate"), "input & inputFrom",
+					"only one of input or inputFrom may be set"),
+			)
+		}
+		if gate.InputFrom != nil {
+			cm := gate.InputFrom.ConfigMapKeyRef
+			sec := gate.InputFrom.SecretKeyRef
+			if (cm == nil && sec == nil) || (cm != nil && sec != nil) {
+				allErrs = append(allErrs,
+					field.Invalid(field.NewPath("spec.rollout.gate.inputFrom"), gate.InputFrom,
+						"exactly one of configMapKeyRef or secretKeyRef must be set"),
+				)
+			}
+		}
+	}
+
 	return allErrs
 }
 
