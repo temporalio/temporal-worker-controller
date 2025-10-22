@@ -261,6 +261,18 @@ func NewDeploymentWithOwnerRef(
 				},
 			},
 		})
+	} else if connection.APIKeySecretRef != nil {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env,
+				corev1.EnvVar{
+					Name: "TEMPORAL_API_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: connection.APIKeySecretRef,
+					},
+				},
+			)
+			podSpec.Containers[i] = container
+		}
 	}
 
 	// Build pod annotations
@@ -306,6 +318,7 @@ func NewDeploymentWithOwnerRef(
 	}
 }
 
+// TODO (Shivam): Change hash when secret name is updated as well.
 func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionSpec) string {
 	// HostPort is required, but MutualTLSSecret can be empty for non-mTLS connections
 	if connection.HostPort == "" {
@@ -318,6 +331,8 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 	_, _ = hasher.Write([]byte(connection.HostPort))
 	if connection.MutualTLSSecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
+	} else if connection.APIKeySecretRef != nil {
+		_, _ = hasher.Write([]byte(connection.APIKeySecretRef.Name))
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil))

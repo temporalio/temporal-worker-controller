@@ -149,7 +149,8 @@ Configure how workers connect to Temporal:
 
 ```yaml
 workerOptions:
-  connection: production-temporal     # Reference to TemporalConnection
+  connectionRef:
+    name: production-temporal     # Reference to TemporalConnection
   temporalNamespace: production      # Temporal namespace
   taskQueues:                        # Optional: explicit task queue list
     - order-processing
@@ -167,7 +168,8 @@ metadata:
   name: production-temporal
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
-  mutualTLSSecret: temporal-cloud-mtls  # Optional: for mTLS
+  mutualTLSSecretRef: 
+    name: temporal-cloud-mtls  # Optional: for mTLS
 ```
 
 ## Gate Configuration
@@ -219,7 +221,8 @@ metadata:
 spec:
   replicas: 5
   workerOptions:
-    connection: production-temporal
+    connectionRef:
+      name: production-temporal
     temporalNamespace: production
   rollout:
     strategy: Progressive
@@ -247,7 +250,8 @@ metadata:
 spec:
   replicas: 2
   workerOptions:
-    connection: staging-temporal
+    connectionRef:
+      name: staging-temporal
     temporalNamespace: staging
   rollout:
     strategy: Progressive
@@ -267,7 +271,8 @@ Configure workers that handle multiple task queues:
 
 ```yaml
 workerOptions:
-  connection: production-temporal
+  connectionRef:
+    name: production-temporal
   temporalNamespace: production
   taskQueues:
     - order-processing
