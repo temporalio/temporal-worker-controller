@@ -275,10 +275,12 @@ const (
 type GateWorkflowConfig struct {
 	WorkflowType string `json:"workflowType"`
 	// Input is an arbitrary JSON object passed as the first parameter to the gate workflow.
+	// For inputs with secrets use SecretKeyRef in InputFrom to omit from logs.
 	// +optional
 	Input *apiextensionsv1.JSON `json:"input,omitempty"`
 	// InputFrom references a key in a ConfigMap or Secret whose contents are passed
 	// as the first parameter to the gate workflow. The referenced value should be a JSON document.
+	// For inputs with secrets use SecretKeyRef to omit from logs.
 	// +optional
 	InputFrom *GateInputSource `json:"inputFrom,omitempty"`
 }

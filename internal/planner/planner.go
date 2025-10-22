@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -525,26 +526,41 @@ func getCurrentStepIndex(steps []temporaliov1alpha1.RolloutStep, targetRampPerce
 	return result
 }
 
+// validateGateInputConfig validates that gate input is configured correctly
+func validateGateInputConfig(gate *temporaliov1alpha1.GateWorkflowConfig) error {
+	if gate == nil {
+		return nil
+	}
+	// If both are set, return error (webhook should prevent this, but double-check)
+	if gate.Input != nil && gate.InputFrom != nil {
+		return errors.New("both spec.rollout.gate.input and spec.rollout.gate.inputFrom are set")
+	}
+	if gate.InputFrom == nil {
+		return nil
+	}
+	// Exactly one of ConfigMapKeyRef or SecretKeyRef should be set
+	cmSet := gate.InputFrom.ConfigMapKeyRef != nil
+	secSet := gate.InputFrom.SecretKeyRef != nil
+	if (cmSet && secSet) || (!cmSet && !secSet) {
+		return errors.New("spec.rollout.gate.inputFrom must set exactly one of configMapKeyRef or secretKeyRef")
+	}
+	return nil
+}
+
 // ResolveGateInput resolves the gate input from inline JSON or from a referenced ConfigMap/Secret
 // Returns the input bytes and a boolean indicating whether the input came from a Secret
 func ResolveGateInput(gate *temporaliov1alpha1.GateWorkflowConfig, namespace string, configMapData map[string]string, configMapBinaryData map[string][]byte, secretData map[string][]byte) ([]byte, bool, error) {
 	if gate == nil {
 		return nil, false, nil
 	}
-	// If both are set, return error (webhook should prevent this, but double-check)
-	if gate.Input != nil && gate.InputFrom != nil {
-		return nil, false, fmt.Errorf("both spec.rollout.gate.input and spec.rollout.gate.inputFrom are set")
+	if err := validateGateInputConfig(gate); err != nil {
+		return nil, false, err
 	}
 	if gate.Input != nil {
 		return gate.Input.Raw, false, nil
 	}
 	if gate.InputFrom == nil {
 		return nil, false, nil
-	}
-	// Exactly one of ConfigMapKeyRef or SecretKeyRef should be set
-	if (gate.InputFrom.ConfigMapKeyRef == nil && gate.InputFrom.SecretKeyRef == nil) ||
-		(gate.InputFrom.ConfigMapKeyRef != nil && gate.InputFrom.SecretKeyRef != nil) {
-		return nil, false, fmt.Errorf("spec.rollout.gate.inputFrom must set exactly one of configMapKeyRef or secretKeyRef")
 	}
 	if cmRef := gate.InputFrom.ConfigMapKeyRef; cmRef != nil {
 		if configMapData != nil {
