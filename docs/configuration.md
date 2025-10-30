@@ -159,7 +159,9 @@ workerOptions:
 
 ### Connection Configuration
 
-Reference a `TemporalConnection` resource that defines server details:
+Reference a `TemporalConnection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both.
+
+**Using mTLS Authentication:**
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
@@ -171,6 +173,128 @@ spec:
   mutualTLSSecretRef: 
     name: temporal-cloud-mtls  # Optional: for mTLS
 ```
+**Creating an mTLS Secret:**
+
+The mTLS secret must be of type `kubernetes.io/tls` and contain `tls.crt` (certificate) and `tls.key` (private key) keys.
+
+<details>
+<summary>Show detailed creation steps</summary>
+
+**Option 1: Using kubectl from existing files:**
+
+If you already have your certificate and key files:
+
+```bash
+kubectl create secret tls temporal-cloud-mtls \
+  --cert=/path/to/certificate.pem \
+  --key=/path/to/private-key.key \
+  --namespace=your-namespace
+```
+
+**Option 2: Using kubectl with literal base64-encoded values:**
+
+```bash
+kubectl create secret tls temporal-cloud-mtls \
+  --cert=<(echo -n "$CERTIFICATE_CONTENT") \
+  --key=<(echo -n "$KEY_CONTENT") \
+  --namespace=your-namespace
+```
+
+**Option 3: Creating via YAML manifest:**
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: temporal-cloud-mtls
+  namespace: your-namespace
+type: kubernetes.io/tls
+data:
+  # Base64-encoded certificate
+  tls.crt: LS0tLS1CRUdJTi...
+  # Base64-encoded private key
+  tls.key: LS0tLS1CRUdJTi...
+```
+
+To generate the base64-encoded values:
+
+```bash
+# For tls.crt
+cat certificate.pem | base64 -w 0
+
+# For tls.key
+cat private-key.key | base64 -w 0
+```
+
+</details>
+
+**Using API Key Authentication:**
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: TemporalConnection
+metadata:
+  name: production-temporal
+spec:
+  hostPort: "production.abc123.tmprl.cloud:7233"
+  apiKeySecretRef:
+    name: temporal-api-key  # Name of the Secret
+    key: api-key            # Key within the Secret containing the API key token
+```
+
+**Creating an API Key Secret:**
+
+The API key secret must be of type `kubernetes.io/opaque` (or you can omit the type field). The API key token should be stored under a key of your choice.
+
+<details>
+<summary>Show detailed creation steps</summary>
+
+**Option 1: Using kubectl with literal value:**
+
+```bash
+kubectl create secret generic temporal-api-key \
+  --from-literal=api-key=your-api-key-token-here \
+  --namespace=your-namespace
+```
+
+**Option 2: Using kubectl from a file:**
+
+If your API key is stored in a file:
+
+```bash
+kubectl create secret generic temporal-api-key \
+  --from-file=api-key=/path/to/api-key-file.txt \
+  --namespace=your-namespace
+```
+
+**Option 3: Creating via YAML manifest:**
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: temporal-api-key
+  namespace: your-namespace
+type: kubernetes.io/opaque
+data:
+  # Base64-encoded API key token
+  # The key name here must match the 'key' field in apiKeySecretRef
+  api-key: eW91ci1hcGkta2V5LXRva2VuLWhlcmU=
+```
+
+To generate the base64-encoded value:
+
+```bash
+echo -n "your-api-key-token-here" | base64
+```
+
+</details>
+
+**Important Notes:**
+- Both secrets must be created in the same Kubernetes namespace as the `TemporalConnection` resource
+- Only one authentication method can be specified per `TemporalConnection` (either `mutualTLSSecretRef` or `apiKeySecretRef`)
+- The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
+- For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
 
 ## Gate Configuration
 
