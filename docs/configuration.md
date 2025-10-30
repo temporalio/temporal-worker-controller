@@ -173,23 +173,6 @@ spec:
   mutualTLSSecretRef: 
     name: temporal-cloud-mtls  # Optional: for mTLS
 ```
-
-**Using API Key Authentication:**
-
-```yaml
-apiVersion: temporal.io/v1alpha1
-kind: TemporalConnection
-metadata:
-  name: production-temporal
-spec:
-  hostPort: "production.abc123.tmprl.cloud:7233"
-  apiKeySecretRef:
-    name: temporal-api-key  # Name of the Secret
-    key: api-key            # Key within the Secret containing the API key token
-```
-
-#### Creating Authentication Secrets
-
 **Creating an mTLS Secret:**
 
 The mTLS secret must be of type `kubernetes.io/tls` and contain `tls.crt` (certificate) and `tls.key` (private key) keys.
@@ -244,6 +227,20 @@ cat private-key.key | base64 -w 0
 ```
 
 </details>
+
+**Using API Key Authentication:**
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: TemporalConnection
+metadata:
+  name: production-temporal
+spec:
+  hostPort: "production.abc123.tmprl.cloud:7233"
+  apiKeySecretRef:
+    name: temporal-api-key  # Name of the Secret
+    key: api-key            # Key within the Secret containing the API key token
+```
 
 **Creating an API Key Secret:**
 
