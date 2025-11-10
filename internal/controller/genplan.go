@@ -83,6 +83,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	// Check if we need to force manual strategy due to external modification
 	rolloutStrategy := w.Spec.RolloutStrategy
 	if w.Status.LastModifierIdentity != getControllerIdentity() &&
+		w.Status.LastModifierIdentity != serverDeleteVersionIdentity &&
 		w.Status.LastModifierIdentity != "" &&
 		!temporalState.IgnoreLastModifier {
 		l.Info(fmt.Sprintf("Forcing Manual rollout strategy since Worker Deployment was modified by a user with a different identity '%s'; to allow controller to make changes again, set 'temporal.io/ignore-last-modifier=true' in the metadata of your Current or Ramping Version; see ownership runbook at docs/ownership.md for more details.", w.Status.LastModifierIdentity))

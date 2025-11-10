@@ -151,17 +151,37 @@ func GetWorkerDeploymentState(
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
 
 			// Get drain time information
-			versionResp, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-				BuildID: version.Version.BuildId,
-			})
-			if err == nil {
-				drainedSince := versionResp.Info.DrainageInfo.LastChangedTime
+			var desc temporalClient.WorkerDeploymentVersionDescription
+			describeVersionUntilDrainTime := func() error {
+				desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+					BuildID: version.Version.BuildId,
+				})
+				if err != nil {
+					return err
+				}
+				if desc.Info.DrainageInfo == nil {
+					return fmt.Errorf("drainage info nil for build %s", version.Version.BuildId)
+				}
+				if desc.Info.DrainageInfo.DrainageStatus != temporalClient.WorkerDeploymentVersionDrainageStatusDrained {
+					return fmt.Errorf("version info does not say that build %s is drained", version.Version.BuildId)
+				}
+				return err
+			}
+			// At first, version is found in DeploymentInfo.VersionSummaries but may not have the full drainage info in
+			// describe version, so we describe with backoff.
+			// If the version was just deleted by the server, we may never succeed at describing it, and it should
+			// be treated as NotRegistered, since it no longer exists in Temporal.
+			var notFound *serviceerror.NotFound
+			if err = withBackoff(10*time.Second, 1*time.Second, describeVersionUntilDrainTime); err == nil { //revive:disable-line:max-control-nesting
+				drainedSince := desc.Info.DrainageInfo.LastChangedTime
 				versionInfo.DrainedSince = &drainedSince
 				// If the deployment exists and has replicas, we assume there are versioned pollers, no need to check
 				deployment, ok := k8sDeployments[version.Version.BuildId]
 				if !ok || deployment.Status.Replicas == 0 { //revive:disable-line:max-control-nesting
-					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, versionResp.Info.TaskQueuesInfos)
+					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, desc.Info.TaskQueuesInfos)
 				}
+			} else if errors.As(err, &notFound) {
+				versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
 			}
 		} else {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive

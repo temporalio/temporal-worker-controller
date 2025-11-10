@@ -18,6 +18,8 @@ const (
 	controllerVersionEnvKey                                    = "CONTROLLER_VERSION"
 	controllerIdentityEnvKey                                   = "CONTROLLER_IDENTITY"
 	ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
+
+	serverDeleteVersionIdentity = "try-delete-for-add-version"
 )
 
 // Version is set by goreleaser via ldflags at build time

@@ -790,7 +790,6 @@ func TestIntegration(t *testing.T) {
 						WithTargetVersion("v6", temporaliov1alpha1.VersionStatusCurrent, -1, false, false).
 						WithCurrentVersion("v6", true, false).
 						WithDeprecatedVersions( // drained AND has pollers -> eligible for deletion
-							testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusNotRegistered, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v3", temporaliov1alpha1.VersionStatusDrained, true, false, true),
