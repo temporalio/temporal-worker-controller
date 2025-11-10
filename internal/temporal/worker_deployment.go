@@ -180,7 +180,7 @@ func GetWorkerDeploymentState(
 				if !ok || deployment.Status.Replicas == 0 { //revive:disable-line:max-control-nesting
 					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, desc.Info.TaskQueuesInfos)
 				}
-			} else if errors.As(err, &notFound) {
+			} else if errors.As(err, &notFound) { //revive:disable-line:max-control-nesting
 				versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
 			}
 		} else {
