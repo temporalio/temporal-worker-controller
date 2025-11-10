@@ -24,18 +24,34 @@ for the Worker Controller to take over, you can update the metadata to indicate 
 There is no Temporal server support for Worker Deployment Version-level metadata, so you'll have to set this value on
 the Current Version of your Worker Deployment.
 
+Note: The controller decodes this metadata value as a string. Be sure to set the value to the string "true" (not the boolean true).
+
 ```bash
 temporal worker deployment update-metadata-version \
    --deployment-name $MY_DEPLOYMENT \
-   --build-id $CURRENT_VERSION_BUILD_ID
-   --metadata 'temporal.io/ignore-last-modifier=true'`
+   --build-id $CURRENT_VERSION_BUILD_ID \
+   --metadata 'temporal.io/ignore-last-modifier="true"'
+```
+Alternatively, if your CLI supports JSON input:
+```bash
+temporal worker deployment update-metadata-version \
+   --deployment-name $MY_DEPLOYMENT \
+   --build-id $CURRENT_VERSION_BUILD_ID \
+   --metadata-json '{"temporal.io/ignore-last-modifier":"true"}'
 ```
 In the rare case that you have a nil Current Version when you are passing back ownership, you should set it on your Ramping Version
 ```bash
 temporal worker deployment update-metadata-version \
    --deployment-name $MY_DEPLOYMENT \
-   --build-id $RAMPING_VERSION_BUILD_ID
-   --metadata 'temporal.io/ignore-last-modifier=true'`
+   --build-id $RAMPING_VERSION_BUILD_ID \
+   --metadata 'temporal.io/ignore-last-modifier="true"'
+```
+Or with JSON:
+```bash
+temporal worker deployment update-metadata-version \
+   --deployment-name $MY_DEPLOYMENT \
+   --build-id $RAMPING_VERSION_BUILD_ID \
+   --metadata-json '{"temporal.io/ignore-last-modifier":"true"}'
 ```
 
 In the even rarer case that you have nil Current Version and nil Ramping Version, you'll need to use the CLI or SDK to
