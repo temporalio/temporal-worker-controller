@@ -41,6 +41,7 @@ const (
 	testDrainageVisibilityGracePeriod    = time.Second
 	testDrainageRefreshInterval          = time.Second
 	testMaxVersionsIneligibleForDeletion = 5
+	testMaxVersionsInDeployment          = 6
 )
 
 // setupKubebuilderAssets sets up the KUBEBUILDER_ASSETS environment variable if not already set
