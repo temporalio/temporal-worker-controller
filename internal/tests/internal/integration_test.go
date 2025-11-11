@@ -184,9 +184,9 @@ func TestIntegration(t *testing.T) {
 				WithWaitTime(5*time.Second).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-									WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-									WithCurrentVersion("v4", true, false).
-									WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+						WithCurrentVersion("v4", true, false).
+						WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 							testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
@@ -384,9 +384,9 @@ func TestIntegration(t *testing.T) {
 				WithWaitTime(5*time.Second).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-									WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-									WithCurrentVersion("v4", true, false).
-									WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+						WithCurrentVersion("v4", true, false).
+						WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 							testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
@@ -583,7 +583,7 @@ func TestIntegration(t *testing.T) {
 				),
 		},
 		{
-			name: "progressive-rollout-blocked-at-max-versions-ineligible-for-deletion",
+			name: "progressive-rollout-blocked-at-ctrlr-max-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -611,9 +611,9 @@ func TestIntegration(t *testing.T) {
 				WithWaitTime(5*time.Second).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-									WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-									WithCurrentVersion("v4", true, false).
-									WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+						WithCurrentVersion("v4", true, false).
+						WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 							testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
@@ -709,7 +709,7 @@ func TestIntegration(t *testing.T) {
 	testsShortPollerTTL := []testCase{
 		// Note: Add tests that require pollers to expire quickly here
 		{
-			name: "6th-rollout-unblocked-after-pollers-die-versions-eligible-for-deletion",
+			name: "6th-rollout-unblocked-after-pollers-die-max-ctrlr-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
