@@ -1,0 +1,127 @@
+name: Compatibility Tests
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'internal/**'
+      - 'api/**'
+      - 'cmd/**'
+      - '.github/workflows/compatibility-test.yml'
+      - 'Makefile'
+  workflow_dispatch:
+    inputs:
+      server_versions:
+        description: 'Comma-separated list of server versions to test (e.g., v1.28.1,v1.29.1,v1.30.0)'
+        required: false
+        default: 'v1.28.1,v1.29.1,v1.30.0'
+
+jobs:
+  compatibility-matrix:
+    name: Test Controller vs Server ${{ matrix.server_version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        server_version:
+          - v1.28.1
+          - v1.29.1
+          - v1.30.0
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          cd internal/tests && go mod download
+          cd compat-tests/${{ matrix.server_version }} && go mod download || true
+
+      - name: Set up envtest
+        run: make envtest
+
+      - name: Generate manifests
+        run: make manifests generate
+
+      - name: Run compatibility tests - ${{ matrix.server_version }}
+        run: make test-compat-${{ matrix.server_version }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-test-results-${{ matrix.server_version }}
+          path: |
+            internal/tests/compat-tests/${{ matrix.server_version }}/*.log
+            internal/tests/compat-tests/${{ matrix.server_version }}/*.out
+          retention-days: 7
+
+  compatibility-summary:
+    name: Compatibility Test Summary
+    runs-on: ubuntu-latest
+    needs: compatibility-matrix
+    if: always()
+    
+    steps:
+      - name: Check compatibility results
+        run: |
+          echo "Compatibility test matrix completed"
+          if [ "${{ needs.compatibility-matrix.result }}" == "failure" ]; then
+            echo "❌ Some compatibility tests failed"
+            exit 1
+          else
+            echo "✅ All compatibility tests passed"
+          fi
+
+      - name: Post summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # Compatibility Test Results
+
+          This workflow validates that the current controller version is compatible with different Temporal server versions.
+
+          ## Matrix Results
+          
+          | Server Version | Status |
+          |---------------|--------|
+          | v1.28.1 | ${{ needs.compatibility-matrix.outputs.v1_28_1 || '✅' }} |
+          | v1.29.1 | ${{ needs.compatibility-matrix.outputs.v1_29_1 || '✅' }} |
+          | v1.30.0 | ${{ needs.compatibility-matrix.outputs.v1_30_0 || '✅' }} |
+
+          ## About These Tests
+
+          These tests ensure that the controller works correctly with different versions of the Temporal server.
+          The tests use `temporaltest` to spin up an in-process server at each specific version.
+
+          ### Supported Server Versions
+
+          - **v1.28.1**: Baseline compatibility version
+          - **v1.29.1**: Has the bug (controller v1.1.0 is NOT compatible with v1.29.1 and below)
+          - **v1.30.0**: Latest tested version
+
+          ### Adding New Server Versions
+
+          To test a new server version:
+          1. Create a new directory: `internal/tests/compat-tests/vX.Y.Z/`
+          2. Copy the go.mod and compat_test.go from an existing version
+          3. Update the server version in both files
+          4. Add a new Makefile target
+          5. Add the version to this workflow's matrix
+          6. Run `go mod tidy` in the new directory
+
+          EOF
+

@@ -222,6 +222,30 @@ test-integration: manifests generate envtest ## Run integration tests against lo
 	@echo "Running integration tests..."
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -v -tags test_dep ./internal/tests/internal -run TestIntegration
 
+.PHONY: test-compat
+test-compat: test-compat-v1.28.1 test-compat-v1.29.1 test-compat-v1.30.0 ## Run all compatibility tests
+
+.PHONY: test-compat-v1.28.1
+test-compat-v1.28.1: manifests generate envtest ## Run compatibility tests against Temporal server v1.28.1
+	@echo "Running compatibility tests against v1.28.1..."
+	cd internal/tests/compat-tests/v1.28.1 && \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	go test -v -tags test_dep -run TestCompatibility
+
+.PHONY: test-compat-v1.29.1
+test-compat-v1.29.1: manifests generate envtest ## Run compatibility tests against Temporal server v1.29.1
+	@echo "Running compatibility tests against v1.29.1..."
+	cd internal/tests/compat-tests/v1.29.1 && \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	go test -v -tags test_dep -run TestCompatibility
+
+.PHONY: test-compat-v1.30.0
+test-compat-v1.30.0: manifests generate envtest ## Run compatibility tests against Temporal server v1.30.0
+	@echo "Running compatibility tests against v1.30.0..."
+	cd internal/tests/compat-tests/v1.30.0 && \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	go test -v -tags test_dep -run TestCompatibility
+
 ##@ Build
 
 .PHONY: build
