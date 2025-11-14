@@ -19,6 +19,7 @@ profiles:
           context: .
           docker:
             dockerfile: Dockerfile
+            useBuildkit: true
     manifests:
       helm:
         releases:
