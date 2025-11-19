@@ -1,5 +1,9 @@
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY temporal-worker-controller /usr/local/bin/temporal-worker-controller
+WORKDIR /app
+
+COPY --chown=nonroot:nonroot temporal-worker-controller /usr/local/bin/temporal-worker-controller
+
+USER nonroot
 
 ENTRYPOINT ["temporal-worker-controller"]
