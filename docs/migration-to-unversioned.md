@@ -1,8 +1,12 @@
 # Migrating from Versioned to Unversioned Workflows
 
-This guide walks you through reverting from worker versioning back to unversioned Temporal Workflows. It assumes you have enabled worker versioning and currently have (or previously had) versioned workers polling the Temporal Server.
+This guide walks you through reverting from versioned workflows back to unversioned Temporal Workflows. It assumes you have enabled worker versioning and currently have (or previously had) versioned workers polling the Temporal Server.
 
 ---
+
+## Important Note
+
+This guide uses specific terminology that is defined in the [Concepts](concepts.md) document. Please review the concepts document first to understand key terms like **Temporal Worker Deployment**, **`TemporalWorkerDeployment` CRD**, and **Kubernetes `Deployment`**, as well as the relationship between them.
 
 ## Table of Contents
 
@@ -64,7 +68,7 @@ worker := worker.New(client, "my-task-queue", worker.Options{})
 
 Deploy the updated worker so that unversioned pollers begin polling the system.
 
-> **Note:** If using the Worker Controller, change the Rollout Strategy in your `TemporalWorkerDeployment` custom resource to `Manual`. This will prevent the controller from automatically setting a new current version.
+> **Note:** If using the Worker Controller to make this deployment, change the Rollout Strategy in your `TemporalWorkerDeployment` custom resource to `Manual`. This will prevent the controller from automatically setting the newly generated buildID as the latest current version.
 
 ### Step 3: Set Current Version to Unversioned
 
@@ -94,7 +98,7 @@ This section highlights the ways in which one can delete the corresponding Worke
 
 ### Deleting Kubernetes Deployments created with the Worker-Controller:
 
-The Worker Controller will delete Kubernetes Deployments, which represent versioned workers, based on your configured Sunset Strategy. The Worker Controller deletes Kubernetes Deployments for a version once the time since it became drained exceeds the combined `Scaledown` and `Sunset` delay. Deleting these deployments stops the workers from polling the Temporal Server, which is a pre-requisite for deleting a Worker-Version.
+The Worker Controller will delete Kubernetes Deployments, which represent versioned workers, based on your configured Sunset Strategy. Specifically, the Controller deletes Kubernetes Deployments for a version once the time since it became drained exceeds the combined `Scaledown` and `Delete` delay. Deleting these deployments stops the workers from polling the Temporal Server, which is a pre-requisite for deleting a Worker-Version.
 
 ### Deleting Worker Versions
 
@@ -107,7 +111,7 @@ temporal worker deployment delete-version \
     --build-id <your-build-id>
 ```
 
-> **Tip:** To skip the drainage requirement, add the `--skip-drainage` flag:
+> **Tip:** To skip the draining requirement, add the `--skip-drainage` flag:
 >
 > ```bash
 > temporal worker deployment delete-version \
