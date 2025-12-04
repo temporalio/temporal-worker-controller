@@ -66,9 +66,17 @@ worker := worker.New(client, "my-task-queue", worker.Options{})
 
 ### Step 2: Deploy the Unversioned Worker
 
-Deploy the updated worker so that unversioned pollers begin polling the system.
+Deploy the updated worker, using a manner of your choice, so that unversioned pollers begin polling the system.
 
-> **Note:** If using the Worker Controller to make this deployment, change the Rollout Strategy in your `TemporalWorkerDeployment` custom resource to `Manual`. This will prevent the controller from automatically setting the newly generated buildID as the latest current version.
+Confirm unversioned pollers are polling by using the CLI and running the following 
+command:
+
+```bash
+temporal task-queue describe --task-queue <your-task-queue> --namespace <your-namespace> 
+```
+
+Look for pollers with an `UNVERSIONED` Build ID in the output.
+
 
 ### Step 3: Set Current Version to Unversioned
 
@@ -89,6 +97,7 @@ After completing the migration steps:
 1. **Verify in the Temporal UI** that traffic is gradually shifting from versioned workers to unversioned workers.
 2. **AutoUpgrade workflows** will eventually move onto the unversioned worker(s).
 3. **Pinned workflows** that were started on versioned workers will continue and complete execution on those pinned workers.
+4. **New executions** of workflows, regardless of them being *Pinned* or *AutoUpgrade*, shall start on the deployed unversioned workers (unless they have a versioning-override set.)
 
 ---
 
