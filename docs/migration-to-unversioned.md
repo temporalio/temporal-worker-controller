@@ -1,6 +1,6 @@
 # Migrating from Versioned to Unversioned Workflows
 
-This guide walks you through reverting from versioned workflows back to unversioned Temporal Workflows. It assumes you have enabled worker versioning and currently have (or previously had) versioned workers polling the Temporal Server.
+This guide walks you through reverting from versioned workers to unversioned workers. It assumes you have enabled worker versioning and currently have (or previously had) versioned workers polling the Temporal Server.
 
 ---
 
@@ -66,17 +66,7 @@ worker := worker.New(client, "my-task-queue", worker.Options{})
 
 ### Step 2: Deploy the Unversioned Worker
 
-Deploy the updated worker, using a manner of your choice, so that unversioned pollers begin polling the system.
-
-Confirm unversioned pollers are polling by using the CLI and running the following 
-command:
-
-```bash
-temporal task-queue describe --task-queue <your-task-queue> --namespace <your-namespace> 
-```
-
-Look for pollers with an `UNVERSIONED` Build ID in the output.
-
+Deploy your unversioned workers, using a manner of your choice, and ensure they are polling all of the Task Queues in your Worker Deployment. This can be done by verifying their presence on the Task Queues page (https://cloud.temporal.io/namespaces/<your-namespace>/task-queues/<your-task-queue>)
 
 ### Step 3: Set Current Version to Unversioned
 
@@ -97,13 +87,13 @@ After completing the migration steps:
 1. **Verify in the Temporal UI** that traffic is gradually shifting from versioned workers to unversioned workers.
 2. **AutoUpgrade workflows** will eventually move onto the unversioned worker(s).
 3. **Pinned workflows** that were started on versioned workers will continue and complete execution on those pinned workers.
-4. **New executions** of workflows, regardless of them being *Pinned* or *AutoUpgrade*, shall start on the deployed unversioned workers (unless they have a versioning-override set.)
+4. **New executions** of workflows, regardless of them being *Pinned* or *AutoUpgrade*, will start on the deployed unversioned workers (unless they have a versioning-override set.)
 
 ---
 
 ## Cleanup and Garbage Collection
 
-This section highlights the ways in which one can delete the corresponding Worker Versions or Worker Deployment resources that were created in Temporal.
+**NOTE**: The cleanup steps below are optional as it is not required to garbage collect the Worker Versions or Worker Deployment resources from the Temporal Server while migrating to unversioned workers. 
 
 ### Deleting Kubernetes Deployments created with the Worker-Controller:
 
@@ -112,22 +102,13 @@ The Worker Controller will delete Kubernetes Deployments, which represent versio
 ### Deleting Worker Versions
 
 A Worker Version can be deleted once it has been drained and has no active pollers.
-Once it's drained and without active pollers, delete the Worker Version using:
+Once it's drained and is without active pollers, delete the Worker Version using:
 
 ```bash
 temporal worker deployment delete-version \
     --deployment-name <your-deployment-name> \
     --build-id <your-build-id>
 ```
-
-> **Tip:** To skip the draining requirement, add the `--skip-drainage` flag:
->
-> ```bash
-> temporal worker deployment delete-version \
->     --deployment-name <your-deployment-name> \
->     --build-id <your-build-id> \
->     --skip-drainage
-> ```
 
 ### Deleting the Worker Deployment
 
