@@ -66,7 +66,7 @@ worker := worker.New(client, "my-task-queue", worker.Options{})
 
 ### Step 2: Deploy the Unversioned Worker
 
-Deploy your unversioned workers, using a manner of your choice, and ensure they are polling all of the Task Queues in your Worker Deployment. This can be done by verifying their presence on the Task Queues page (https://cloud.temporal.io/namespaces/<your-namespace>/task-queues/<your-task-queue>)
+Deploy your unversioned workers as you would without the Worker Controller (ie. as their own `Deployments` not connected to a `TemporalWorkerDeployment` resource) and ensure they are polling all of the Task Queues in your Worker Deployment. This can be done by verifying their presence on the Task Queues page (https://cloud.temporal.io/namespaces/<your-namespace>/task-queues/<your-task-queue>)
 
 ### Step 3: Set Current Version to Unversioned
 
