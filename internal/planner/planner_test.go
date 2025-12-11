@@ -2176,6 +2176,154 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 	}
 }
 
+func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
+	tests := []struct {
+		name               string
+		buildID            string
+		existingDeployment *appsv1.Deployment
+		newSpec            *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		connection         temporaliov1alpha1.TemporalConnectionSpec
+		expectUpdate       bool
+		expectImage        string
+	}{
+		{
+			name:               "non-existing deployment does not result in an update",
+			buildID:            "non-existent",
+			existingDeployment: nil,
+			newSpec:            createWorkerSpecWithBuildID("stable-build-id"),
+			connection:         createDefaultConnectionSpec(),
+			expectUpdate:       false,
+		},
+		{
+			name:    "no update when buildID is not explicitly set (auto-generated buildID)",
+			buildID: "v1",
+			existingDeployment: createDeploymentForDriftTest(1, "v1", "old-image:v1"),
+			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: int32Ptr(1),
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "worker", Image: "new-image:v2"},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+					// BuildID not set - means auto-generated
+				},
+			},
+			connection:   createDefaultConnectionSpec(),
+			expectUpdate: false, // No update because BuildID is not explicitly set
+		},
+		{
+			name:    "same image does not trigger update when buildID is set",
+			buildID: "stable-build-id",
+			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
+			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: int32Ptr(1),
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "worker", Image: "my-image:v1"},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+					BuildID:           "stable-build-id",
+				},
+			},
+			connection:   createDefaultConnectionSpec(),
+			expectUpdate: false, // No update because image is the same
+		},
+		{
+			name:    "different image triggers update when buildID is set",
+			buildID: "stable-build-id",
+			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "old-image:v1"),
+			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: int32Ptr(1),
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "worker", Image: "new-image:v2"},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+					BuildID:           "stable-build-id",
+				},
+			},
+			connection:   createDefaultConnectionSpec(),
+			expectUpdate: true,
+			expectImage:  "new-image:v2",
+		},
+		{
+			name:    "different replicas triggers update when buildID is set",
+			buildID: "stable-build-id",
+			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
+			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: int32Ptr(3), // Changed from 1 to 3
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "worker", Image: "my-image:v1"},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+					BuildID:           "stable-build-id",
+				},
+			},
+			connection:   createDefaultConnectionSpec(),
+			expectUpdate: true,
+			expectImage:  "my-image:v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sState := &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{},
+			}
+
+			buildID := tt.buildID
+			if tt.existingDeployment != nil {
+				k8sState.Deployments[buildID] = tt.existingDeployment
+			}
+
+			result := checkAndUpdateDeploymentPodTemplateSpec(buildID, k8sState, tt.newSpec, tt.connection)
+
+			if !tt.expectUpdate {
+				assert.Nil(t, result, "Expected no update, but got deployment")
+				return
+			}
+
+			require.NotNil(t, result, "Expected deployment update, but got nil")
+
+			// Check container image was updated
+			if tt.expectImage != "" {
+				require.Len(t, result.Spec.Template.Spec.Containers, 1, "Should have one container")
+				assert.Equal(t, tt.expectImage, result.Spec.Template.Spec.Containers[0].Image, "Container image should be updated")
+			}
+
+			// Check that controller-injected env vars are present
+			found := false
+			for _, container := range result.Spec.Template.Spec.Containers {
+				for _, env := range container.Env {
+					if env.Name == "TEMPORAL_WORKER_BUILD_ID" {
+						assert.Equal(t, buildID, env.Value, "TEMPORAL_WORKER_BUILD_ID should be set")
+						found = true
+						break
+					}
+				}
+			}
+			assert.True(t, found, "Should find TEMPORAL_WORKER_BUILD_ID environment variable")
+		})
+	}
+}
+
 // Helper function to create a deployment with the specified replicas and the default connection spec hash
 func createDeploymentWithDefaultConnectionSpecHash(replicas int32) *appsv1.Deployment {
 	return &appsv1.Deployment{
@@ -2207,6 +2355,45 @@ func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deplo
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						k8s.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(createOutdatedConnectionSpec()),
+					},
+				},
+			},
+		},
+	}
+}
+
+// Helper function to create a deployment for drift testing
+func createDeploymentForDriftTest(replicas int32, buildID string, image string) *appsv1.Deployment {
+	r := replicas
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-deployment",
+			Labels: map[string]string{
+				k8s.BuildIDLabel: buildID,
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &r,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					k8s.BuildIDLabel: buildID,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						k8s.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(createDefaultConnectionSpec()),
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "worker",
+							Image: image,
+							Env: []corev1.EnvVar{
+								{Name: "TEMPORAL_DEPLOYMENT_NAME", Value: "test/my-worker"},
+							},
+						},
 					},
 				},
 			},
@@ -2272,6 +2459,27 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec 
 		},
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace: "test-namespace",
+		},
+	}
+}
+
+// createWorkerSpecWithBuildID creates a worker spec with an explicit buildID set
+func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
+	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+		Replicas: int32Ptr(1),
+		Template: corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "worker",
+						Image: "test-image:latest",
+					},
+				},
+			},
+		},
+		WorkerOptions: temporaliov1alpha1.WorkerOptions{
+			TemporalNamespace: "test-namespace",
+			BuildID:           buildID,
 		},
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
@@ -31,7 +32,7 @@ const (
 	WorkerDeploymentNameSeparator = "/"
 	ResourceNameSeparator         = "-"
 	MaxBuildIdLen                 = 63
-	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
+	ConnectionSpecHashAnnotation = "temporal.io/connection-spec-hash"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -112,6 +113,15 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 }
 
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+	// Check for user-provided build ID in spec.workerOptions.buildID
+	if override := w.Spec.WorkerOptions.BuildID; override != "" {
+		cleaned := cleanBuildID(override)
+		if cleaned != "" {
+			return TruncateString(cleaned, MaxBuildIdLen)
+		}
+		// Fall through to default hash-based generation if buildID is invalid after cleaning
+	}
+
 	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
 			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
@@ -177,9 +187,12 @@ func CleanStringForDNS(s string) string {
 //
 // Temporal build IDs only need to be ASCII.
 func cleanBuildID(s string) string {
-	// Keep only letters, numbers, dashes, and dots.
+	// Keep only letters, numbers, dashes, underscores, and dots.
 	re := regexp.MustCompile(`[^a-zA-Z0-9-._]+`)
-	return re.ReplaceAllString(s, ResourceNameSeparator)
+	s = re.ReplaceAllString(s, ResourceNameSeparator)
+	// Trim leading/trailing separators to comply with K8s label requirements
+	// (must begin and end with alphanumeric character)
+	return strings.Trim(s, "-._")
 }
 
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
