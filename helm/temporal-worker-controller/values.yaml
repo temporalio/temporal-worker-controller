@@ -55,15 +55,13 @@ securityContext:
 # architectures. You can build your manager image using the makefile target docker-buildx.
 affinity: {}
   # podAntiAffinity:
-  #   preferredDuringSchedulingIgnoredDuringExecution:
-  #   - weight: 100
-  #     podAffinityTerm:
-  #       labelSelector:
+  #   requiredDuringSchedulingIgnoredDuringExecution:
+  #     - labelSelector:
   #         matchExpressions:
-  #         - key: control-plane
-  #           operator: In
-  #           values:
-  #           - controller-manager
+  #           - key: app.kubernetes.io/component
+  #             operator: In
+  #             values:
+  #               - manager
   #       topologyKey: kubernetes.io/hostname
   # nodeAffinity:
   #   requiredDuringSchedulingIgnoredDuringExecution:
