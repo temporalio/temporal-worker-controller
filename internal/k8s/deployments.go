@@ -16,6 +16,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -180,6 +181,53 @@ func cleanBuildID(s string) string {
 	// Keep only letters, numbers, dashes, and dots.
 	re := regexp.MustCompile(`[^a-zA-Z0-9-._]+`)
 	return re.ReplaceAllString(s, ResourceNameSeparator)
+}
+
+func NewHPAWithOwnerRef(
+	typeMeta *metav1.TypeMeta,
+	objectMeta *metav1.ObjectMeta,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	buildID string,
+) *autoscalingv2.HorizontalPodAutoscaler {
+	selectorLabels := map[string]string{
+		twdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
+		BuildIDLabel: TruncateString(buildID, 63),
+	}
+	blockOwnerDeletion := true
+
+	return &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:                       ComputeVersionedDeploymentName(objectMeta.Name, buildID) + "-hpa",
+			Namespace:                  objectMeta.Namespace,
+			DeletionGracePeriodSeconds: nil,
+			Labels:                     selectorLabels,
+			Annotations:                spec.Template.Annotations,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         typeMeta.APIVersion,
+				Kind:               typeMeta.Kind,
+				Name:               objectMeta.Name,
+				UID:                objectMeta.UID,
+				BlockOwnerDeletion: &blockOwnerDeletion,
+				Controller:         nil,
+			}},
+			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
+			//                 deleting deployments that are still reachable.
+		},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       ComputeVersionedDeploymentName(objectMeta.Name, buildID),
+			},
+			// Use defaults of 1 pod. minReplicas is allowed to be 0 if the alpha feature gate HPAScaleToZero is enabled
+			// and at least one Object or External metric is configured. Scaling is active as long as at least one metric
+			// value is available. +optional
+			MinReplicas: spec.MinReplicas,
+			MaxReplicas: *spec.MaxReplicas,
+			Metrics:     nil, // default: 80% CPU utilization
+			Behavior:    nil, // can configure stabilization time, metric tolerance, for scale-up and scale-down. There are "policies" for this, but start with the default.
+		},
+	}
 }
 
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
@@ -356,4 +404,21 @@ func NewDeploymentWithControllerRef(
 		return nil, err
 	}
 	return d, nil
+}
+
+func NewHPAWithControllerRef(
+	w *temporaliov1alpha1.TemporalWorkerDeployment,
+	buildID string,
+	reconcilerScheme *runtime.Scheme,
+) (*autoscalingv2.HorizontalPodAutoscaler, error) {
+	h := NewHPAWithOwnerRef(
+		&w.TypeMeta,
+		&w.ObjectMeta,
+		&w.Spec,
+		buildID,
+	)
+	if err := ctrl.SetControllerReference(w, h, reconcilerScheme); err != nil {
+		return nil, err
+	}
+	return h, nil
 }

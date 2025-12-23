@@ -39,6 +39,23 @@ type TemporalWorkerDeploymentSpec struct {
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
+	// Minimum of desired pods. This is a pointer to distinguish between explicit
+	// zero and not specified. Defaults to 1.
+	// This field makes the controller create an HPA for the deployments created by this spec.
+	// Min and max replicas are passed on to the HPA, which will be responsible for scaling up and down the number of pods.
+	// +optional
+	// +kubebuilder:default=1
+	MinReplicas *int32 `json:"minReplicas,omitempty" protobuf:"varint,1,opt,name=minReplicas"`
+
+	// Maximum of desired pods. This is a pointer to distinguish between explicit
+	// zero and not specified. Defaults to 0.
+	// This field makes the controller create an HPA for the deployments created by this spec.
+	// Min and max replicas are passed on to the HPA, which will be responsible for scaling up and down the number of pods.
+	// If MaxReplicas is not specified, no HPA will be created.
+	// +optional
+	// +kubebuilder:default=0
+	MaxReplicas *int32 `json:"maxReplicas,omitempty" protobuf:"varint,1,opt,name=maxReplicas"`
+
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
 	Template corev1.PodTemplateSpec `json:"template"`

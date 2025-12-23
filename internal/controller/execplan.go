@@ -31,6 +31,15 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
+	// Create HPA
+	if p.CreateHPA != nil {
+		l.Info("creating HPA", "HPA", p.CreateHPA)
+		if err := r.Create(ctx, p.CreateHPA); err != nil {
+			l.Error(err, "unable to create HPA", "HPA", p.CreateHPA)
+			return err
+		}
+	}
+
 	// Delete deployments
 	for _, d := range p.DeleteDeployments {
 		l.Info("deleting deployment", "deployment", d)
@@ -62,6 +71,15 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		if err := r.Update(ctx, d); err != nil {
 			l.Error(err, "unable to update deployment", "deployment", d)
 			return fmt.Errorf("unable to update deployment: %w", err)
+		}
+	}
+
+	// Update HPAs
+	for _, h := range p.UpdateHPAs {
+		l.Info("updating HPA", "HPA", h.Name, "namespace", h.Namespace)
+		if err := r.Update(ctx, h); err != nil {
+			l.Error(err, "unable to update HPA", "HPA", h)
+			return fmt.Errorf("unable to update HPA: %w", err)
 		}
 	}
 

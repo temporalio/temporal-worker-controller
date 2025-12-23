@@ -64,7 +64,6 @@ spec:
                   gate:
                     properties:
                       input:
-                        type: object
                         x-kubernetes-preserve-unknown-fields: true
                       inputFrom:
                         properties:
@@ -73,25 +72,27 @@ spec:
                               key:
                                 type: string
                               name:
+                                default: ""
                                 type: string
                               optional:
                                 type: boolean
                             required:
                             - key
-                            - name
                             type: object
+                            x-kubernetes-map-type: atomic
                           secretKeyRef:
                             properties:
                               key:
                                 type: string
                               name:
+                                default: ""
                                 type: string
                               optional:
                                 type: boolean
                             required:
                             - key
-                            - name
                             type: object
+                            x-kubernetes-map-type: atomic
                         type: object
                       workflowType:
                         type: string
@@ -3741,6 +3742,10 @@ spec:
                                             type: integer
                                           signerName:
                                             type: string
+                                          userAnnotations:
+                                            additionalProperties:
+                                              type: string
+                                            type: object
                                         required:
                                         - keyType
                                         - signerName
@@ -3935,6 +3940,18 @@ spec:
                         x-kubernetes-list-map-keys:
                         - name
                         x-kubernetes-list-type: map
+                      workloadRef:
+                        properties:
+                          name:
+                            type: string
+                          podGroup:
+                            type: string
+                          podGroupReplicaKey:
+                            type: string
+                        required:
+                        - name
+                        - podGroup
+                        type: object
                     required:
                     - containers
                     type: object

@@ -14,6 +14,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -27,8 +28,10 @@ type plan struct {
 	// Which actions to take
 	DeleteDeployments []*appsv1.Deployment
 	CreateDeployment  *appsv1.Deployment
+	CreateHPA         *autoscalingv2.HorizontalPodAutoscaler
 	ScaleDeployments  map[*corev1.ObjectReference]uint32
 	UpdateDeployments []*appsv1.Deployment
+	UpdateHPAs        []*autoscalingv2.HorizontalPodAutoscaler
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
@@ -174,6 +177,15 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 			return nil, err
 		}
 		plan.CreateDeployment = d
+
+		// TODO(carlydf): create a more explicit opt-in to HPA..
+		if w.Spec.MaxReplicas != nil {
+			h, err := r.newHPA(w, targetBuildID)
+			if err != nil {
+				return nil, err
+			}
+			plan.CreateHPA = h
+		}
 	}
 
 	return plan, nil
@@ -186,4 +198,12 @@ func (r *TemporalWorkerDeploymentReconciler) newDeployment(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) (*appsv1.Deployment, error) {
 	return k8s.NewDeploymentWithControllerRef(w, buildID, connection, r.Scheme)
+}
+
+// Create a new HPA with owner reference
+func (r *TemporalWorkerDeploymentReconciler) newHPA(
+	w *temporaliov1alpha1.TemporalWorkerDeployment,
+	buildID string,
+) (*autoscalingv2.HorizontalPodAutoscaler, error) {
+	return k8s.NewHPAWithControllerRef(w, buildID, r.Scheme)
 }
