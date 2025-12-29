@@ -19,6 +19,10 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - description: Current replicas
+      jsonPath: .status.replicas
+      name: Replicas
+      type: integer
     - description: Current build ID
       jsonPath: .status.currentVersion.buildID
       name: Current
@@ -64,7 +68,6 @@ spec:
                   gate:
                     properties:
                       input:
-                        type: object
                         x-kubernetes-preserve-unknown-fields: true
                       inputFrom:
                         properties:
@@ -73,25 +76,27 @@ spec:
                               key:
                                 type: string
                               name:
+                                default: ""
                                 type: string
                               optional:
                                 type: boolean
                             required:
                             - key
-                            - name
                             type: object
+                            x-kubernetes-map-type: atomic
                           secretKeyRef:
                             properties:
                               key:
                                 type: string
                               name:
+                                default: ""
                                 type: string
                               optional:
                                 type: boolean
                             required:
                             - key
-                            - name
                             type: object
+                            x-kubernetes-map-type: atomic
                         type: object
                       workflowType:
                         type: string
@@ -4057,6 +4062,11 @@ spec:
                 type: array
               lastModifierIdentity:
                 type: string
+              replicas:
+                format: int32
+                type: integer
+              selector:
+                type: string
               targetVersion:
                 properties:
                   buildID:
@@ -4141,4 +4151,8 @@ spec:
     served: true
     storage: true
     subresources:
+      scale:
+        labelSelectorPath: .status.selector
+        specReplicasPath: .spec.replicas
+        statusReplicasPath: .status.replicas
       status: {}

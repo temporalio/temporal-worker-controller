@@ -5,6 +5,8 @@
 package controller
 
 import (
+	"strings"
+
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -34,6 +36,25 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 	}
 
 	status.LastModifierIdentity = m.temporalState.LastModifierIdentity
+
+	// Compute total replicas from all managed deployments for /scale subresource
+	// This allows HPA/KEDA to query the current replica count
+	var totalReplicas int32
+	for _, deployment := range m.k8sState.Deployments {
+		if deployment.Status.Replicas > 0 {
+			totalReplicas += deployment.Status.Replicas
+		}
+	}
+	status.Replicas = totalReplicas
+
+	// Set label selector for /scale subresource - allows HPA/KEDA to discover pods
+	// Uses app.kubernetes.io/name label since all managed pods share this label
+	// Note: workerDeploymentName is namespace/name, but we only want the name part for labels
+	name := m.workerDeploymentName
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	status.Selector = "app.kubernetes.io/name=" + name
 
 	// Get build IDs directly from temporal state
 	currentBuildID := m.temporalState.CurrentBuildID

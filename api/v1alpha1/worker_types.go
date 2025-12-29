@@ -108,6 +108,17 @@ type TemporalWorkerDeploymentStatus struct {
 	// so it's generally not a good idea to read from the status of the root object.
 	// Instead, you should reconstruct it every run.
 
+	// Replicas is the total number of non-terminated pods targeted by this TemporalWorkerDeployment.
+	// This is used by the /scale subresource to report current replica count to HPA/KEDA.
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Selector is the label selector for pods managed by this TemporalWorkerDeployment.
+	// This is used by the /scale subresource to allow HPA/KEDA to discover pods.
+	// Format: "app.kubernetes.io/name=<name>"
+	// +optional
+	Selector string `json:"selector,omitempty"`
+
 	// TargetVersion is the desired next version. If TargetVersion.Deployment is nil,
 	// then the controller should create it. If not nil, the controller should
 	// wait for it to become healthy and then move it to the CurrentVersion.
@@ -348,7 +359,9 @@ type ManualRolloutStrategy struct{}
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas,selectorpath=.status.selector
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
+//+kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".status.replicas",description="Current replicas"
 //+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
 //+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
