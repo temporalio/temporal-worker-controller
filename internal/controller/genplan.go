@@ -178,8 +178,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		}
 		plan.CreateDeployment = d
 
-		// TODO(carlydf): create a more explicit opt-in to HPA..
-		if w.Spec.MaxReplicas != nil {
+		if w.Spec.Hpa != nil {
 			h, err := r.newHPA(w, targetBuildID)
 			if err != nil {
 				return nil, err

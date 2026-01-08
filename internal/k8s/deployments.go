@@ -213,20 +213,7 @@ func NewHPAWithOwnerRef(
 			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
 			//                 deleting deployments that are still reachable.
 		},
-		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
-			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
-				APIVersion: "apps/v1",
-				Kind:       "Deployment",
-				Name:       ComputeVersionedDeploymentName(objectMeta.Name, buildID),
-			},
-			// Use defaults of 1 pod. minReplicas is allowed to be 0 if the alpha feature gate HPAScaleToZero is enabled
-			// and at least one Object or External metric is configured. Scaling is active as long as at least one metric
-			// value is available. +optional
-			MinReplicas: spec.MinReplicas,
-			MaxReplicas: *spec.MaxReplicas,
-			Metrics:     nil, // default: 80% CPU utilization
-			Behavior:    nil, // can configure stabilization time, metric tolerance, for scale-up and scale-down. There are "policies" for this, but start with the default.
-		},
+		Spec: *spec.Hpa,
 	}
 }
 

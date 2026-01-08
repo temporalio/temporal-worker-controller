@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	"k8s.io/api/autoscaling/v2"
 	"k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -466,6 +467,11 @@ func (in *TemporalWorkerDeploymentSpec) DeepCopyInto(out *TemporalWorkerDeployme
 		in, out := &in.Replicas, &out.Replicas
 		*out = new(int32)
 		**out = **in
+	}
+	if in.Hpa != nil {
+		in, out := &in.Hpa, &out.Hpa
+		*out = new(v2.HorizontalPodAutoscalerSpec)
+		(*in).DeepCopyInto(*out)
 	}
 	in.Template.DeepCopyInto(&out.Template)
 	if in.ProgressDeadlineSeconds != nil {

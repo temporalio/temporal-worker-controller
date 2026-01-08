@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,26 +36,15 @@ type TemporalWorkerDeploymentSpec struct {
 	// Number of desired pods. This is a pointer to distinguish between explicit
 	// zero and not specified. Defaults to 1.
 	// This field makes TemporalWorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
+	// Ignored if the Hpa field is set.
 	// +optional
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
-	// Minimum of desired pods. This is a pointer to distinguish between explicit
-	// zero and not specified. Defaults to 1.
-	// This field makes the controller create an HPA for the deployments created by this spec.
-	// Min and max replicas are passed on to the HPA, which will be responsible for scaling up and down the number of pods.
+	// Setting this field makes the controller create an HPA for the deployments created by this spec.
+	// If set, Replicas field value will be ignored.
 	// +optional
-	// +kubebuilder:default=1
-	MinReplicas *int32 `json:"minReplicas,omitempty" protobuf:"varint,1,opt,name=minReplicas"`
-
-	// Maximum of desired pods. This is a pointer to distinguish between explicit
-	// zero and not specified. Defaults to 0.
-	// This field makes the controller create an HPA for the deployments created by this spec.
-	// Min and max replicas are passed on to the HPA, which will be responsible for scaling up and down the number of pods.
-	// If MaxReplicas is not specified, no HPA will be created.
-	// +optional
-	// +kubebuilder:default=0
-	MaxReplicas *int32 `json:"maxReplicas,omitempty" protobuf:"varint,1,opt,name=maxReplicas"`
+	Hpa *autoscalingv2.HorizontalPodAutoscalerSpec `json:"hpa,omitempty" protobuf:"varint,1,opt,name=hpa"`
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
