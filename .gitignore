@@ -10,4 +10,7 @@ certs
 .DS_Store
 
 .claude
-.config 
+.config
+
+# Load test binary
+internal/demo/scripts/loadtest/loadtest 

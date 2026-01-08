@@ -19,7 +19,9 @@ func main() {
 	// Register activities and workflows
 	w.RegisterWorkflow(helloworld.RolloutGate)
 	w.RegisterWorkflow(helloworld.HelloWorld)
+	w.RegisterWorkflow(helloworld.LoadTestWorkflow)
 	w.RegisterActivity(helloworld.GetSubject)
+	w.RegisterActivity(helloworld.LoadTestActivity)
 
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatal(err)

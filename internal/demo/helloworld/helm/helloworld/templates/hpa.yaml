@@ -1,0 +1,81 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-hpa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{ include "helloworld.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}
+
+  minReplicas: 2
+  maxReplicas: 20
+
+  metrics:
+    # --- CPU utilization ---
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+    # --- Memory utilization ---
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+    # --- Prometheus custom metric ---
+    # - backlog (only via API)
+    # - schedule_to_start_latency (available from worker, proxy for backlog)
+    # - slot_utilization (available from worker)
+    # 1. Let # of slots be fixed to a size where, if filled, CPU utilization crosses threshold.
+    # 2. Turn on poller auto-tuning, which will increase pollers in response to backlog
+
+
+    # This is per-pod
+    #- type: Pods
+    #  pods:
+    #    metric:
+    #      name: http_requests_per_second
+    #    target:
+    #      type: AverageValue
+    #      averageValue: "100"
+
+  behavior:
+    scaleUp:
+      # If only scaling on CPU and Memory, set this to 0 since CPU/Mem are already trailing.
+      # If also scaling up on backlog count,
+      stabilizationWindowSeconds: 60
+      selectPolicy: Max # pick the most aggressive policy
+      policies:
+        # Allow fast scale-up by percentage
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        # Also allow an absolute increase
+        #- type: Pods
+        #  value: 4
+        #  periodSeconds: 60
+
+    scaleDown: # ideally would like to scale down on low slot utilization
+      stabilizationWindowSeconds: 300
+      selectPolicy: Min # pick the least aggressive policy
+      policies:
+        # Gradual scale-down by percentage
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+        # Or by absolute pod count (At most 2 pods can be removed every 60 seconds)
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+
+# Could add a PodDisruptionBudget to enforce minAvailable across more scenarios
+# Other major lever for graceful scaledown is terminationGracePeriodSeconds.

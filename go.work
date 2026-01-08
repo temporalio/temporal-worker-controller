@@ -3,5 +3,6 @@ go 1.25.0
 use (
 	.
 	./internal/demo
+	./internal/demo/scripts/loadtest
 	./internal/tests
 )
