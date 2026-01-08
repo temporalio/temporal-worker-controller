@@ -190,8 +190,23 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 		return nil
 	}
 
-	// Compare the deployed spec with the desired spec to detect drift
-	if !hasPodTemplateSpecDrift(existingDeployment, spec) {
+	// Get the stored hash from the existing deployment's pod template annotations
+	storedHash := ""
+	if existingDeployment.Spec.Template.Annotations != nil {
+		storedHash = existingDeployment.Spec.Template.Annotations[k8s.PodTemplateSpecHashAnnotation]
+	}
+
+	// Backwards compatibility: if no hash annotation exists (legacy deployment),
+	// don't trigger an update - the hash will be added on the next spec change
+	if storedHash == "" {
+		return nil
+	}
+
+	// Compute the hash of the current user-provided pod template spec
+	currentHash := k8s.ComputePodTemplateSpecHash(spec.Template)
+
+	// If hashes match, no drift detected
+	if storedHash == currentHash {
 		return nil
 	}
 
@@ -200,92 +215,6 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 	updateDeploymentWithPodTemplateSpec(existingDeployment, spec, connection)
 
 	return existingDeployment
-}
-
-// hasPodTemplateSpecDrift compares the existing deployment with the desired TWD spec
-// to determine if a rolling update is needed. It compares user-controllable fields
-// that would indicate the pod spec has changed.
-func hasPodTemplateSpecDrift(deployment *appsv1.Deployment, spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec) bool {
-	// Check replicas
-	if deployment.Spec.Replicas != nil && spec.Replicas != nil {
-		if *deployment.Spec.Replicas != *spec.Replicas {
-			return true
-		}
-	} else if (deployment.Spec.Replicas == nil) != (spec.Replicas == nil) {
-		return true
-	}
-
-	// Check MinReadySeconds
-	if deployment.Spec.MinReadySeconds != spec.MinReadySeconds {
-		return true
-	}
-
-	// Compare container images - this is the most common change
-	existingContainers := deployment.Spec.Template.Spec.Containers
-	desiredContainers := spec.Template.Spec.Containers
-
-	if len(existingContainers) != len(desiredContainers) {
-		return true
-	}
-
-	for i := range desiredContainers {
-		if i >= len(existingContainers) {
-			return true
-		}
-		// Compare image
-		if existingContainers[i].Image != desiredContainers[i].Image {
-			return true
-		}
-		// Compare resources
-		if !resourcesEqual(existingContainers[i].Resources, desiredContainers[i].Resources) {
-			return true
-		}
-	}
-
-	// Compare init containers
-	existingInitContainers := deployment.Spec.Template.Spec.InitContainers
-	desiredInitContainers := spec.Template.Spec.InitContainers
-
-	if len(existingInitContainers) != len(desiredInitContainers) {
-		return true
-	}
-
-	for i := range desiredInitContainers {
-		if i >= len(existingInitContainers) {
-			return true
-		}
-		if existingInitContainers[i].Image != desiredInitContainers[i].Image {
-			return true
-		}
-	}
-
-	// No drift detected
-	return false
-}
-
-// resourcesEqual compares two ResourceRequirements structs
-func resourcesEqual(a, b corev1.ResourceRequirements) bool {
-	// Compare limits
-	if len(a.Limits) != len(b.Limits) {
-		return false
-	}
-	for k, v := range a.Limits {
-		if bv, ok := b.Limits[k]; !ok || !v.Equal(bv) {
-			return false
-		}
-	}
-
-	// Compare requests
-	if len(a.Requests) != len(b.Requests) {
-		return false
-	}
-	for k, v := range a.Requests {
-		if bv, ok := b.Requests[k]; !ok || !v.Equal(bv) {
-			return false
-		}
-	}
-
-	return true
 }
 
 // updateDeploymentWithPodTemplateSpec updates an existing deployment with a new pod template spec
@@ -392,6 +321,8 @@ func updateDeploymentWithPodTemplateSpec(
 		podAnnotations[k] = v
 	}
 	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
+	// Store the new pod template spec hash
+	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(spec.Template)
 
 	// Preserve existing pod labels and add/update required labels
 	podLabels := make(map[string]string)

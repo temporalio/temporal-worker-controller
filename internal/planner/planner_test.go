@@ -2259,7 +2259,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			expectImage:  "new-image:v2",
 		},
 		{
-			name:    "different replicas triggers update when buildID is set",
+			name:    "replicas-only change does not trigger update (handled by scaling logic)",
 			buildID: "stable-build-id",
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
@@ -2267,7 +2267,36 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
+							// Same image as stored - hash will match
 							{Name: "worker", Image: "my-image:v1"},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+					BuildID:           "stable-build-id",
+				},
+			},
+			connection: createDefaultConnectionSpec(),
+			// Replicas are not part of PodTemplateSpec, so hash won't change.
+			// Replicas changes are handled by getScaleDeployments() instead.
+			expectUpdate: false,
+		},
+		{
+			name:    "env var change triggers update when buildID is set",
+			buildID: "stable-build-id",
+			existingDeployment: createDeploymentForDriftTestWithEnv(1, "stable-build-id", "my-image:v1",
+				[]corev1.EnvVar{{Name: "MY_VAR", Value: "old-value"}}),
+			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: int32Ptr(1),
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "worker",
+								Image: "my-image:v1",
+								Env:   []corev1.EnvVar{{Name: "MY_VAR", Value: "new-value"}},
+							},
 						},
 					},
 				},
@@ -2279,6 +2308,29 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			connection:   createDefaultConnectionSpec(),
 			expectUpdate: true,
 			expectImage:  "my-image:v1",
+		},
+		{
+			name:    "backwards compat: no hash annotation means no update",
+			buildID: "stable-build-id",
+			existingDeployment: createDeploymentWithoutHashAnnotation(1, "stable-build-id", "old-image:v1"),
+			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: int32Ptr(1),
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "worker", Image: "new-image:v2"},
+						},
+					},
+				},
+				WorkerOptions: temporaliov1alpha1.WorkerOptions{
+					TemporalNamespace: "test-namespace",
+					BuildID:           "stable-build-id",
+				},
+			},
+			connection: createDefaultConnectionSpec(),
+			// Legacy deployment without hash annotation should not trigger update
+			// to maintain backwards compatibility
+			expectUpdate: false,
 		},
 	}
 
@@ -2365,6 +2417,17 @@ func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deplo
 // Helper function to create a deployment for drift testing
 func createDeploymentForDriftTest(replicas int32, buildID string, image string) *appsv1.Deployment {
 	r := replicas
+	// Create the user-provided pod template spec (without controller modifications)
+	userTemplate := corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "worker",
+					Image: image,
+				},
+			},
+		},
+	}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-deployment",
@@ -2382,6 +2445,99 @@ func createDeploymentForDriftTest(replicas int32, buildID string, image string) 
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
+						k8s.ConnectionSpecHashAnnotation:  k8s.ComputeConnectionSpecHash(createDefaultConnectionSpec()),
+						k8s.PodTemplateSpecHashAnnotation: k8s.ComputePodTemplateSpecHash(userTemplate),
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "worker",
+							Image: image,
+							Env: []corev1.EnvVar{
+								{Name: "TEMPORAL_DEPLOYMENT_NAME", Value: "test/my-worker"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// createDeploymentForDriftTestWithEnv creates a deployment for drift testing with custom env vars
+func createDeploymentForDriftTestWithEnv(replicas int32, buildID string, image string, envVars []corev1.EnvVar) *appsv1.Deployment {
+	r := replicas
+	// Create the user-provided pod template spec (without controller modifications)
+	userTemplate := corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "worker",
+					Image: image,
+					Env:   envVars,
+				},
+			},
+		},
+	}
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-deployment",
+			Labels: map[string]string{
+				k8s.BuildIDLabel: buildID,
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &r,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					k8s.BuildIDLabel: buildID,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						k8s.ConnectionSpecHashAnnotation:  k8s.ComputeConnectionSpecHash(createDefaultConnectionSpec()),
+						k8s.PodTemplateSpecHashAnnotation: k8s.ComputePodTemplateSpecHash(userTemplate),
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "worker",
+							Image: image,
+							Env: append(envVars, corev1.EnvVar{
+								Name: "TEMPORAL_DEPLOYMENT_NAME", Value: "test/my-worker",
+							}),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// createDeploymentWithoutHashAnnotation creates a deployment without the pod template spec hash (for backwards compat testing)
+func createDeploymentWithoutHashAnnotation(replicas int32, buildID string, image string) *appsv1.Deployment {
+	r := replicas
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-deployment",
+			Labels: map[string]string{
+				k8s.BuildIDLabel: buildID,
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &r,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					k8s.BuildIDLabel: buildID,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						// Only connection spec hash, no pod template spec hash
 						k8s.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(createDefaultConnectionSpec()),
 					},
 				},

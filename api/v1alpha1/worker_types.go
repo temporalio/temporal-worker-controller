@@ -34,14 +34,13 @@ type WorkerOptions struct {
 	//
 	// WARNING: Using a custom build ID requires careful management. If workflow code changes
 	// but BuildID stays the same, pinned workflows may execute on workers running incompatible
-	// code. Only use this when you have a reliable way to compute a hash of your workflow
+	// code. Only use this when you have a reliable way to detect changes in your workflow
 	// definitions (e.g., hashing workflow source files in CI/CD).
 	//
 	// When the BuildID is stable but pod template spec changes, the controller triggers
-	// a rolling update instead of creating a new deployment version. Currently detected
-	// changes: replicas, minReadySeconds, container images, container resources (limits/requests),
-	// and init container images. Other fields (env vars, volumes, commands) are not currently
-	// monitored for drift.
+	// a rolling update instead of creating a new deployment version. The controller uses
+	// a hash of the user-provided pod template spec to detect ANY changes, including
+	// container images, env vars, commands, volumes, resources, and all other fields.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$`
