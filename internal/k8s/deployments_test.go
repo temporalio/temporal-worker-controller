@@ -698,6 +698,108 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 
 }
 
+func TestComputePodTemplateSpecHash(t *testing.T) {
+	t.Run("generates non-empty hash for valid template", func(t *testing.T) {
+		template := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1"},
+				},
+			},
+		}
+		result := k8s.ComputePodTemplateSpecHash(template)
+		assert.NotEmpty(t, result)
+		assert.Len(t, result, 64) // SHA256 hex encoded
+	})
+
+	t.Run("is deterministic - same input produces same hash", func(t *testing.T) {
+		template := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1"},
+				},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template)
+		hash2 := k8s.ComputePodTemplateSpecHash(template)
+		assert.Equal(t, hash1, hash2)
+	})
+
+	t.Run("different images produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v1"}},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v2"}},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("different env vars produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Env: []corev1.EnvVar{{Name: "FOO", Value: "bar"}}},
+				},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Env: []corev1.EnvVar{{Name: "FOO", Value: "baz"}}},
+				},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("different commands produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Command: []string{"./old-cmd"}},
+				},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Command: []string{"./new-cmd"}},
+				},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("different volumes produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v1"}},
+				Volumes:    []corev1.Volume{{Name: "vol1"}},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v1"}},
+				Volumes:    []corev1.Volume{{Name: "vol2"}},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
+}
+
 func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) {
 	tests := map[string]struct {
 		connection        temporaliov1alpha1.TemporalConnectionSpec

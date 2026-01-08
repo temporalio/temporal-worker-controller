@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -31,8 +32,9 @@ const (
 	twdNameLabel                  = "temporal.io/deployment-name"
 	WorkerDeploymentNameSeparator = "/"
 	ResourceNameSeparator         = "-"
-	MaxBuildIdLen                 = 63
-	ConnectionSpecHashAnnotation = "temporal.io/connection-spec-hash"
+	MaxBuildIdLen                    = 63
+	ConnectionSpecHashAnnotation     = "temporal.io/connection-spec-hash"
+	PodTemplateSpecHashAnnotation    = "temporal.io/pod-template-spec-hash"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -294,6 +296,9 @@ func NewDeploymentWithOwnerRef(
 		podAnnotations[k] = v
 	}
 	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
+	// Store hash of user-provided pod template spec BEFORE controller modifications
+	// This enables drift detection when build ID is stable
+	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(spec.Template)
 	blockOwnerDeletion := true
 
 	return &appsv1.Deployment{
@@ -347,6 +352,29 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 	} else if connection.APIKeySecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.APIKeySecretRef.Name))
 	}
+
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+// ComputePodTemplateSpecHash computes a SHA256 hash of the user-provided pod template spec.
+// This hash is used to detect drift when the build ID is stable but the pod spec has changed.
+// The hash captures ALL user-controllable fields in the pod template spec.
+func ComputePodTemplateSpecHash(template corev1.PodTemplateSpec) string {
+	hasher := sha256.New()
+
+	// Use spew to get a deterministic string representation of the entire struct.
+	// This captures ALL fields including env vars, commands, volumes, etc.
+	// The config MUST NOT be changed because that could change the result of a hash operation.
+	printer := &spew.ConfigState{
+		Indent:                  " ",
+		SortKeys:                true,
+		DisableMethods:          true,
+		SpewKeys:                true,
+		DisablePointerAddresses: true,
+		DisableCapacities:       true,
+	}
+
+	_, _ = hasher.Write([]byte(printer.Sprintf("%#v", template)))
 
 	return hex.EncodeToString(hasher.Sum(nil))
 }
