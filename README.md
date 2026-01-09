@@ -90,7 +90,7 @@ helm install temporal-worker-controller \
 
 ### Next Steps
 
-**New to deploying workers with this controller?** → Start with our [Migration Guide](docs/migration-guide.md) to learn how to safely transition from traditional deployments.
+**New to deploying workers with this controller?** → Start with our [Migration Guide](docs/migration-to-versioned.md) to learn how to safely transition from traditional deployments.
 
 **Ready to dive deeper?** → Check out the [Architecture Guide](docs/architecture.md) to understand how the controller works, or the [Temporal Worker Versioning docs](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) to learn about the underlying Temporal feature.
 
@@ -131,7 +131,8 @@ The Temporal Worker Controller eliminates this operational overhead by automatin
 
 | Document | Description |
 |----------|-------------|
-| [Migration Guide](docs/migration-guide.md) | Step-by-step guide for migrating from traditional deployments |
+| [Migration Guide](docs/migration-to-versioned.md) | Step-by-step guide for migrating from traditional deployments |
+| [Reversion Guide](docs/migration-to-unversioned.md) | Step-by-step guide for migrating back to unversioned deployment |
 | [Architecture](docs/architecture.md) | Technical deep-dive into how the controller works |
 | [Configuration](docs/configuration.md) | Complete configuration reference |
 | [Concepts](docs/concepts.md) | Key concepts and terminology |
