@@ -80,6 +80,12 @@ func (b *TemporalWorkerDeploymentBuilder) WithTargetTemplate(imageName string) *
 	return b
 }
 
+// WithCustomBuildId sets the optional custom build id of the TWD, thus defining a stable target version separate from the hash of the pod spec.
+func (b *TemporalWorkerDeploymentBuilder) WithCustomBuildId(buildID string) *TemporalWorkerDeploymentBuilder {
+	b.twd.Spec.WorkerOptions.BuildID = buildID
+	return b
+}
+
 // WithTemporalConnection sets the temporal connection name
 func (b *TemporalWorkerDeploymentBuilder) WithTemporalConnection(connectionName string) *TemporalWorkerDeploymentBuilder {
 	b.twd.Spec.WorkerOptions.TemporalConnectionRef = temporaliov1alpha1.TemporalConnectionReference{Name: connectionName}
@@ -161,7 +167,7 @@ func (sb *StatusBuilder) WithNamespace(k8sNamespace string) *StatusBuilder {
 // WithCurrentVersion sets the current version in the status
 func (sb *StatusBuilder) WithCurrentVersion(imageName string, healthy, createDeployment bool) *StatusBuilder {
 	sb.currentVersionBuilder = func(twdName string, namespace string) *temporaliov1alpha1.CurrentWorkerDeploymentVersion {
-		return MakeCurrentVersion(namespace, twdName, imageName, healthy, createDeployment)
+		return MakeCurrentVersion(namespace, twdName, imageName, "", healthy, createDeployment)
 	}
 	return sb
 }
@@ -171,7 +177,18 @@ func (sb *StatusBuilder) WithCurrentVersion(imageName string, healthy, createDep
 // Target Version is required.
 func (sb *StatusBuilder) WithTargetVersion(imageName string, status temporaliov1alpha1.VersionStatus, rampPercentage int32, healthy bool, createDeployment bool) *StatusBuilder {
 	sb.targetVersionBuilder = func(twdName string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
-		return MakeTargetVersion(namespace, twdName, imageName, status, rampPercentage, healthy, createDeployment)
+		return MakeTargetVersion(namespace, twdName, imageName, "", status, rampPercentage, healthy, createDeployment)
+	}
+	return sb
+}
+
+// WithTargetVersionWithCustomBuild sets the target version in the status with a custom build id not based on the pod spec.
+// Set createDeployment to true if the test runner should create the Deployment, or false if you expect the controller to create it..
+// Target Version is required.
+func (sb *StatusBuilder) WithTargetVersionWithCustomBuild(imageName, customBuildID string, status temporaliov1alpha1.VersionStatus, rampPercentage int32, healthy bool, createDeployment bool) *StatusBuilder {
+	sb.targetVersionBuilder = func(twdName string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
+		tv := MakeTargetVersion(namespace, twdName, imageName, customBuildID, status, rampPercentage, healthy, createDeployment)
+		return tv
 	}
 	return sb
 }
@@ -184,7 +201,7 @@ func (sb *StatusBuilder) WithDeprecatedVersions(infos ...DeprecatedVersionInfo) 
 	sb.deprecatedVersionsBuilder = func(twdName string, namespace string) []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
 		ret := make([]*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion, len(infos))
 		for i, info := range infos {
-			ret[i] = MakeDeprecatedVersion(namespace, twdName, info.image, info.status, info.healthy, info.createDeployment, info.hasDeployment)
+			ret[i] = MakeDeprecatedVersion(namespace, twdName, info.image, "", info.status, info.healthy, info.createDeployment, info.hasDeployment)
 
 		}
 		return ret
@@ -368,14 +385,23 @@ func NewDeprecatedVersionInfo(imageName string, status temporaliov1alpha1.Versio
 // DeploymentInfo defines the necessary information about a Deployment, so that tests can
 // recreate and validate state that is not visible in the TemporalWorkerDeployment status
 type DeploymentInfo struct {
-	image    string
-	replicas int32
+	image         string
+	replicas      int32
+	customBuildID string
 }
 
 func NewDeploymentInfo(imageName string, replicas int32) DeploymentInfo {
 	return DeploymentInfo{
 		image:    imageName,
 		replicas: replicas,
+	}
+}
+
+func NewDeploymentInfoWithCustomBuildID(imageName, custombuildID string, replicas int32) DeploymentInfo {
+	return DeploymentInfo{
+		image:         imageName,
+		replicas:      replicas,
+		customBuildID: custombuildID,
 	}
 }
 
@@ -418,7 +444,10 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 		expectedDeploymentReplicas: make(map[string]int32),
 	}
 	for _, info := range tcb.existingDeploymentInfos {
-		buildId := MakeBuildId(tcb.name, info.image, nil)
+		buildId := info.customBuildID
+		if buildId == "" {
+			buildId = MakeBuildId(tcb.name, info.image, nil)
+		}
 		ret.existingDeploymentReplicas[buildId] = info.replicas
 		ret.existingDeploymentImages[buildId] = info.image
 	}

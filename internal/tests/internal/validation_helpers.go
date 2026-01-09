@@ -15,30 +15,74 @@ import (
 	"go.temporal.io/server/temporaltest"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
 	EmptyTargetVersion = temporaliov1alpha1.TargetWorkerDeploymentVersion{}
 )
 
-// waitForDeployment waits for a deployment to be created
-func waitForDeployment(t *testing.T, k8sClient client.Client, deploymentName, namespace string, timeout time.Duration) {
+// waitForExpectedTargetDeployment waits for a deployment to be created
+func waitForExpectedTargetDeployment(t *testing.T, twd *temporaliov1alpha1.TemporalWorkerDeployment, env testhelpers.TestEnv, timeout time.Duration) {
 	ctx := context.Background()
 	deadline := time.Now().Add(timeout)
+	deploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
+	namespace := twd.Namespace
 
 	for time.Now().Before(deadline) {
 		var deployment appsv1.Deployment
-		if err := k8sClient.Get(ctx, types.NamespacedName{
+		if err := env.K8sClient.Get(ctx, types.NamespacedName{
 			Name:      deploymentName,
 			Namespace: namespace,
 		}, &deployment); err == nil {
 			t.Logf("Found deployment %s in namespace %s", deployment.Name, namespace)
+			expectedBuildID := k8s.ComputeBuildID(twd)
+			expectedDeployment, err := k8s.NewDeploymentWithControllerRef(twd, expectedBuildID, env.Connection.Spec, env.Mgr.GetScheme())
+			if err != nil {
+				t.Fatalf("failed to create expected deployment: %v", err)
+			}
+			if !deploymentsEqual(*expectedDeployment, deployment) {
+				t.Logf("deployment %s in namespace %s does not match expected deployment", deployment.Name, namespace)
+			}
+			t.Logf("Deployment %s with image '%s' matches expected deployment", deployment.Name, deployment.Spec.Template.Spec.Containers[0].Image)
 			return
 		}
 		time.Sleep(1 * time.Second)
 	}
 	t.Fatalf("failed to wait for deployment: timeout waiting for deployment %s in namespace %s", deploymentName, namespace)
+}
+
+// deploymentsEqual returns true if the two deployments are equal in the fields we care about.
+// Not doing a full hash comparison because I don't want to deal with timestamps.
+// Only checks containers and images for now. Other pod spec changes are tested in unit tests.
+func deploymentsEqual(expected, actual appsv1.Deployment) bool {
+	if expected.Spec.MinReadySeconds != actual.Spec.MinReadySeconds {
+		return false
+	}
+	expectedPodSpec := expected.Spec.Template.Spec
+	actualPodSpec := actual.Spec.Template.Spec
+	if len(expectedPodSpec.Containers) != len(actualPodSpec.Containers) {
+		return false
+	}
+	for i := range expectedPodSpec.Containers {
+		if expectedPodSpec.Containers[i].Name != actualPodSpec.Containers[i].Name {
+			return false
+		}
+		if expectedPodSpec.Containers[i].Image != actualPodSpec.Containers[i].Image {
+			return false
+		}
+		if len(expectedPodSpec.Containers[i].Env) != len(actualPodSpec.Containers[i].Env) {
+			return false
+		}
+		for j := range expectedPodSpec.Containers[i].Env {
+			if expectedPodSpec.Containers[i].Env[j].Name != actualPodSpec.Containers[i].Env[j].Name {
+				return false
+			}
+			if expectedPodSpec.Containers[i].Env[j].Value != actualPodSpec.Containers[i].Env[j].Value {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func waitForVersionRegistrationInDeployment(
@@ -134,12 +178,13 @@ func verifyTemporalStateMatchesStatusEventually(
 		expectedDeploymentStatus.TargetVersion.Status == "" {
 		return // this is the first rollout, no Worker Deployment in temporal to describe
 	}
-	deploymentClient := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(k8s.ComputeWorkerDeploymentName(twd))
+	deploymentName := k8s.ComputeWorkerDeploymentName(twd)
+	deploymentClient := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(deploymentName)
 
 	eventually(t, timeout, interval, func() error {
 		resp, err := deploymentClient.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 		if err != nil {
-			return fmt.Errorf("error describing worker deployment: %w (target version status: %v)", err, expectedDeploymentStatus.TargetVersion.Status)
+			return fmt.Errorf("error describing worker deployment %s: %w (target version status: %v)", deploymentName, err, expectedDeploymentStatus.TargetVersion.Status)
 		}
 		rc := resp.Info.RoutingConfig
 
@@ -293,6 +338,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 						*twd.Status.TargetVersion.RampPercentage)
 				}
 			}
+			waitForExpectedTargetDeployment(t, &twd, env, 30*time.Second)
 		}
 		// validate deprecated version(s)
 		if len(expectedDeploymentStatus.DeprecatedVersions) != len(twd.Status.DeprecatedVersions) {

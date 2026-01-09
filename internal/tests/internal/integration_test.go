@@ -108,6 +108,29 @@ func TestIntegration(t *testing.T) {
 				),
 		},
 		{
+			name: "manual-rollout-custom-build-expect-rolling-update", // due to pod spec change
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithManualStrategy().
+						WithReplicas(1).
+						WithTargetTemplate("v1.1"). // new image, same stable build id
+						WithCustomBuildId("custom-build").
+						WithStatus( // there was already an inactive deployment there with a different image name
+							testhelpers.NewStatusBuilder().
+								WithTargetVersionWithCustomBuild("v1.0", "custom-build", temporaliov1alpha1.VersionStatusInactive, -1, true, true),
+						),
+				).
+				WithExistingDeployments(
+					testhelpers.NewDeploymentInfoWithCustomBuildID("v1.0", "custom-build", 1),
+				).
+				WithWaitTime(5 * time.Second).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersionWithCustomBuild("v1.1", "custom-build", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
+				),
+		},
+		{
 			name: "manual-rollout-scale-down-deprecated-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
@@ -874,7 +897,7 @@ func testTemporalWorkerDeploymentCreation(
 
 	// only wait for and create the deployment if it is expected
 	if expectedStatus.TargetVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
-		waitForDeployment(t, k8sClient, expectedDeploymentName, twd.Namespace, 30*time.Second)
+		waitForExpectedTargetDeployment(t, twd, env, 30*time.Second)
 		workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
 		defer handleStopFuncs(workerStopFuncs)
 	}

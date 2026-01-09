@@ -141,6 +141,7 @@ func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient cli
 // Uses input.Status + existingDeploymentReplicas to create (and maybe kill) pollers for deprecated versions in temporal
 // also gets routing config of the deployment into the starting state before running the test.
 // Does not set Status.VersionConflictToken, since that is only set internally by the server.
+// Returns stop functions for all started workers that the caller must defer to ensure cleanup.
 func makePreliminaryStatusTrue(
 	ctx context.Context,
 	t *testing.T,
@@ -196,12 +197,14 @@ func createStatus(
 		prevTWD := recreateTWD(newTWD, env.ExistingDeploymentImages[v.BuildId], env.ExistingDeploymentReplicas[v.BuildId])
 		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
-		waitForDeployment(t, env.K8sClient, expectedDeploymentName, prevTWD.Namespace, 30*time.Second)
+		waitForExpectedTargetDeployment(t, prevTWD, env, 30*time.Second)
 		workerStopFuncs = applyDeployment(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
 
 		switch prevVersion.Status {
-		case temporaliov1alpha1.VersionStatusInactive, temporaliov1alpha1.VersionStatusNotRegistered:
+		case temporaliov1alpha1.VersionStatusNotRegistered:
 			// no-op
+		case temporaliov1alpha1.VersionStatusInactive:
+			waitForVersionRegistrationInDeployment(t, ctx, env.Ts, v)
 		case temporaliov1alpha1.VersionStatusRamping:
 			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId, *rampPercentage) // rampPercentage won't be nil if the version is ramping
 		case temporaliov1alpha1.VersionStatusCurrent:
