@@ -354,7 +354,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "spec buildID override",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
-				twd.Spec.WorkerOptions.BuildID = "manual-override-v1"
+				twd.Spec.WorkerOptions.CustomBuildID = "manual-override-v1"
 				return twd, nil
 			},
 			expectedPrefix:  "manual-override-v1",
@@ -369,10 +369,10 @@ func TestGenerateBuildID(t *testing.T) {
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				// Two TWDs with DIFFERENT images but SAME buildID
 				twd1 := testhelpers.MakeTWDWithImage("", "", "image-v1")
-				twd1.Spec.WorkerOptions.BuildID = "stable-id"
+				twd1.Spec.WorkerOptions.CustomBuildID = "stable-id"
 
 				twd2 := testhelpers.MakeTWDWithImage("", "", "image-v2")
-				twd2.Spec.WorkerOptions.BuildID = "stable-id"
+				twd2.Spec.WorkerOptions.CustomBuildID = "stable-id"
 				return twd1, twd2
 			},
 			expectedPrefix:  "stable-id",
@@ -385,7 +385,7 @@ func TestGenerateBuildID(t *testing.T) {
 				// 72 char buildID - should be truncated to 63
 				longBuildID := "this-is-a-very-long-build-id-value-that-exceeds-63-characters-limit"
 				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
-				twd.Spec.WorkerOptions.BuildID = longBuildID
+				twd.Spec.WorkerOptions.CustomBuildID = longBuildID
 				return twd, nil
 			},
 			expectedPrefix:  "this-is-a-very-long-build-id-value-that-exceeds-63-characters-l",
@@ -396,7 +396,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "spec buildID override with empty value falls back to hash",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image")
-				twd.Spec.WorkerOptions.BuildID = "" // empty buildID
+				twd.Spec.WorkerOptions.CustomBuildID = "" // empty customBuildID
 				return twd, nil
 			},
 			expectedPrefix:  "fallback-image", // Falls back to image-based build ID
@@ -407,7 +407,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "spec buildID override with only invalid chars falls back to hash",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image2")
-				twd.Spec.WorkerOptions.BuildID = "###$$$%%%" // all invalid chars
+				twd.Spec.WorkerOptions.CustomBuildID = "###$$$%%%" // all invalid chars
 				return twd, nil
 			},
 			expectedPrefix:  "fallback-image2", // Falls back to image-based build ID
@@ -418,7 +418,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "spec buildID override trims leading and trailing separators",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
-				twd.Spec.WorkerOptions.BuildID = "---my-build-id---" // leading/trailing dashes
+				twd.Spec.WorkerOptions.CustomBuildID = "---my-build-id---" // leading/trailing dashes
 				return twd, nil
 			},
 			expectedPrefix:  "my-build-id", // dashes trimmed

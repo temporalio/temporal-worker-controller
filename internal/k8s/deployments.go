@@ -115,8 +115,8 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 }
 
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	// Check for user-provided build ID in spec.workerOptions.buildID
-	if override := w.Spec.WorkerOptions.BuildID; override != "" {
+	// Check for user-provided build ID in spec.workerOptions.customBuildID
+	if override := w.Spec.WorkerOptions.CustomBuildID; override != "" {
 		cleaned := cleanBuildID(override)
 		if cleaned != "" {
 			return TruncateString(cleaned, MaxBuildIdLen)
@@ -222,73 +222,8 @@ func NewDeploymentWithOwnerRef(
 
 	podSpec := spec.Template.Spec.DeepCopy()
 
-	// Add environment variables to containers
-	for i, container := range podSpec.Containers {
-		container.Env = append(container.Env,
-			corev1.EnvVar{
-				Name:  "TEMPORAL_ADDRESS",
-				Value: connection.HostPort,
-			},
-			corev1.EnvVar{
-				Name:  "TEMPORAL_NAMESPACE",
-				Value: spec.WorkerOptions.TemporalNamespace,
-			},
-			corev1.EnvVar{
-				Name:  "TEMPORAL_DEPLOYMENT_NAME",
-				Value: workerDeploymentName,
-			},
-			corev1.EnvVar{
-				Name:  "TEMPORAL_WORKER_BUILD_ID",
-				Value: buildID,
-			},
-		)
-		podSpec.Containers[i] = container
-	}
-
-	// Add TLS config if mTLS is enabled
-	if connection.MutualTLSSecretRef != nil {
-		for i, container := range podSpec.Containers {
-			container.Env = append(container.Env,
-				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS",
-					Value: "true",
-				},
-				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_CLIENT_KEY_PATH",
-					Value: "/etc/temporal/tls/tls.key",
-				},
-				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_CLIENT_CERT_PATH",
-					Value: "/etc/temporal/tls/tls.crt",
-				},
-			)
-			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      "temporal-tls",
-				MountPath: "/etc/temporal/tls",
-			})
-			podSpec.Containers[i] = container
-		}
-		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-			Name: "temporal-tls",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: connection.MutualTLSSecretRef.Name,
-				},
-			},
-		})
-	} else if connection.APIKeySecretRef != nil {
-		for i, container := range podSpec.Containers {
-			container.Env = append(container.Env,
-				corev1.EnvVar{
-					Name: "TEMPORAL_API_KEY",
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: connection.APIKeySecretRef,
-					},
-				},
-			)
-			podSpec.Containers[i] = container
-		}
-	}
+	// Apply controller-managed environment variables and volume mounts
+	ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
 
 	// Build pod annotations
 	podAnnotations := make(map[string]string)
@@ -377,6 +312,85 @@ func ComputePodTemplateSpecHash(template corev1.PodTemplateSpec) string {
 	_, _ = hasher.Write([]byte(printer.Sprintf("%#v", template)))
 
 	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+// ApplyControllerPodSpecModifications applies controller-managed environment variables and
+// volume mounts to a pod spec. This is used both when creating new deployments and when
+// updating existing deployments for drift detection.
+func ApplyControllerPodSpecModifications(
+	podSpec *corev1.PodSpec,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+	temporalNamespace string,
+	workerDeploymentName string,
+	buildID string,
+) {
+	// Add environment variables to containers
+	for i, container := range podSpec.Containers {
+		container.Env = append(container.Env,
+			corev1.EnvVar{
+				Name:  "TEMPORAL_ADDRESS",
+				Value: connection.HostPort,
+			},
+			corev1.EnvVar{
+				Name:  "TEMPORAL_NAMESPACE",
+				Value: temporalNamespace,
+			},
+			corev1.EnvVar{
+				Name:  "TEMPORAL_DEPLOYMENT_NAME",
+				Value: workerDeploymentName,
+			},
+			corev1.EnvVar{
+				Name:  "TEMPORAL_WORKER_BUILD_ID",
+				Value: buildID,
+			},
+		)
+		podSpec.Containers[i] = container
+	}
+
+	// Add TLS config if mTLS is enabled
+	if connection.MutualTLSSecretRef != nil {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env,
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS",
+					Value: "true",
+				},
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS_CLIENT_KEY_PATH",
+					Value: "/etc/temporal/tls/tls.key",
+				},
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS_CLIENT_CERT_PATH",
+					Value: "/etc/temporal/tls/tls.crt",
+				},
+			)
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+				Name:      "temporal-tls",
+				MountPath: "/etc/temporal/tls",
+			})
+			podSpec.Containers[i] = container
+		}
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "temporal-tls",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: connection.MutualTLSSecretRef.Name,
+				},
+			},
+		})
+	} else if connection.APIKeySecretRef != nil {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env,
+				corev1.EnvVar{
+					Name: "TEMPORAL_API_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: connection.APIKeySecretRef,
+					},
+				},
+			)
+			podSpec.Containers[i] = container
+		}
+	}
 }
 
 func NewDeploymentWithControllerRef(
