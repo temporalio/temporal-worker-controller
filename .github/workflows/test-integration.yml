@@ -34,16 +34,25 @@ jobs:
     - name: Build worker-controller image
       run: |
         skaffold build --profile worker-controller --push=false
+      env:
+        DOCKER_BUILDKIT: 1
+        BUILDKIT_PROGRESS: plain
 
     - name: Build helloworld worker image
       run: |
         skaffold build --profile helloworld-worker --push=false
+      env:
+        DOCKER_BUILDKIT: 1
+        BUILDKIT_PROGRESS: plain
 
     # Verify that the demo worker patch applies successfully and builds.
     - name: Build helloworld worker image patch
       run: |
         git apply internal/demo/helloworld/changes/no-version-gate.patch
         skaffold build --profile helloworld-worker --push=false
+      env:
+        DOCKER_BUILDKIT: 1
+        BUILDKIT_PROGRESS: plain
 
   test-integration:
     name: Run Integration Tests

@@ -1,5 +1,38 @@
-# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore build and test binaries.
+# Version control
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Tests
+*_test.go
+internal/testhelpers
+internal/tests
+
+# Development
+.env
+.env.*
+*.log
+skaffold.yaml
+skaffold.example.env
+
+# Build artifacts
 bin/
 helm/
 internal/demo
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# CI/CD
+.github
+.goreleaser.yml
+.goreleaser.main.yml
+
+# Go
+go.work
+go.work.sum
