@@ -2230,7 +2230,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection:   createDefaultConnectionSpec(),
@@ -2251,7 +2251,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection:   createDefaultConnectionSpec(),
@@ -2274,7 +2274,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection: createDefaultConnectionSpec(),
@@ -2302,7 +2302,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection:   createDefaultConnectionSpec(),
@@ -2324,7 +2324,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection: createDefaultConnectionSpec(),
@@ -2619,7 +2619,7 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec 
 	}
 }
 
-// createWorkerSpecWithBuildID creates a worker spec with an explicit buildID set
+// createWorkerSpecWithBuildID creates a worker spec with an explicit customBuildID set
 func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
 	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 		Replicas: int32Ptr(1),
@@ -2635,7 +2635,7 @@ func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.TemporalWor
 		},
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace: "test-namespace",
-			BuildID:           buildID,
+			CustomBuildID:     buildID,
 		},
 	}
 }
