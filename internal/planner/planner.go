@@ -92,7 +92,7 @@ func GeneratePlan(
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
-	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, connection)
+	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
 	// Determine if we need to start any test workflows
 	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName, gateInput, isGateInputSecret)
@@ -168,31 +168,161 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 	}
 }
 
+// checkAndUpdateDeploymentPodTemplateSpec determines whether the Deployment for the given buildID is
+// out-of-date with respect to the user-provided pod template spec. This enables rolling updates when
+// the build ID is stable (e.g., using spec.workerOptions.buildID) but the pod spec has changed.
+// If an update is required, it rebuilds the deployment spec and returns a pointer to that Deployment.
+// If no update is needed or the Deployment does not exist, it returns nil.
+func checkAndUpdateDeploymentPodTemplateSpec(
+	buildID string,
+	k8sState *k8s.DeploymentState,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[buildID]
+	if !exists {
+		return nil
+	}
+
+	// Only check for drift when customBuildID is explicitly set by the user.
+	// If buildID is auto-generated, any spec change would generate a new buildID anyway.
+	if spec.WorkerOptions.CustomBuildID == "" {
+		return nil
+	}
+
+	// Get the stored hash from the existing deployment's pod template annotations
+	storedHash := ""
+	if existingDeployment.Spec.Template.Annotations != nil {
+		storedHash = existingDeployment.Spec.Template.Annotations[k8s.PodTemplateSpecHashAnnotation]
+	}
+
+	// Backwards compatibility: if no hash annotation exists (legacy deployment),
+	// don't trigger an update - the hash will be added on the next spec change
+	if storedHash == "" {
+		return nil
+	}
+
+	// Compute the hash of the current user-provided pod template spec
+	currentHash := k8s.ComputePodTemplateSpecHash(spec.Template)
+
+	// If hashes match, no drift detected
+	if storedHash == currentHash {
+		return nil
+	}
+
+	// Pod template has changed - rebuild the pod spec from the TWD spec
+	// This applies all controller modifications (env vars, TLS mounts, etc.)
+	updateDeploymentWithPodTemplateSpec(existingDeployment, spec, connection)
+
+	return existingDeployment
+}
+
+// updateDeploymentWithPodTemplateSpec updates an existing deployment with a new pod template spec
+// from the TWD spec. This applies all the controller modifications that NewDeploymentWithOwnerRef does.
+func updateDeploymentWithPodTemplateSpec(
+	deployment *appsv1.Deployment,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	connection temporaliov1alpha1.TemporalConnectionSpec,
+) {
+	// Deep copy the user-provided pod spec to avoid mutating the original
+	podSpec := spec.Template.Spec.DeepCopy()
+
+	// Extract the build ID from the deployment's labels (with nil safety)
+	var buildID string
+	if deployment.Labels != nil {
+		buildID = deployment.Labels[k8s.BuildIDLabel]
+	}
+
+	// Extract the worker deployment name from existing env vars
+	var workerDeploymentName string
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		for _, env := range container.Env {
+			if env.Name == "TEMPORAL_DEPLOYMENT_NAME" {
+				workerDeploymentName = env.Value
+				break
+			}
+		}
+		if workerDeploymentName != "" {
+			break
+		}
+	}
+
+	// Apply controller-managed environment variables and volume mounts
+	// Uses the same shared helper as NewDeploymentWithOwnerRef
+	k8s.ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
+
+	// Build new pod annotations
+	podAnnotations := make(map[string]string)
+	for k, v := range spec.Template.Annotations {
+		podAnnotations[k] = v
+	}
+	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
+	// Store the new pod template spec hash
+	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(spec.Template)
+
+	// Preserve existing pod labels and add/update required labels
+	podLabels := make(map[string]string)
+	for k, v := range spec.Template.Labels {
+		podLabels[k] = v
+	}
+	// Copy selector labels from existing deployment
+	for k, v := range deployment.Spec.Selector.MatchLabels {
+		podLabels[k] = v
+	}
+
+	// Update the deployment's pod template
+	deployment.Spec.Template.ObjectMeta.Labels = podLabels
+	deployment.Spec.Template.ObjectMeta.Annotations = podAnnotations
+	deployment.Spec.Template.Spec = *podSpec
+
+	// Update replicas if changed
+	deployment.Spec.Replicas = spec.Replicas
+	deployment.Spec.MinReadySeconds = spec.MinReadySeconds
+}
+
 func getUpdateDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) []*appsv1.Deployment {
 	var updateDeployments []*appsv1.Deployment
+	// Track which deployments we've already added to avoid duplicates
+	updatedBuildIDs := make(map[string]bool)
+
+	// Check target version deployment for pod template spec drift
+	// This enables rolling updates when the build ID is stable but spec changed
+	if status.TargetVersion.BuildID != "" {
+		if deployment := checkAndUpdateDeploymentPodTemplateSpec(status.TargetVersion.BuildID, k8sState, spec, connection); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[status.TargetVersion.BuildID] = true
+		}
+	}
 
 	// Check target version deployment if it has an expired connection spec hash
-	if status.TargetVersion.BuildID != "" {
+	// (only if not already updated by pod template check)
+	if status.TargetVersion.BuildID != "" && !updatedBuildIDs[status.TargetVersion.BuildID] {
 		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.BuildID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[status.TargetVersion.BuildID] = true
 		}
 	}
 
 	// Check current version deployment if it has an expired connection spec hash
-	if status.CurrentVersion != nil && status.CurrentVersion.BuildID != "" {
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID != "" && !updatedBuildIDs[status.CurrentVersion.BuildID] {
 		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.BuildID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[status.CurrentVersion.BuildID] = true
 		}
 	}
 
 	// Check deprecated versions for expired connection spec hashes
 	for _, version := range status.DeprecatedVersions {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(version.BuildID, k8sState, connection); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
+		if !updatedBuildIDs[version.BuildID] {
+			if deployment := checkAndUpdateDeploymentConnectionSpec(version.BuildID, k8sState, connection); deployment != nil {
+				updateDeployments = append(updateDeployments, deployment)
+				updatedBuildIDs[version.BuildID] = true
+			}
 		}
 	}
 

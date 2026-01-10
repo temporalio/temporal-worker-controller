@@ -64,7 +64,6 @@ spec:
                   gate:
                     properties:
                       input:
-                        type: object
                         x-kubernetes-preserve-unknown-fields: true
                       inputFrom:
                         properties:
@@ -73,25 +72,27 @@ spec:
                               key:
                                 type: string
                               name:
+                                default: ""
                                 type: string
                               optional:
                                 type: boolean
                             required:
                             - key
-                            - name
                             type: object
+                            x-kubernetes-map-type: atomic
                           secretKeyRef:
                             properties:
                               key:
                                 type: string
                               name:
+                                default: ""
                                 type: string
                               optional:
                                 type: boolean
                             required:
                             - key
-                            - name
                             type: object
+                            x-kubernetes-map-type: atomic
                         type: object
                       workflowType:
                         type: string
@@ -3949,6 +3950,10 @@ spec:
                     required:
                     - name
                     type: object
+                  customBuildID:
+                    maxLength: 63
+                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$
+                    type: string
                   temporalNamespace:
                     minLength: 1
                     type: string
