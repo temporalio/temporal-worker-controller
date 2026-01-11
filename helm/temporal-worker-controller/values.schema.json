@@ -112,100 +112,9 @@
       }
     },
     "affinity": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Whether to enable affinity rules"
-        },
-        "podAntiAffinity": {
-          "type": "object",
-          "properties": {
-            "preferredDuringSchedulingIgnoredDuringExecution": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "weight": {
-                    "type": "integer"
-                  },
-                  "podAffinityTerm": {
-                    "type": "object",
-                    "properties": {
-                      "labelSelector": {
-                        "type": "object",
-                        "properties": {
-                          "matchExpressions": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "key": {
-                                  "type": "string"
-                                },
-                                "operator": {
-                                  "type": "string"
-                                },
-                                "values": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      },
-                      "topologyKey": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "nodeAffinity": {
-          "type": "object",
-          "properties": {
-            "requiredDuringSchedulingIgnoredDuringExecution": {
-              "type": "object",
-              "properties": {
-                "nodeSelectorTerms": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "matchExpressions": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "type": "string"
-                            },
-                            "operator": {
-                              "type": "string"
-                            },
-                            "values": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      "default": {},
+      "description": "A Kubernetes Affinity, if required. For more information, see [Affinity v1 core](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#affinity-v1-core).\n\nFor example:\naffinity:\n  nodeAffinity:\n   requiredDuringSchedulingIgnoredDuringExecution:\n     nodeSelectorTerms:\n     - matchExpressions:\n       - key: foo.bar.com/role\n         operator: In\n         values:\n         - master",
+      "type": "object"
     },
     "authProxy": {
       "type": "object",
@@ -289,6 +198,22 @@
           "description": "Whether to create the namespace"
         }
       }
+    },
+    "nodeSelector": {
+      "default": {},
+      "description": "The nodeSelector on Pods tells Kubernetes to schedule Pods on the nodes with matching labels. For more information, see [Assigning Pods to Nodes](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/).\n\nThis default ensures that Pods are only scheduled to Linux nodes. It prevents Pods being scheduled to Windows nodes in a mixed OS cluster.",
+      "type": "object"
+    },
+    "tolerations": {
+      "default": [],
+      "description": "A list of Kubernetes Tolerations, if required. For more information, see [Toleration v1 core](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#toleration-v1-core).\n\nFor example:\ntolerations:\n- key: foo.bar.com/role\n  operator: Equal\n  value: master\n  effect: NoSchedule",
+      "items": {},
+      "type": "array"
+    },
+    "replicas": {
+      "default": 1,
+      "description": "Number of replicas of manager to run.\n\nThe default is 1, but in production set this to 2 or 3 to provide high availability.",
+      "type": "number"
     }
   }
 } 

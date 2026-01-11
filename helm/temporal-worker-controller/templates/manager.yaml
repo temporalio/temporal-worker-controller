@@ -20,7 +20,7 @@ spec:
   selector:
     matchLabels:
       {{- include "temporal-worker-controller.selectorLabels" . | nindent 6 }}
-  replicas: 1
+  replicas: {{ .Values.replicas }}
   template:
     metadata:
       annotations:
@@ -29,15 +29,15 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
+        app.kubernetes.io/component: manager
         {{- include "temporal-worker-controller.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      {{- if .Values.affinity.enabled }}
+      {{- with .Values.affinity }}
       affinity:
-        {{- toYaml .Values.affinity.podAntiAffinity | nindent 8 }}
-        {{- toYaml .Values.affinity.nodeAffinity | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
         runAsNonRoot: true
@@ -124,4 +124,12 @@ spec:
             secretName: webhook-server-cert
       {{- end }}
       serviceAccountName: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
-      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }} 
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
