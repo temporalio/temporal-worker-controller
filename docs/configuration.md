@@ -152,9 +152,6 @@ workerOptions:
   connectionRef:
     name: production-temporal     # Reference to TemporalConnection
   temporalNamespace: production      # Temporal namespace
-  taskQueues:                        # Optional: explicit task queue list
-    - order-processing
-    - payment-processing
 ```
 
 ### Connection Configuration
@@ -387,21 +384,6 @@ spec:
   sunset:
     scaledownDelay: 30m
     deleteDelay: 4h
-```
-
-### Multiple Task Queues
-
-Configure workers that handle multiple task queues:
-
-```yaml
-workerOptions:
-  connectionRef:
-    name: production-temporal
-  temporalNamespace: production
-  taskQueues:
-    - order-processing
-    - payment-processing
-    - notification-sending
 ```
 
 ## Configuration Validation
