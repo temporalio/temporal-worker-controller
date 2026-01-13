@@ -350,6 +350,81 @@ func TestGenerateBuildID(t *testing.T) {
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
+		{
+			name: "spec buildID override",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
+				twd.Spec.WorkerOptions.CustomBuildID = "manual-override-v1"
+				return twd, nil
+			},
+			expectedPrefix:  "manual-override-v1",
+			expectedHashLen: 2, // "v1" is length 2.
+			// The override returns cleanBuildID(buildIDValue).
+			// If buildID is "manual-override-v1", cleanBuildID returns "manual-override-v1".
+			// split by "-" gives ["manual", "override", "v1"]. last element is "v1", len is 2.
+			expectEquality: false,
+		},
+		{
+			name: "spec buildID override stability",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				// Two TWDs with DIFFERENT images but SAME buildID
+				twd1 := testhelpers.MakeTWDWithImage("", "", "image-v1")
+				twd1.Spec.WorkerOptions.CustomBuildID = "stable-id"
+
+				twd2 := testhelpers.MakeTWDWithImage("", "", "image-v2")
+				twd2.Spec.WorkerOptions.CustomBuildID = "stable-id"
+				return twd1, twd2
+			},
+			expectedPrefix:  "stable-id",
+			expectedHashLen: 2, // "id" has len 2
+			expectEquality:  true,
+		},
+		{
+			name: "spec buildID override with long value is truncated",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				// 72 char buildID - should be truncated to 63
+				longBuildID := "this-is-a-very-long-build-id-value-that-exceeds-63-characters-limit"
+				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
+				twd.Spec.WorkerOptions.CustomBuildID = longBuildID
+				return twd, nil
+			},
+			expectedPrefix:  "this-is-a-very-long-build-id-value-that-exceeds-63-characters-l",
+			expectedHashLen: 1, // "l" has len 1
+			expectEquality:  false,
+		},
+		{
+			name: "spec buildID override with empty value falls back to hash",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image")
+				twd.Spec.WorkerOptions.CustomBuildID = "" // empty customBuildID
+				return twd, nil
+			},
+			expectedPrefix:  "fallback-image", // Falls back to image-based build ID
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "spec buildID override with only invalid chars falls back to hash",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image2")
+				twd.Spec.WorkerOptions.CustomBuildID = "###$$$%%%" // all invalid chars
+				return twd, nil
+			},
+			expectedPrefix:  "fallback-image2", // Falls back to image-based build ID
+			expectedHashLen: 4,
+			expectEquality:  false,
+		},
+		{
+			name: "spec buildID override trims leading and trailing separators",
+			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
+				twd.Spec.WorkerOptions.CustomBuildID = "---my-build-id---" // leading/trailing dashes
+				return twd, nil
+			},
+			expectedPrefix:  "my-build-id", // dashes trimmed
+			expectedHashLen: 2,             // "id" has len 2
+			expectEquality:  false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -621,6 +696,108 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.Equal(t, hash1, hash2, "Same API key secret name should produce the same hash")
 	})
 
+}
+
+func TestComputePodTemplateSpecHash(t *testing.T) {
+	t.Run("generates non-empty hash for valid template", func(t *testing.T) {
+		template := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1"},
+				},
+			},
+		}
+		result := k8s.ComputePodTemplateSpecHash(template)
+		assert.NotEmpty(t, result)
+		assert.Len(t, result, 64) // SHA256 hex encoded
+	})
+
+	t.Run("is deterministic - same input produces same hash", func(t *testing.T) {
+		template := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1"},
+				},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template)
+		hash2 := k8s.ComputePodTemplateSpecHash(template)
+		assert.Equal(t, hash1, hash2)
+	})
+
+	t.Run("different images produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v1"}},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v2"}},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("different env vars produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Env: []corev1.EnvVar{{Name: "FOO", Value: "bar"}}},
+				},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Env: []corev1.EnvVar{{Name: "FOO", Value: "baz"}}},
+				},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("different commands produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Command: []string{"./old-cmd"}},
+				},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "worker", Image: "test:v1", Command: []string{"./new-cmd"}},
+				},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("different volumes produce different hashes", func(t *testing.T) {
+		template1 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v1"}},
+				Volumes:    []corev1.Volume{{Name: "vol1"}},
+			},
+		}
+		template2 := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "test:v1"}},
+				Volumes:    []corev1.Volume{{Name: "vol2"}},
+			},
+		}
+		hash1 := k8s.ComputePodTemplateSpecHash(template1)
+		hash2 := k8s.ComputePodTemplateSpecHash(template2)
+		assert.NotEqual(t, hash1, hash2)
+	})
 }
 
 func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) {

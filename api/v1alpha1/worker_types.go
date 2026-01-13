@@ -27,6 +27,24 @@ type WorkerOptions struct {
 	// The Temporal namespace for the worker to connect to.
 	// +kubebuilder:validation:MinLength=1
 	TemporalNamespace string `json:"temporalNamespace"`
+	// CustomBuildID optionally overrides the auto-generated build ID for this worker deployment.
+	// When set, the controller uses this value instead of computing a build ID from the
+	// pod template hash. This enables rolling updates for non-workflow code changes
+	// (bug fixes, config changes) while preserving the same build ID.
+	//
+	// WARNING: Using a custom build ID requires careful management. If workflow code changes
+	// but CustomBuildID stays the same, pinned workflows may execute on workers running incompatible
+	// code. Only use this when you have a reliable way to detect changes in your workflow
+	// definitions (e.g., hashing workflow source files in CI/CD).
+	//
+	// When the CustomBuildID is stable but pod template spec changes, the controller triggers
+	// a rolling update instead of creating a new deployment version. The controller uses
+	// a hash of the user-provided pod template spec to detect ANY changes, including
+	// container images, env vars, commands, volumes, resources, and all other fields.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$`
+	CustomBuildID string `json:"customBuildID,omitempty"`
 }
 
 // TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment
