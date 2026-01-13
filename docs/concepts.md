@@ -8,7 +8,7 @@ This document defines key concepts and terminology used throughout the Temporal 
 A logical grouping in Temporal that represents a collection of workers that are deployed together and should be versioned together. Examples include "payment-processor", "notification-sender", or "data-pipeline-worker". This is a concept within Temporal itself, not specific to Kubernetes. See https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning for more details.
 
 **Key characteristics:**
-- Identified by a unique worker deployment name (e.g., "payment-processor/staging")
+- Identified by a unique worker deployment name (e.g., "staging/payment-processor")
 - Can have multiple concurrent worker versions running simultaneously
 - Versions of a Worker Deployment are identified by Build IDs (e.g., "v1.5.1", "v1.5.2")
 - Temporal routes workflow executions to appropriate worker versions based on the `RoutingConfig` of the Worker Deployment that the versions are in.
