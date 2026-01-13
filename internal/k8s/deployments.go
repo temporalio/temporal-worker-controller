@@ -32,9 +32,9 @@ const (
 	twdNameLabel                  = "temporal.io/deployment-name"
 	WorkerDeploymentNameSeparator = "/"
 	ResourceNameSeparator         = "-"
-	MaxBuildIdLen                    = 63
-	ConnectionSpecHashAnnotation     = "temporal.io/connection-spec-hash"
-	PodTemplateSpecHashAnnotation    = "temporal.io/pod-template-spec-hash"
+	MaxBuildIdLen                 = 63
+	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
+	PodTemplateSpecHashAnnotation = "temporal.io/pod-template-spec-hash"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
