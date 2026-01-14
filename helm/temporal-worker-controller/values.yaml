@@ -50,20 +50,18 @@ securityContext:
   seccompProfile:
     enabled: false
 
-# Configure the nodeAffinity expression according to the platforms which are 
-# supported by your solution. It is considered best practice to support multiple
-# architectures. You can build your manager image using the makefile target docker-buildx.
-affinity: {}
-  # podAntiAffinity:
-  #   requiredDuringSchedulingIgnoredDuringExecution:
-  #     - labelSelector:
-  #         matchExpressions:
-  #           - key: app.kubernetes.io/component
-  #             operator: In
-  #             values:
-  #               - manager
-  #       topologyKey: kubernetes.io/hostname
-  # nodeAffinity: {}
+affinity:
+# Use when running multiple replicas to spread manager pods across nodes.
+# For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: manager
+              app.kubernetes.io/instance: {{ .Release.Name }}
+          topologyKey: kubernetes.io/hostname
 
 # Opt out of these resources if you want to disable the
 # auth proxy (https://github.com/brancz/kube-rbac-proxy)
@@ -101,4 +99,4 @@ nodeSelector: {}
 
 tolerations: []
 
-replicas: 1
+replicas: 2
