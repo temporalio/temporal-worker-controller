@@ -115,14 +115,14 @@ func TestIntegration(t *testing.T) {
 						WithManualStrategy().
 						WithReplicas(1).
 						WithTargetTemplate("v1.1"). // new image, same stable build id
-						WithCustomBuildId("custom-build").
+						WithUnsafeCustomBuildID("custom-build").
 						WithStatus( // there was already an inactive deployment there with a different image name
 							testhelpers.NewStatusBuilder().
 								WithTargetVersionWithCustomBuild("v1.0", "custom-build", temporaliov1alpha1.VersionStatusInactive, -1, true, true),
 						),
 				).
 				WithExistingDeployments(
-					testhelpers.NewDeploymentInfoWithCustomBuildID("v1.0", "custom-build", 1),
+					testhelpers.NewDeploymentInfoWithUnsafeCustomBuildID("v1.0", "custom-build", 1),
 				).
 				WithWaitTime(5 * time.Second).
 				WithExpectedStatus(

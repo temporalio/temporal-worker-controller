@@ -80,9 +80,9 @@ func (b *TemporalWorkerDeploymentBuilder) WithTargetTemplate(imageName string) *
 	return b
 }
 
-// WithCustomBuildId sets the optional custom build id of the TWD, thus defining a stable target version separate from the hash of the pod spec.
-func (b *TemporalWorkerDeploymentBuilder) WithCustomBuildId(buildID string) *TemporalWorkerDeploymentBuilder {
-	b.twd.Spec.WorkerOptions.CustomBuildID = buildID
+// WithUnsafeCustomBuildID sets the optional custom build id of the TWD, thus defining a stable target version separate from the hash of the pod spec.
+func (b *TemporalWorkerDeploymentBuilder) WithUnsafeCustomBuildID(buildID string) *TemporalWorkerDeploymentBuilder {
+	b.twd.Spec.WorkerOptions.UnsafeCustomBuildID = buildID
 	return b
 }
 
@@ -185,9 +185,9 @@ func (sb *StatusBuilder) WithTargetVersion(imageName string, status temporaliov1
 // WithTargetVersionWithCustomBuild sets the target version in the status with a custom build id not based on the pod spec.
 // Set createDeployment to true if the test runner should create the Deployment, or false if you expect the controller to create it..
 // Target Version is required.
-func (sb *StatusBuilder) WithTargetVersionWithCustomBuild(imageName, customBuildID string, status temporaliov1alpha1.VersionStatus, rampPercentage int32, healthy bool, createDeployment bool) *StatusBuilder {
+func (sb *StatusBuilder) WithTargetVersionWithCustomBuild(imageName, unsafeCustomBuildID string, status temporaliov1alpha1.VersionStatus, rampPercentage int32, healthy bool, createDeployment bool) *StatusBuilder {
 	sb.targetVersionBuilder = func(twdName string, namespace string) temporaliov1alpha1.TargetWorkerDeploymentVersion {
-		tv := MakeTargetVersion(namespace, twdName, imageName, customBuildID, status, rampPercentage, healthy, createDeployment)
+		tv := MakeTargetVersion(namespace, twdName, imageName, unsafeCustomBuildID, status, rampPercentage, healthy, createDeployment)
 		return tv
 	}
 	return sb
@@ -385,9 +385,9 @@ func NewDeprecatedVersionInfo(imageName string, status temporaliov1alpha1.Versio
 // DeploymentInfo defines the necessary information about a Deployment, so that tests can
 // recreate and validate state that is not visible in the TemporalWorkerDeployment status
 type DeploymentInfo struct {
-	image         string
-	replicas      int32
-	customBuildID string
+	image               string
+	replicas            int32
+	unsafeCustomBuildID string
 }
 
 func NewDeploymentInfo(imageName string, replicas int32) DeploymentInfo {
@@ -397,11 +397,11 @@ func NewDeploymentInfo(imageName string, replicas int32) DeploymentInfo {
 	}
 }
 
-func NewDeploymentInfoWithCustomBuildID(imageName, custombuildID string, replicas int32) DeploymentInfo {
+func NewDeploymentInfoWithUnsafeCustomBuildID(imageName, unsafeCustomBuildID string, replicas int32) DeploymentInfo {
 	return DeploymentInfo{
-		image:         imageName,
-		replicas:      replicas,
-		customBuildID: custombuildID,
+		image:               imageName,
+		replicas:            replicas,
+		unsafeCustomBuildID: unsafeCustomBuildID,
 	}
 }
 
@@ -444,7 +444,7 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 		expectedDeploymentReplicas: make(map[string]int32),
 	}
 	for _, info := range tcb.existingDeploymentInfos {
-		buildId := info.customBuildID
+		buildId := info.unsafeCustomBuildID
 		if buildId == "" {
 			buildId = MakeBuildId(tcb.name, info.image, nil)
 		}

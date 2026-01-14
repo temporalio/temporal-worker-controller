@@ -3950,7 +3950,7 @@ spec:
                     required:
                     - name
                     type: object
-                  customBuildID:
+                  unsafeCustomBuildID:
                     maxLength: 63
                     pattern: ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$
                     type: string

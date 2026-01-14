@@ -184,9 +184,9 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 		return nil
 	}
 
-	// Only check for drift when customBuildID is explicitly set by the user.
+	// Only check for drift when UnsafeCustomBuildID is explicitly set by the user.
 	// If buildID is auto-generated, any spec change would generate a new buildID anyway.
-	if spec.WorkerOptions.CustomBuildID == "" {
+	if spec.WorkerOptions.UnsafeCustomBuildID == "" {
 		return nil
 	}
 
