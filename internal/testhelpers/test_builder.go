@@ -82,7 +82,7 @@ func (b *TemporalWorkerDeploymentBuilder) WithTargetTemplate(imageName string) *
 
 // WithCustomBuildId sets the optional custom build id of the TWD, thus defining a stable target version separate from the hash of the pod spec.
 func (b *TemporalWorkerDeploymentBuilder) WithCustomBuildId(buildID string) *TemporalWorkerDeploymentBuilder {
-	b.twd.Spec.WorkerOptions.BuildID = buildID
+	b.twd.Spec.WorkerOptions.CustomBuildID = buildID
 	return b
 }
 
