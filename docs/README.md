@@ -11,8 +11,18 @@ This documentation structure is designed to support various types of technical d
 
 ## Index
 
-### [Migration Guide](migration-guide.md)
+### [Migration Guide](migration-to-versioned.md)
 Comprehensive guide for migrating from existing unversioned worker deployment systems to the Temporal Worker Controller. Includes step-by-step instructions, configuration mapping, and common patterns.
+See [Migration to Unversioned](migration-to-unversioned.md) for how to migrate back to an unversioned deployment system.
+
+### [Concepts](concepts.md)
+Conceptual guides for the Temporal Worker Controller system.
+
+### [Configuration](configuration.md)
+Configuration options for the Temporal Worker Controller.
+
+### [Architecture](architecture.md)
+High-level overview of the Temporal Worker Controller architecture.
 
 ### [Limits](limits.md)
 Technical constraints and limitations of the Temporal Worker Controller system, including maximum field lengths and other operational boundaries.

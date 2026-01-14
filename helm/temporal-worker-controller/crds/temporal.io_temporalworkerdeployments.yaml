@@ -3954,6 +3954,10 @@ spec:
                     required:
                     - name
                     type: object
+                  customBuildID:
+                    maxLength: 63
+                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$
+                    type: string
                   temporalNamespace:
                     minLength: 1
                     type: string

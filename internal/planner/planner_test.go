@@ -2195,8 +2195,8 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			expectUpdate:       false,
 		},
 		{
-			name:    "no update when buildID is not explicitly set (auto-generated buildID)",
-			buildID: "v1",
+			name:               "no update when buildID is not explicitly set (auto-generated buildID)",
+			buildID:            "v1",
 			existingDeployment: createDeploymentForDriftTest(1, "v1", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
@@ -2216,8 +2216,8 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			expectUpdate: false, // No update because BuildID is not explicitly set
 		},
 		{
-			name:    "same image does not trigger update when buildID is set",
-			buildID: "stable-build-id",
+			name:               "same image does not trigger update when buildID is set",
+			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
@@ -2230,15 +2230,15 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection:   createDefaultConnectionSpec(),
 			expectUpdate: false, // No update because image is the same
 		},
 		{
-			name:    "different image triggers update when buildID is set",
-			buildID: "stable-build-id",
+			name:               "different image triggers update when buildID is set",
+			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
@@ -2251,7 +2251,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection:   createDefaultConnectionSpec(),
@@ -2259,8 +2259,8 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			expectImage:  "new-image:v2",
 		},
 		{
-			name:    "replicas-only change does not trigger update (handled by scaling logic)",
-			buildID: "stable-build-id",
+			name:               "replicas-only change does not trigger update (handled by scaling logic)",
+			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: int32Ptr(3), // Changed from 1 to 3
@@ -2274,7 +2274,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection: createDefaultConnectionSpec(),
@@ -2302,7 +2302,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection:   createDefaultConnectionSpec(),
@@ -2310,8 +2310,8 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			expectImage:  "my-image:v1",
 		},
 		{
-			name:    "backwards compat: no hash annotation means no update",
-			buildID: "stable-build-id",
+			name:               "backwards compat: no hash annotation means no update",
+			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentWithoutHashAnnotation(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
@@ -2324,7 +2324,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				},
 				WorkerOptions: temporaliov1alpha1.WorkerOptions{
 					TemporalNamespace: "test-namespace",
-					BuildID:           "stable-build-id",
+					CustomBuildID:     "stable-build-id",
 				},
 			},
 			connection: createDefaultConnectionSpec(),
@@ -2619,7 +2619,7 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec 
 	}
 }
 
-// createWorkerSpecWithBuildID creates a worker spec with an explicit buildID set
+// createWorkerSpecWithBuildID creates a worker spec with an explicit customBuildID set
 func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
 	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 		Replicas: int32Ptr(1),
@@ -2635,7 +2635,7 @@ func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.TemporalWor
 		},
 		WorkerOptions: temporaliov1alpha1.WorkerOptions{
 			TemporalNamespace: "test-namespace",
-			BuildID:           buildID,
+			CustomBuildID:     buildID,
 		},
 	}
 }
