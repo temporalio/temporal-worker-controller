@@ -3942,10 +3942,6 @@ spec:
                 type: object
               workerOptions:
                 properties:
-                  buildID:
-                    maxLength: 63
-                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$
-                    type: string
                   connectionRef:
                     properties:
                       name:
