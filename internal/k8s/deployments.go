@@ -115,8 +115,8 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 }
 
 func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
-	// Check for user-provided build ID in spec.workerOptions.customBuildID
-	if override := w.Spec.WorkerOptions.CustomBuildID; override != "" {
+	// Check for user-provided build ID in spec.workerOptions.unsafeCustomBuildID
+	if override := w.Spec.WorkerOptions.UnsafeCustomBuildID; override != "" {
 		cleaned := cleanBuildID(override)
 		if cleaned != "" {
 			return TruncateString(cleaned, MaxBuildIdLen)
