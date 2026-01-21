@@ -50,18 +50,9 @@ securityContext:
   seccompProfile:
     enabled: false
 
-affinity:
-# Use when running multiple replicas to spread manager pods across nodes.
+# Default podAntiAffinity prefers to spread manager pods across nodes.
 # For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.
-  podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        podAffinityTerm:
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/component: manager
-              app.kubernetes.io/instance: {{ .Release.Name }}
-          topologyKey: kubernetes.io/hostname
+affinity: {}
 
 # Opt out of these resources if you want to disable the
 # auth proxy (https://github.com/brancz/kube-rbac-proxy)
