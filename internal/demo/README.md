@@ -17,7 +17,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 
 1. Start a local Minikube cluster:
    ```bash
-   minikube start --nodes 2
+   minikube start
    ```
 
 2. Create the `skaffold.env` file:
