@@ -56,74 +56,74 @@ spec:
           type: RuntimeDefault
         {{- end }}
       containers:
-        - name: manager
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion)}}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          env:
-            - name: CONTROLLER_IDENTITY
-              value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
-            - name: CONTROLLER_VERSION
-              value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
-          args:
-            - --leader-elect
+      - name: manager
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion)}}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: CONTROLLER_IDENTITY
+          value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
+        - name: CONTROLLER_VERSION
+          value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+        args:
+        - --leader-elect
         {{- if .Values.metrics.enabled }}
-            - "--metrics-bind-address=127.0.0.1:{{ .Values.metrics.port }}"
+        - "--metrics-bind-address=127.0.0.1:{{ .Values.metrics.port }}"
         {{- end }}
-            - "--health-probe-bind-address=:8081"
+        - "--health-probe-bind-address=:8081"
         {{- if .Values.webhook.enabled }}
         {{ fail "webhooks aren't supported yet" }}
-          ports:
-            - containerPort: 9443
-              name: webhook-server
-              protocol: TCP
-          volumeMounts:
-            - mountPath: /tmp/k8s-webhook-server/serving-certs
-              name: cert
-              readOnly: true
+        ports:
+          - containerPort: 9443
+            name: webhook-server
+            protocol: TCP
+        volumeMounts:
+          - mountPath: /tmp/k8s-webhook-server/serving-certs
+            name: cert
+            readOnly: true
         {{- end }}
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - "ALL"
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8081
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8081
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          resources:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
           {{- toYaml .Values.resources | nindent 10 }}
       {{- if not .Values.metrics.disableAuth }}
-        - name: kube-rbac-proxy
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - "ALL"
-          image: gcr.io/kubebuilder/kube-rbac-proxy:v0.14.1
-          args:
-            - "--secure-listen-address=0.0.0.0:8443"
-            - --upstream=http://127.0.0.1:{{ .Values.metrics.port }}/
-            - "--logtostderr=true"
-            - "--v=0"
-          ports:
-            - containerPort: 8443
-              protocol: TCP
-              name: https
-          resources:
-            limits:
-              cpu: 500m
-              memory: 128Mi
-            requests:
-              cpu: 5m
-              memory: 64Mi
+      - name: kube-rbac-proxy
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - "ALL"
+        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.14.1
+        args:
+          - "--secure-listen-address=0.0.0.0:8443"
+          - --upstream=http://127.0.0.1:{{ .Values.metrics.port }}/
+          - "--logtostderr=true"
+          - "--v=0"
+        ports:
+          - containerPort: 8443
+            protocol: TCP
+            name: https
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 5m
+            memory: 64Mi
       {{- end }}
       {{- if .Values.webhook.enabled }}
       {{ fail "webhooks aren't supported yet" }}
