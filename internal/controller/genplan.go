@@ -150,6 +150,23 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.ScaleDeployments = planResult.ScaleDeployments
 	plan.UpdateDeployments = planResult.UpdateDeployments
 
+	// If KEDA/HPA managed, only keep scale-to-zero operations (for sunset behavior).
+	if _, ok := w.GetAnnotations()["temporal.io/keda-managed"]; ok {
+		for ref, replicas := range plan.ScaleDeployments {
+			if replicas > 0 {
+				delete(plan.ScaleDeployments, ref)
+			}
+		}
+		// Preserve existing replicas in UpdateDeployments to avoid fighting KEDA.
+		for _, d := range plan.UpdateDeployments {
+			if buildID, hasBuildID := d.Labels[k8s.BuildIDLabel]; hasBuildID {
+				if existing, found := k8sState.Deployments[buildID]; found && existing.Spec.Replicas != nil {
+					d.Spec.Replicas = existing.Spec.Replicas
+				}
+			}
+		}
+	}
+
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
 
