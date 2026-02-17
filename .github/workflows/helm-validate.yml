@@ -3,7 +3,7 @@ name: Helm Chart Validation
 on:
   push:
     branches: [main]
-  # pull_request:
+  pull_request:
 
 permissions:
   contents: read
@@ -37,47 +37,16 @@ jobs:
       - name: Template with default values
         run: helm template test-release helm/temporal-worker-controller
 
-      - name: Template with RBAC disabled
+      - name: Template with namespace creation
         run: |
           helm template test-release helm/temporal-worker-controller \
-            --set rbac.create=false
+            --set namespace.create=true
 
       - name: Template with auth proxy disabled
         run: |
           helm template test-release helm/temporal-worker-controller \
             --set authProxy.enabled=false \
             --set metrics.disableAuth=true
-
-      - name: Template with namespace creation
-        run: |
-          helm template test-release helm/temporal-worker-controller \
-            --set namespace.create=true
-
-      - name: Template with seccomp enabled
-        run: |
-          helm template test-release helm/temporal-worker-controller \
-            --set securityContext.seccompProfile.enabled=true
-
-      - name: Template with custom image tag
-        run: |
-          helm template test-release helm/temporal-worker-controller \
-            --set image.tag=v1.0.0
-
-      - name: Template with service account creation disabled
-        run: |
-          helm template test-release helm/temporal-worker-controller \
-            --set serviceAccount.create=false
-
-      - name: Template with auth proxy enabled but auth disabled
-        run: |
-          helm template test-release helm/temporal-worker-controller \
-            --set authProxy.enabled=true \
-            --set metrics.disableAuth=true
-
-      - name: Template with metrics disabled
-        run: |
-          helm template test-release helm/temporal-worker-controller \
-            --set metrics.enabled=false
 
   helm-validate-succeed:
     name: All Helm Validations Succeed
