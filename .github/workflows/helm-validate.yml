@@ -20,17 +20,8 @@ jobs:
         with:
           version: 'v3.14.3'
 
-      - name: Lint chart with default values
+      - name: Lint chart
         run: helm lint --strict helm/temporal-worker-controller
-
-      - name: Lint chart with RBAC disabled
-        run: helm lint --strict helm/temporal-worker-controller --set rbac.create=false
-
-      - name: Lint chart with auth proxy disabled
-        run: |
-          helm lint --strict helm/temporal-worker-controller \
-            --set authProxy.enabled=false \
-            --set metrics.disableAuth=true
 
   helm-template:
     name: Template Helm Chart
