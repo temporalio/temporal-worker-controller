@@ -17,8 +17,6 @@ jobs:
 
       - name: Install Helm
         uses: azure/setup-helm@v3
-        with:
-          version: 'v3.14.3'
 
       - name: Lint chart
         run: helm lint --strict helm/temporal-worker-controller
@@ -31,8 +29,6 @@ jobs:
 
       - name: Install Helm
         uses: azure/setup-helm@v3
-        with:
-          version: 'v3.14.3'
 
       - name: Template with default values
         run: helm template test-release helm/temporal-worker-controller
