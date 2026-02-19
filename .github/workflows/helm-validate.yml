@@ -1,0 +1,61 @@
+name: Helm Chart Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  helm-lint:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      - name: Lint chart
+        run: helm lint --strict helm/temporal-worker-controller
+
+  helm-template:
+    name: Template Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      - name: Template with default values
+        run: helm template test-release helm/temporal-worker-controller
+
+      - name: Template with namespace creation
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set namespace.create=true
+
+      - name: Template with auth proxy disabled
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set authProxy.enabled=false \
+            --set metrics.disableAuth=true
+
+  helm-validate-succeed:
+    name: All Helm Validations Succeed
+    needs:
+      - helm-lint
+      - helm-template
+    runs-on: ubuntu-latest
+    if: always()
+    env:
+      RESULTS: ${{ toJSON(needs.*.result) }}
+    steps:
+      - name: Check results
+        run: |
+          if [[ -n $(echo "$RESULTS" | jq '.[] | select (. != "success")') ]]; then
+            exit 1
+          fi
