@@ -11,22 +11,26 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, temporalClient sdkclient.Client, p *plan) error {
+func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
 	// Create deployment
 	if p.CreateDeployment != nil {
 		l.Info("creating deployment", "deployment", p.CreateDeployment)
 		if err := r.Create(ctx, p.CreateDeployment); err != nil {
 			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment)
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "DeploymentCreateFailed",
+				"Failed to create Deployment %q: %v", p.CreateDeployment.Name, err)
 			return err
 		}
 	}
@@ -36,6 +40,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		l.Info("deleting deployment", "deployment", d)
 		if err := r.Delete(ctx, d); err != nil {
 			l.Error(err, "unable to delete deployment", "deployment", d)
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "DeploymentDeleteFailed",
+				"Failed to delete Deployment %q: %v", d.Name, err)
 			return err
 		}
 	}
@@ -52,6 +58,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		scale := &autoscalingv1.Scale{Spec: autoscalingv1.ScaleSpec{Replicas: int32(replicas)}}
 		if err := r.Client.SubResource("scale").Update(ctx, dep, client.WithSubResourceBody(scale)); err != nil {
 			l.Error(err, "unable to scale deployment", "deployment", d, "replicas", replicas)
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "DeploymentScaleFailed",
+				"Failed to scale Deployment %q to %d replicas: %v", d.Name, replicas, err)
 			return fmt.Errorf("unable to scale deployment: %w", err)
 		}
 	}
@@ -61,6 +69,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
 		if err := r.Update(ctx, d); err != nil {
 			l.Error(err, "unable to update deployment", "deployment", d)
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "DeploymentUpdateFailed",
+				"Failed to update Deployment %q: %v", d.Name, err)
 			return fmt.Errorf("unable to update deployment: %w", err)
 		}
 	}
@@ -129,6 +139,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType)
 		}
 		if err != nil {
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "TestWorkflowStartFailed",
+				"Failed to start gate workflow %q (buildID %s): %v", wf.workflowType, wf.buildID, err)
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
 		}
 	}
@@ -142,6 +154,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      getControllerIdentity(),
 			}); err != nil {
+				r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
+					"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
 				return fmt.Errorf("unable to set current deployment version: %w", err)
 			}
 		} else {
@@ -157,6 +171,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				ConflictToken: vcfg.ConflictToken,
 				Identity:      getControllerIdentity(),
 			}); err != nil {
+				r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
+					"Failed to set buildID %q as ramping version (%.1f%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
 				return fmt.Errorf("unable to set ramping deployment version: %w", err)
 			}
 		}
@@ -172,6 +188,8 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				},
 			},
 		}); err != nil { // would be cool to do this atomically with the update
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "MetadataUpdateFailed",
+				"Failed to update version metadata for buildID %q: %v", vcfg.BuildID, err)
 			return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
 		}
 	}

@@ -141,7 +141,8 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	}
 
 	if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
-		panic(err)
+		c.Close()
+		return nil, fmt.Errorf("temporal server health check failed: %w", err)
 	}
 
 	cp.mux.Lock()

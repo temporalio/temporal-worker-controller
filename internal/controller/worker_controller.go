@@ -17,9 +17,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -71,6 +73,7 @@ type TemporalWorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
+	Recorder           record.EventRecorder
 
 	// Disables panic recovery if true
 	DisableRecoverPanic bool
@@ -96,6 +99,7 @@ type TemporalWorkerDeploymentReconciler struct {
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -146,6 +150,11 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
 		l.Error(err, "unable to fetch TemporalConnection")
+		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalConnectionNotFound",
+			"Unable to fetch TemporalConnection %q: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err)
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionValid, metav1.ConditionFalse,
+			"TemporalConnectionNotFound", fmt.Sprintf("TemporalConnection %q not found: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err))
+		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, err
 	}
 
@@ -153,8 +162,17 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
 	if err != nil {
 		l.Error(err, "unable to resolve auth secret name")
+		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "AuthSecretInvalid",
+			"Unable to resolve auth secret from TemporalConnection %q: %v", temporalConnection.Name, err)
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionValid, metav1.ConditionFalse,
+			"AuthSecretInvalid", fmt.Sprintf("Unable to resolve auth secret: %v", err))
+		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, err
 	}
+
+	// Mark TemporalConnection as valid since we fetched it and resolved auth
+	r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionValid, metav1.ConditionTrue,
+		"TemporalConnectionValid", "TemporalConnection is valid and auth secret is resolved")
 
 	// Get or update temporal client for connection
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
@@ -171,6 +189,11 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		})
 		if err != nil {
 			l.Error(err, "unable to create TemporalClient")
+			r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalClientCreationFailed",
+				"Unable to create Temporal client for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err)
+			r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalNamespaceAccessible, metav1.ConditionFalse,
+				"TemporalClientCreationFailed", fmt.Sprintf("Failed to connect to Temporal: %v", err))
+			_ = r.Status().Update(ctx, &workerDeploy)
 			return ctrl.Result{}, err
 		}
 		temporalClient = c
@@ -203,14 +226,25 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		getControllerIdentity(),
 	)
 	if err != nil {
+		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalStateFetchFailed",
+			"Unable to get Temporal worker deployment state: %v", err)
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalNamespaceAccessible, metav1.ConditionFalse,
+			"TemporalStateFetchFailed", fmt.Sprintf("Failed to query Temporal worker deployment state: %v", err))
+		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)
 	}
+
+	// Mark Temporal namespace as accessible since we successfully queried state
+	r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalNamespaceAccessible, metav1.ConditionTrue,
+		"TemporalNamespaceAccessible", "Successfully connected to Temporal namespace")
 
 	// Compute a new status from k8s and temporal state
 	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy, temporalState, k8sState)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// Preserve conditions that were set during this reconciliation
+	status.Conditions = workerDeploy.Status.Conditions
 	workerDeploy.Status = *status
 	if err := r.Status().Update(ctx, &workerDeploy); err != nil {
 		// Ignore "object has been modified" errors, since we'll just re-fetch
@@ -235,12 +269,22 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// Generate a plan to get to desired spec from current status
 	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec, temporalState)
 	if err != nil {
+		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "PlanGenerationFailed",
+			"Unable to generate reconciliation plan: %v", err)
 		return ctrl.Result{}, err
 	}
 
 	// Execute the plan, handling any errors
-	if err := r.executePlan(ctx, l, temporalClient, plan); err != nil {
+	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
+		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "PlanExecutionFailed",
+			"Unable to execute reconciliation plan: %v", err)
 		return ctrl.Result{}, err
+	}
+
+	// Mark as Ready on successful reconciliation
+	if workerDeploy.Status.TargetVersion.BuildID == workerDeploy.Status.CurrentVersion.BuildID {
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue,
+			"RolloutSucceeded", "Target version rollout complete "+workerDeploy.Status.TargetVersion.BuildID)
 	}
 
 	return ctrl.Result{
@@ -250,6 +294,22 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		// For demo purposes only!
 		//RequeueAfter: 1 * time.Second,
 	}, nil
+}
+
+// setCondition sets a condition on the TemporalWorkerDeployment status.
+func (r *TemporalWorkerDeploymentReconciler) setCondition(
+	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	conditionType string,
+	status metav1.ConditionStatus,
+	reason, message string,
+) {
+	meta.SetStatusCondition(&workerDeploy.Status.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		ObservedGeneration: workerDeploy.Generation,
+		Reason:             reason,
+		Message:            message,
+	})
 }
 
 // SetupWithManager sets up the controller with the Manager.
