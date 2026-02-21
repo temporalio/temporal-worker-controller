@@ -33,6 +33,7 @@ const (
 	WorkerDeploymentNameSeparator = "/"
 	ResourceNameSeparator         = "-"
 	MaxBuildIdLen                 = 63
+	MaxDeploymentNameLen          = 47
 	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation = "temporal.io/pod-template-spec-hash"
 )
@@ -142,8 +143,20 @@ func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment)
 }
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
+// Name will be <=47 characters and unique for that Worker Deployment Version within the namespace.
 func ComputeVersionedDeploymentName(baseName, buildID string) string {
-	return CleanStringForDNS(baseName + ResourceNameSeparator + buildID)
+	fullName := baseName + ResourceNameSeparator + buildID
+	if len(fullName) > MaxDeploymentNameLen {
+		hashName := HashString(fullName)[:10]
+		fullName = baseName[:10] + ResourceNameSeparator + buildID[:10] + ResourceNameSeparator + hashName
+	}
+	return CleanStringForDNS(fullName)
+}
+
+func HashString(s string) string {
+	h := sha256.New()
+	h.Write([]byte(s))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func computeImagePrefix(s string, maxLen int) string {
