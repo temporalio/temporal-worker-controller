@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
+func (r *TemporalWorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, p *plan) error {
 	// Create deployment
 	if p.CreateDeployment != nil {
 		l.Info("creating deployment", "deployment", p.CreateDeployment)
@@ -45,6 +45,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			return err
 		}
 	}
+
 	// Scale deployments
 	for d, replicas := range p.ScaleDeployments {
 		l.Info("scaling deployment", "deployment", d, "replicas", replicas)
@@ -75,9 +76,10 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
-	// Get deployment handler
-	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+	return nil
+}
 
+func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
 	for _, wf := range p.startTestWorkflows {
 		// Log workflow start details
 		if len(wf.input) > 0 {
@@ -144,54 +146,78 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Register current version or ramps
-	if vcfg := p.UpdateVersionConfig; vcfg != nil {
-		if vcfg.SetCurrent {
-			l.Info("registering new current version", "buildID", vcfg.BuildID)
-			if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-				BuildID:       vcfg.BuildID,
-				ConflictToken: vcfg.ConflictToken,
-				Identity:      getControllerIdentity(),
-			}); err != nil {
-				r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
-					"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
-				return fmt.Errorf("unable to set current deployment version: %w", err)
-			}
+func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, deploymentHandler sdkclient.WorkerDeploymentHandle, p *plan) error {
+	vcfg := p.UpdateVersionConfig
+	if vcfg == nil {
+		return nil
+	}
+
+	if vcfg.SetCurrent {
+		l.Info("registering new current version", "buildID", vcfg.BuildID)
+		if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
+			BuildID:       vcfg.BuildID,
+			ConflictToken: vcfg.ConflictToken,
+			Identity:      getControllerIdentity(),
+		}); err != nil {
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
+				"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
+			return fmt.Errorf("unable to set current deployment version: %w", err)
+		}
+	} else {
+		if vcfg.RampPercentage > 0 {
+			l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
 		} else {
-			if vcfg.RampPercentage > 0 {
-				l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
-			} else {
-				l.Info("deleting ramp", "buildID", vcfg.BuildID)
-			}
+			l.Info("deleting ramp", "buildID", vcfg.BuildID)
+		}
 
-			if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-				BuildID:       vcfg.BuildID,
-				Percentage:    float32(vcfg.RampPercentage),
-				ConflictToken: vcfg.ConflictToken,
-				Identity:      getControllerIdentity(),
-			}); err != nil {
-				r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
-					"Failed to set buildID %q as ramping version (%.1f%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
-				return fmt.Errorf("unable to set ramping deployment version: %w", err)
-			}
+		if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+			BuildID:       vcfg.BuildID,
+			Percentage:    float32(vcfg.RampPercentage),
+			ConflictToken: vcfg.ConflictToken,
+			Identity:      getControllerIdentity(),
+		}); err != nil {
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
+				"Failed to set buildID %q as ramping version (%.1f%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
+			return fmt.Errorf("unable to set ramping deployment version: %w", err)
 		}
-		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-			Version: worker.WorkerDeploymentVersion{
-				DeploymentName: p.WorkerDeploymentName,
-				BuildId:        vcfg.BuildID,
+	}
+
+	if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
+		Version: worker.WorkerDeploymentVersion{
+			DeploymentName: p.WorkerDeploymentName,
+			BuildId:        vcfg.BuildID,
+		},
+		MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
+			UpsertEntries: map[string]interface{}{
+				controllerIdentityMetadataKey: getControllerIdentity(),
+				controllerVersionMetadataKey:  getControllerVersion(),
 			},
-			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
-				UpsertEntries: map[string]interface{}{
-					controllerIdentityMetadataKey: getControllerIdentity(),
-					controllerVersionMetadataKey:  getControllerVersion(),
-				},
-			},
-		}); err != nil { // would be cool to do this atomically with the update
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "MetadataUpdateFailed",
-				"Failed to update version metadata for buildID %q: %v", vcfg.BuildID, err)
-			return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
-		}
+		},
+	}); err != nil { // would be cool to do this atomically with the update
+		r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "MetadataUpdateFailed",
+			"Failed to update version metadata for buildID %q: %v", vcfg.BuildID, err)
+		return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
+	}
+
+	return nil
+}
+
+func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
+	if err := r.executeK8sOperations(ctx, l, workerDeploy, p); err != nil {
+		return err
+	}
+
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+
+	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
+		return err
+	}
+
+	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
+		return err
 	}
 
 	for _, buildId := range p.RemoveIgnoreLastModifierBuilds {
