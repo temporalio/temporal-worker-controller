@@ -355,7 +355,7 @@ func TestReconcile_ValidationFailure_NoEventEmitted(t *testing.T) {
 
 	// Validation failures don't return errors — they requeue after 5 minutes
 	require.NoError(t, err)
-	assert.True(t, result.Requeue, "should requeue on validation failure")
+	assert.NotZero(t, result.RequeueAfter, "should requeue on validation failure")
 
 	// No events should be emitted for validation failures (user just needs to fix their spec)
 	events := drainEvents(recorder)
