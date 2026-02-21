@@ -86,6 +86,17 @@ type TemporalWorkerDeploymentSpec struct {
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
+// Condition type constants for TemporalWorkerDeployment.
+const (
+	// ConditionTemporalConnectionHealthy indicates whether the referenced TemporalConnection
+	// resource exists and is properly configured.
+	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
+
+	// ConditionRolloutReady indicates whether the TemporalWorkerDeployment is fully reconciled
+	// and operational.
+	ConditionRolloutReady = "RolloutReady"
+)
+
 // VersionStatus indicates the status of a version.
 // +enum
 type VersionStatus string
@@ -155,8 +166,9 @@ type TemporalWorkerDeploymentStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
 
-	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+	// Conditions represent the latest available observations of the TemporalWorkerDeployment's current state.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.

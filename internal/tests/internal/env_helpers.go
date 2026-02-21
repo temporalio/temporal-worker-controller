@@ -154,6 +154,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
 		TemporalClientPool:  clientPool,
+		Recorder:            mgr.GetEventRecorderFor("temporal-worker-controller"),
 		DisableRecoverPanic: true,
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 	}
