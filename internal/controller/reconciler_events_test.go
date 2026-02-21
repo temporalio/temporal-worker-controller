@@ -64,10 +64,10 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 	recorder := record.NewFakeRecorder(10)
 
 	r := &TemporalWorkerDeploymentReconciler{
-		Client:             fakeClient,
-		Scheme:             scheme,
-		TemporalClientPool: clientpool.New(nil, fakeClient),
-		Recorder:           recorder,
+		Client:              fakeClient,
+		Scheme:              scheme,
+		TemporalClientPool:  clientpool.New(nil, fakeClient),
+		Recorder:            recorder,
 		DisableRecoverPanic: true,
 		MaxDeploymentVersionsIneligibleForDeletion: 75,
 	}

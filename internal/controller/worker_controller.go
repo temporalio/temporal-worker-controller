@@ -278,7 +278,8 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Mark as Ready on successful reconciliation
-	if workerDeploy.Status.TargetVersion.BuildID == workerDeploy.Status.CurrentVersion.BuildID {
+	if workerDeploy.Status.CurrentVersion != nil &&
+		workerDeploy.Status.TargetVersion.BuildID == workerDeploy.Status.CurrentVersion.BuildID {
 		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue,
 			"RolloutSucceeded", "Target version rollout complete "+workerDeploy.Status.TargetVersion.BuildID)
 	}
