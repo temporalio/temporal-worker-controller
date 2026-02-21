@@ -88,17 +88,13 @@ type TemporalWorkerDeploymentSpec struct {
 
 // Condition type constants for TemporalWorkerDeployment.
 const (
-	// ConditionTemporalConnectionValid indicates whether the referenced TemporalConnection
+	// ConditionTemporalConnectionHealthy indicates whether the referenced TemporalConnection
 	// resource exists and is properly configured.
-	ConditionTemporalConnectionValid = "TemporalConnectionValid"
+	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
 
-	// ConditionTemporalNamespaceAccessible indicates whether the Temporal namespace
-	// specified in workerOptions is reachable and the controller has access.
-	ConditionTemporalNamespaceAccessible = "TemporalNamespaceAccessible"
-
-	// ConditionReady indicates whether the TemporalWorkerDeployment is fully reconciled
+	// ConditionRolloutReady indicates whether the TemporalWorkerDeployment is fully reconciled
 	// and operational.
-	ConditionReady = "Ready"
+	ConditionRolloutReady = "RolloutReady"
 )
 
 // VersionStatus indicates the status of a version.

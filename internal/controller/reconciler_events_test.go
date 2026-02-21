@@ -207,8 +207,8 @@ func TestReconcile_TemporalConnectionNotFound_SetsCondition(t *testing.T) {
 	var updated temporaliov1alpha1.TemporalWorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-worker", Namespace: "default"}, &updated))
 
-	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionValid)
-	require.NotNil(t, cond, "TemporalConnectionValid condition should be set")
+	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
+	require.NotNil(t, cond, "TemporalConnectionHealthy condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	assert.Equal(t, "TemporalConnectionNotFound", cond.Reason)
 	assert.Contains(t, cond.Message, "nonexistent-connection")
@@ -266,16 +266,11 @@ func TestReconcile_TemporalClientCreationFailed_EmitsEventAndCondition(t *testin
 	var updated temporaliov1alpha1.TemporalWorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-worker", Namespace: "default"}, &updated))
 
-	// TemporalConnectionValid should be True (connection was fetched successfully)
-	connCond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionValid)
+	// TemporalConnectionHealthy should be False (client creation failed, overwriting the earlier True)
+	connCond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
 	require.NotNil(t, connCond)
-	assert.Equal(t, metav1.ConditionTrue, connCond.Status)
-
-	// TemporalNamespaceAccessible should be False (client creation failed)
-	nsCond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalNamespaceAccessible)
-	require.NotNil(t, nsCond)
-	assert.Equal(t, metav1.ConditionFalse, nsCond.Status)
-	assert.Equal(t, "TemporalClientCreationFailed", nsCond.Reason)
+	assert.Equal(t, metav1.ConditionFalse, connCond.Status)
+	assert.Equal(t, "TemporalClientCreationFailed", connCond.Reason)
 }
 
 func TestReconcile_TWDNotFound_NoEvent(t *testing.T) {
@@ -296,10 +291,10 @@ func TestSetCondition_SetsNewCondition(t *testing.T) {
 	twd := makeTWD("test-worker", "default", "my-connection")
 	r, _ := newTestReconciler(nil)
 
-	r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "TestReason", "Test message")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue, "TestReason", "Test message")
 
 	require.Len(t, twd.Status.Conditions, 1)
-	assert.Equal(t, temporaliov1alpha1.ConditionReady, twd.Status.Conditions[0].Type)
+	assert.Equal(t, temporaliov1alpha1.ConditionRolloutReady, twd.Status.Conditions[0].Type)
 	assert.Equal(t, metav1.ConditionTrue, twd.Status.Conditions[0].Status)
 	assert.Equal(t, "TestReason", twd.Status.Conditions[0].Reason)
 	assert.Equal(t, "Test message", twd.Status.Conditions[0].Message)
@@ -311,11 +306,11 @@ func TestSetCondition_UpdatesExistingCondition(t *testing.T) {
 	r, _ := newTestReconciler(nil)
 
 	// Set initial condition
-	r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "InitialReason", "Initial message")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue, "InitialReason", "Initial message")
 	require.Len(t, twd.Status.Conditions, 1)
 
 	// Update the condition
-	r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, "UpdatedReason", "Updated message")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionFalse, "UpdatedReason", "Updated message")
 
 	// Should still be exactly 1 condition, not 2
 	require.Len(t, twd.Status.Conditions, 1)
@@ -328,21 +323,16 @@ func TestSetCondition_MultipleDifferentConditions(t *testing.T) {
 	twd := makeTWD("test-worker", "default", "my-connection")
 	r, _ := newTestReconciler(nil)
 
-	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionValid, metav1.ConditionTrue, "Valid", "Connection is valid")
-	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalNamespaceAccessible, metav1.ConditionTrue, "Accessible", "Namespace is accessible")
-	r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "Ready", "All good")
+	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, "Healthy", "Connection is healthy")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue, "Ready", "All good")
 
-	require.Len(t, twd.Status.Conditions, 3)
+	require.Len(t, twd.Status.Conditions, 2)
 
-	connCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionValid)
+	connCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
 	require.NotNil(t, connCond)
 	assert.Equal(t, metav1.ConditionTrue, connCond.Status)
 
-	nsCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionTemporalNamespaceAccessible)
-	require.NotNil(t, nsCond)
-	assert.Equal(t, metav1.ConditionTrue, nsCond.Status)
-
-	readyCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	readyCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionRolloutReady)
 	require.NotNil(t, readyCond)
 	assert.Equal(t, metav1.ConditionTrue, readyCond.Status)
 }
@@ -393,17 +383,13 @@ func TestReconcile_ConnectionValid_ThenClientFails_ConditionsReflectBoth(t *test
 	events := drainEvents(recorder)
 	assertEventEmitted(t, events, "TemporalClientCreationFailed")
 
-	// Verify conditions: connection valid but namespace not accessible
+	// Verify condition: TemporalConnectionHealthy should be False (client creation failed)
 	var updated temporaliov1alpha1.TemporalWorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-worker", Namespace: "default"}, &updated))
 
-	connCond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionValid)
-	require.NotNil(t, connCond, "TemporalConnectionValid condition should be set")
-	assert.Equal(t, metav1.ConditionTrue, connCond.Status, "connection was fetched successfully")
-
-	nsCond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalNamespaceAccessible)
-	require.NotNil(t, nsCond, "TemporalNamespaceAccessible condition should be set")
-	assert.Equal(t, metav1.ConditionFalse, nsCond.Status, "client creation should have failed")
+	connCond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
+	require.NotNil(t, connCond, "TemporalConnectionHealthy condition should be set")
+	assert.Equal(t, metav1.ConditionFalse, connCond.Status, "client creation should have failed")
 }
 
 func TestReconcile_EventMessageContainsUsefulContext(t *testing.T) {

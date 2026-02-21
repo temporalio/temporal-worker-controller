@@ -152,7 +152,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		l.Error(err, "unable to fetch TemporalConnection")
 		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalConnectionNotFound",
 			"Unable to fetch TemporalConnection %q: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err)
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionValid, metav1.ConditionFalse,
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
 			"TemporalConnectionNotFound", fmt.Sprintf("TemporalConnection %q not found: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err))
 		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, err
@@ -164,15 +164,15 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		l.Error(err, "unable to resolve auth secret name")
 		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "AuthSecretInvalid",
 			"Unable to resolve auth secret from TemporalConnection %q: %v", temporalConnection.Name, err)
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionValid, metav1.ConditionFalse,
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
 			"AuthSecretInvalid", fmt.Sprintf("Unable to resolve auth secret: %v", err))
 		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, err
 	}
 
 	// Mark TemporalConnection as valid since we fetched it and resolved auth
-	r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionValid, metav1.ConditionTrue,
-		"TemporalConnectionValid", "TemporalConnection is valid and auth secret is resolved")
+	r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue,
+		"TemporalConnectionHealthy", "TemporalConnection is healthy and auth secret is resolved")
 
 	// Get or update temporal client for connection
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
@@ -191,7 +191,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 			l.Error(err, "unable to create TemporalClient")
 			r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalClientCreationFailed",
 				"Unable to create Temporal client for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err)
-			r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalNamespaceAccessible, metav1.ConditionFalse,
+			r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
 				"TemporalClientCreationFailed", fmt.Sprintf("Failed to connect to Temporal: %v", err))
 			_ = r.Status().Update(ctx, &workerDeploy)
 			return ctrl.Result{}, err
@@ -228,15 +228,11 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	if err != nil {
 		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalStateFetchFailed",
 			"Unable to get Temporal worker deployment state: %v", err)
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalNamespaceAccessible, metav1.ConditionFalse,
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
 			"TemporalStateFetchFailed", fmt.Sprintf("Failed to query Temporal worker deployment state: %v", err))
 		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)
 	}
-
-	// Mark Temporal namespace as accessible since we successfully queried state
-	r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalNamespaceAccessible, metav1.ConditionTrue,
-		"TemporalNamespaceAccessible", "Successfully connected to Temporal namespace")
 
 	// Compute a new status from k8s and temporal state
 	status, err := r.generateStatus(ctx, l, temporalClient, req, &workerDeploy, temporalState, k8sState)
@@ -283,7 +279,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// Mark as Ready on successful reconciliation
 	if workerDeploy.Status.TargetVersion.BuildID == workerDeploy.Status.CurrentVersion.BuildID {
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue,
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue,
 			"RolloutSucceeded", "Target version rollout complete "+workerDeploy.Status.TargetVersion.BuildID)
 	}
 
