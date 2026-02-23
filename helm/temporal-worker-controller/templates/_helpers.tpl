@@ -18,3 +18,25 @@ Used for matchLabels (Deployments, Services, affinities, etc.)
 app.kubernetes.io/name: temporal-worker-controller
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Return Role or ClusterRole depending on ownNamespace
+*/}}
+{{- define "temporal-worker-controller.rbac.roleKind" -}}
+{{- if .Values.rbac.ownNamespace -}}
+Role
+{{- else -}}
+ClusterRole
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return RoleBinding or ClusterRoleBinding depending on ownNamespace
+*/}}
+{{- define "temporal-worker-controller.rbac.roleBindingKind" -}}
+{{- if .Values.rbac.ownNamespace -}}
+RoleBinding
+{{- else -}}
+ClusterRoleBinding
+{{- end -}}
+{{- end -}}

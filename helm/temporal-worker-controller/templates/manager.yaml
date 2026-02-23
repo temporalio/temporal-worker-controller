@@ -98,6 +98,10 @@ spec:
         {{- end }}
         - name: ALLOWED_KINDS
           value: {{ join "," $allKinds | quote }}
+        {{- with .Values.watchNamespace }}
+        - name: WATCH_NAMESPACE
+          value: {{ . | quote }}
+        {{- end }}
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}
