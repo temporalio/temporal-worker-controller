@@ -33,6 +33,16 @@ terminationGracePeriodSeconds: 10
 rbac:
   # Specifies whether RBAC resources should be created
   create: true
+  # Specifies whether the RBAC resources should be namespace-scoped or not 
+  # Set to true to create Roles and RoleBindings in the release namespace instead of ClusterRoles and ClusterRoleBindings
+  ownNamespace: false
+
+# Comma-separated list of namespaces the controller should watch.
+# Examples:
+#   watchNamespace: "foo"
+#   watchNamespace: "foo,bar"
+# If empty, the controller watches all namespaces (cluster-wide).
+watchNamespace: ""
 
 serviceAccount:
   # Specifies whether a ServiceAccount should be created
