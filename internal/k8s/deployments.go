@@ -29,7 +29,7 @@ const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel                  = "temporal.io/build-id"
-	twdNameLabel                  = "temporal.io/deployment-name"
+	TwdNameLabel                  = "temporal.io/deployment-name"
 	WorkerDeploymentNameSeparator = "/"
 	ResourceNameSeparator         = "-"
 	MaxBuildIdLen                 = 63
@@ -207,7 +207,7 @@ func NewDeploymentWithOwnerRef(
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
 	selectorLabels := map[string]string{
-		twdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
+		TwdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
 		BuildIDLabel: TruncateString(buildID, 63),
 	}
 

@@ -155,8 +155,15 @@ type TemporalWorkerDeploymentStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
 
-	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+	// Replicas is the total number of ready replicas across all versioned Deployments
+	// managed by this TemporalWorkerDeployment. Used by the scale subresource.
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Selector is a label query that matches all pods managed by this TemporalWorkerDeployment.
+	// Used by the scale subresource for HPA/KEDA/VPA compatibility.
+	// +optional
+	Selector string `json:"selector,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
@@ -366,6 +373,7 @@ type ManualRolloutStrategy struct{}
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas,selectorpath=.status.selector
 // +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
 //+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"

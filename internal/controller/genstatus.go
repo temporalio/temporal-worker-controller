@@ -51,7 +51,7 @@ func (r *TemporalWorkerDeploymentReconciler) generateStatus(
 	// Target build ID already computed above
 
 	// Use the state mapper to convert state objects to CRD status
-	stateMapper := newStateMapper(k8sState, temporalState, workerDeploymentName)
+	stateMapper := newStateMapper(k8sState, temporalState, workerDeploymentName, workerDeploy.GetName())
 	status := stateMapper.mapToStatus(targetBuildID)
 
 	return status, nil

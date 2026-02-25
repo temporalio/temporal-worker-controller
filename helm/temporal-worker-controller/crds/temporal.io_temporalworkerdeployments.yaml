@@ -3950,12 +3950,12 @@ spec:
                     required:
                     - name
                     type: object
+                  temporalNamespace:
+                    minLength: 1
+                    type: string
                   unsafeCustomBuildID:
                     maxLength: 63
                     pattern: ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$
-                    type: string
-                  temporalNamespace:
-                    minLength: 1
                     type: string
                 required:
                 - connectionRef
@@ -4062,6 +4062,11 @@ spec:
                 type: array
               lastModifierIdentity:
                 type: string
+              replicas:
+                format: int32
+                type: integer
+              selector:
+                type: string
               targetVersion:
                 properties:
                   buildID:
@@ -4146,4 +4151,8 @@ spec:
     served: true
     storage: true
     subresources:
+      scale:
+        labelSelectorPath: .status.selector
+        specReplicasPath: .spec.replicas
+        statusReplicasPath: .status.replicas
       status: {}

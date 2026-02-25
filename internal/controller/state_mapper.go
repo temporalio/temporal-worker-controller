@@ -5,6 +5,8 @@
 package controller
 
 import (
+	"fmt"
+
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -16,14 +18,18 @@ type stateMapper struct {
 	k8sState             *k8s.DeploymentState
 	temporalState        *temporal.TemporalWorkerState
 	workerDeploymentName string
+	// twdName is the TemporalWorkerDeployment's Kubernetes metadata.name,
+	// used to construct the label selector for the scale subresource.
+	twdName string
 }
 
 // newStateMapper creates a new state mapper
-func newStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.TemporalWorkerState, workerDeploymentName string) *stateMapper {
+func newStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.TemporalWorkerState, workerDeploymentName string, twdName string) *stateMapper {
 	return &stateMapper{
 		k8sState:             k8sState,
 		temporalState:        temporalState,
 		workerDeploymentName: workerDeploymentName,
+		twdName:              twdName,
 	}
 }
 
@@ -68,6 +74,19 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorker
 
 	// Set version count from temporal state (directly from VersionSummaries via Versions map)
 	status.VersionCount = int32(len(m.temporalState.Versions))
+
+	// Compute aggregate replica count across all child Deployments for the scale subresource
+	var totalReplicas int32
+	for _, d := range m.k8sState.Deployments {
+		totalReplicas += d.Status.ReadyReplicas
+	}
+	status.Replicas = totalReplicas
+
+	// Set the label selector that matches all pods managed by this TWD.
+	// Must match the label value set in NewDeploymentWithOwnerRef, which uses
+	// CleanStringForDNS(objectMeta.GetName()) -- the TWD's Kubernetes name,
+	// NOT the Temporal deployment name (which includes namespace/ prefix).
+	status.Selector = fmt.Sprintf("%s=%s", k8s.TwdNameLabel, k8s.TruncateString(k8s.CleanStringForDNS(m.twdName), 63))
 
 	return status
 }
