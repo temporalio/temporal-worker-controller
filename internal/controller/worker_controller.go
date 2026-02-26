@@ -36,6 +36,9 @@ const (
 	// TODO(jlegrone): add this everywhere
 	deployOwnerKey = ".metadata.controller"
 	buildIDLabel   = "temporal.io/build-id"
+
+	// tworWorkerRefKey is the field index key for TemporalWorkerOwnedResource by workerRef.name.
+	tworWorkerRefKey = ".spec.workerRef.name"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -274,16 +277,41 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
+	// Index TemporalWorkerOwnedResource by spec.workerRef.name for efficient listing.
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.TemporalWorkerOwnedResource{}, tworWorkerRefKey, func(rawObj client.Object) []string {
+		twor := rawObj.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
+		return []string{twor.Spec.WorkerRef.Name}
+	}); err != nil {
+		return err
+	}
+
 	recoverPanic := !r.DisableRecoverPanic
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.TemporalConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
+		Watches(&temporaliov1alpha1.TemporalWorkerOwnedResource{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsForOwnedResource)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 			RecoverPanic:            &recoverPanic,
 		}).
 		Complete(r)
+}
+
+// findTWDsForOwnedResource maps a TemporalWorkerOwnedResource to the TWD reconcile request.
+func (r *TemporalWorkerDeploymentReconciler) findTWDsForOwnedResource(ctx context.Context, twor client.Object) []reconcile.Request {
+	tworObj, ok := twor.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
+	if !ok {
+		return nil
+	}
+	return []reconcile.Request{
+		{
+			NamespacedName: types.NamespacedName{
+				Name:      tworObj.Spec.WorkerRef.Name,
+				Namespace: twor.GetNamespace(),
+			},
+		},
+	}
 }
 
 func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {

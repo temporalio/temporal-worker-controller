@@ -190,5 +190,39 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
+	// Apply owned resources via Server-Side Apply.
+	// Partial failure isolation: all resources are attempted even if some fail;
+	// errors are collected and returned together.
+	var ownedResourceErrors []error
+	for _, apply := range p.ApplyOwnedResources {
+		l.Info("applying owned resource",
+			"name", apply.Resource.GetName(),
+			"kind", apply.Resource.GetKind(),
+			"fieldManager", apply.FieldManager,
+		)
+		// client.Apply uses Server-Side Apply, which is a create-or-update operation:
+		// if the resource does not yet exist the API server creates it; if it already
+		// exists the API server merges only the fields owned by this field manager,
+		// leaving fields owned by other managers (e.g. the HPA controller) untouched.
+		// client.ForceOwnership allows this field manager to claim any fields that were
+		// previously owned by a different manager (e.g. after a field manager rename).
+		if err := r.Client.Patch(
+			ctx,
+			apply.Resource,
+			client.Apply,
+			client.ForceOwnership,
+			client.FieldOwner(apply.FieldManager),
+		); err != nil {
+			l.Error(err, "unable to apply owned resource",
+				"name", apply.Resource.GetName(),
+				"kind", apply.Resource.GetKind(),
+			)
+			ownedResourceErrors = append(ownedResourceErrors, err)
+		}
+	}
+	if len(ownedResourceErrors) > 0 {
+		return fmt.Errorf("errors applying owned resources (%d failures): %v", len(ownedResourceErrors), ownedResourceErrors[0])
+	}
+
 	return nil
 }

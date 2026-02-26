@@ -15,8 +15,16 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// ownedResourceApply holds a rendered owned resource to apply via Server-Side Apply.
+type ownedResourceApply struct {
+	Resource     *unstructured.Unstructured
+	FieldManager string
+}
 
 // plan holds the actions to execute during reconciliation
 type plan struct {
@@ -38,6 +46,9 @@ type plan struct {
 	// Build IDs of versions from which the controller should
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
+
+	// OwnedResources to apply via Server-Side Apply, one per (TWOR × Build ID) pair.
+	ApplyOwnedResources []ownedResourceApply
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -176,7 +187,58 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		plan.CreateDeployment = d
 	}
 
+	// Compute owned resource apply actions for all active Build IDs.
+	if err := r.planOwnedResources(ctx, l, w, k8sState, plan); err != nil {
+		return nil, err
+	}
+
 	return plan, nil
+}
+
+// planOwnedResources lists all TemporalWorkerOwnedResources referencing this TWD and,
+// for each active Build ID Deployment, renders and enqueues the resource for SSA apply.
+func (r *TemporalWorkerDeploymentReconciler) planOwnedResources(
+	ctx context.Context,
+	l logr.Logger,
+	w *temporaliov1alpha1.TemporalWorkerDeployment,
+	k8sState *k8s.DeploymentState,
+	p *plan,
+) error {
+	var tworList temporaliov1alpha1.TemporalWorkerOwnedResourceList
+	if err := r.List(ctx, &tworList,
+		client.InNamespace(w.Namespace),
+		client.MatchingFields{tworWorkerRefKey: w.Name},
+	); err != nil {
+		return fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
+	}
+
+	for i := range tworList.Items {
+		twor := &tworList.Items[i]
+
+		// Skip TWORs with no raw object (should not happen in practice due to admission validation)
+		if twor.Spec.Object.Raw == nil {
+			l.Info("skipping TemporalWorkerOwnedResource with empty spec.object", "name", twor.Name)
+			continue
+		}
+
+		for buildID, deployment := range k8sState.Deployments {
+			rendered, err := k8s.RenderOwnedResource(twor, deployment, buildID)
+			if err != nil {
+				// Log and skip this resource/build-ID pair; surface via status in future work.
+				l.Error(err, "failed to render TemporalWorkerOwnedResource",
+					"twor", twor.Name,
+					"buildID", buildID,
+				)
+				continue
+			}
+			p.ApplyOwnedResources = append(p.ApplyOwnedResources, ownedResourceApply{
+				Resource: rendered,
+				// Field manager is stable + unique per TWOR — see OwnedResourceFieldManager.
+				FieldManager: k8s.OwnedResourceFieldManager(twor),
+			})
+		}
+	}
+	return nil
 }
 
 // Create a new deployment with owner reference
