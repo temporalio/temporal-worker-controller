@@ -99,7 +99,7 @@ type TemporalWorkerDeploymentReconciler struct {
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -275,13 +275,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "PlanExecutionFailed",
 			"Unable to execute reconciliation plan: %v", err)
 		return ctrl.Result{}, err
-	}
-
-	// Mark as Ready on successful reconciliation
-	if workerDeploy.Status.CurrentVersion != nil &&
-		workerDeploy.Status.TargetVersion.BuildID == workerDeploy.Status.CurrentVersion.BuildID {
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue,
-			"RolloutSucceeded", "Target version rollout complete "+workerDeploy.Status.TargetVersion.BuildID)
 	}
 
 	return ctrl.Result{

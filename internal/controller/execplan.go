@@ -142,7 +142,7 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 		}
 		if err != nil {
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "TestWorkflowStartFailed",
-				"Failed to start gate workflow %q (buildID %s): %v", wf.workflowType, wf.buildID, err)
+				"Failed to start gate workflow %q (buildID %s, taskQueue %s): %v", wf.workflowType, wf.buildID, wf.taskQueue, err)
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
 		}
 	}
@@ -166,6 +166,8 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 				"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
 			return fmt.Errorf("unable to set current deployment version: %w", err)
 		}
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue,
+			"RolloutComplete", fmt.Sprintf("Rollout complete for buildID %s", vcfg.BuildID))
 	} else {
 		if vcfg.RampPercentage > 0 {
 			l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
