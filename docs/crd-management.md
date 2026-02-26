@@ -20,6 +20,24 @@ Benefits:
 - Upgrading CRDs ahead of the controller (within one minor version) is always safe
 - Structural CRD breaking changes (if ever needed) require a new API version (e.g., `v1beta1`) with a migration guide
 
+### What the commitment requires of each release
+
+- All new fields must be marked optional (`+optional`, `omitempty`) — no new required fields may be added within a minor version
+- No existing fields may be removed or have their types changed within a minor version
+- These rules apply to both spec and status fields
+
+### Compatibility scenarios
+
+The table below defines what must hold true for the commitment to be considered met. "N" is the current release and "N+1" is the next.
+
+| Scenario | CRDs | Controller | Expected outcome |
+|---|---|---|---|
+| Normal upgrade (recommended order) | N → N+1 first | N → N+1 after | No issues |
+| CRDs ahead, controller not yet upgraded | N+1 | N | Safe: new fields are optional, so the older controller ignores unknown fields in reads and doesn't include them in its writes (which is acceptable since they're optional) |
+| Wrong order: controller upgraded first | N | N+1 (CRDs not yet upgraded) | Silent feature degradation: new status fields the N+1 controller writes are pruned by the API server (schema still at N). All existing CRs continue reconciling normally. New features depending on those fields don't work until CRDs are upgraded. No crashes, no per-CR errors. |
+| Controller rollback (CRDs stay at N+1) | N+1 | N+1 → N | Safe for spec (the controller never writes TWD spec). Status fields added in N+1 will be absent after the first reconciliation cycle — this is acceptable because status is fully reconstituted from live state, not preserved across reconciles. |
+| CRD rollback | N+1 → N | N | See [CRD rollback and field pruning](#crd-rollback-and-field-pruning) — this is the dangerous case. |
+
 ## Initial Installation
 
 Install the CRDs chart first, then the controller chart:
@@ -68,6 +86,40 @@ helm rollback temporal-worker-controller --namespace temporal-system
 # 2. Optionally roll back CRDs
 helm rollback temporal-worker-controller-crds --namespace temporal-system
 ```
+
+### CRD rollback and field pruning
+
+**Recommendation:** When a controller rollback is needed, prefer keeping CRDs at the newer version and rolling back only the controller. Per the compatibility commitment this is always safe. Only roll back CRDs if you have a specific reason and have verified no objects are using the fields being removed from the schema (see below).
+
+#### How Kubernetes handles rolled-back CRDs
+
+When a CRD schema changes, Kubernetes does not retroactively re-validate or re-prune existing objects. Fields not present in the current schema are silently dropped ("pruned") only when an object is next written through the API server — any UPDATE or PATCH: `kubectl apply`, a GitOps reconciliation cycle, a user editing a field, or any tooling that touches the object.
+
+#### The specific risk
+
+If objects on the cluster have spec fields that were added in CRD version N+1 (e.g., `spec.newFeature: enabled`), and the CRD is rolled back to N (which does not define `spec.newFeature`):
+
+- Those objects still show the field when you `kubectl get` them — the data is still in etcd.
+- On the next write to any of those objects — even an unrelated change like updating `spec.replicas` — the API server silently drops `spec.newFeature`.
+- This is **permanent data loss with no error or warning**.
+
+#### Why the controller's write patterns affect the risk
+
+The controller never writes back to TWD spec; it only writes to the status subresource and manages child Kubernetes Deployments. This means the controller itself will not directly trigger spec field pruning. However:
+
+- GitOps tools (Flux, ArgoCD), manual `kubectl apply`, or any tooling that writes to the TWD object will trigger pruning on its next sync cycle.
+- Status: the controller fully reconstitutes status from live cluster state on every reconcile. Status fields added in N+1 will disappear after one reconcile cycle regardless of CRD version. This is expected behavior and not meaningful data loss.
+
+#### How to determine if CRD rollback is safe
+
+Before rolling back CRDs, check whether any `TemporalWorkerDeployment` objects on the cluster are using fields that exist in the newer CRD version but not the older one:
+
+```bash
+# Replace <field-added-in-newer-version> with the field name(s) introduced in the version you are rolling back from
+kubectl get temporalworkerdeployments -A -o yaml | grep <field-added-in-newer-version>
+```
+
+If the output is empty, no objects are using those fields and rollback is safe. If output is non-empty, rolling back the CRD will cause silent data loss on the next write to those objects.
 
 ## Migration Guide for Existing Users
 
