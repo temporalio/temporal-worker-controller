@@ -123,7 +123,7 @@ If the output is empty, no objects are using those fields and rollback is safe. 
 
 ## Migration Guide for Existing Users
 
-If you are upgrading from a chart version that shipped CRDs in the `crds/` directory (v1.2.0 and earlier), follow these steps.
+If you are upgrading from a chart version that shipped CRDs in the `crds/` directory (Controller Helm Chart v0.12.0 and earlier), follow these steps.
 
 When upgrading to the new chart version, Helm will **not** delete the existing CRDs — they remain on the cluster untouched. The controller continues working normally. The CRDs become temporarily "orphaned" from Helm tracking, which is fine.
 
