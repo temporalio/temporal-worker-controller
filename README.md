@@ -81,12 +81,24 @@ When you update the image, the controller automatically:
 
 ### 🔧 Installation
 
+CRDs are shipped as a separate Helm chart so they can be upgraded independently of the controller. Install the CRDs chart first, then the controller chart:
+
 ```bash
-# Install using Helm in your preferred namespace
+# 1. Install CRDs
+helm install temporal-worker-controller-crds \
+  oci://docker.io/temporalio/temporal-worker-controller-crds \
+  --version <version> \
+  --namespace <your-namespace> \
+  --create-namespace
+
+# 2. Install the controller
 helm install temporal-worker-controller \
   oci://docker.io/temporalio/temporal-worker-controller \
+  --version <version> \
   --namespace <your-namespace>
 ```
+
+See [docs/crd-management.md](docs/crd-management.md) for upgrade, rollback, and migration instructions.
 
 ### Next Steps
 
@@ -137,6 +149,7 @@ The Temporal Worker Controller eliminates this operational overhead by automatin
 | [Configuration](docs/configuration.md) | Complete configuration reference |
 | [Concepts](docs/concepts.md) | Key concepts and terminology |
 | [Limits](docs/limits.md) | Technical constraints and limitations |
+| [CRD Management](docs/crd-management.md) | CRD upgrade, rollback, and migration guide |
 
 ## 🔧 Worker Configuration
 
