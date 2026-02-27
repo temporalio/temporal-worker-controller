@@ -279,7 +279,11 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 
 	// Index TemporalWorkerOwnedResource by spec.workerRef.name for efficient listing.
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.TemporalWorkerOwnedResource{}, tworWorkerRefKey, func(rawObj client.Object) []string {
-		twor := rawObj.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
+		twor, ok := rawObj.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
+		if !ok {
+			mgr.GetLogger().Error(fmt.Errorf("error indexing TemporalWorkerOwnedResources"), "could not convert raw object", rawObj)
+			return nil
+		}
 		return []string{twor.Spec.WorkerRef.Name}
 	}); err != nil {
 		return err
