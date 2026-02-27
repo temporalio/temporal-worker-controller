@@ -64,6 +64,23 @@ spec:
           value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
         - name: CONTROLLER_VERSION
           value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+        # POD_NAMESPACE and SERVICE_ACCOUNT_NAME are populated automatically by
+        # Kubernetes from the pod's own metadata (namespace and service account name).
+        # The validating webhook reads them to perform SubjectAccessReview checks
+        # using the controller's identity.
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: SERVICE_ACCOUNT_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.serviceAccountName
+        # BANNED_KINDS controls which resource kinds are rejected by the
+        # TemporalWorkerOwnedResource validating webhook. Configurable via
+        # ownedResources.bannedKinds in values.yaml.
+        - name: BANNED_KINDS
+          value: "{{ join "," .Values.ownedResources.bannedKinds }}"
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}

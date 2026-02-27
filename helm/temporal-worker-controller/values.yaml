@@ -81,6 +81,20 @@ webhook:
   port: 9443
   certDir: /tmp/k8s-webhook-server/serving-certs
 
+# Configuration for TemporalWorkerOwnedResource validation.
+ownedResources:
+  # bannedKinds is the list of Kubernetes resource kinds that are not permitted as
+  # TemporalWorkerOwnedResource objects. The default list blocks workload types
+  # (Deployment, StatefulSet, Job, Pod, CronJob) to prevent misuse of the mechanism
+  # to run arbitrary services alongside the worker. Override this list if you have a
+  # legitimate use case for one of these kinds.
+  bannedKinds:
+    - Deployment
+    - StatefulSet
+    - Job
+    - Pod
+    - CronJob
+
 # Not yet supported
 certmanager:
   enabled: false
