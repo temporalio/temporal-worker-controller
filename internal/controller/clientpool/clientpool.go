@@ -130,9 +130,22 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	if err != nil {
 		return nil, err
 	}
-	clientOpts.ConnectionOptions.TLS = &tls.Config{
+	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
+	// If the secret contains a CA certificate, use it as the trusted root for server
+	// certificate verification. This enables connecting to Temporal servers whose TLS
+	// certificates are signed by private or internal CAs (e.g. cert-manager in a test
+	// cluster). When ca.crt is absent, Go falls back to the system CA bundle, which is
+	// the correct behaviour for Temporal Cloud and other publicly-signed endpoints.
+	if caCert, ok := secret.Data["ca.crt"]; ok && len(caCert) > 0 {
+		rootCAs := x509.NewCertPool()
+		if !rootCAs.AppendCertsFromPEM(caCert) {
+			return nil, errors.New("failed to parse CA certificate from secret")
+		}
+		tlsCfg.RootCAs = rootCAs
+	}
+	clientOpts.ConnectionOptions.TLS = tlsCfg
 	expiryTime = exp
 
 	c, err := sdkclient.Dial(clientOpts)
