@@ -16,7 +16,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+// OwnedResourceApply holds a rendered owned resource to apply via Server-Side Apply.
+type OwnedResourceApply struct {
+	Resource     *unstructured.Unstructured
+	FieldManager string
+}
 
 // Plan holds the actions to execute during reconciliation
 type Plan struct {
@@ -30,6 +37,8 @@ type Plan struct {
 	// Build IDs of versions from which the controller should
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
+	// OwnedResourceApplies holds resources to apply via SSA, one per (TWOR × Build ID) pair.
+	OwnedResourceApplies []OwnedResourceApply
 }
 
 // VersionConfig defines version configuration for Temporal
@@ -78,6 +87,7 @@ func GeneratePlan(
 	maxVersionsIneligibleForDeletion int32,
 	gateInput []byte,
 	isGateInputSecret bool,
+	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
@@ -114,7 +124,41 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
+	plan.OwnedResourceApplies = getOwnedResourceApplies(l, twors, k8sState)
+
 	return plan, nil
+}
+
+// getOwnedResourceApplies renders one OwnedResourceApply for each (TWOR × active Build ID) pair.
+// Pairs that fail to render are logged and skipped; they do not block the rest.
+func getOwnedResourceApplies(
+	l logr.Logger,
+	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
+	k8sState *k8s.DeploymentState,
+) []OwnedResourceApply {
+	var applies []OwnedResourceApply
+	for i := range twors {
+		twor := &twors[i]
+		if twor.Spec.Object.Raw == nil {
+			l.Info("skipping TemporalWorkerOwnedResource with empty spec.object", "name", twor.Name)
+			continue
+		}
+		for buildID, deployment := range k8sState.Deployments {
+			rendered, err := k8s.RenderOwnedResource(twor, deployment, buildID)
+			if err != nil {
+				l.Error(err, "failed to render TemporalWorkerOwnedResource",
+					"twor", twor.Name,
+					"buildID", buildID,
+				)
+				continue
+			}
+			applies = append(applies, OwnedResourceApply{
+				Resource:     rendered,
+				FieldManager: k8s.OwnedResourceFieldManager(twor),
+			})
+		}
+	}
+	return applies
 }
 
 // checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
