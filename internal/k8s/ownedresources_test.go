@@ -91,9 +91,9 @@ func TestContainsTemplateMarker(t *testing.T) {
 
 func TestRenderString(t *testing.T) {
 	data := TemplateData{
-		DeploymentName: "my-worker-abc123",
-		Namespace:      "default",
-		BuildID:        "abc123",
+		DeploymentName:    "my-worker-abc123",
+		TemporalNamespace: "my-temporal-ns",
+		BuildID:           "abc123",
 	}
 
 	tests := []struct {
@@ -102,10 +102,10 @@ func TestRenderString(t *testing.T) {
 	}{
 		{"plain string", "plain string"},
 		{"{{ .DeploymentName }}", "my-worker-abc123"},
-		{"{{ .Namespace }}", "default"},
+		{"{{ .TemporalNamespace }}", "my-temporal-ns"},
 		{"{{ .BuildID }}", "abc123"},
 		{"Monitor for build {{ .BuildID }}", "Monitor for build abc123"},
-		{"{{ .DeploymentName }}.{{ .Namespace }}", "my-worker-abc123.default"},
+		{"{{ .DeploymentName }}.{{ .TemporalNamespace }}", "my-worker-abc123.my-temporal-ns"},
 	}
 	for _, tc := range tests {
 		got, err := renderString(tc.input, data)
@@ -235,7 +235,7 @@ func TestRenderOwnedResource(t *testing.T) {
 	}
 	buildID := "abc123"
 
-	obj, err := RenderOwnedResource(twor, deployment, buildID)
+	obj, err := RenderOwnedResource(twor, deployment, buildID, "my-temporal-ns")
 	require.NoError(t, err)
 
 	// Check metadata — name follows the hash-suffix formula
@@ -268,7 +268,7 @@ func TestRenderOwnedResource_WithTemplates(t *testing.T) {
 		"kind":       "WorkloadMonitor",
 		"spec": map[string]interface{}{
 			"targetWorkload": "{{ .DeploymentName }}",
-			"description":    "Monitor for build {{ .BuildID }} in {{ .Namespace }}",
+			"description":    "Monitor for build {{ .BuildID }} in {{ .TemporalNamespace }}",
 		},
 	}
 	rawBytes, err := json.Marshal(objSpec)
@@ -295,11 +295,11 @@ func TestRenderOwnedResource_WithTemplates(t *testing.T) {
 		},
 	}
 
-	obj, err := RenderOwnedResource(twor, deployment, "abc123")
+	obj, err := RenderOwnedResource(twor, deployment, "abc123", "my-temporal-ns")
 	require.NoError(t, err)
 
 	spec, ok := obj.Object["spec"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "my-worker-abc123", spec["targetWorkload"])
-	assert.Equal(t, "Monitor for build abc123 in production", spec["description"])
+	assert.Equal(t, "Monitor for build abc123 in my-temporal-ns", spec["description"])
 }

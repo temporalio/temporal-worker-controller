@@ -124,7 +124,7 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	plan.ApplyOwnedResources = getOwnedResourceApplies(l, twors, k8sState)
+	plan.ApplyOwnedResources = getOwnedResourceApplies(l, twors, k8sState, spec.WorkerOptions.TemporalNamespace)
 
 	return plan, nil
 }
@@ -135,6 +135,7 @@ func getOwnedResourceApplies(
 	l logr.Logger,
 	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
 	k8sState *k8s.DeploymentState,
+	temporalNamespace string,
 ) []OwnedResourceApply {
 	var applies []OwnedResourceApply
 	for i := range twors {
@@ -144,7 +145,7 @@ func getOwnedResourceApplies(
 			continue
 		}
 		for buildID, deployment := range k8sState.Deployments {
-			rendered, err := k8s.RenderOwnedResource(twor, deployment, buildID)
+			rendered, err := k8s.RenderOwnedResource(twor, deployment, buildID, temporalNamespace)
 			if err != nil {
 				l.Error(err, "failed to render TemporalWorkerOwnedResource",
 					"twor", twor.Name,

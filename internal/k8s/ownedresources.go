@@ -91,8 +91,8 @@ func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 type TemplateData struct {
 	// DeploymentName is the controller-generated versioned Deployment name.
 	DeploymentName string
-	// Namespace is the namespace of the resource.
-	Namespace string
+	// TemporalNamespace is the Temporal namespace the worker connects to.
+	TemporalNamespace string
 	// BuildID is the Build ID for this version.
 	BuildID string
 }
@@ -109,6 +109,7 @@ func RenderOwnedResource(
 	twor *temporaliov1alpha1.TemporalWorkerOwnedResource,
 	deployment *appsv1.Deployment,
 	buildID string,
+	temporalNamespace string,
 ) (*unstructured.Unstructured, error) {
 	// Step 1: unmarshal the raw object
 	var raw map[string]interface{}
@@ -117,9 +118,9 @@ func RenderOwnedResource(
 	}
 
 	data := TemplateData{
-		DeploymentName: deployment.Name,
-		Namespace:      twor.Namespace,
-		BuildID:        buildID,
+		DeploymentName:    deployment.Name,
+		TemporalNamespace: temporalNamespace,
+		BuildID:           buildID,
 	}
 
 	selectorLabels := ComputeSelectorLabels(twor.Spec.WorkerRef.Name, buildID)

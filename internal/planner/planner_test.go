@@ -3006,7 +3006,7 @@ func TestGetOwnedResourceApplies(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getOwnedResourceApplies(logr.Discard(), tc.twors, tc.k8sState)
+			applies := getOwnedResourceApplies(logr.Discard(), tc.twors, tc.k8sState, "test-temporal-ns")
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of owned resource applies")
 		})
 	}
@@ -3021,7 +3021,7 @@ func TestGetOwnedResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor}, k8sState)
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor}, k8sState, "test-temporal-ns")
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -3053,7 +3053,7 @@ func TestGetOwnedResourceApplies_FieldManagerDistinctPerTWOR(t *testing.T) {
 		},
 	}
 
-	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor1, twor2}, k8sState)
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor1, twor2}, k8sState, "test-temporal-ns")
 	require.Len(t, applies, 2)
 
 	fms := make(map[string]bool)
@@ -3107,6 +3107,85 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 			},
 		},
 	}
+}
+
+func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
+	// PDB with matchLabels opted in for auto-injection via null sentinel.
+	pdbSpec := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{
+				"matchLabels": nil, // null = opt in to auto-injection
+			},
+			"minAvailable": float64(1),
+		},
+	}
+	raw, _ := json.Marshal(pdbSpec)
+	twor := temporaliov1alpha1.TemporalWorkerOwnedResource{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
+		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
+	}
+
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor}, k8sState, "test-temporal-ns")
+	require.Len(t, applies, 1)
+
+	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	selector, ok := spec["selector"].(map[string]interface{})
+	require.True(t, ok)
+	matchLabels, ok := selector["matchLabels"].(map[string]interface{})
+	require.True(t, ok, "matchLabels should have been auto-injected")
+
+	// The injected labels must equal ComputeSelectorLabels(workerRef, buildID).
+	expected := k8s.ComputeSelectorLabels("my-worker", "build-abc")
+	for k, v := range expected {
+		assert.Equal(t, v, matchLabels[k], "injected matchLabels[%q]", k)
+	}
+	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
+}
+
+func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
+	// Arbitrary CRD that uses all three template variables.
+	objSpec := map[string]interface{}{
+		"apiVersion": "monitoring.example.com/v1",
+		"kind":       "WorkloadMonitor",
+		"spec": map[string]interface{}{
+			"targetWorkload":    "{{ .DeploymentName }}",
+			"versionLabel":      "build-{{ .BuildID }}",
+			"temporalNamespace": "{{ .TemporalNamespace }}",
+		},
+	}
+	raw, _ := json.Marshal(objSpec)
+	twor := temporaliov1alpha1.TemporalWorkerOwnedResource{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-monitor", Namespace: "k8s-production"},
+		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
+	}
+
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor}, k8sState, "temporal-production")
+	require.Len(t, applies, 1)
+
+	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "my-worker-build-abc", spec["targetWorkload"], ".DeploymentName not rendered")
+	assert.Equal(t, "build-build-abc", spec["versionLabel"], ".BuildID not rendered")
+	assert.Equal(t, "temporal-production", spec["temporalNamespace"], ".TemporalNamespace not rendered")
 }
 
 // createTestTWORWithInvalidTemplate builds a TWOR whose spec.object contains a broken Go
