@@ -87,17 +87,14 @@ spec:
         - "--metrics-bind-address=127.0.0.1:{{ .Values.metrics.port }}"
         {{- end }}
         - "--health-probe-bind-address=:8081"
-        {{- if .Values.webhook.enabled }}
-        {{ fail "webhooks aren't supported yet" }}
         ports:
-          - containerPort: 9443
+          - containerPort: {{ .Values.webhook.port }}
             name: webhook-server
             protocol: TCP
         volumeMounts:
-          - mountPath: /tmp/k8s-webhook-server/serving-certs
+          - mountPath: {{ .Values.webhook.certDir }}
             name: cert
             readOnly: true
-        {{- end }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -142,14 +139,11 @@ spec:
             cpu: 5m
             memory: 64Mi
       {{- end }}
-      {{- if .Values.webhook.enabled }}
-      {{ fail "webhooks aren't supported yet" }}
       volumes:
         - name: cert
           secret:
             defaultMode: 420
             secretName: webhook-server-cert
-      {{- end }}
       serviceAccountName: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- with .Values.nodeSelector }}

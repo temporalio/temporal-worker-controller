@@ -75,8 +75,10 @@ metrics:
 namespace:
   create: false
 
-# Not yet supported
 webhook:
+  # enabled controls the optional TemporalWorkerDeployment validating webhook.
+  # The TemporalWorkerOwnedResource validating webhook is always enabled and does
+  # not require this flag.
   enabled: false
   port: 9443
   certDir: /tmp/k8s-webhook-server/serving-certs
@@ -95,9 +97,13 @@ ownedResources:
     - Pod
     - CronJob
 
-# Not yet supported
 certmanager:
-  enabled: false
+  # enabled controls creation of the cert-manager Issuer and Certificate used for
+  # webhook TLS. cert-manager must be installed in the cluster.
+  # See https://cert-manager.io/docs/installation/
+  # Set to false only if you are providing your own TLS certificate in a Secret
+  # named "webhook-server-cert" in the controller namespace.
+  enabled: true
 
 # Not yet supported
 prometheus:
