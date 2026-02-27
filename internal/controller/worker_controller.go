@@ -150,11 +150,10 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
 		l.Error(err, "unable to fetch TemporalConnection")
-		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalConnectionNotFound",
-			"Unable to fetch TemporalConnection %q: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err)
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
-			"TemporalConnectionNotFound", fmt.Sprintf("TemporalConnection %q not found: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err))
-		_ = r.Status().Update(ctx, &workerDeploy)
+		r.recordWarningAndSetCondition(ctx, &workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+			"TemporalConnectionNotFound",
+			fmt.Sprintf("Unable to fetch TemporalConnection %q: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err),
+			fmt.Sprintf("TemporalConnection %q not found: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err))
 		return ctrl.Result{}, err
 	}
 
@@ -162,11 +161,10 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
 	if err != nil {
 		l.Error(err, "unable to resolve auth secret name")
-		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "AuthSecretInvalid",
-			"Unable to resolve auth secret from TemporalConnection %q: %v", temporalConnection.Name, err)
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
-			"AuthSecretInvalid", fmt.Sprintf("Unable to resolve auth secret: %v", err))
-		_ = r.Status().Update(ctx, &workerDeploy)
+		r.recordWarningAndSetCondition(ctx, &workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+			"AuthSecretInvalid",
+			fmt.Sprintf("Unable to resolve auth secret from TemporalConnection %q: %v", temporalConnection.Name, err),
+			fmt.Sprintf("Unable to resolve auth secret: %v", err))
 		return ctrl.Result{}, err
 	}
 
@@ -189,11 +187,10 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		})
 		if err != nil {
 			l.Error(err, "unable to create TemporalClient")
-			r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalClientCreationFailed",
-				"Unable to create Temporal client for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err)
-			r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
-				"TemporalClientCreationFailed", fmt.Sprintf("Failed to connect to Temporal: %v", err))
-			_ = r.Status().Update(ctx, &workerDeploy)
+			r.recordWarningAndSetCondition(ctx, &workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+				"TemporalClientCreationFailed",
+				fmt.Sprintf("Unable to create Temporal client for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
+				fmt.Sprintf("Failed to connect to Temporal: %v", err))
 			return ctrl.Result{}, err
 		}
 		temporalClient = c
@@ -226,11 +223,10 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		getControllerIdentity(),
 	)
 	if err != nil {
-		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "TemporalStateFetchFailed",
-			"Unable to get Temporal worker deployment state: %v", err)
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse,
-			"TemporalStateFetchFailed", fmt.Sprintf("Failed to query Temporal worker deployment state: %v", err))
-		_ = r.Status().Update(ctx, &workerDeploy)
+		r.recordWarningAndSetCondition(ctx, &workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+			"TemporalStateFetchFailed",
+			fmt.Sprintf("Unable to get Temporal worker deployment state: %v", err),
+			fmt.Sprintf("Failed to query Temporal worker deployment state: %v", err))
 		return ctrl.Result{}, fmt.Errorf("unable to get Temporal worker deployment state: %w", err)
 	}
 
@@ -267,6 +263,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	if err != nil {
 		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "PlanGenerationFailed",
 			"Unable to generate reconciliation plan: %v", err)
+		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, err
 	}
 
@@ -274,6 +271,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
 		r.Recorder.Eventf(&workerDeploy, corev1.EventTypeWarning, "PlanExecutionFailed",
 			"Unable to execute reconciliation plan: %v", err)
+		_ = r.Status().Update(ctx, &workerDeploy)
 		return ctrl.Result{}, err
 	}
 
@@ -300,6 +298,20 @@ func (r *TemporalWorkerDeploymentReconciler) setCondition(
 		Reason:             reason,
 		Message:            message,
 	})
+}
+
+// recordWarningAndSetCondition emits a warning event, sets a condition to False, and persists the status update.
+func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetCondition(
+	ctx context.Context,
+	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	conditionType string,
+	reason string,
+	eventMessage string,
+	conditionMessage string,
+) {
+	r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, reason, eventMessage)
+	r.setCondition(workerDeploy, conditionType, metav1.ConditionFalse, reason, conditionMessage)
+	_ = r.Status().Update(ctx, workerDeploy)
 }
 
 // SetupWithManager sets up the controller with the Manager.

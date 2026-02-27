@@ -92,8 +92,8 @@ const (
 	// resource exists and is properly configured.
 	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
 
-	// ConditionRolloutReady indicates whether the TemporalWorkerDeployment is fully reconciled
-	// and operational.
+	// ConditionRolloutReady indicates whether the target version has been successfully
+	// registered as the current version, completing the rollout.
 	ConditionRolloutReady = "RolloutReady"
 )
 

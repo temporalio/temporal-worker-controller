@@ -141,6 +141,7 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType)
 		}
 		if err != nil {
+			l.Error(err, "unable to start test workflow execution", "workflowType", wf.workflowType, "buildID", wf.buildID, "taskQueue", wf.taskQueue)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "TestWorkflowStartFailed",
 				"Failed to start gate workflow %q (buildID %s, taskQueue %s): %v", wf.workflowType, wf.buildID, wf.taskQueue, err)
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
@@ -162,6 +163,7 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 			ConflictToken: vcfg.ConflictToken,
 			Identity:      getControllerIdentity(),
 		}); err != nil {
+			l.Error(err, "unable to set current deployment version", "buildID", vcfg.BuildID)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
 				"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
 			return fmt.Errorf("unable to set current deployment version: %w", err)
@@ -181,6 +183,7 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 			ConflictToken: vcfg.ConflictToken,
 			Identity:      getControllerIdentity(),
 		}); err != nil {
+			l.Error(err, "unable to set ramping deployment version", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "VersionRegistrationFailed",
 				"Failed to set buildID %q as ramping version (%.1f%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
 			return fmt.Errorf("unable to set ramping deployment version: %w", err)
@@ -199,6 +202,7 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 			},
 		},
 	}); err != nil { // would be cool to do this atomically with the update
+		l.Error(err, "unable to update version metadata", "buildID", vcfg.BuildID)
 		r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, "MetadataUpdateFailed",
 			"Failed to update version metadata for buildID %q: %v", vcfg.BuildID, err)
 		return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
@@ -232,6 +236,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				RemoveEntries: []string{temporal.IgnoreLastModifierKey},
 			},
 		}); err != nil {
+			l.Error(err, "unable to remove ignore-last-modifier metadata", "buildID", buildId)
 			return fmt.Errorf("unable to update metadata to remove %s deployment: %w", temporal.IgnoreLastModifierKey, err)
 		}
 	}
