@@ -78,9 +78,9 @@ spec:
               fieldPath: spec.serviceAccountName
         # BANNED_KINDS controls which resource kinds are rejected by the
         # TemporalWorkerOwnedResource validating webhook. Configurable via
-        # ownedResources.bannedKinds in values.yaml.
+        # ownedResourceConfig.bannedKinds in values.yaml.
         - name: BANNED_KINDS
-          value: "{{ join "," .Values.ownedResources.bannedKinds }}"
+          value: "{{ join "," .Values.ownedResourceConfig.bannedKinds }}"
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}

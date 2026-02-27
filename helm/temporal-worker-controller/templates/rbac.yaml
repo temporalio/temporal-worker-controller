@@ -148,8 +148,8 @@ rules:
     verbs:
       - create
   # Rules for managing resources attached via TemporalWorkerOwnedResource.
-  # Controlled by ownedResources.rbac in values.yaml.
-  {{- if .Values.ownedResources.rbac.wildcard }}
+  # Controlled by ownedResourceConfig.rbac in values.yaml.
+  {{- if .Values.ownedResourceConfig.rbac.wildcard }}
   - apiGroups:
       - "*"
     resources:
@@ -161,7 +161,7 @@ rules:
       - patch
       - update
   {{- else }}
-  {{- range .Values.ownedResources.rbac.rules }}
+  {{- range .Values.ownedResourceConfig.rbac.rules }}
   - apiGroups:
       {{- range .apiGroups }}
       - {{ . | quote }}
