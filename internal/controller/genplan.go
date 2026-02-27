@@ -169,7 +169,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.UpdateVersionConfig = planResult.VersionConfig
 
 	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
-	plan.ApplyOwnedResources = planResult.OwnedResourceApplies
+	plan.ApplyOwnedResources = planResult.ApplyOwnedResources
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

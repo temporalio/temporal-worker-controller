@@ -475,7 +475,7 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
-			assert.Equal(t, tc.expectOwnedResourceApplies, len(plan.OwnedResourceApplies), "unexpected number of owned resource applies")
+			assert.Equal(t, tc.expectOwnedResourceApplies, len(plan.ApplyOwnedResources), "unexpected number of owned resource applies")
 
 			if tc.expectConfig {
 				assert.NotNil(t, plan.VersionConfig, "expected version config")

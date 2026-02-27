@@ -37,8 +37,8 @@ type Plan struct {
 	// Build IDs of versions from which the controller should
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
-	// OwnedResourceApplies holds resources to apply via SSA, one per (TWOR × Build ID) pair.
-	OwnedResourceApplies []OwnedResourceApply
+	// ApplyOwnedResources holds resources to apply via SSA, one per (TWOR × Build ID) pair.
+	ApplyOwnedResources []OwnedResourceApply
 }
 
 // VersionConfig defines version configuration for Temporal
@@ -124,7 +124,7 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	plan.OwnedResourceApplies = getOwnedResourceApplies(l, twors, k8sState)
+	plan.ApplyOwnedResources = getOwnedResourceApplies(l, twors, k8sState)
 
 	return plan, nil
 }
