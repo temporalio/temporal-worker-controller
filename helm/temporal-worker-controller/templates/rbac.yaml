@@ -147,6 +147,25 @@ rules:
       - subjectaccessreviews
     verbs:
       - create
+  # TemporalWorkerOwnedResource attaches arbitrary user-defined resources (HPA, PDB,
+  # custom CRDs, etc.) to versioned Deployments. Because the attached resource types
+  # are not known at install time, the controller needs broad permissions to apply them.
+  #
+  # This is safe: the TemporalWorkerOwnedResource validating webhook is a required
+  # security control that runs on every create/update/delete. It verifies that the
+  # requesting user has permission to manage the embedded resource type before the
+  # TWOR object is admitted. The controller only ever applies resources that a
+  # permissioned user explicitly requested.
+  - apiGroups:
+      - "*"
+    resources:
+      - "*"
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
+      - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
