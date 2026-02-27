@@ -1,0 +1,85 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: temporalworkerownedresources.temporal.io
+spec:
+  group: temporal.io
+  names:
+    kind: TemporalWorkerOwnedResource
+    listKind: TemporalWorkerOwnedResourceList
+    plural: temporalworkerownedresources
+    shortNames:
+    - twor
+    singular: temporalworkerownedresource
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Referenced TemporalWorkerDeployment
+      jsonPath: .spec.workerRef.name
+      name: Worker
+      type: string
+    - description: Kind of owned resource
+      jsonPath: .spec.object.kind
+      name: Kind
+      type: string
+    - description: Age
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              object:
+                x-kubernetes-preserve-unknown-fields: true
+              workerRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - object
+            - workerRef
+            type: object
+          status:
+            properties:
+              versions:
+                items:
+                  properties:
+                    applied:
+                      type: boolean
+                    buildID:
+                      type: string
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    resourceName:
+                      type: string
+                  required:
+                  - applied
+                  - buildID
+                  - lastTransitionTime
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
