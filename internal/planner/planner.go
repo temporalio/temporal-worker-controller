@@ -21,8 +21,11 @@ import (
 
 // OwnedResourceApply holds a rendered owned resource to apply via Server-Side Apply.
 type OwnedResourceApply struct {
-	Resource     *unstructured.Unstructured
-	FieldManager string
+	Resource      *unstructured.Unstructured
+	FieldManager  string
+	TWORName      string
+	TWORNamespace string
+	BuildID       string
 }
 
 // Plan holds the actions to execute during reconciliation
@@ -154,8 +157,11 @@ func getOwnedResourceApplies(
 				continue
 			}
 			applies = append(applies, OwnedResourceApply{
-				Resource:     rendered,
-				FieldManager: k8s.OwnedResourceFieldManager(twor),
+				Resource:      rendered,
+				FieldManager:  k8s.OwnedResourceFieldManager(twor),
+				TWORName:      twor.Name,
+				TWORNamespace: twor.Namespace,
+				BuildID:       buildID,
 			})
 		}
 	}

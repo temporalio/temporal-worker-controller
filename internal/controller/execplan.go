@@ -7,10 +7,13 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
@@ -18,6 +21,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -193,7 +197,14 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	// Apply owned resources via Server-Side Apply.
 	// Partial failure isolation: all resources are attempted even if some fail;
 	// errors are collected and returned together.
-	var ownedResourceErrors []error
+	type tworKey struct{ namespace, name string }
+	type applyResult struct {
+		buildID      string
+		resourceName string
+		err          error
+	}
+	tworResults := make(map[tworKey][]applyResult)
+
 	for _, apply := range p.ApplyOwnedResources {
 		l.Info("applying owned resource",
 			"name", apply.Resource.GetName(),
@@ -206,23 +217,54 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		// leaving fields owned by other managers (e.g. the HPA controller) untouched.
 		// client.ForceOwnership allows this field manager to claim any fields that were
 		// previously owned by a different manager (e.g. after a field manager rename).
-		if err := r.Client.Patch(
+		applyErr := r.Client.Patch(
 			ctx,
 			apply.Resource,
 			client.Apply,
 			client.ForceOwnership,
 			client.FieldOwner(apply.FieldManager),
-		); err != nil {
-			l.Error(err, "unable to apply owned resource",
+		)
+		if applyErr != nil {
+			l.Error(applyErr, "unable to apply owned resource",
 				"name", apply.Resource.GetName(),
 				"kind", apply.Resource.GetKind(),
 			)
-			ownedResourceErrors = append(ownedResourceErrors, err)
 		}
-	}
-	if len(ownedResourceErrors) > 0 {
-		return fmt.Errorf("errors applying owned resources (%d failures): %v", len(ownedResourceErrors), ownedResourceErrors[0])
+		key := tworKey{apply.TWORNamespace, apply.TWORName}
+		tworResults[key] = append(tworResults[key], applyResult{
+			buildID:      apply.BuildID,
+			resourceName: apply.Resource.GetName(),
+			err:          applyErr,
+		})
 	}
 
-	return nil
+	// Write per-Build-ID status back to each TWOR.
+	// Done after all applies so a single failed apply does not prevent status
+	// updates for the other (TWOR, Build ID) pairs.
+	var applyErrs, statusErrs []error
+	for key, results := range tworResults {
+		versions := make([]temporaliov1alpha1.OwnedResourceVersionStatus, 0, len(results))
+		for _, result := range results {
+			var msg string
+			if result.err != nil {
+				applyErrs = append(applyErrs, result.err)
+				msg = result.err.Error()
+			}
+			versions = append(versions, k8s.OwnedResourceVersionStatusForBuildID(
+				result.buildID, result.resourceName, result.err == nil, msg,
+			))
+		}
+
+		twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, twor); err != nil {
+			statusErrs = append(statusErrs, fmt.Errorf("get TWOR %s/%s for status update: %w", key.namespace, key.name, err))
+			continue
+		}
+		twor.Status.Versions = versions
+		if err := r.Status().Update(ctx, twor); err != nil {
+			statusErrs = append(statusErrs, fmt.Errorf("update status for TWOR %s/%s: %w", key.namespace, key.name, err))
+		}
+	}
+
+	return errors.Join(errors.Join(applyErrs...), errors.Join(statusErrs...))
 }
