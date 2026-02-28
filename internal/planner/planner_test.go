@@ -466,7 +466,7 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.twors)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.twors, metav1.OwnerReference{})
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -1993,7 +1993,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false, nil)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false, nil, metav1.OwnerReference{})
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
@@ -3209,4 +3209,87 @@ func createTestTWORWithInvalidTemplate(name, workerRefName string) temporaliov1a
 			Object:    runtime.RawExtension{Raw: raw},
 		},
 	}
+}
+
+func TestGetTWOROwnerRefPatches(t *testing.T) {
+	isController := true
+	blockOwnerDeletion := true
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         "temporal.io/v1alpha1",
+		Kind:               "TemporalWorkerDeployment",
+		Name:               "my-worker",
+		UID:                types.UID("twd-uid-123"),
+		Controller:         &isController,
+		BlockOwnerDeletion: &blockOwnerDeletion,
+	}
+
+	newTWOR := func(name string, ownerRefs ...metav1.OwnerReference) temporaliov1alpha1.TemporalWorkerOwnedResource {
+		return temporaliov1alpha1.TemporalWorkerOwnedResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            name,
+				Namespace:       "default",
+				OwnerReferences: ownerRefs,
+			},
+		}
+	}
+
+	t.Run("all TWORs need owner ref", func(t *testing.T) {
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("twor-a"),
+			newTWOR("twor-b"),
+		}
+		patches := getTWOROwnerRefPatches(twors, ownerRef)
+		require.Len(t, patches, 2)
+
+		// Base should be unchanged
+		assert.Empty(t, patches[0].Base.OwnerReferences)
+		assert.Empty(t, patches[1].Base.OwnerReferences)
+
+		// Patched should have the owner ref appended
+		require.Len(t, patches[0].Patched.OwnerReferences, 1)
+		assert.Equal(t, ownerRef.UID, patches[0].Patched.OwnerReferences[0].UID)
+		assert.Equal(t, true, *patches[0].Patched.OwnerReferences[0].Controller)
+	})
+
+	t.Run("TWOR already owned by this TWD is skipped", func(t *testing.T) {
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("already-owned", ownerRef),
+			newTWOR("needs-ref"),
+		}
+		patches := getTWOROwnerRefPatches(twors, ownerRef)
+		require.Len(t, patches, 1)
+		assert.Equal(t, "needs-ref", patches[0].Patched.Name)
+	})
+
+	t.Run("TWOR with different controller owner still gets patched", func(t *testing.T) {
+		otherUID := types.UID("other-uid")
+		otherController := true
+		otherRef := metav1.OwnerReference{UID: otherUID, Controller: &otherController}
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("other-owner", otherRef),
+		}
+		patches := getTWOROwnerRefPatches(twors, ownerRef)
+		// The other controller has a different UID so we still add our ref
+		require.Len(t, patches, 1)
+		require.Len(t, patches[0].Patched.OwnerReferences, 2)
+	})
+
+	t.Run("empty TWOR list returns nil", func(t *testing.T) {
+		patches := getTWOROwnerRefPatches(nil, ownerRef)
+		assert.Nil(t, patches)
+	})
+
+	t.Run("non-controller owner ref with same UID does not skip", func(t *testing.T) {
+		notController := false
+		nonControllerRef := metav1.OwnerReference{
+			UID:        ownerRef.UID,
+			Controller: &notController,
+		}
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("non-controller-ref", nonControllerRef),
+		}
+		patches := getTWOROwnerRefPatches(twors, ownerRef)
+		// controller=false with matching UID should still get the controller ref added
+		require.Len(t, patches, 1)
+	})
 }

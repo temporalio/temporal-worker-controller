@@ -42,6 +42,17 @@ type Plan struct {
 	RemoveIgnoreLastModifierBuilds []string
 	// ApplyOwnedResources holds resources to apply via SSA, one per (TWOR × Build ID) pair.
 	ApplyOwnedResources []OwnedResourceApply
+	// EnsureTWOROwnerRefs holds (base, patched) pairs for TWORs that need a
+	// controller owner reference added, ready for client.MergeFrom patching.
+	EnsureTWOROwnerRefs []TWOROwnerRefPatch
+}
+
+// TWOROwnerRefPatch holds a TWOR pair for a single merge-patch:
+// Base is the unmodified object (used as the patch base), Patched has the
+// controller owner reference already appended.
+type TWOROwnerRefPatch struct {
+	Base    *temporaliov1alpha1.TemporalWorkerOwnedResource
+	Patched *temporaliov1alpha1.TemporalWorkerOwnedResource
 }
 
 // VersionConfig defines version configuration for Temporal
@@ -91,6 +102,7 @@ func GeneratePlan(
 	gateInput []byte,
 	isGateInputSecret bool,
 	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
+	twdOwnerRef metav1.OwnerReference,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
@@ -128,6 +140,7 @@ func GeneratePlan(
 	//                 but have no corresponding Deployment.
 
 	plan.ApplyOwnedResources = getOwnedResourceApplies(l, twors, k8sState, spec.WorkerOptions.TemporalNamespace)
+	plan.EnsureTWOROwnerRefs = getTWOROwnerRefPatches(twors, twdOwnerRef)
 
 	return plan, nil
 }
@@ -166,6 +179,35 @@ func getOwnedResourceApplies(
 		}
 	}
 	return applies
+}
+
+// getTWOROwnerRefPatches returns (base, patched) pairs for each TWOR that does not
+// yet have a controller owner reference with the given UID. The patched copy has
+// twdOwnerRef appended to its OwnerReferences so that executePlan can apply a
+// merge-patch to add the reference without a full Update.
+func getTWOROwnerRefPatches(
+	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
+	twdOwnerRef metav1.OwnerReference,
+) []TWOROwnerRefPatch {
+	var patches []TWOROwnerRefPatch
+	for i := range twors {
+		twor := &twors[i]
+		// Skip if this TWD is already the controller owner.
+		alreadyOwned := false
+		for _, ref := range twor.OwnerReferences {
+			if ref.Controller != nil && *ref.Controller && ref.UID == twdOwnerRef.UID {
+				alreadyOwned = true
+				break
+			}
+		}
+		if alreadyOwned {
+			continue
+		}
+		patched := twor.DeepCopy()
+		patched.OwnerReferences = append(patched.OwnerReferences, twdOwnerRef)
+		patches = append(patches, TWOROwnerRefPatch{Base: twor, Patched: patched})
+	}
+	return patches
 }
 
 // checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is

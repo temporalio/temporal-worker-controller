@@ -46,15 +46,7 @@ type plan struct {
 
 	// TWORs that need a controller owner reference added, as (base, patched) pairs
 	// ready for client.MergeFrom patching in executePlan.
-	EnsureTWOROwnerRefs []tworOwnerRefPatch
-}
-
-// tworOwnerRefPatch holds a TWOR pair for a single merge-patch:
-// Base is the unmodified object (used as the patch base), Patched has the
-// owner reference already set.
-type tworOwnerRefPatch struct {
-	Base    *temporaliov1alpha1.TemporalWorkerOwnedResource
-	Patched *temporaliov1alpha1.TemporalWorkerOwnedResource
+	EnsureTWOROwnerRefs []planner.TWOROwnerRefPatch
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -155,28 +147,17 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		return nil, fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
 	}
 
-	// For each TWOR that does not yet have an owner reference to this TWD, build a
-	// (base, patched) pair so that executePlan can apply the patch. No writes here.
+	// Build the owner reference that the planner will use to populate
+	// EnsureTWOROwnerRefs for any TWOR not yet owned by this TWD.
 	isController := true
 	blockOwnerDeletion := true
-	for i := range tworList.Items {
-		twor := &tworList.Items[i]
-		if metav1.IsControlledBy(twor, w) {
-			continue
-		}
-		patched := twor.DeepCopy()
-		patched.OwnerReferences = append(patched.OwnerReferences, metav1.OwnerReference{
-			APIVersion:         temporaliov1alpha1.GroupVersion.String(),
-			Kind:               "TemporalWorkerDeployment",
-			Name:               w.Name,
-			UID:                w.UID,
-			Controller:         &isController,
-			BlockOwnerDeletion: &blockOwnerDeletion,
-		})
-		plan.EnsureTWOROwnerRefs = append(plan.EnsureTWOROwnerRefs, tworOwnerRefPatch{
-			Base:    twor,
-			Patched: patched,
-		})
+	twdOwnerRef := metav1.OwnerReference{
+		APIVersion:         temporaliov1alpha1.GroupVersion.String(),
+		Kind:               "TemporalWorkerDeployment",
+		Name:               w.Name,
+		UID:                w.UID,
+		Controller:         &isController,
+		BlockOwnerDeletion: &blockOwnerDeletion,
 	}
 
 	planResult, err := planner.GeneratePlan(
@@ -192,6 +173,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		gateInput,
 		isGateInputSecret,
 		tworList.Items,
+		twdOwnerRef,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)
@@ -207,6 +189,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
 	plan.ApplyOwnedResources = planResult.ApplyOwnedResources
+	plan.EnsureTWOROwnerRefs = planResult.EnsureTWOROwnerRefs
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
