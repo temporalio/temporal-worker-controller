@@ -18,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -44,6 +43,18 @@ type plan struct {
 
 	// OwnedResources to apply via Server-Side Apply, one per (TWOR × Build ID) pair.
 	ApplyOwnedResources []planner.OwnedResourceApply
+
+	// TWORs that need a controller owner reference added, as (base, patched) pairs
+	// ready for client.MergeFrom patching in executePlan.
+	EnsureTWOROwnerRefs []tworOwnerRefPatch
+}
+
+// tworOwnerRefPatch holds a TWOR pair for a single merge-patch:
+// Base is the unmodified object (used as the patch base), Patched has the
+// owner reference already set.
+type tworOwnerRefPatch struct {
+	Base    *temporaliov1alpha1.TemporalWorkerOwnedResource
+	Patched *temporaliov1alpha1.TemporalWorkerOwnedResource
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -144,23 +155,28 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		return nil, fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
 	}
 
-	// Ensure each TWOR has an owner reference to this TWD so that Kubernetes GC
-	// deletes the TWOR when the TWD is deleted. We use a merge-patch rather than
-	// Update to avoid conflicts with concurrent modifications, and we skip the
-	// patch entirely when the reference is already present to avoid unnecessary
-	// writes on every reconcile loop.
+	// For each TWOR that does not yet have an owner reference to this TWD, build a
+	// (base, patched) pair so that executePlan can apply the patch. No writes here.
+	isController := true
+	blockOwnerDeletion := true
 	for i := range tworList.Items {
 		twor := &tworList.Items[i]
 		if metav1.IsControlledBy(twor, w) {
 			continue
 		}
-		patchBase := twor.DeepCopy()
-		if err := controllerutil.SetControllerReference(w, twor, r.Scheme); err != nil {
-			return nil, fmt.Errorf("set controller reference on TWOR %s/%s: %w", twor.Namespace, twor.Name, err)
-		}
-		if err := r.Patch(ctx, twor, client.MergeFrom(patchBase)); err != nil {
-			return nil, fmt.Errorf("patch TWOR %s/%s with controller reference: %w", twor.Namespace, twor.Name, err)
-		}
+		patched := twor.DeepCopy()
+		patched.OwnerReferences = append(patched.OwnerReferences, metav1.OwnerReference{
+			APIVersion:         temporaliov1alpha1.GroupVersion.String(),
+			Kind:               "TemporalWorkerDeployment",
+			Name:               w.Name,
+			UID:                w.UID,
+			Controller:         &isController,
+			BlockOwnerDeletion: &blockOwnerDeletion,
+		})
+		plan.EnsureTWOROwnerRefs = append(plan.EnsureTWOROwnerRefs, tworOwnerRefPatch{
+			Base:    twor,
+			Patched: patched,
+		})
 	}
 
 	planResult, err := planner.GeneratePlan(

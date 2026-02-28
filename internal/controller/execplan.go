@@ -194,6 +194,14 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
+	// Patch any TWORs that are missing the owner reference to this TWD.
+	for _, ownerPatch := range p.EnsureTWOROwnerRefs {
+		if err := r.Patch(ctx, ownerPatch.Patched, client.MergeFrom(ownerPatch.Base)); err != nil {
+			return fmt.Errorf("patch TWOR %s/%s with controller reference: %w",
+				ownerPatch.Patched.Namespace, ownerPatch.Patched.Name, err)
+		}
+	}
+
 	// Apply owned resources via Server-Side Apply.
 	// Partial failure isolation: all resources are attempted even if some fail;
 	// errors are collected and returned together.
