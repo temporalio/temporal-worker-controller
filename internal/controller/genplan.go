@@ -15,7 +15,6 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -147,19 +146,6 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		return nil, fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
 	}
 
-	// Build the owner reference that the planner will use to populate
-	// EnsureTWOROwnerRefs for any TWOR not yet owned by this TWD.
-	isController := true
-	blockOwnerDeletion := true
-	twdOwnerRef := metav1.OwnerReference{
-		APIVersion:         temporaliov1alpha1.GroupVersion.String(),
-		Kind:               "TemporalWorkerDeployment",
-		Name:               w.Name,
-		UID:                w.UID,
-		Controller:         &isController,
-		BlockOwnerDeletion: &blockOwnerDeletion,
-	}
-
 	planResult, err := planner.GeneratePlan(
 		l,
 		k8sState,
@@ -173,7 +159,8 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		gateInput,
 		isGateInputSecret,
 		tworList.Items,
-		twdOwnerRef,
+		w.Name,
+		w.UID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)

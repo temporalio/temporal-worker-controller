@@ -30,6 +30,7 @@ var defaultBannedKinds = []string{"Deployment", "StatefulSet", "Job", "Pod", "Cr
 
 // TemporalWorkerOwnedResourceValidator validates TemporalWorkerOwnedResource objects.
 // It holds API-dependent dependencies (client, RESTMapper, controller SA identity).
+// +kubebuilder:object:generate=false
 type TemporalWorkerOwnedResourceValidator struct {
 	Client                client.Client
 	RESTMapper            meta.RESTMapper

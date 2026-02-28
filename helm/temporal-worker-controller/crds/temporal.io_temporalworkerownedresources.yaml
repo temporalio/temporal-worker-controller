@@ -42,6 +42,7 @@ spec:
           spec:
             properties:
               object:
+                type: object
                 x-kubernetes-preserve-unknown-fields: true
               workerRef:
                 properties:
