@@ -15,8 +15,10 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -140,6 +142,25 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		client.MatchingFields{tworWorkerRefKey: w.Name},
 	); err != nil {
 		return nil, fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
+	}
+
+	// Ensure each TWOR has an owner reference to this TWD so that Kubernetes GC
+	// deletes the TWOR when the TWD is deleted. We use a merge-patch rather than
+	// Update to avoid conflicts with concurrent modifications, and we skip the
+	// patch entirely when the reference is already present to avoid unnecessary
+	// writes on every reconcile loop.
+	for i := range tworList.Items {
+		twor := &tworList.Items[i]
+		if metav1.IsControlledBy(twor, w) {
+			continue
+		}
+		patchBase := twor.DeepCopy()
+		if err := controllerutil.SetControllerReference(w, twor, r.Scheme); err != nil {
+			return nil, fmt.Errorf("set controller reference on TWOR %s/%s: %w", twor.Namespace, twor.Name, err)
+		}
+		if err := r.Patch(ctx, twor, client.MergeFrom(patchBase)); err != nil {
+			return nil, fmt.Errorf("patch TWOR %s/%s with controller reference: %w", twor.Namespace, twor.Name, err)
+		}
 	}
 
 	planResult, err := planner.GeneratePlan(
