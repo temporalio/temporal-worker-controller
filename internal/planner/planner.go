@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // OwnedResourceApply holds a rendered owned resource to apply via Server-Side Apply.
@@ -102,7 +103,8 @@ func GeneratePlan(
 	gateInput []byte,
 	isGateInputSecret bool,
 	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
-	twdOwnerRef metav1.OwnerReference,
+	twdName string,
+	twdUID types.UID,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
@@ -140,7 +142,7 @@ func GeneratePlan(
 	//                 but have no corresponding Deployment.
 
 	plan.ApplyOwnedResources = getOwnedResourceApplies(l, twors, k8sState, spec.WorkerOptions.TemporalNamespace)
-	plan.EnsureTWOROwnerRefs = getTWOROwnerRefPatches(twors, twdOwnerRef)
+	plan.EnsureTWOROwnerRefs = getTWOROwnerRefPatches(twors, twdName, twdUID)
 
 	return plan, nil
 }
@@ -182,20 +184,31 @@ func getOwnedResourceApplies(
 }
 
 // getTWOROwnerRefPatches returns (base, patched) pairs for each TWOR that does not
-// yet have a controller owner reference with the given UID. The patched copy has
-// twdOwnerRef appended to its OwnerReferences so that executePlan can apply a
-// merge-patch to add the reference without a full Update.
+// yet have a controller owner reference pointing to the given TWD. The patched copy
+// has the owner reference appended so that executePlan can apply a merge-patch to
+// add it without a full Update.
 func getTWOROwnerRefPatches(
 	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
-	twdOwnerRef metav1.OwnerReference,
+	twdName string,
+	twdUID types.UID,
 ) []TWOROwnerRefPatch {
+	isController := true
+	blockOwnerDeletion := true
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         temporaliov1alpha1.GroupVersion.String(),
+		Kind:               "TemporalWorkerDeployment",
+		Name:               twdName,
+		UID:                twdUID,
+		Controller:         &isController,
+		BlockOwnerDeletion: &blockOwnerDeletion,
+	}
 	var patches []TWOROwnerRefPatch
 	for i := range twors {
 		twor := &twors[i]
 		// Skip if this TWD is already the controller owner.
 		alreadyOwned := false
 		for _, ref := range twor.OwnerReferences {
-			if ref.Controller != nil && *ref.Controller && ref.UID == twdOwnerRef.UID {
+			if ref.Controller != nil && *ref.Controller && ref.UID == twdUID {
 				alreadyOwned = true
 				break
 			}
@@ -204,7 +217,7 @@ func getTWOROwnerRefPatches(
 			continue
 		}
 		patched := twor.DeepCopy()
-		patched.OwnerReferences = append(patched.OwnerReferences, twdOwnerRef)
+		patched.OwnerReferences = append(patched.OwnerReferences, ownerRef)
 		patches = append(patches, TWOROwnerRefPatch{Base: twor, Patched: patched})
 	}
 	return patches
