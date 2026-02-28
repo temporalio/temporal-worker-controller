@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,7 +13,10 @@ import (
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -839,6 +843,152 @@ func TestIntegration(t *testing.T) {
 		})
 	}
 
+	// TemporalWorkerOwnedResource integration test:
+	// Creates a TWOR with an HPA spec and verifies that the controller applies one HPA per active Build ID.
+	t.Run("twor-creates-hpa-per-build-id", func(t *testing.T) {
+		ctx := context.Background()
+		twdName := "twor-hpa-test"
+		tworName := "test-hpa"
+
+		// Build the TWD using the existing builder (sets connection ref, temporal namespace, task queue).
+		tc := testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithTargetTemplate("v1.0"),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+					WithCurrentVersion("v1.0", true, false),
+			).
+			BuildWithValues(twdName, testNamespace.Name, ts.GetDefaultNamespace())
+		twd := tc.GetTWD()
+
+		t.Log("Creating TemporalConnection")
+		temporalConnection := &temporaliov1alpha1.TemporalConnection{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
+				Namespace: twd.Namespace,
+			},
+			Spec: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort: ts.GetFrontendHostPort(),
+			},
+		}
+		if err := k8sClient.Create(ctx, temporalConnection); err != nil {
+			t.Fatalf("failed to create TemporalConnection: %v", err)
+		}
+
+		env := testhelpers.TestEnv{
+			K8sClient:                  k8sClient,
+			Mgr:                        mgr,
+			Ts:                         ts,
+			Connection:                 temporalConnection,
+			ExistingDeploymentReplicas: make(map[string]int32),
+			ExistingDeploymentImages:   make(map[string]string),
+			ExpectedDeploymentReplicas: make(map[string]int32),
+		}
+
+		t.Log("Creating TemporalWorkerDeployment")
+		if err := k8sClient.Create(ctx, twd); err != nil {
+			t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+		}
+
+		// Wait for the controller to create the versioned Deployment, then start workers
+		// and mark it healthy so that the reconciler sees it as an active Build ID.
+		waitForExpectedTargetDeployment(t, twd, env, 30*time.Second)
+		buildID := k8s.ComputeBuildID(twd)
+		depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+		stopFuncs := applyDeployment(t, ctx, k8sClient, depName, testNamespace.Name)
+		defer handleStopFuncs(stopFuncs)
+
+		// Wait for TWD status to reach Current before creating the TWOR,
+		// so that k8sState.Deployments already contains the active Build ID
+		// when the reconciler next runs.
+		verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, tc.GetExpectedStatus(), 30*time.Second, 5*time.Second)
+
+		t.Log("Creating TemporalWorkerOwnedResource with HPA spec")
+		twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      tworName,
+				Namespace: testNamespace.Name,
+			},
+			Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+				WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: twd.Name},
+				// scaleTargetRef is set to null to trigger auto-injection by the controller.
+				Object: runtime.RawExtension{Raw: []byte(`{
+					"apiVersion": "autoscaling/v2",
+					"kind": "HorizontalPodAutoscaler",
+					"spec": {
+						"scaleTargetRef": null,
+						"minReplicas": 2,
+						"maxReplicas": 5,
+						"metrics": []
+					}
+				}`)},
+			},
+		}
+		if err := k8sClient.Create(ctx, twor); err != nil {
+			t.Fatalf("failed to create TemporalWorkerOwnedResource: %v", err)
+		}
+
+		// Compute expected HPA name using the same function the controller uses.
+		hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+		t.Logf("Waiting for HPA %q to be created in namespace %q", hpaName, testNamespace.Name)
+
+		// Poll until the HPA appears.
+		var hpa autoscalingv2.HorizontalPodAutoscaler
+		eventually(t, 30*time.Second, time.Second, func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: testNamespace.Name}, &hpa)
+		})
+
+		// Assert that scaleTargetRef was auto-injected to point at the versioned Deployment.
+		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+		if hpa.Spec.ScaleTargetRef.Name != expectedDeploymentName {
+			t.Errorf("HPA scaleTargetRef.name = %q, want %q", hpa.Spec.ScaleTargetRef.Name, expectedDeploymentName)
+		}
+		if hpa.Spec.ScaleTargetRef.Kind != "Deployment" {
+			t.Errorf("HPA scaleTargetRef.kind = %q, want %q", hpa.Spec.ScaleTargetRef.Kind, "Deployment")
+		}
+		if hpa.Spec.ScaleTargetRef.APIVersion != "apps/v1" {
+			t.Errorf("HPA scaleTargetRef.apiVersion = %q, want %q", hpa.Spec.ScaleTargetRef.APIVersion, "apps/v1")
+		}
+		t.Logf("HPA scaleTargetRef correctly injected: %s/%s %s", hpa.Spec.ScaleTargetRef.APIVersion, hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
+
+		// Poll until TWOR.Status.Versions is populated with Applied: true for the build ID.
+		eventually(t, 30*time.Second, time.Second, func() error {
+			var updatedTWOR temporaliov1alpha1.TemporalWorkerOwnedResource
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: tworName, Namespace: testNamespace.Name}, &updatedTWOR); err != nil {
+				return err
+			}
+			for _, v := range updatedTWOR.Status.Versions {
+				if v.BuildID == buildID && v.Applied {
+					return nil
+				}
+			}
+			return fmt.Errorf("TWOR status not yet updated for build ID %q (current versions: %+v)", buildID, updatedTWOR.Status.Versions)
+		})
+		t.Log("TWOR status shows Applied: true for build ID")
+
+		// Assert that the TWOR has the TWD as a controller owner reference.
+		var updatedTWOR temporaliov1alpha1.TemporalWorkerOwnedResource
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: tworName, Namespace: testNamespace.Name}, &updatedTWOR); err != nil {
+			t.Fatalf("failed to re-fetch TWOR: %v", err)
+		}
+		foundOwnerRef := false
+		for _, ref := range updatedTWOR.OwnerReferences {
+			if ref.Kind == "TemporalWorkerDeployment" && ref.Name == twd.Name && ref.Controller != nil && *ref.Controller {
+				foundOwnerRef = true
+				break
+			}
+		}
+		if !foundOwnerRef {
+			t.Errorf("TWOR %s/%s missing controller owner reference to TWD %s (refs: %+v)",
+				testNamespace.Name, tworName, twd.Name, updatedTWOR.OwnerReferences)
+		} else {
+			t.Logf("TWOR correctly has controller owner reference to TWD %q", twd.Name)
+		}
+	})
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
