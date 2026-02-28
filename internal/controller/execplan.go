@@ -266,5 +266,5 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
-	return errors.Join(errors.Join(applyErrs...), errors.Join(statusErrs...))
+	return errors.Join(append(applyErrs, statusErrs...)...)
 }
