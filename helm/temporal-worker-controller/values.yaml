@@ -130,9 +130,15 @@ certmanager:
   # enabled controls creation of the cert-manager Issuer and Certificate used for
   # webhook TLS. cert-manager must be installed in the cluster.
   # See https://cert-manager.io/docs/installation/
-  # Set to false only if you are providing your own TLS certificate in a Secret
-  # named "webhook-server-cert" in the controller namespace.
+  # Set to false only if you are providing your own TLS certificate (see caBundle below).
   enabled: true
+
+  # caBundle is only used when enabled: false (i.e. you are managing webhook TLS yourself).
+  # Set this to the base64-encoded PEM CA certificate that signed the TLS certificate in
+  # the "webhook-server-cert" Secret. The Kubernetes API server uses this to verify the
+  # webhook server's TLS certificate.
+  # Leave empty when enabled: true — cert-manager injects the CA bundle automatically.
+  caBundle: ""
 
 # Not yet supported
 prometheus:

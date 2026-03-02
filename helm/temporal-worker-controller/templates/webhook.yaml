@@ -34,6 +34,9 @@ webhooks:
   - name: vtemporalworkerownedresource.kb.io
     admissionReviewVersions: ["v1"]
     clientConfig:
+      {{- if and (not .Values.certmanager.enabled) .Values.certmanager.caBundle }}
+      caBundle: {{ .Values.certmanager.caBundle }}
+      {{- end }}
       service:
         name: {{ .Release.Name }}-webhook-service
         namespace: {{ .Release.Namespace }}
@@ -64,6 +67,9 @@ webhooks:
   - name: vtemporalworkerdeployment.kb.io
     admissionReviewVersions: ["v1"]
     clientConfig:
+      {{- if and (not .Values.certmanager.enabled) .Values.certmanager.caBundle }}
+      caBundle: {{ .Values.certmanager.caBundle }}
+      {{- end }}
       service:
         name: {{ .Release.Name }}-webhook-service
         namespace: {{ .Release.Namespace }}
