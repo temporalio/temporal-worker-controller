@@ -13,470 +13,399 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
-	"go.temporal.io/server/temporaltest"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
-	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-// runTWORTests runs all TWOR gap integration tests as sub-tests.
-// Called from TestIntegration so that all tests share the same envtest + Temporal setup.
-func runTWORTests(
-	t *testing.T,
-	k8sClient client.Client,
-	mgr manager.Manager,
-	ts *temporaltest.TestServer,
-	testNamespace *corev1.Namespace,
-) {
-	// Test 1: Deployment owner ref on per-Build-ID resource copy
-	t.Run("twor-deployment-owner-ref", func(t *testing.T) {
-		ctx := context.Background()
-		twdName := "twor-owner-ref-test"
-		tworName := "ownerref-hpa"
+// tworTestCases returns TWOR integration tests as a slice of testCase entries that run through
+// the standard testTemporalWorkerDeploymentCreation runner.
+//
+// Each entry:
+//   - Sets up a fresh TWD (AllAtOnce v1.0 → Current) via the shared runner, which confirms the
+//     TWD has reached its expected status via verifyTemporalWorkerDeploymentStatusEventually and
+//     verifyTemporalStateMatchesStatusEventually.
+//   - Uses WithValidatorFunction to exercise TWOR-specific behaviour after those checks pass.
+//
+// Exception: "twor-multiple-active-versions" uses a Progressive strategy with an existing v0
+// Deployment so the runner leaves the TWD in a v1.0=Ramping + v0=Current state before the
+// ValidatorFunction creates the TWOR.
+func tworTestCases() []testCase {
+	return []testCase{
+		// Deployment owner ref on per-Build-ID resource copy.
+		// Verifies that each per-Build-ID HPA has the versioned Deployment (not the TWD) as its
+		// controller owner reference, so that k8s GC deletes the HPA when the Deployment is removed.
+		{
+			name: "twor-deployment-owner-ref",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+					tworName := "ownerref-hpa"
 
-		twd, _, buildID, stopFuncs := setupTWORTestBase(t, ctx, k8sClient, mgr, ts, testNamespace, twdName)
-		defer handleStopFuncs(stopFuncs)
-
-		twor := makeHPATWOR(tworName, testNamespace.Name, twd.Name)
-		if err := k8sClient.Create(ctx, twor); err != nil {
-			t.Fatalf("failed to create TWOR: %v", err)
-		}
-
-		hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
-		depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
-
-		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaName, depName, 30*time.Second)
-
-		// Assert the HPA has the versioned Deployment (not the TWD) as its controller owner reference.
-		assertHPAOwnerRefToDeployment(t, ctx, k8sClient, testNamespace.Name, hpaName, depName)
-	})
-
-	// Test 2: matchLabels auto-injection end-to-end
-	t.Run("twor-matchlabels-injection", func(t *testing.T) {
-		ctx := context.Background()
-		twdName := "twor-matchlabels-test"
-		tworName := "matchlabels-pdb"
-
-		twd, _, buildID, stopFuncs := setupTWORTestBase(t, ctx, k8sClient, mgr, ts, testNamespace, twdName)
-		defer handleStopFuncs(stopFuncs)
-
-		// PDB with selector.matchLabels: null — controller should auto-inject the selector labels.
-		twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      tworName,
-				Namespace: testNamespace.Name,
-			},
-			Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-				WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: twd.Name},
-				Object: runtime.RawExtension{Raw: []byte(`{
-					"apiVersion": "policy/v1",
-					"kind": "PodDisruptionBudget",
-					"spec": {
-						"minAvailable": 1,
-						"selector": {
-							"matchLabels": null
-						}
+					twor := makeHPATWOR(tworName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, twor); err != nil {
+						t.Fatalf("failed to create TWOR: %v", err)
 					}
-				}`)},
-			},
-		}
-		if err := k8sClient.Create(ctx, twor); err != nil {
-			t.Fatalf("failed to create TWOR: %v", err)
-		}
 
-		pdbName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
-		waitForPDBWithInjectedMatchLabels(t, ctx, k8sClient, testNamespace.Name, pdbName, twd.Name, buildID, 30*time.Second)
-	})
-
-	// Test 3: Multiple TWORs on the same TWD — SSA field manager isolation
-	t.Run("twor-multiple-twors-same-twd", func(t *testing.T) {
-		ctx := context.Background()
-		twdName := "twor-multi-test"
-		tworHPAName := "multi-hpa"
-		tworPDBName := "multi-pdb"
-
-		twd, _, buildID, stopFuncs := setupTWORTestBase(t, ctx, k8sClient, mgr, ts, testNamespace, twdName)
-		defer handleStopFuncs(stopFuncs)
-
-		tworHPA := makeHPATWOR(tworHPAName, testNamespace.Name, twd.Name)
-		if err := k8sClient.Create(ctx, tworHPA); err != nil {
-			t.Fatalf("failed to create HPA TWOR: %v", err)
-		}
-
-		tworPDB := &temporaliov1alpha1.TemporalWorkerOwnedResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      tworPDBName,
-				Namespace: testNamespace.Name,
-			},
-			Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-				WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: twd.Name},
-				Object: runtime.RawExtension{Raw: []byte(`{
-					"apiVersion": "policy/v1",
-					"kind": "PodDisruptionBudget",
-					"spec": {
-						"minAvailable": 1,
-						"selector": {
-							"matchLabels": null
-						}
-					}
-				}`)},
-			},
-		}
-		if err := k8sClient.Create(ctx, tworPDB); err != nil {
-			t.Fatalf("failed to create PDB TWOR: %v", err)
-		}
-
-		hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworHPAName, buildID)
-		pdbName := k8s.ComputeOwnedResourceName(twd.Name, tworPDBName, buildID)
-		depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
-
-		// Both resources should be created with no field manager conflict.
-		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaName, depName, 30*time.Second)
-		waitForPDBWithInjectedMatchLabels(t, ctx, k8sClient, testNamespace.Name, pdbName, twd.Name, buildID, 30*time.Second)
-
-		// Both TWORs should have Applied:true.
-		waitForTWORStatusApplied(t, ctx, k8sClient, testNamespace.Name, tworHPAName, buildID, 30*time.Second)
-		waitForTWORStatusApplied(t, ctx, k8sClient, testNamespace.Name, tworPDBName, buildID, 30*time.Second)
-	})
-
-	// Test 4: Template variable rendering end-to-end
-	t.Run("twor-template-variable", func(t *testing.T) {
-		ctx := context.Background()
-		twdName := "twor-template-test"
-		tworName := "template-hpa"
-
-		twd, _, buildID, stopFuncs := setupTWORTestBase(t, ctx, k8sClient, mgr, ts, testNamespace, twdName)
-		defer handleStopFuncs(stopFuncs)
-
-		// HPA with a Go template expression in an annotation.
-		// After rendering, the annotation should contain the actual versioned Deployment name.
-		twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      tworName,
-				Namespace: testNamespace.Name,
-			},
-			Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-				WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: twd.Name},
-				Object: runtime.RawExtension{Raw: []byte(`{
-					"apiVersion": "autoscaling/v2",
-					"kind": "HorizontalPodAutoscaler",
-					"metadata": {
-						"annotations": {
-							"my-deployment": "{{ .DeploymentName }}"
-						}
-					},
-					"spec": {
-						"scaleTargetRef": null,
-						"minReplicas": 2,
-						"maxReplicas": 5,
-						"metrics": []
-					}
-				}`)},
-			},
-		}
-		if err := k8sClient.Create(ctx, twor); err != nil {
-			t.Fatalf("failed to create TWOR: %v", err)
-		}
-
-		hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
-		expectedDepName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
-
-		// Poll until the HPA appears and verify the annotation was rendered.
-		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaName, expectedDepName, 30*time.Second)
-
-		eventually(t, 30*time.Second, time.Second, func() error {
-			var hpa autoscalingv2.HorizontalPodAutoscaler
-			if err := k8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: testNamespace.Name}, &hpa); err != nil {
-				return err
-			}
-			got := hpa.Annotations["my-deployment"]
-			if got != expectedDepName {
-				return fmt.Errorf("annotation my-deployment = %q, want %q", got, expectedDepName)
-			}
-			return nil
-		})
-		t.Logf("Template variable {{ .DeploymentName }} correctly rendered to %q", expectedDepName)
-	})
-
-	// Test 5: Multiple active versions (current + ramping) each get a TWOR copy
-	t.Run("twor-multiple-active-versions", func(t *testing.T) {
-		ctx := context.Background()
-		twdName := "twor-multi-ver-test"
-		tworName := "multi-ver-hpa"
-
-		// Set up: v0 as Current, then roll to v1 with progressive strategy (long pause → stays Ramping).
-		tc := testhelpers.NewTestCase().
-			WithInput(
-				testhelpers.NewTemporalWorkerDeploymentBuilder().
-					WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
-					WithTargetTemplate("v1.0").
-					WithStatus(
-						testhelpers.NewStatusBuilder().
-							WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
-							WithCurrentVersion("v0", true, true),
-					),
-			).
-			WithExistingDeployments(
-				testhelpers.NewDeploymentInfo("v0", 1),
-			).
-			BuildWithValues(twdName, testNamespace.Name, ts.GetDefaultNamespace())
-
-		twd := tc.GetTWD()
-
-		temporalConnection := &temporaliov1alpha1.TemporalConnection{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
-				Namespace: twd.Namespace,
-			},
-			Spec: temporaliov1alpha1.TemporalConnectionSpec{
-				HostPort: ts.GetFrontendHostPort(),
-			},
-		}
-		if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-			t.Fatalf("failed to create TemporalConnection: %v", err)
-		}
-
-		env := testhelpers.TestEnv{
-			K8sClient:                  k8sClient,
-			Mgr:                        mgr,
-			Ts:                         ts,
-			Connection:                 temporalConnection,
-			ExistingDeploymentReplicas: tc.GetExistingDeploymentReplicas(),
-			ExistingDeploymentImages:   tc.GetExistingDeploymentImages(),
-			ExpectedDeploymentReplicas: make(map[string]int32),
-		}
-
-		// Set up preliminary state (v0 as current in Temporal).
-		makePreliminaryStatusTrue(ctx, t, env, twd)
-		verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, twd.Status, 30*time.Second, 5*time.Second)
-
-		if err := k8sClient.Create(ctx, twd); err != nil {
-			t.Fatalf("failed to create TWD: %v", err)
-		}
-
-		// Wait for v1 deployment to be created.
-		waitForExpectedTargetDeployment(t, twd, env, 30*time.Second)
-
-		buildIDv1 := k8s.ComputeBuildID(twd)
-		depNameV1 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv1)
-		stopFuncsV1 := applyDeployment(t, ctx, k8sClient, depNameV1, testNamespace.Name)
-		defer handleStopFuncs(stopFuncsV1)
-
-		// Wait for v1 to be Ramping at 5% while v0 remains Current.
-		buildIDv0 := testhelpers.MakeBuildId(twdName, "v0", "", nil)
-		expectedStatus := testhelpers.NewStatusBuilder().
-			WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusRamping, 5, true, false).
-			WithCurrentVersion("v0", true, true).
-			WithName(twdName).
-			WithNamespace(testNamespace.Name).
-			Build()
-		verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, expectedStatus, 60*time.Second, 2*time.Second)
-
-		// Create the TWOR — should create one copy per active build ID (v0 + v1).
-		twor := makeHPATWOR(tworName, testNamespace.Name, twd.Name)
-		if err := k8sClient.Create(ctx, twor); err != nil {
-			t.Fatalf("failed to create TWOR: %v", err)
-		}
-
-		hpaNameV0 := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildIDv0)
-		hpaNameV1 := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildIDv1)
-		depNameV0 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv0)
-
-		// Both per-Build-ID HPA copies should be created.
-		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaNameV0, depNameV0, 30*time.Second)
-		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaNameV1, depNameV1, 30*time.Second)
-
-		// Both build IDs should appear in TWOR status as Applied.
-		waitForTWORStatusApplied(t, ctx, k8sClient, testNamespace.Name, tworName, buildIDv0, 30*time.Second)
-		waitForTWORStatusApplied(t, ctx, k8sClient, testNamespace.Name, tworName, buildIDv1, 30*time.Second)
-	})
-
-	// Test 6: Apply failure → status.Applied:false
-	t.Run("twor-apply-failure", func(t *testing.T) {
-		ctx := context.Background()
-		twdName := "twor-apply-fail-test"
-		tworName := "fail-resource"
-
-		twd, _, buildID, stopFuncs := setupTWORTestBase(t, ctx, k8sClient, mgr, ts, testNamespace, twdName)
-		defer handleStopFuncs(stopFuncs)
-
-		// Use an unknown GVK that doesn't exist in the envtest API server.
-		// The controller's SSA apply will fail because the API server can't find the resource type.
-		twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      tworName,
-				Namespace: testNamespace.Name,
-			},
-			Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-				WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: twd.Name},
-				Object: runtime.RawExtension{Raw: []byte(`{
-					"apiVersion": "nonexistent.example.com/v1",
-					"kind": "FakeResource",
-					"spec": {
-						"someField": "someValue"
-					}
-				}`)},
-			},
-		}
-		if err := k8sClient.Create(ctx, twor); err != nil {
-			t.Fatalf("failed to create TWOR: %v", err)
-		}
-
-		// Wait for the TWOR status to show Applied:false for the build ID.
-		waitForTWORStatusNotApplied(t, ctx, k8sClient, testNamespace.Name, tworName, buildID, 30*time.Second)
-	})
-
-	// Test 7: SSA idempotency — multiple reconcile loops do not create duplicates or trigger spurious updates
-	t.Run("twor-ssa-idempotency", func(t *testing.T) {
-		ctx := context.Background()
-		twdName := "twor-idempotent-test"
-		tworName := "idempotent-hpa"
-
-		twd, _, buildID, stopFuncs := setupTWORTestBase(t, ctx, k8sClient, mgr, ts, testNamespace, twdName)
-		defer handleStopFuncs(stopFuncs)
-
-		twor := makeHPATWOR(tworName, testNamespace.Name, twd.Name)
-		if err := k8sClient.Create(ctx, twor); err != nil {
-			t.Fatalf("failed to create TWOR: %v", err)
-		}
-
-		hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
-		depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
-
-		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaName, depName, 30*time.Second)
-		waitForTWORStatusApplied(t, ctx, k8sClient, testNamespace.Name, tworName, buildID, 30*time.Second)
-
-		// Record the HPA's resourceVersion before additional reconcile loops.
-		var hpaBefore autoscalingv2.HorizontalPodAutoscaler
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: testNamespace.Name}, &hpaBefore); err != nil {
-			t.Fatalf("failed to get HPA: %v", err)
-		}
-		rvBefore := hpaBefore.ResourceVersion
-		ownerRefCountBefore := len(hpaBefore.OwnerReferences)
-		t.Logf("HPA resourceVersion before extra reconciles: %s, ownerRefs: %d", rvBefore, ownerRefCountBefore)
-
-		// Trigger extra reconcile loops by touching the TWD annotation.
-		// With RECONCILE_INTERVAL=1s, waiting 4s gives ~4 additional reconcile loops.
-		var currentTWD temporaliov1alpha1.TemporalWorkerDeployment
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: testNamespace.Name}, &currentTWD); err != nil {
-			t.Fatalf("failed to get TWD: %v", err)
-		}
-		patch := client.MergeFrom(currentTWD.DeepCopy())
-		if currentTWD.Annotations == nil {
-			currentTWD.Annotations = map[string]string{}
-		}
-		currentTWD.Annotations["test-reconcile-trigger"] = "1"
-		if err := k8sClient.Patch(ctx, &currentTWD, patch); err != nil {
-			t.Fatalf("failed to patch TWD annotation: %v", err)
-		}
-		time.Sleep(4 * time.Second)
-
-		// Fetch the HPA again and verify nothing changed.
-		var hpaAfter autoscalingv2.HorizontalPodAutoscaler
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: testNamespace.Name}, &hpaAfter); err != nil {
-			t.Fatalf("failed to re-fetch HPA: %v", err)
-		}
-
-		if hpaAfter.ResourceVersion != rvBefore {
-			t.Errorf("HPA resourceVersion changed from %s to %s after extra reconcile loops (SSA should be idempotent)",
-				rvBefore, hpaAfter.ResourceVersion)
-		}
-		if len(hpaAfter.OwnerReferences) != ownerRefCountBefore {
-			t.Errorf("HPA ownerReferences count changed from %d to %d — possible duplicate owner ref added",
-				ownerRefCountBefore, len(hpaAfter.OwnerReferences))
-		}
-
-		// Verify there is still exactly one HPA with this name.
-		var hpaList autoscalingv2.HorizontalPodAutoscalerList
-		if err := k8sClient.List(ctx, &hpaList,
-			client.InNamespace(testNamespace.Name),
-			client.MatchingLabels{k8s.BuildIDLabel: buildID},
-		); err != nil {
-			t.Fatalf("failed to list HPAs: %v", err)
-		}
-		if len(hpaList.Items) != 1 {
-			t.Errorf("expected exactly 1 HPA with build ID %q, got %d", buildID, len(hpaList.Items))
-		}
-
-		t.Log("SSA idempotency confirmed: HPA unchanged after multiple reconcile loops")
-	})
-}
-
-// setupTWORTestBase creates a TWD + TemporalConnection, waits for the target Deployment,
-// starts workers, and waits for VersionStatusCurrent. Returns the TWD, connection, buildID,
-// and stop functions for the workers (caller must defer handleStopFuncs(stopFuncs)).
-func setupTWORTestBase(
-	t *testing.T,
-	ctx context.Context,
-	k8sClient client.Client,
-	mgr manager.Manager,
-	ts *temporaltest.TestServer,
-	testNamespace *corev1.Namespace,
-	twdName string,
-) (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalConnection, string, []func()) {
-	t.Helper()
-
-	tc := testhelpers.NewTestCase().
-		WithInput(
-			testhelpers.NewTemporalWorkerDeploymentBuilder().
-				WithAllAtOnceStrategy().
-				WithTargetTemplate("v1.0"),
-		).
-		WithExpectedStatus(
-			testhelpers.NewStatusBuilder().
-				WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
-				WithCurrentVersion("v1.0", true, false),
-		).
-		BuildWithValues(twdName, testNamespace.Name, ts.GetDefaultNamespace())
-
-	twd := tc.GetTWD()
-
-	temporalConnection := &temporaliov1alpha1.TemporalConnection{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
-			Namespace: twd.Namespace,
+					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
+					assertHPAOwnerRefToDeployment(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName)
+				}),
 		},
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
-			HostPort: ts.GetFrontendHostPort(),
+
+		// matchLabels auto-injection end-to-end.
+		// Verifies that a PDB TWOR with selector.matchLabels: null gets the controller-managed
+		// selector labels injected before the resource is applied to the API server.
+		{
+			name: "twor-matchlabels-injection",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					tworName := "matchlabels-pdb"
+
+					twor := makeTWORWithRaw(tworName, twd.Namespace, twd.Name, []byte(`{
+						"apiVersion": "policy/v1",
+						"kind": "PodDisruptionBudget",
+						"spec": {
+							"minAvailable": 1,
+							"selector": {
+								"matchLabels": null
+							}
+						}
+					}`))
+					if err := env.K8sClient.Create(ctx, twor); err != nil {
+						t.Fatalf("failed to create TWOR: %v", err)
+					}
+
+					pdbName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					waitForPDBWithInjectedMatchLabels(t, ctx, env.K8sClient, twd.Namespace, pdbName, twd.Name, buildID, 30*time.Second)
+				}),
+		},
+
+		// Multiple TWORs on the same TWD — SSA field manager isolation.
+		// Verifies that two TWORs (one HPA, one PDB) targeting the same TWD are applied
+		// independently with no field manager conflict between them.
+		{
+			name: "twor-multiple-twors-same-twd",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					tworHPAName := "multi-hpa"
+					tworPDBName := "multi-pdb"
+
+					tworHPA := makeHPATWOR(tworHPAName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, tworHPA); err != nil {
+						t.Fatalf("failed to create HPA TWOR: %v", err)
+					}
+
+					tworPDB := makeTWORWithRaw(tworPDBName, twd.Namespace, twd.Name, []byte(`{
+						"apiVersion": "policy/v1",
+						"kind": "PodDisruptionBudget",
+						"spec": {
+							"minAvailable": 1,
+							"selector": {
+								"matchLabels": null
+							}
+						}
+					}`))
+					if err := env.K8sClient.Create(ctx, tworPDB); err != nil {
+						t.Fatalf("failed to create PDB TWOR: %v", err)
+					}
+
+					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworHPAName, buildID)
+					pdbName := k8s.ComputeOwnedResourceName(twd.Name, tworPDBName, buildID)
+					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
+					waitForPDBWithInjectedMatchLabels(t, ctx, env.K8sClient, twd.Namespace, pdbName, twd.Name, buildID, 30*time.Second)
+					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworHPAName, buildID, 30*time.Second)
+					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworPDBName, buildID, 30*time.Second)
+				}),
+		},
+
+		// Template variable rendering end-to-end.
+		// Verifies that {{ .DeploymentName }} in a TWOR annotation is rendered to the actual
+		// versioned Deployment name before the resource is applied.
+		{
+			name: "twor-template-variable",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					tworName := "template-hpa"
+					expectedDepName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+
+					twor := makeTWORWithRaw(tworName, twd.Namespace, twd.Name, []byte(`{
+						"apiVersion": "autoscaling/v2",
+						"kind": "HorizontalPodAutoscaler",
+						"metadata": {
+							"annotations": {
+								"my-deployment": "{{ .DeploymentName }}"
+							}
+						},
+						"spec": {
+							"scaleTargetRef": null,
+							"minReplicas": 2,
+							"maxReplicas": 5,
+							"metrics": []
+						}
+					}`))
+					if err := env.K8sClient.Create(ctx, twor); err != nil {
+						t.Fatalf("failed to create TWOR: %v", err)
+					}
+
+					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, expectedDepName, 30*time.Second)
+
+					eventually(t, 30*time.Second, time.Second, func() error {
+						var hpa autoscalingv2.HorizontalPodAutoscaler
+						if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: twd.Namespace}, &hpa); err != nil {
+							return err
+						}
+						got := hpa.Annotations["my-deployment"]
+						if got != expectedDepName {
+							return fmt.Errorf("annotation my-deployment = %q, want %q", got, expectedDepName)
+						}
+						return nil
+					})
+					t.Logf("Template variable {{ .DeploymentName }} correctly rendered to %q", expectedDepName)
+				}),
+		},
+
+		// Multiple active versions (current + ramping) each get a TWOR copy.
+		// Uses a Progressive strategy with v0 pre-seeded as Current so the controller leaves
+		// v1.0 in Ramping state. The ValidatorFunction then verifies that one HPA copy is
+		// created per active Build ID (both v0 and v1.0).
+		{
+			name: "twor-multiple-active-versions",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+						WithTargetTemplate("v1.0").
+						WithStatus(
+							testhelpers.NewStatusBuilder().
+								WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+								WithCurrentVersion("v0", true, true),
+						),
+				).
+				WithExistingDeployments(
+					testhelpers.NewDeploymentInfo("v0", 1),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusRamping, 5, true, false).
+						WithCurrentVersion("v0", true, true),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildIDv1 := k8s.ComputeBuildID(twd)
+					buildIDv0 := testhelpers.MakeBuildId(twd.Name, "v0", "", nil)
+					tworName := "multi-ver-hpa"
+
+					twor := makeHPATWOR(tworName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, twor); err != nil {
+						t.Fatalf("failed to create TWOR: %v", err)
+					}
+
+					hpaNameV0 := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildIDv0)
+					hpaNameV1 := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildIDv1)
+					depNameV0 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv0)
+					depNameV1 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv1)
+
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaNameV0, depNameV0, 30*time.Second)
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaNameV1, depNameV1, 30*time.Second)
+					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildIDv0, 30*time.Second)
+					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildIDv1, 30*time.Second)
+				}),
+		},
+
+		// Apply failure → status.Applied:false.
+		// Uses an unknown GVK that the API server cannot recognise. The controller's SSA apply
+		// fails and the TWOR status must reflect Applied:false for that Build ID.
+		{
+			name: "twor-apply-failure",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					tworName := "fail-resource"
+
+					twor := makeTWORWithRaw(tworName, twd.Namespace, twd.Name, []byte(`{
+						"apiVersion": "nonexistent.example.com/v1",
+						"kind": "FakeResource",
+						"spec": {
+							"someField": "someValue"
+						}
+					}`))
+					if err := env.K8sClient.Create(ctx, twor); err != nil {
+						t.Fatalf("failed to create TWOR: %v", err)
+					}
+
+					waitForTWORStatusNotApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildID, 30*time.Second)
+				}),
+		},
+
+		// SSA idempotency — multiple reconcile loops do not create duplicates.
+		// Verifies that the HPA's resourceVersion and ownerReference count do not change after
+		// additional reconcile loops are triggered by patching the TWD annotation.
+		{
+			name: "twor-ssa-idempotency",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					tworName := "idempotent-hpa"
+
+					twor := makeHPATWOR(tworName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, twor); err != nil {
+						t.Fatalf("failed to create TWOR: %v", err)
+					}
+
+					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
+					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildID, 30*time.Second)
+
+					// Snapshot the HPA state before triggering extra reconciles.
+					var hpaBefore autoscalingv2.HorizontalPodAutoscaler
+					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: twd.Namespace}, &hpaBefore); err != nil {
+						t.Fatalf("failed to get HPA: %v", err)
+					}
+					rvBefore := hpaBefore.ResourceVersion
+					ownerRefCountBefore := len(hpaBefore.OwnerReferences)
+					t.Logf("HPA resourceVersion before extra reconciles: %s, ownerRefs: %d", rvBefore, ownerRefCountBefore)
+
+					// Trigger extra reconcile loops by patching the TWD annotation.
+					// With RECONCILE_INTERVAL=1s, waiting 4s gives ~4 additional loops.
+					var currentTWD temporaliov1alpha1.TemporalWorkerDeployment
+					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &currentTWD); err != nil {
+						t.Fatalf("failed to get TWD: %v", err)
+					}
+					patch := client.MergeFrom(currentTWD.DeepCopy())
+					if currentTWD.Annotations == nil {
+						currentTWD.Annotations = map[string]string{}
+					}
+					currentTWD.Annotations["test-reconcile-trigger"] = "1"
+					if err := env.K8sClient.Patch(ctx, &currentTWD, patch); err != nil {
+						t.Fatalf("failed to patch TWD annotation: %v", err)
+					}
+					time.Sleep(4 * time.Second)
+
+					// HPA must be unchanged after additional reconcile loops.
+					var hpaAfter autoscalingv2.HorizontalPodAutoscaler
+					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: twd.Namespace}, &hpaAfter); err != nil {
+						t.Fatalf("failed to re-fetch HPA: %v", err)
+					}
+					if hpaAfter.ResourceVersion != rvBefore {
+						t.Errorf("HPA resourceVersion changed from %s to %s after extra reconcile loops (SSA should be idempotent)",
+							rvBefore, hpaAfter.ResourceVersion)
+					}
+					if len(hpaAfter.OwnerReferences) != ownerRefCountBefore {
+						t.Errorf("HPA ownerReferences count changed from %d to %d — possible duplicate owner ref added",
+							ownerRefCountBefore, len(hpaAfter.OwnerReferences))
+					}
+
+					var hpaList autoscalingv2.HorizontalPodAutoscalerList
+					if err := env.K8sClient.List(ctx, &hpaList,
+						client.InNamespace(twd.Namespace),
+						client.MatchingLabels{k8s.BuildIDLabel: buildID},
+					); err != nil {
+						t.Fatalf("failed to list HPAs: %v", err)
+					}
+					if len(hpaList.Items) != 1 {
+						t.Errorf("expected exactly 1 HPA with build ID %q, got %d", buildID, len(hpaList.Items))
+					}
+					t.Log("SSA idempotency confirmed: HPA unchanged after multiple reconcile loops")
+				}),
 		},
 	}
-	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to create TemporalConnection: %v", err)
-	}
-
-	env := testhelpers.TestEnv{
-		K8sClient:                  k8sClient,
-		Mgr:                        mgr,
-		Ts:                         ts,
-		Connection:                 temporalConnection,
-		ExistingDeploymentReplicas: make(map[string]int32),
-		ExistingDeploymentImages:   make(map[string]string),
-		ExpectedDeploymentReplicas: make(map[string]int32),
-	}
-
-	if err := k8sClient.Create(ctx, twd); err != nil {
-		t.Fatalf("failed to create TWD: %v", err)
-	}
-
-	waitForExpectedTargetDeployment(t, twd, env, 30*time.Second)
-
-	buildID := k8s.ComputeBuildID(twd)
-	depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
-	stopFuncs := applyDeployment(t, ctx, k8sClient, depName, testNamespace.Name)
-
-	verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, tc.GetExpectedStatus(), 30*time.Second, 5*time.Second)
-
-	return twd, temporalConnection, buildID, stopFuncs
 }
 
 // makeHPATWOR constructs a TemporalWorkerOwnedResource with an HPA spec where
 // scaleTargetRef is null (triggering auto-injection by the controller).
 func makeHPATWOR(name, namespace, workerRefName string) *temporaliov1alpha1.TemporalWorkerOwnedResource {
+	return makeTWORWithRaw(name, namespace, workerRefName, []byte(`{
+		"apiVersion": "autoscaling/v2",
+		"kind": "HorizontalPodAutoscaler",
+		"spec": {
+			"scaleTargetRef": null,
+			"minReplicas": 2,
+			"maxReplicas": 5,
+			"metrics": []
+		}
+	}`))
+}
+
+// makeTWORWithRaw constructs a TemporalWorkerOwnedResource with the given raw JSON object spec.
+func makeTWORWithRaw(name, namespace, workerRefName string, raw []byte) *temporaliov1alpha1.TemporalWorkerOwnedResource {
 	return &temporaliov1alpha1.TemporalWorkerOwnedResource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -484,16 +413,7 @@ func makeHPATWOR(name, namespace, workerRefName string) *temporaliov1alpha1.Temp
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
 			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerRefName},
-			Object: runtime.RawExtension{Raw: []byte(`{
-				"apiVersion": "autoscaling/v2",
-				"kind": "HorizontalPodAutoscaler",
-				"spec": {
-					"scaleTargetRef": null,
-					"minReplicas": 2,
-					"maxReplicas": 5,
-					"metrics": []
-				}
-			}`)},
+			Object:    runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -553,7 +473,7 @@ func waitForPDBWithInjectedMatchLabels(
 }
 
 // waitForTWORStatusNotApplied polls until the TWOR status contains an entry for buildID
-// with Applied:false (and optionally a non-empty message indicating the error).
+// with Applied:false (indicating the SSA apply failed).
 func waitForTWORStatusNotApplied(
 	t *testing.T,
 	ctx context.Context,

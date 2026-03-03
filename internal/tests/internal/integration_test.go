@@ -943,11 +943,26 @@ func TestIntegration(t *testing.T) {
 		assertTWORControllerOwnerRef(t, ctx, k8sClient, testNamespace.Name, tworName, twd.Name)
 	})
 
-	// Run TWOR gap tests (tests 1–7 from test-coverage-analysis.md)
-	runTWORTests(t, k8sClient, mgr, ts, testNamespace)
+	// TWOR integration tests: per-Build-ID HPA owner refs and scaleTargetRef injection,
+	// PDB matchLabels injection, multiple TWORs on the same TWD, template variable rendering,
+	// multi-version rollout copies, SSA apply failure handling, and SSA idempotency.
+	// Each entry uses the standard runner; TWOR-specific assertions are in ValidatorFunction.
+	for _, tc := range tworTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+		})
+	}
 
-	// Run rollout gap tests (tests 8, 9, 10, 13 from test-coverage-analysis.md)
-	runRolloutTests(t, k8sClient, mgr, ts, testNamespace)
+	// Rollout integration tests: progressive auto-promotion, ConnectionSpecHash annotation
+	// repair, gate-blocked rollout unblocked by ConfigMap creation, and accumulation of
+	// multiple deprecated versions across successive image rollouts.
+	for _, tc := range rolloutTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+		})
+	}
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
@@ -996,9 +1011,20 @@ func testTemporalWorkerDeploymentCreation(
 		f(t, ctx, tc, env)
 	}
 
+	// Apply any test-specific mutations to the TWD before it is created.
+	if f := tc.GetTWDMutatorFunc(); f != nil {
+		f(twd)
+	}
+
 	t.Log("Creating a TemporalWorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
 		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+	}
+
+	// Hook: runs after TWD creation but before waiting for the target Deployment.
+	// Use this to assert blocking behaviour and then unblock the rollout.
+	if f := tc.GetPostTWDCreateFunc(); f != nil {
+		f(t, ctx, tc, env)
 	}
 
 	t.Log("Waiting for the controller to reconcile")
