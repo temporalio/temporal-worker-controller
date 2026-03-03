@@ -25,7 +25,7 @@ func expectedOwnedResourceName(twdName, tworName, buildID string) string {
 	h := sha256.Sum256([]byte(twdName + tworName + buildID))
 	hashSuffix := hex.EncodeToString(h[:4])
 	raw := CleanStringForDNS(twdName + "-" + tworName + "-" + buildID)
-	prefix := strings.TrimRight(TruncateString(raw, 253-9), "-")
+	prefix := strings.TrimRight(TruncateString(raw, 47-9), "-")
 	return prefix + "-" + hashSuffix
 }
 
@@ -34,14 +34,14 @@ func TestComputeOwnedResourceName(t *testing.T) {
 		got := ComputeOwnedResourceName("my-worker", "my-hpa", "image-abc123")
 		// Should start with the human-readable prefix
 		assert.True(t, strings.HasPrefix(got, "my-worker-my-hpa-image-abc123-"), "got: %q", got)
-		// Should be ≤ 253 chars
-		assert.LessOrEqual(t, len(got), 253)
+		// Should be ≤ 47 chars
+		assert.LessOrEqual(t, len(got), 47)
 	})
 
 	t.Run("special chars are cleaned for DNS", func(t *testing.T) {
 		got := ComputeOwnedResourceName("my_worker", "my/hpa", "image:latest")
 		assert.True(t, strings.HasPrefix(got, "my-worker-my-hpa-image-latest-"), "got: %q", got)
-		assert.LessOrEqual(t, len(got), 253)
+		assert.LessOrEqual(t, len(got), 47)
 	})
 
 	t.Run("deterministic — same inputs always produce same name", func(t *testing.T) {
@@ -57,7 +57,7 @@ func TestComputeOwnedResourceName(t *testing.T) {
 		assert.NotEqual(t, name1, name2)
 	})
 
-	t.Run("very long names are still ≤ 253 chars and distinct per buildID", func(t *testing.T) {
+	t.Run("very long names are still ≤ 47 chars and distinct per buildID", func(t *testing.T) {
 		longTWD := strings.Repeat("w", 63)
 		longTWOR := strings.Repeat("r", 253) // maximum k8s object name
 		buildID1 := "build-" + strings.Repeat("a", 57)
@@ -66,8 +66,8 @@ func TestComputeOwnedResourceName(t *testing.T) {
 		n1 := ComputeOwnedResourceName(longTWD, longTWOR, buildID1)
 		n2 := ComputeOwnedResourceName(longTWD, longTWOR, buildID2)
 
-		assert.LessOrEqual(t, len(n1), 253, "name1 length: %d", len(n1))
-		assert.LessOrEqual(t, len(n2), 253, "name2 length: %d", len(n2))
+		assert.LessOrEqual(t, len(n1), 47, "name1 length: %d", len(n1))
+		assert.LessOrEqual(t, len(n2), 47, "name2 length: %d", len(n2))
 		assert.NotEqual(t, n1, n2, "names must differ even when prefix is fully truncated")
 	})
 

@@ -39,10 +39,12 @@ func OwnedResourceFieldManager(twor *temporaliov1alpha1.TemporalWorkerOwnedResou
 
 const (
 	// ownedResourceMaxNameLen is the maximum length of a generated owned resource name.
-	// 253 is the RFC 1123 DNS subdomain limit used by most Kubernetes resource types
-	// (HPA, PDB, and most CRDs). Resources with stricter limits (e.g. 63-char DNS
-	// labels) are rare for the autoscaler/policy use cases TWOR targets.
-	ownedResourceMaxNameLen = 253
+	// 47 is chosen to be safe for Deployment resources: a pod name is composed of
+	// "{deployment-name}-{rs-hash}-{pod-hash}" where the hashes add ~17 characters,
+	// and pod names must be ≤63 characters. Using 47 as the limit ensures that the
+	// generated names work even if the user un-bans Deployment as an owned resource
+	// kind, avoiding special-casing per resource type.
+	ownedResourceMaxNameLen = 47
 
 	// ownedResourceHashLen is the number of hex characters used for the uniqueness suffix.
 	// 8 hex chars = 4 bytes = 32 bits, giving negligible collision probability

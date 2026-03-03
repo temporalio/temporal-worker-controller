@@ -123,9 +123,9 @@ kubectl get twd
 
 ### Testing TemporalWorkerOwnedResource (per-version HPA)
 
-`TemporalWorkerOwnedResource` (TWOR) lets you attach Kubernetes resources — HPAs, PodDisruptionBudgets, etc. — to each active versioned Deployment. The controller creates one copy per active Build ID and wires it to the correct Deployment automatically.
+`TemporalWorkerOwnedResource` lets you attach Kubernetes resources — HPAs, PodDisruptionBudgets, etc. — to each worker version with running workers. The controller creates one copy per worker version with a running Deployment and wires it to the correct Deployment automatically.
 
-The TWOR validating webhook enforces that you have permission to create the embedded resource type yourself, and it requires TLS (provided by cert-manager, installed in step 3 above).
+The `TemporalWorkerOwnedResource` validating webhook enforces that you have permission to create the embedded resource type yourself, and it requires TLS (provided by cert-manager, installed in step 3 above).
 
 After deploying the helloworld worker (step 5), apply the example HPA:
 
@@ -133,19 +133,19 @@ After deploying the helloworld worker (step 5), apply the example HPA:
 kubectl apply -f examples/twor-hpa.yaml
 ```
 
-Watch the controller create an HPA for each active Build ID:
+Watch the controller create an HPA for each worker version with running workers:
 
 ```bash
-# See TWOR status (Applied: true once the controller reconciles)
-kubectl get twor
+# See TemporalWorkerOwnedResource status (Applied: true once the controller reconciles)
+kubectl get temporalworkerownedresource
 
 # See the per-Build-ID HPAs
 kubectl get hpa
 ```
 
-You should see one HPA per active worker version, with `scaleTargetRef` automatically pointing at the correct versioned Deployment.
+You should see one HPA per worker version with running workers, with `scaleTargetRef` automatically pointing at the correct versioned Deployment.
 
-When you deploy a new worker version (e.g., step 8), the controller creates a new HPA for the new Build ID and keeps the old one until that version is deleted.
+When you deploy a new worker version (e.g., step 8), the controller creates a new HPA for the new Build ID and keeps the old one until that versioned Deployment is deleted during the sunset process.
 
 See [docs/owned-resources.md](../../docs/owned-resources.md) for full documentation.
 
