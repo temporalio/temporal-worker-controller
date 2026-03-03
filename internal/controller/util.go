@@ -25,7 +25,7 @@ const (
 	ReasonDeploymentScaleFailed     = "DeploymentScaleFailed"
 	ReasonDeploymentUpdateFailed    = "DeploymentUpdateFailed"
 	ReasonTestWorkflowStartFailed   = "TestWorkflowStartFailed"
-	ReasonVersionRegistrationFailed = "VersionRegistrationFailed"
+	ReasonVersionPromotionFailed    = "VersionPromotionFailed"
 	ReasonMetadataUpdateFailed      = "MetadataUpdateFailed"
 )
 
