@@ -92,9 +92,41 @@ const (
 	// resource exists and is properly configured.
 	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
 
-	// ConditionRolloutReady indicates whether the target version has been successfully
+	// ConditionRolloutComplete indicates whether the target version has been successfully
 	// registered as the current version, completing the rollout.
-	ConditionRolloutReady = "RolloutReady"
+	ConditionRolloutComplete = "RolloutComplete"
+)
+
+// Condition reason constants for TemporalWorkerDeployment.
+//
+// These strings appear in status.conditions[].reason and are part of the CRD's
+// status API. Operators, monitoring rules, and scripts may depend on them.
+// They should be treated as stable within an API version and renamed only with
+// a corresponding version bump.
+const (
+	// ReasonTemporalConnectionNotFound is set on ConditionTemporalConnectionHealthy
+	// when the referenced TemporalConnection resource cannot be found.
+	ReasonTemporalConnectionNotFound = "TemporalConnectionNotFound"
+
+	// ReasonAuthSecretInvalid is set on ConditionTemporalConnectionHealthy when
+	// the auth secret referenced by the TemporalConnection cannot be resolved.
+	ReasonAuthSecretInvalid = "AuthSecretInvalid"
+
+	// ReasonTemporalClientCreationFailed is set on ConditionTemporalConnectionHealthy
+	// when a Temporal SDK client cannot be created for the connection.
+	ReasonTemporalClientCreationFailed = "TemporalClientCreationFailed"
+
+	// ReasonTemporalStateFetchFailed is set on ConditionTemporalConnectionHealthy
+	// when the controller cannot query the current worker deployment state from Temporal.
+	ReasonTemporalStateFetchFailed = "TemporalStateFetchFailed"
+
+	// ReasonTemporalConnectionHealthy is set on ConditionTemporalConnectionHealthy
+	// when the connection is reachable and the auth secret is resolved.
+	ReasonTemporalConnectionHealthy = "TemporalConnectionHealthy"
+
+	// ReasonRolloutComplete is set on ConditionRolloutComplete when the target
+	// version has been successfully registered as the current version.
+	ReasonRolloutComplete = "RolloutComplete"
 )
 
 // VersionStatus indicates the status of a version.

@@ -291,10 +291,10 @@ func TestSetCondition_SetsNewCondition(t *testing.T) {
 	twd := makeTWD("test-worker", "default", "my-connection")
 	r, _ := newTestReconciler(nil)
 
-	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue, "TestReason", "Test message")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, "TestReason", "Test message")
 
 	require.Len(t, twd.Status.Conditions, 1)
-	assert.Equal(t, temporaliov1alpha1.ConditionRolloutReady, twd.Status.Conditions[0].Type)
+	assert.Equal(t, temporaliov1alpha1.ConditionRolloutComplete, twd.Status.Conditions[0].Type)
 	assert.Equal(t, metav1.ConditionTrue, twd.Status.Conditions[0].Status)
 	assert.Equal(t, "TestReason", twd.Status.Conditions[0].Reason)
 	assert.Equal(t, "Test message", twd.Status.Conditions[0].Message)
@@ -306,11 +306,11 @@ func TestSetCondition_UpdatesExistingCondition(t *testing.T) {
 	r, _ := newTestReconciler(nil)
 
 	// Set initial condition
-	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue, "InitialReason", "Initial message")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, "InitialReason", "Initial message")
 	require.Len(t, twd.Status.Conditions, 1)
 
 	// Update the condition
-	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionFalse, "UpdatedReason", "Updated message")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionFalse, "UpdatedReason", "Updated message")
 
 	// Should still be exactly 1 condition, not 2
 	require.Len(t, twd.Status.Conditions, 1)
@@ -324,7 +324,7 @@ func TestSetCondition_MultipleDifferentConditions(t *testing.T) {
 	r, _ := newTestReconciler(nil)
 
 	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, "Healthy", "Connection is healthy")
-	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutReady, metav1.ConditionTrue, "Ready", "All good")
+	r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, "Ready", "All good")
 
 	require.Len(t, twd.Status.Conditions, 2)
 
@@ -332,7 +332,7 @@ func TestSetCondition_MultipleDifferentConditions(t *testing.T) {
 	require.NotNil(t, connCond)
 	assert.Equal(t, metav1.ConditionTrue, connCond.Status)
 
-	readyCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionRolloutReady)
+	readyCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionRolloutComplete)
 	require.NotNil(t, readyCond)
 	assert.Equal(t, metav1.ConditionTrue, readyCond.Status)
 }
