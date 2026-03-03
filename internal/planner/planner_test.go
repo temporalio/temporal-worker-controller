@@ -3246,9 +3246,9 @@ func TestGetTWOROwnerRefPatches(t *testing.T) {
 	t.Run("TWOR already owned by this TWD is skipped", func(t *testing.T) {
 		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
 			newTWOR("already-owned", metav1.OwnerReference{
-			APIVersion: "temporal.io/v1alpha1", Kind: "TemporalWorkerDeployment",
-			Name: twdName, UID: twdUID, Controller: func() *bool { b := true; return &b }(),
-		}),
+				APIVersion: "temporal.io/v1alpha1", Kind: "TemporalWorkerDeployment",
+				Name: twdName, UID: twdUID, Controller: func() *bool { b := true; return &b }(),
+			}),
 			newTWOR("needs-ref"),
 		}
 		patches := getTWOROwnerRefPatches(twors, twdName, twdUID)

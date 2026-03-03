@@ -942,6 +942,12 @@ func TestIntegration(t *testing.T) {
 		// Assert that the TWOR has the TWD as a controller owner reference.
 		assertTWORControllerOwnerRef(t, ctx, k8sClient, testNamespace.Name, tworName, twd.Name)
 	})
+
+	// Run TWOR gap tests (tests 1–7 from test-coverage-analysis.md)
+	runTWORTests(t, k8sClient, mgr, ts, testNamespace)
+
+	// Run rollout gap tests (tests 8, 9, 10, 13 from test-coverage-analysis.md)
+	runRolloutTests(t, k8sClient, mgr, ts, testNamespace)
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status

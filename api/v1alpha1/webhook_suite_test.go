@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,6 +17,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	admissionv1 "k8s.io/api/admission/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	//+kubebuilder:scaffold:imports
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -50,7 +54,10 @@ var _ = BeforeSuite(func() {
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			// config/crd/bases is not used in this project; CRDs live under helm/
+			filepath.Join("..", "..", "helm", "temporal-worker-controller", "crds"),
+		},
 		ErrorIfCRDPathMissing: false,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			Paths: []string{filepath.Join("..", "..", "config", "webhook")},
@@ -68,6 +75,19 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = admissionv1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	// corev1, rbacv1, and authorizationv1 are needed by the integration tests.
+	// corev1: create Namespaces
+	// rbacv1: create Roles and RoleBindings for RBAC setup
+	// authorizationv1: create SubjectAccessReview objects inside the webhook validator
+	err = corev1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = rbacv1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = authorizationv1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
@@ -91,6 +111,15 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = (&TemporalWorkerDeployment{}).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	// Set env vars consumed by NewTemporalWorkerOwnedResourceValidator before constructing it.
+	// POD_NAMESPACE and SERVICE_ACCOUNT_NAME identify the controller SA for the SAR checks.
+	// "test-system" / "test-controller" are the values used in the integration tests.
+	Expect(os.Setenv("POD_NAMESPACE", "test-system")).To(Succeed())
+	Expect(os.Setenv("SERVICE_ACCOUNT_NAME", "test-controller")).To(Succeed())
+
+	err = NewTemporalWorkerOwnedResourceValidator(mgr).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:webhook
