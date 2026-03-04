@@ -238,18 +238,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// Preserve conditions that were set during this reconciliation
 	status.Conditions = workerDeploy.Status.Conditions
 	workerDeploy.Status = *status
-	if err := r.Status().Update(ctx, &workerDeploy); err != nil {
-		// Ignore "object has been modified" errors, since we'll just re-fetch
-		// on the next reconciliation loop.
-		if apierrors.IsConflict(err) {
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Second,
-			}, nil
-		}
-		l.Error(err, "unable to update TemporalWorker status")
-		return ctrl.Result{}, err
-	}
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	//                 (defaults were already set above, but have to be set again after status update)
@@ -275,8 +263,18 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// Persist any conditions set during plan execution (e.g. RolloutComplete).
-	_ = r.Status().Update(ctx, &workerDeploy)
+	// Single status write per reconcile: persists the generated status and any
+	// conditions set during this loop (e.g. TemporalConnectionHealthy, RolloutComplete).
+	if err := r.Status().Update(ctx, &workerDeploy); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: time.Second,
+			}, nil
+		}
+		l.Error(err, "unable to update TemporalWorker status")
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{
 		Requeue: true,
