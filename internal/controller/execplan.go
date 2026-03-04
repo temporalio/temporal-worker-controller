@@ -185,7 +185,7 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 		}); err != nil {
 			l.Error(err, "unable to set ramping deployment version", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonVersionPromotionFailed,
-				"Failed to set buildID %q as ramping version (%.1f%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
+				"Failed to set buildID %q as ramping version (%d%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
 			return fmt.Errorf("unable to set ramping deployment version: %w", err)
 		}
 	}
