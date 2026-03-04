@@ -275,6 +275,9 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
+	// Persist any conditions set during plan execution (e.g. RolloutComplete).
+	_ = r.Status().Update(ctx, &workerDeploy)
+
 	return ctrl.Result{
 		Requeue: true,
 		// TODO(jlegrone): Consider increasing this value if the only thing we need to check for is unreachable versions.
