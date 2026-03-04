@@ -10,22 +10,26 @@ package internal
 //   - Event reason RolloutComplete               (emitted alongside the condition above)
 //   - ConditionTemporalConnectionHealthy = False (missing TemporalConnection)
 //   - Event reason TemporalConnectionNotFound    (emitted alongside the condition above)
+//   - ReasonTemporalClientCreationFailed: TemporalConnection pointing to an unreachable port
+//   - ReasonTemporalStateFetchFailed: TWD pointing to a Temporal namespace that doesn't exist
 //
-// Not yet covered, ranked by ease of triggering:
-//   1. ReasonAuthSecretInvalid (Easy): create a TemporalConnection with conflicting/incomplete
-//      auth config, e.g. mTLS mode with no secret ref.
-//   2. ReasonTemporalClientCreationFailed (Medium): set hostPort to an unreachable address;
-//      depends on whether the Temporal SDK validates the connection eagerly at UpsertClient.
-//   3. ReasonTemporalStateFetchFailed (Medium): set temporalNamespace on the TWD to a namespace
-//      that doesn't exist on the test server; the deployment state query would fail.
-//   4. ReasonTestWorkflowStartFailed (Medium): need Temporal to reject StartWorkflow; could do
-//      this by naming a Gate workflow that is not registered on the worker.
-//   5. ReasonDeploymentCreateFailed / UpdateFailed / ScaleFailed / DeleteFailed (Hard):
+// Not yet covered, ranked by ease of triggering in functional tests:
+//   1. ReasonTestWorkflowStartFailed (Hard): Temporal does NOT reject StartWorkflow for
+//      unregistered workflow types — it queues the workflow and waits for a worker. There is
+//      no clean way to make StartWorkflow itself fail without injecting network errors or
+//      context cancellation.
+//   2. ReasonDeploymentCreateFailed / UpdateFailed / ScaleFailed / DeleteFailed (Hard):
 //      need the k8s API server in envtest to reject the operation (e.g. via a webhook or quota).
-//   6. ReasonVersionPromotionFailed / ReasonMetadataUpdateFailed (Hard): need SetCurrentVersion
-//      or UpdateVersionMetadata to fail on an otherwise healthy Temporal server.
-//   7. ReasonPlanGenerationFailed / ReasonPlanExecutionFailed (Hard): meta-errors that wrap the
+//   3. ReasonVersionPromotionFailed / ReasonMetadataUpdateFailed (Hard): need SetCurrentVersion
+//      or UpdateVersionMetadata to fail on an otherwise healthy Temporal server. Similar challenge
+//      as making StartWorkflow fail.
+//   4. ReasonPlanGenerationFailed / ReasonPlanExecutionFailed (Hard): meta-errors that wrap the
 //      above; would fire automatically if any of the above are triggered.
+//   5. ReasonAuthSecretInvalid (Impossible): This is never triggered. The CRD schema enforces a DNS name pattern
+//      on mutualTLSSecretRef.name, so an empty name is rejected before it reaches the controller.
+//      Additionally, resolveAuthSecretName never returns an error with the current
+//      implementation (the nil guard in getTLSSecretName/getAPIKeySecretName is redundant
+//      because the caller already checks non-nil). The code path is effectively dead.
 
 import (
 	"context"
@@ -105,33 +109,84 @@ func runConditionsAndEventsTests(
 		})
 	}
 
-	// conditions-missing-connection runs standalone because it deliberately omits the
-	// TemporalConnection resource that testTemporalWorkerDeploymentCreation always creates.
-	// We don't need to create a test Temporal server for this test case because the connection
-	// is missing anyways.
+	// The following three tests each trigger a different ConditionTemporalConnectionHealthy=False
+	// reason. They all run standalone (not through testTemporalWorkerDeploymentCreation) because
+	// the controller fails before creating any k8s Deployments, so the normal status-validation
+	// and deployment-wait machinery in testTemporalWorkerDeploymentCreation would time out.
+	//
+	// conditions-temporal-state-fetch-failed also cannot use the testCase/testCaseBuilder
+	// structure because testTemporalWorkerDeploymentCreation hardcodes the Temporal namespace
+	// via BuildWithValues(name, ns, ts.GetDefaultNamespace()) with no way to inject a custom
+	// namespace.
+	//
+	// All three share the same skeleton, extracted into testUnhealthyConnectionCondition below.
 	t.Run("conditions-missing-connection", func(t *testing.T) {
-		ctx := context.Background()
-
-		twd := testhelpers.NewTemporalWorkerDeploymentBuilder().
-			WithManualStrategy().
-			WithTargetTemplate("v1.0").
-			WithName("conditions-missing-connection").
-			WithNamespace(testNamespace).
-			WithTemporalConnection("does-not-exist").
-			WithTemporalNamespace(ts.GetDefaultNamespace()).
-			Build()
-
-		if err := k8sClient.Create(ctx, twd); err != nil {
-			t.Fatalf("failed to create TWD: %v", err)
-		}
-
-		waitForCondition(t, ctx, k8sClient, twd.Name, twd.Namespace,
-			temporaliov1alpha1.ConditionTemporalConnectionHealthy,
-			metav1.ConditionFalse,
-			temporaliov1alpha1.ReasonTemporalConnectionNotFound,
-			30*time.Second, time.Second)
-		waitForEvent(t, ctx, k8sClient, twd.Name, twd.Namespace,
-			temporaliov1alpha1.ReasonTemporalConnectionNotFound,
-			30*time.Second, time.Second)
+		// No TemporalConnection is created; the controller cannot find the one referenced by
+		// the TWD and immediately sets the condition to False.
+		testUnhealthyConnectionCondition(t, k8sClient,
+			"conditions-missing-connection", testNamespace, ts.GetDefaultNamespace(),
+			nil,
+			temporaliov1alpha1.ReasonTemporalConnectionNotFound)
 	})
+	t.Run("conditions-client-creation-failed", func(t *testing.T) {
+		// Port 1 is never bound; the SDK returns ECONNREFUSED immediately.
+		testUnhealthyConnectionCondition(t, k8sClient,
+			"conditions-client-creation-failed", testNamespace, ts.GetDefaultNamespace(),
+			&temporaliov1alpha1.TemporalConnectionSpec{HostPort: "localhost:1"},
+			temporaliov1alpha1.ReasonTemporalClientCreationFailed)
+	})
+	t.Run("conditions-temporal-state-fetch-failed", func(t *testing.T) {
+		// The real server is reachable so client creation succeeds, but "does-not-exist" is
+		// not a registered Temporal namespace so Describe() fails.
+		testUnhealthyConnectionCondition(t, k8sClient,
+			"conditions-temporal-state-fetch-failed", testNamespace, "does-not-exist",
+			&temporaliov1alpha1.TemporalConnectionSpec{HostPort: ts.GetFrontendHostPort()},
+			temporaliov1alpha1.ReasonTemporalStateFetchFailed)
+	})
+}
+
+// testUnhealthyConnectionCondition is shared by the four error-path condition tests.
+// It optionally creates a TemporalConnection (nil connectionSpec = missing connection),
+// creates a TWD pointing to that connection with the given temporalNamespace, then asserts
+// that ConditionTemporalConnectionHealthy becomes False with the expected reason and that a
+// matching Warning event is emitted.
+func testUnhealthyConnectionCondition(
+	t *testing.T,
+	k8sClient client.Client,
+	name, testNamespace, temporalNamespace string,
+	connectionSpec *temporaliov1alpha1.TemporalConnectionSpec,
+	expectedReason string,
+) {
+	t.Helper()
+	ctx := context.Background()
+
+	if connectionSpec != nil {
+		conn := &temporaliov1alpha1.TemporalConnection{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+			Spec:       *connectionSpec,
+		}
+		if err := k8sClient.Create(ctx, conn); err != nil {
+			t.Fatalf("failed to create TemporalConnection: %v", err)
+		}
+	}
+
+	twd := testhelpers.NewTemporalWorkerDeploymentBuilder().
+		WithManualStrategy().
+		WithTargetTemplate("v1.0").
+		WithName(name).
+		WithNamespace(testNamespace).
+		WithTemporalConnection(name).
+		WithTemporalNamespace(temporalNamespace).
+		Build()
+
+	if err := k8sClient.Create(ctx, twd); err != nil {
+		t.Fatalf("failed to create TWD: %v", err)
+	}
+
+	waitForCondition(t, ctx, k8sClient, twd.Name, twd.Namespace,
+		temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+		metav1.ConditionFalse, expectedReason,
+		30*time.Second, time.Second)
+	waitForEvent(t, ctx, k8sClient, twd.Name, twd.Namespace,
+		expectedReason, 30*time.Second, time.Second)
 }

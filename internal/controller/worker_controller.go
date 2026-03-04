@@ -160,6 +160,8 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// Get the Auth Mode and Secret Name
 	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
 	if err != nil {
+		// Note: as things are now, this will never happen, because getAPIKeySecretName only errors when secretRef == nil,
+		// but resolveAuthSecretName only calls it inside the tc.Spec.APIKeySecretRef != nil branch
 		l.Error(err, "unable to resolve auth secret name")
 		r.recordWarningAndSetConditionFalse(ctx, &workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
 			temporaliov1alpha1.ReasonAuthSecretInvalid,
