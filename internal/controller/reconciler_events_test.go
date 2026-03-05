@@ -6,13 +6,18 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/planner"
+	"go.temporal.io/api/serviceerror"
+	sdkclient "go.temporal.io/sdk/client"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -119,8 +124,8 @@ func makeTWD(name, namespace, connectionName string) *temporaliov1alpha1.Tempora
 	}
 }
 
-// makeTemporalConnection creates a minimal TemporalConnection for testing.
-func makeTemporalConnection(name, namespace, hostPort string) *temporaliov1alpha1.TemporalConnection {
+// makeNoCredsTemporalConnection creates a minimal TemporalConnection for testing.
+func makeNoCredsTemporalConnection(name, namespace, hostPort string) *temporaliov1alpha1.TemporalConnection {
 	return &temporaliov1alpha1.TemporalConnection{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: temporaliov1alpha1.GroupVersion.String(),
@@ -217,7 +222,7 @@ func TestReconcile_TemporalConnectionNotFound_SetsCondition(t *testing.T) {
 func TestReconcile_AuthSecretInvalid_EmitsEvent(t *testing.T) {
 	// Create a TemporalConnection with mTLS that references a secret,
 	// but the MutualTLSSecretRef has an empty name (will cause resolveAuthSecretName to fail)
-	tc := makeTemporalConnection("my-connection", "default", "localhost:7233")
+	tc := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
 	tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: ""} // empty name triggers error in getTLSSecretName
 
 	twd := makeTWD("test-worker", "default", "my-connection")
@@ -247,7 +252,7 @@ func TestReconcile_AuthSecretInvalid_EmitsEvent(t *testing.T) {
 
 func TestReconcile_TemporalClientCreationFailed_EmitsEventAndCondition(t *testing.T) {
 	// TemporalConnection exists but references a TLS secret that doesn't exist in k8s
-	tc := makeTemporalConnection("my-connection", "default", "localhost:7233")
+	tc := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
 	tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: "missing-tls-secret"}
 
 	twd := makeTWD("test-worker", "default", "my-connection")
@@ -346,7 +351,7 @@ func TestReconcile_ValidationFailure_NoEventEmitted(t *testing.T) {
 	}
 
 	// Also need a connection for this test — but validation happens before connection fetch
-	tc := makeTemporalConnection("my-connection", "default", "localhost:7233")
+	tc := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
 	r, recorder := newTestReconciler([]client.Object{twd, tc})
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -365,7 +370,7 @@ func TestReconcile_ValidationFailure_NoEventEmitted(t *testing.T) {
 
 func TestReconcile_ConnectionValid_ThenClientFails_ConditionsReflectBoth(t *testing.T) {
 	// Connection exists and is fetchable, but uses API key auth with a missing secret
-	tc := makeTemporalConnection("my-connection", "default", "localhost:7233")
+	tc := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
 	tc.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 		LocalObjectReference: corev1.LocalObjectReference{Name: "missing-api-key-secret"},
 		Key:                  "api-key",
@@ -410,4 +415,315 @@ func TestReconcile_EventMessageContainsUsefulContext(t *testing.T) {
 				"Event message should include the missing connection name for debugging")
 		}
 	}
+}
+
+// ─── Stub types ──────────────────────────────────────────────────────────────
+
+// stubWDHandle implements sdkclient.WorkerDeploymentHandle with configurable per-method errors.
+type stubWDHandle struct {
+	sdkclient.WorkerDeploymentHandle
+	describeErr   error
+	setCurrentErr error
+	setRampingErr error
+	updateMetaErr error
+}
+
+func (s *stubWDHandle) Describe(_ context.Context, _ sdkclient.WorkerDeploymentDescribeOptions) (sdkclient.WorkerDeploymentDescribeResponse, error) {
+	return sdkclient.WorkerDeploymentDescribeResponse{}, s.describeErr
+}
+
+func (s *stubWDHandle) SetCurrentVersion(_ context.Context, _ sdkclient.WorkerDeploymentSetCurrentVersionOptions) (sdkclient.WorkerDeploymentSetCurrentVersionResponse, error) {
+	return sdkclient.WorkerDeploymentSetCurrentVersionResponse{}, s.setCurrentErr
+}
+
+func (s *stubWDHandle) SetRampingVersion(_ context.Context, _ sdkclient.WorkerDeploymentSetRampingVersionOptions) (sdkclient.WorkerDeploymentSetRampingVersionResponse, error) {
+	return sdkclient.WorkerDeploymentSetRampingVersionResponse{}, s.setRampingErr
+}
+
+func (s *stubWDHandle) UpdateVersionMetadata(_ context.Context, _ sdkclient.WorkerDeploymentUpdateVersionMetadataOptions) (sdkclient.WorkerDeploymentUpdateVersionMetadataResponse, error) {
+	return sdkclient.WorkerDeploymentUpdateVersionMetadataResponse{}, s.updateMetaErr
+}
+
+// stubWDClient implements sdkclient.WorkerDeploymentClient, returning a fixed handle.
+type stubWDClient struct {
+	sdkclient.WorkerDeploymentClient
+	handle sdkclient.WorkerDeploymentHandle
+}
+
+func (s *stubWDClient) GetHandle(_ string) sdkclient.WorkerDeploymentHandle { return s.handle }
+
+// stubTemporalClient implements sdkclient.Client, routing WorkerDeploymentClient and
+// ExecuteWorkflow to configurable stubs.
+type stubTemporalClient struct {
+	sdkclient.Client
+	wdClient sdkclient.WorkerDeploymentClient
+	execErr  error
+}
+
+func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeploymentClient {
+	return s.wdClient
+}
+
+func (s *stubTemporalClient) ExecuteWorkflow(_ context.Context, _ sdkclient.StartWorkflowOptions, _ interface{}, _ ...interface{}) (sdkclient.WorkflowRun, error) {
+	return nil, s.execErr
+}
+
+// newStubTemporalClient returns a stub client whose Describe returns NotFound (no existing
+// Worker Deployment), and whose ExecuteWorkflow returns execErr.
+func newStubTemporalClient(execErr error) *stubTemporalClient {
+	handle := &stubWDHandle{describeErr: &serviceerror.NotFound{}}
+	return &stubTemporalClient{
+		wdClient: &stubWDClient{handle: handle},
+		execErr:  execErr,
+	}
+}
+
+// noCredsPoolKey returns the ClientPoolKey for a no-credentials TemporalConnection.
+func noCredsPoolKey(hostPort, temporalNamespace string) clientpool.ClientPoolKey {
+	return clientpool.ClientPoolKey{
+		HostPort:   hostPort,
+		Namespace:  temporalNamespace,
+		SecretName: "",
+		AuthMode:   clientpool.AuthModeNoCredentials,
+	}
+}
+
+// ─── executeK8sOperations tests ──────────────────────────────────────────────
+
+func TestExecuteK8sOperations_DeploymentCreateFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{
+		Create: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.CreateOption) error {
+			return fmt.Errorf("simulated create failure")
+		},
+	})
+
+	p := &plan{
+		CreateDeployment: &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "new-deploy", Namespace: twd.Namespace},
+		},
+	}
+
+	err := r.executeK8sOperations(context.Background(), logr.Discard(), twd, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonDeploymentCreateFailed)
+}
+
+func TestExecuteK8sOperations_DeploymentDeleteFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{
+		Delete: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.DeleteOption) error {
+			return fmt.Errorf("simulated delete failure")
+		},
+	})
+
+	p := &plan{
+		DeleteDeployments: []*appsv1.Deployment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "old-deploy", Namespace: twd.Namespace}},
+		},
+	}
+
+	err := r.executeK8sOperations(context.Background(), logr.Discard(), twd, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonDeploymentDeleteFailed)
+}
+
+func TestExecuteK8sOperations_DeploymentUpdateFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{
+		Update: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.UpdateOption) error {
+			return fmt.Errorf("simulated update failure")
+		},
+	})
+
+	p := &plan{
+		UpdateDeployments: []*appsv1.Deployment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "old-deploy", Namespace: twd.Namespace}},
+		},
+	}
+
+	err := r.executeK8sOperations(context.Background(), logr.Discard(), twd, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonDeploymentUpdateFailed)
+}
+
+func TestExecuteK8sOperations_DeploymentScaleFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{
+		SubResourceUpdate: func(_ context.Context, _ client.Client, _ string, _ client.Object, _ ...client.SubResourceUpdateOption) error {
+			return fmt.Errorf("simulated scale failure")
+		},
+	})
+
+	ref := &corev1.ObjectReference{Namespace: twd.Namespace, Name: "some-deploy"}
+	p := &plan{
+		ScaleDeployments: map[*corev1.ObjectReference]uint32{ref: 0},
+	}
+
+	err := r.executeK8sOperations(context.Background(), logr.Discard(), twd, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonDeploymentScaleFailed)
+}
+
+// ─── startTestWorkflows tests ────────────────────────────────────────────────
+
+func TestStartTestWorkflows_StartFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+
+	stubClient := newStubTemporalClient(fmt.Errorf("simulated ExecuteWorkflow failure"))
+
+	p := &plan{
+		WorkerDeploymentName: twd.Name,
+		startTestWorkflows: []startWorkflowConfig{
+			{
+				workflowType: "MyGateWorkflow",
+				workflowID:   "my-gate-wf-id",
+				buildID:      "build-abc",
+				taskQueue:    "my-task-queue",
+			},
+		},
+	}
+
+	err := r.startTestWorkflows(context.Background(), logr.Discard(), twd, stubClient, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonTestWorkflowStartFailed)
+}
+
+// ─── updateVersionConfig tests ───────────────────────────────────────────────
+
+func TestUpdateVersionConfig_SetCurrentFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+
+	handle := &stubWDHandle{setCurrentErr: fmt.Errorf("simulated SetCurrentVersion failure")}
+
+	p := &plan{
+		WorkerDeploymentName: twd.Name,
+		UpdateVersionConfig: &planner.VersionConfig{
+			BuildID:    "build-abc",
+			SetCurrent: true,
+		},
+	}
+
+	err := r.updateVersionConfig(context.Background(), logr.Discard(), twd, handle, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonVersionPromotionFailed)
+}
+
+func TestUpdateVersionConfig_SetRampingFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+
+	handle := &stubWDHandle{setRampingErr: fmt.Errorf("simulated SetRampingVersion failure")}
+
+	p := &plan{
+		WorkerDeploymentName: twd.Name,
+		UpdateVersionConfig: &planner.VersionConfig{
+			BuildID:        "build-abc",
+			SetCurrent:     false,
+			RampPercentage: 25,
+		},
+	}
+
+	err := r.updateVersionConfig(context.Background(), logr.Discard(), twd, handle, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonVersionPromotionFailed)
+}
+
+func TestUpdateVersionConfig_MetadataUpdateFailed_EmitsEvent(t *testing.T) {
+	namespace := "default"
+	twd := makeTWD("test-worker", namespace, "my-conn")
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+
+	// SetCurrentVersion succeeds; UpdateVersionMetadata fails.
+	handle := &stubWDHandle{updateMetaErr: fmt.Errorf("simulated UpdateVersionMetadata failure")}
+
+	p := &plan{
+		WorkerDeploymentName: twd.Name,
+		UpdateVersionConfig: &planner.VersionConfig{
+			BuildID:    "build-abc",
+			SetCurrent: true,
+		},
+	}
+
+	err := r.updateVersionConfig(context.Background(), logr.Discard(), twd, handle, p)
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonMetadataUpdateFailed)
+}
+
+// ─── Reconcile-level tests ───────────────────────────────────────────────────
+
+// TestReconcile_PlanGenerationFailed_EmitsEvent injects a List failure on the second call.
+// The first List (in worker_controller.go) succeeds; the second (inside generatePlan) fails,
+// which causes Reconcile to emit ReasonPlanGenerationFailed.
+func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
+	k8sNamespace := "default"
+	hostPort := "localhost:7233"
+
+	tc := makeNoCredsTemporalConnection("my-conn", k8sNamespace, hostPort)
+	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
+
+	listCallCount := 0
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			listCallCount++
+			if listCallCount > 1 {
+				return fmt.Errorf("simulated List failure on call #%d", listCallCount)
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+
+	r.TemporalClientPool.SetClientForTesting(
+		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
+		newStubTemporalClient(nil),
+	)
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
+}
+
+// TestReconcile_PlanExecutionFailed_EmitsEvent injects a Create failure so that
+// executeK8sOperations fails for the new Deployment that a fresh TWD always needs,
+// causing Reconcile to emit ReasonPlanExecutionFailed.
+func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
+	k8sNamespace := "default"
+	hostPort := "localhost:7233"
+
+	tc := makeNoCredsTemporalConnection("my-conn", k8sNamespace, hostPort)
+	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
+
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
+		Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
+			// Only fail Deployment creates; allow TWD status updates (which use SubResource).
+			if _, ok := obj.(*appsv1.Deployment); ok {
+				return fmt.Errorf("simulated Deployment create failure")
+			}
+			return nil
+		},
+	})
+
+	r.TemporalClientPool.SetClientForTesting(
+		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
+		newStubTemporalClient(nil),
+	)
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+
+	require.Error(t, err)
+	assertEventEmitted(t, drainEvents(recorder), ReasonPlanExecutionFailed)
 }

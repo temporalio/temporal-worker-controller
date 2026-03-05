@@ -33,7 +33,7 @@ const (
 
 type ClientPoolKey struct {
 	HostPort   string
-	Namespace  string
+	Namespace  string   // Temporal namespace
 	SecretName string   // Include secret name in key to invalidate cache when the secret name changes
 	AuthMode   AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
 }
@@ -282,6 +282,14 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authM
 		return nil, fmt.Errorf("invalid auth mode: %s", authMode)
 	}
 
+}
+
+// SetClientForTesting pre-populates the pool with a stub client, bypassing the network dial.
+// Intended for use in unit tests only.
+func (cp *ClientPool) SetClientForTesting(key ClientPoolKey, c sdkclient.Client) {
+	cp.mux.Lock()
+	defer cp.mux.Unlock()
+	cp.clients[key] = ClientInfo{client: c, auth: ClientAuth{mode: key.AuthMode}}
 }
 
 func (cp *ClientPool) Close() {
