@@ -13,23 +13,12 @@ package internal
 //   - ReasonTemporalClientCreationFailed: TemporalConnection pointing to an unreachable port
 //   - ReasonTemporalStateFetchFailed: TWD pointing to a Temporal namespace that doesn't exist
 //
-// Not yet covered, ranked by ease of triggering in functional tests:
-//   1. ReasonTestWorkflowStartFailed (Hard): Temporal does NOT reject StartWorkflow for
-//      unregistered workflow types — it queues the workflow and waits for a worker. There is
-//      no clean way to make StartWorkflow itself fail without injecting network errors or
-//      context cancellation.
-//   2. ReasonDeploymentCreateFailed / UpdateFailed / ScaleFailed / DeleteFailed (Hard):
-//      need the k8s API server in envtest to reject the operation (e.g. via a webhook or quota).
-//   3. ReasonVersionPromotionFailed / ReasonMetadataUpdateFailed (Hard): need SetCurrentVersion
-//      or UpdateVersionMetadata to fail on an otherwise healthy Temporal server. Similar challenge
-//      as making StartWorkflow fail.
-//   4. ReasonPlanGenerationFailed / ReasonPlanExecutionFailed (Hard): meta-errors that wrap the
-//      above; would fire automatically if any of the above are triggered.
-//   5. ReasonAuthSecretInvalid (Impossible): This is never triggered. The CRD schema enforces a DNS name pattern
-//      on mutualTLSSecretRef.name, so an empty name is rejected before it reaches the controller.
-//      Additionally, resolveAuthSecretName never returns an error with the current
-//      implementation (the nil guard in getTLSSecretName/getAPIKeySecretName is redundant
-//      because the caller already checks non-nil). The code path is effectively dead.
+// Covered in unit tests
+//   - ReasonTestWorkflowStartFailed
+//   - ReasonDeploymentCreateFailed / UpdateFailed / ScaleFailed / DeleteFailed
+//   - ReasonVersionPromotionFailed / ReasonMetadataUpdateFailed
+//   - ReasonPlanGenerationFailed / ReasonPlanExecutionFailed
+//   - ReasonAuthSecretInvalid
 
 import (
 	"context"

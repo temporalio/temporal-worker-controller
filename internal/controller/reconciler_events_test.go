@@ -362,10 +362,17 @@ func TestReconcile_TemporalConnectionNotFound(t *testing.T) {
 	assert.Contains(t, cond.Message, connName)
 }
 
-// TestReconcile_TemporalConnectionUnhealthy verifies that a missing credential secret
-// (regardless of auth type) causes a TemporalClientCreationFailed event, a malformed
-// credential secret causes an AuthSecretInvalid event, and both of the above conditions
-// set the TemporalConnectionHealthy condition to False.
+// TestReconcile_TemporalConnectionUnhealthy verifies that credential configuration
+// errors (regardless of auth type) emit ReasonAuthSecretInvalid and set the
+// TemporalConnectionHealthy condition to False.
+//
+// ReasonAuthSecretInvalid fires for two distinct failure modes:
+//   - resolveAuthSecretName: the secret ref exists but has an empty name (spec validation gap)
+//   - ParseClientSecret:     the named k8s Secret cannot be fetched (not found, wrong type, etc.)
+//
+// ReasonTemporalClientCreationFailed fires only when DialAndUpsertClient fails (network/Temporal
+// error). That path requires a live server and is covered by the integration test
+// conditions-client-creation-failed.
 func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -373,23 +380,27 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 		expectedReason string
 	}{
 		{
-			name: "MissingTLSSecret_TemporalClientCreationFailed",
+			// Secret name is non-empty but the k8s Secret doesn't exist; ParseClientSecret
+			// returns a not-found error, which is reported as AuthSecretInvalid (not ClientCreationFailed).
+			name: "MissingTLSSecret_AuthSecretInvalid",
 			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
 				tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: "missing-tls-secret"}
 			},
-			expectedReason: temporaliov1alpha1.ReasonTemporalClientCreationFailed,
+			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
 		},
 		{
-			name: "MissingAPIKeySecret_TemporalClientCreationFailed",
+			// Same as above for API key auth.
+			name: "MissingAPIKeySecret_AuthSecretInvalid",
 			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
 				tc.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: "missing-api-key-secret"},
 					Key:                  "api-key",
 				}
 			},
-			expectedReason: temporaliov1alpha1.ReasonTemporalClientCreationFailed,
+			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
 		},
 		{
+			// Secret ref is present but name is empty; resolveAuthSecretName returns an error.
 			name: "MalformedTLSSecret_AuthSecretInvalid",
 			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
 				tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: ""}
@@ -397,7 +408,8 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
 		},
 		{
-			name: "MalformedAPIPKeySecret_AuthSecretInvalid",
+			// Same as above for API key auth.
+			name: "MalformedAPIKeySecret_AuthSecretInvalid",
 			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
 				tc.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: ""},
@@ -606,29 +618,29 @@ func TestStartTestWorkflows_StartFailed_EmitsEvent(t *testing.T) {
 
 func TestUpdateVersionConfig_EmitsEventOnFailure(t *testing.T) {
 	cases := []struct {
-		name       string
-		handle     *stubWDHandle
-		config     *planner.VersionConfig
-		wantReason string
+		name           string
+		handle         *stubWDHandle
+		config         *planner.VersionConfig
+		expectedReason string
 	}{
 		{
-			name:       "SetCurrentFailed",
-			handle:     &stubWDHandle{setCurrentErr: fmt.Errorf("simulated SetCurrentVersion failure")},
-			config:     &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
-			wantReason: ReasonVersionPromotionFailed,
+			name:           "SetCurrentFailed",
+			handle:         &stubWDHandle{setCurrentErr: fmt.Errorf("simulated SetCurrentVersion failure")},
+			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
+			expectedReason: ReasonVersionPromotionFailed,
 		},
 		{
-			name:       "SetRampingFailed",
-			handle:     &stubWDHandle{setRampingErr: fmt.Errorf("simulated SetRampingVersion failure")},
-			config:     &planner.VersionConfig{BuildID: "build-abc", RampPercentage: 25},
-			wantReason: ReasonVersionPromotionFailed,
+			name:           "SetRampingFailed",
+			handle:         &stubWDHandle{setRampingErr: fmt.Errorf("simulated SetRampingVersion failure")},
+			config:         &planner.VersionConfig{BuildID: "build-abc", RampPercentage: 25},
+			expectedReason: ReasonVersionPromotionFailed,
 		},
 		{
 			// SetCurrentVersion succeeds; UpdateVersionMetadata fails.
-			name:       "MetadataUpdateFailed",
-			handle:     &stubWDHandle{updateMetaErr: fmt.Errorf("simulated UpdateVersionMetadata failure")},
-			config:     &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
-			wantReason: ReasonMetadataUpdateFailed,
+			name:           "MetadataUpdateFailed",
+			handle:         &stubWDHandle{updateMetaErr: fmt.Errorf("simulated UpdateVersionMetadata failure")},
+			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
+			expectedReason: ReasonMetadataUpdateFailed,
 		},
 	}
 
@@ -641,7 +653,7 @@ func TestUpdateVersionConfig_EmitsEventOnFailure(t *testing.T) {
 			p := &plan{WorkerDeploymentName: twd.Name, UpdateVersionConfig: tc.config}
 			err := r.updateVersionConfig(context.Background(), logr.Discard(), twd, tc.handle, p)
 			require.Error(t, err)
-			assertEventEmitted(t, drainEvents(recorder), tc.wantReason)
+			assertEventEmitted(t, drainEvents(recorder), tc.expectedReason)
 		})
 	}
 }

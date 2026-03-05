@@ -180,11 +180,21 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		AuthMode:   authMode,
 	})
 	if !ok {
-		c, err := r.TemporalClientPool.UpsertClient(ctx, secretName, authMode, clientpool.NewClientOptions{
+		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
 			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 			Spec:              temporalConnection.Spec,
 		})
+		if err != nil {
+			l.Error(err, "invalid Temporal auth secret")
+			r.recordWarningAndSetConditionFalse(ctx, &workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+				temporaliov1alpha1.ReasonAuthSecretInvalid,
+				fmt.Sprintf("Invalid Temporal auth secret for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
+				fmt.Sprintf("Invalid auth secret: %v", err))
+			return ctrl.Result{}, err
+		}
+
+		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
 		if err != nil {
 			l.Error(err, "unable to create TemporalClient")
 			r.recordWarningAndSetConditionFalse(ctx, &workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy,

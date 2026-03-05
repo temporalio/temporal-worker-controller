@@ -108,12 +108,16 @@ const (
 	// when the referenced TemporalConnection resource cannot be found.
 	ReasonTemporalConnectionNotFound = "TemporalConnectionNotFound"
 
-	// ReasonAuthSecretInvalid is set on ConditionTemporalConnectionHealthy when
-	// the auth secret referenced by the TemporalConnection cannot be resolved.
+	// ReasonAuthSecretInvalid is set on ConditionTemporalConnectionHealthy when the
+	// credential secret referenced by the TemporalConnection is misconfigured. This
+	// covers: (1) the secret reference has an empty name, (2) the named Kubernetes
+	// Secret cannot be fetched or has an unexpected type, and (3) the mTLS certificate
+	// in the secret is expired or about to expire.
 	ReasonAuthSecretInvalid = "AuthSecretInvalid"
 
 	// ReasonTemporalClientCreationFailed is set on ConditionTemporalConnectionHealthy
-	// when a Temporal SDK client cannot be created for the connection.
+	// when the Temporal SDK client cannot connect to the server (dial failure or failed
+	// health check). The credentials were valid; the server itself is unreachable.
 	ReasonTemporalClientCreationFailed = "TemporalClientCreationFailed"
 
 	// ReasonTemporalStateFetchFailed is set on ConditionTemporalConnectionHealthy
