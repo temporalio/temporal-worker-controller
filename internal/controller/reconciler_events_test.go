@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -491,7 +492,7 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
 		Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
 			if _, ok := obj.(*appsv1.Deployment); ok {
-				return fmt.Errorf("simulated Deployment create failure")
+				return errors.New("simulated Deployment create failure")
 			}
 			return nil
 		},
