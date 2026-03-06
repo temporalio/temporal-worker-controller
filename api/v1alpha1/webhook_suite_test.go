@@ -48,6 +48,10 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		Skip("Skipping webhook integration tests: KUBEBUILDER_ASSETS not set")
+	}
+
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	ctx, cancel = context.WithCancel(context.TODO())
@@ -145,6 +149,9 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
+	if testEnv == nil {
+		return // BeforeSuite was skipped; nothing to tear down
+	}
 	cancel()
 	By("tearing down the test environment")
 	err := testEnv.Stop()
