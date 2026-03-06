@@ -137,21 +137,25 @@ func RenderOwnedResource(
 	if err != nil {
 		return nil, fmt.Errorf("failed to render templates: %w", err)
 	}
-	raw = rendered.(map[string]interface{})
+	renderedMap, ok := rendered.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected type after template rendering: %T", rendered)
+	}
+	raw = renderedMap
 
 	// Step 4: set metadata
 	resourceName := ComputeOwnedResourceName(twor.Spec.WorkerRef.Name, twor.Name, buildID)
 
-	meta, _ := raw["metadata"].(map[string]interface{})
-	if meta == nil {
+	meta, ok := raw["metadata"].(map[string]interface{})
+	if !ok || meta == nil {
 		meta = make(map[string]interface{})
 	}
 	meta["name"] = resourceName
 	meta["namespace"] = twor.Namespace
 
 	// Merge labels
-	existingLabels, _ := meta["labels"].(map[string]interface{})
-	if existingLabels == nil {
+	existingLabels, ok := meta["labels"].(map[string]interface{})
+	if !ok || existingLabels == nil {
 		existingLabels = make(map[string]interface{})
 	}
 	for k, v := range selectorLabels {
@@ -190,31 +194,47 @@ func autoInjectFields(obj map[string]interface{}, deploymentName string, selecto
 		case "scaleTargetRef":
 			// Inject only when the key is present but null (user opted in)
 			if v == nil {
-				obj[k] = map[string]interface{}{
-					"apiVersion": appsv1.SchemeGroupVersion.String(),
-					"kind":       "Deployment",
-					"name":       deploymentName,
-				}
+				obj[k] = buildScaleTargetRef(deploymentName)
 			}
 		case "matchLabels":
 			// Inject only when the key is present but null (user opted in)
 			if v == nil {
-				labels := make(map[string]interface{}, len(selectorLabels))
-				for lk, lv := range selectorLabels {
-					labels[lk] = lv
-				}
-				obj[k] = labels
+				obj[k] = labelsAsInterface(selectorLabels)
 			}
 		default:
-			// Recurse into nested objects
-			if nested, ok := v.(map[string]interface{}); ok {
-				autoInjectFields(nested, deploymentName, selectorLabels)
-			} else if arr, ok := v.([]interface{}); ok {
-				for _, item := range arr {
-					if nestedItem, ok := item.(map[string]interface{}); ok {
-						autoInjectFields(nestedItem, deploymentName, selectorLabels)
-					}
-				}
+			autoInjectInValue(v, deploymentName, selectorLabels)
+		}
+	}
+}
+
+// buildScaleTargetRef constructs the scaleTargetRef map pointing at the versioned Deployment.
+func buildScaleTargetRef(deploymentName string) map[string]interface{} {
+	return map[string]interface{}{
+		"apiVersion": appsv1.SchemeGroupVersion.String(),
+		"kind":       "Deployment",
+		"name":       deploymentName,
+	}
+}
+
+// labelsAsInterface converts a string→string label map to map[string]interface{} for JSON encoding.
+func labelsAsInterface(selectorLabels map[string]string) map[string]interface{} {
+	labels := make(map[string]interface{}, len(selectorLabels))
+	for k, v := range selectorLabels {
+		labels[k] = v
+	}
+	return labels
+}
+
+// autoInjectInValue recurses into v if it is a map or a slice of maps.
+func autoInjectInValue(v interface{}, deploymentName string, selectorLabels map[string]string) {
+	if nested, ok := v.(map[string]interface{}); ok {
+		autoInjectFields(nested, deploymentName, selectorLabels)
+		return
+	}
+	if arr, ok := v.([]interface{}); ok {
+		for _, item := range arr {
+			if nestedItem, ok := item.(map[string]interface{}); ok {
+				autoInjectFields(nestedItem, deploymentName, selectorLabels)
 			}
 		}
 	}

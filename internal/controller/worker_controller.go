@@ -281,7 +281,7 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.TemporalWorkerOwnedResource{}, tworWorkerRefKey, func(rawObj client.Object) []string {
 		twor, ok := rawObj.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
 		if !ok {
-			mgr.GetLogger().Error(fmt.Errorf("error indexing TemporalWorkerOwnedResources"), "could not convert raw object", rawObj)
+			mgr.GetLogger().Error(errors.New("error indexing TemporalWorkerOwnedResources"), "could not convert raw object", rawObj)
 			return nil
 		}
 		return []string{twor.Spec.WorkerRef.Name}
