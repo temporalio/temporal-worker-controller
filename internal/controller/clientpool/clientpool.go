@@ -292,12 +292,12 @@ func (cp *ClientPool) Close() {
 
 func calculateCertificateExpirationTime(certBytes []byte, bufferTime time.Duration) (time.Time, error) {
 	if len(certBytes) == 0 {
-		return time.Time{}, fmt.Errorf("no certificate bytes provided")
+		return time.Time{}, errors.New("no certificate bytes provided")
 	}
 
 	block, _ := pem.Decode(certBytes)
 	if block == nil {
-		return time.Time{}, fmt.Errorf("failed to decode PEM block")
+		return time.Time{}, errors.New("failed to decode PEM block")
 	}
 
 	cert, err := x509.ParseCertificate(block.Bytes)

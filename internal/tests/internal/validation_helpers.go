@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -193,7 +194,7 @@ func verifyTemporalStateMatchesStatusEventually(
 
 		if cv := expectedDeploymentStatus.CurrentVersion; cv != nil {
 			if rc.CurrentVersion == nil {
-				return fmt.Errorf("expected CurrentVersion to be set")
+				return errors.New("expected CurrentVersion to be set")
 			}
 			if rc.CurrentVersion.BuildId != expectedDeploymentStatus.CurrentVersion.BuildID {
 				return fmt.Errorf("expected current build id to be '%s', got '%s'",
@@ -297,7 +298,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 		// validate current version
 		if expectedDeploymentStatus.CurrentVersion != nil {
 			if twd.Status.CurrentVersion == nil {
-				return fmt.Errorf("expected CurrentVersion to be set")
+				return errors.New("expected CurrentVersion to be set")
 			}
 			if twd.Status.CurrentVersion.BuildID != expectedDeploymentStatus.CurrentVersion.BuildID {
 				return fmt.Errorf("expected current build id to be '%s', got '%s'",
@@ -305,7 +306,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 					twd.Status.CurrentVersion.BuildID)
 			}
 			if twd.Status.CurrentVersion.Deployment == nil {
-				return fmt.Errorf("expected CurrentVersion.Deployment to be set")
+				return errors.New("expected CurrentVersion.Deployment to be set")
 			}
 			if twd.Status.CurrentVersion.Deployment.Name != expectedDeploymentStatus.CurrentVersion.Deployment.Name {
 				return fmt.Errorf("expected deployment name to be '%s', got '%s'",

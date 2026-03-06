@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -53,7 +54,7 @@ func setupKubebuilderAssets() error {
 	// Get the repository root to find the setup-envtest binary
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
-		return fmt.Errorf("failed to get current file path")
+		return errors.New("failed to get current file path")
 	}
 	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(currentFile), "../../.."))
 	if err != nil {
@@ -237,10 +238,10 @@ func setupUnversionedPollers(t *testing.T, ctx context.Context, tc testhelpers.T
 			return fmt.Errorf("error checking unversioned Activity pollers %v", err)
 		}
 		if !unversionedWorkflowPoller {
-			return fmt.Errorf("no workflow poller")
+			return errors.New("no workflow poller")
 		}
 		if !unversionedActivityPoller {
-			return fmt.Errorf("no activity poller")
+			return errors.New("no activity poller")
 		}
 		return nil
 	})

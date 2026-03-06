@@ -527,7 +527,7 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 			name: "DeploymentCreateFailed",
 			interceptors: interceptor.Funcs{
 				Create: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.CreateOption) error {
-					return fmt.Errorf("simulated create failure")
+					return errors.New("simulated create failure")
 				},
 			},
 			makePlan: func(ns string) *plan {
@@ -541,7 +541,7 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 			name: "DeploymentDeleteFailed",
 			interceptors: interceptor.Funcs{
 				Delete: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.DeleteOption) error {
-					return fmt.Errorf("simulated delete failure")
+					return errors.New("simulated delete failure")
 				},
 			},
 			makePlan: func(ns string) *plan {
@@ -555,7 +555,7 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 			name: "DeploymentUpdateFailed",
 			interceptors: interceptor.Funcs{
 				Update: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.UpdateOption) error {
-					return fmt.Errorf("simulated update failure")
+					return errors.New("simulated update failure")
 				},
 			},
 			makePlan: func(ns string) *plan {
@@ -569,7 +569,7 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 			name: "DeploymentScaleFailed",
 			interceptors: interceptor.Funcs{
 				SubResourceUpdate: func(_ context.Context, _ client.Client, _ string, _ client.Object, _ ...client.SubResourceUpdateOption) error {
-					return fmt.Errorf("simulated scale failure")
+					return errors.New("simulated scale failure")
 				},
 			},
 			makePlan: func(ns string) *plan {
@@ -610,7 +610,7 @@ func TestStartTestWorkflows_StartFailed_EmitsEvent(t *testing.T) {
 	}
 
 	err := r.startTestWorkflows(context.Background(), logr.Discard(), twd,
-		newStubTemporalClient(fmt.Errorf("simulated ExecuteWorkflow failure")), p)
+		newStubTemporalClient(errors.New("simulated ExecuteWorkflow failure")), p)
 	require.Error(t, err)
 	assertEventEmitted(t, drainEvents(recorder), ReasonTestWorkflowStartFailed)
 }
@@ -626,20 +626,20 @@ func TestUpdateVersionConfig_EmitsEventOnFailure(t *testing.T) {
 	}{
 		{
 			name:           "SetCurrentFailed",
-			handle:         &stubWDHandle{setCurrentErr: fmt.Errorf("simulated SetCurrentVersion failure")},
+			handle:         &stubWDHandle{setCurrentErr: errors.New("simulated SetCurrentVersion failure")},
 			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
 			expectedReason: ReasonVersionPromotionFailed,
 		},
 		{
 			name:           "SetRampingFailed",
-			handle:         &stubWDHandle{setRampingErr: fmt.Errorf("simulated SetRampingVersion failure")},
+			handle:         &stubWDHandle{setRampingErr: errors.New("simulated SetRampingVersion failure")},
 			config:         &planner.VersionConfig{BuildID: "build-abc", RampPercentage: 25},
 			expectedReason: ReasonVersionPromotionFailed,
 		},
 		{
 			// SetCurrentVersion succeeds; UpdateVersionMetadata fails.
 			name:           "MetadataUpdateFailed",
-			handle:         &stubWDHandle{updateMetaErr: fmt.Errorf("simulated UpdateVersionMetadata failure")},
+			handle:         &stubWDHandle{updateMetaErr: errors.New("simulated UpdateVersionMetadata failure")},
 			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
 			expectedReason: ReasonMetadataUpdateFailed,
 		},
