@@ -51,6 +51,8 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
         {{- if .Values.securityContext.seccompProfile.enabled }}
         seccompProfile:
           type: RuntimeDefault

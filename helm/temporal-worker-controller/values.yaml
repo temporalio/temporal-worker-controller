@@ -49,6 +49,8 @@ serviceAccount:
 securityContext:
   seccompProfile:
     enabled: false
+  runAsUser: 65532
+  runAsGroup: 65532
 
 # Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager
 # pods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.
