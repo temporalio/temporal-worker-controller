@@ -4,7 +4,7 @@
 
 Helm's `crds/` directory installs CRDs on `helm install` but **silently ignores them on `helm upgrade`** and does not delete them on `helm uninstall`. This means users have no supported mechanism to upgrade CRDs when upgrading the controller chart via the standard Helm workflow.
 
-To provide an explicit, version-tracked CRD upgrade path, the temporal-worker-controller ships CRDs as a separate Helm chart: `temporal-worker-controller-crds`. This is the same pattern used by [Karpenter](https://karpenter.sh/docs/upgrading/upgrade-guide/) (`karpenter-crd`), [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds), and [VictoriaMetrics](https://docs.victoriametrics.com/helm/victoria-metrics-operator-crds/) (`victoria-metrics-operator-crds`).
+To provide an explicit, version-tracked CRD upgrade path, the temporal-worker-controller ships CRDs as a separate Helm chart: `temporal-worker-controller-crds`. This is the same pattern used by [Karpenter](https://karpenter.sh/docs/upgrading/upgrade-guide/) (`karpenter-crd`) and [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds).
 
 Benefits:
 - CRDs survive accidental `helm uninstall` of either chart (`helm.sh/resource-policy: keep`)
