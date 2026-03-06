@@ -71,12 +71,12 @@ No Kubernetes API server, no Temporal server. Tests call functions directly.
 ### Envtest + Real Temporal Server (Integration Tests)
 Full k8s fake API (envtest) with a real in-process Temporal server (`temporaltest.TestServer`). No real pods, no real controllers (HPA controller, GC controller, etc.), no webhook server registered, no cert-manager.
 
-**File:** `internal/tests/internal/integration_test.go` (28 subtests)
+**File:** `internal/tests/internal/integration_test.go` (39 subtests)
 
 ### Webhook Suite (Envtest + Webhook Server)
 Real webhook server registered with TLS, but no Temporal server. Tests webhook HTTP responses directly.
 
-**File:** `api/v1alpha1/webhook_suite_test.go` (currently only setup; no test cases written)
+**File:** `api/v1alpha1/temporalworkerownedresource_webhook_integration_test.go` (5 subtests via Ginkgo suite in `webhook_suite_test.go`)
 
 ---
 
@@ -86,7 +86,7 @@ Real webhook server registered with TLS, but no Temporal server. Tests webhook H
 |---|---|---|
 | Creates versioned Deployment for target Build ID | ✅ | All strategy subtests |
 | Rolling update on pod spec change | ✅ | `manual-rollout-custom-build-expect-rolling-update` |
-| Rolling update on connection spec change | ❌ | Tested only at unit level |
+| Rolling update on connection spec change | ✅ | `connection-spec-change-rolling-update` |
 | Scales deprecated versions to 0 after scaledownDelay | ✅ | `*-scale-down-deprecated-versions` |
 | Deletes deprecated Deployments after deleteDelay | ✅ | `7th-rollout-unblocked-after-pollers-die-version-deleted` |
 | Max-ineligible-versions blocks rollout | ✅ | `*-blocked-at-max-versions*` |
@@ -95,7 +95,7 @@ Real webhook server registered with TLS, but no Temporal server. Tests webhook H
 | AllAtOnce: gate workflow blocks/unblocks | ✅ | `all-at-once-*-gate-*` subtests |
 | Progressive: blocks on unversioned pollers | ✅ | `progressive-rollout-yes-unversioned-pollers-*` |
 | Progressive: first ramp step | ✅ | `progressive-rollout-expect-first-step` |
-| Progressive: full ramp progression | ❌ | Only first step tested end-to-end |
+| Progressive: full ramp progression | ✅ | `progressive-ramp-to-current` |
 | Progressive: gate blocks ramping | ✅ | `progressive-rollout-with-failed-gate` |
 | Progressive: gate success + pollers → ramp | ✅ | `progressive-rollout-success-gate-expect-first-step` |
 | External modifier blocks controller | ✅ | `*-blocked-by-modifier` |
@@ -105,17 +105,19 @@ Real webhook server registered with TLS, but no Temporal server. Tests webhook H
 | TWOR: scaleTargetRef auto-injected | ✅ | `twor-creates-hpa-per-build-id` |
 | TWOR: status.versions Applied:true | ✅ | `twor-creates-hpa-per-build-id` |
 | TWOR: TWD owner ref set on TWOR | ✅ | `twor-creates-hpa-per-build-id` |
-| TWOR: versioned Deployment owner ref on resource copy | ❌ | Not asserted in integration test |
-| TWOR: matchLabels auto-injected | ❌ | Only unit tested |
-| TWOR: multiple TWORs on same TWD | ❌ | Not tested |
-| TWOR: template variables ({{ .DeploymentName }}) | ❌ | Only unit tested |
-| TWOR: multiple active versions (current + ramping) | ❌ | Not tested |
-| TWOR: apply failure → status.Applied:false | ❌ | Not tested |
+| TWOR: versioned Deployment owner ref on resource copy | ✅ | `twor-deployment-owner-ref` |
+| TWOR: matchLabels auto-injected | ✅ | `twor-matchlabels-injection` |
+| TWOR: multiple TWORs on same TWD | ✅ | `twor-multiple-twors-same-twd` |
+| TWOR: template variables ({{ .DeploymentName }}) | ✅ | `twor-template-variable` |
+| TWOR: multiple active versions (current + ramping) | ✅ | `twor-multiple-active-versions` |
+| TWOR: apply failure → status.Applied:false | ✅ | `twor-apply-failure` |
+| TWOR: SSA idempotency across reconcile loops | ✅ | `twor-ssa-idempotency` |
 | TWOR: cleanup on rollout (old version TWOR instances) | ❌ | GC not present in envtest |
-| Gate input from ConfigMap | ❌ | Not tested |
+| Gate input from ConfigMap | ✅ | `gate-input-from-configmap` |
 | Gate input from Secret | ❌ | Not tested |
+| Multiple deprecated versions in status | ✅ | `multiple-deprecated-versions` |
 | Webhook: spec validation (no API) | ✅ | Comprehensive unit tests |
-| Webhook: SAR checks | ❌ | No webhook server in integration tests |
+| Webhook: SAR checks (end-to-end admission) | ✅ | `twor-webhook-*` tests in webhook suite |
 | Webhook: cert-manager TLS | ❌ | No cert-manager in envtest |
 
 ---
@@ -124,39 +126,31 @@ Real webhook server registered with TLS, but no Temporal server. Tests webhook H
 
 These are all exercisable within the current envtest + real Temporal framework. They validate real reconciler behavior without requiring real pods, real RBAC, or real cert-manager.
 
-### TWOR Gaps (high value)
+### TWOR Gaps (high value) — all implemented ✅
 
-**1. TWOR: Deployment owner reference on per-Build-ID resource copy**
-Currently the integration test asserts the TWOR has the TWD as owner, but does not assert the created HPA has the versioned Deployment as its owner reference. This is the GC mechanism for sunset cleanup — important to have in envtest even though GC itself won't run.
+**1. TWOR: Deployment owner reference on per-Build-ID resource copy** ✅ `twor-deployment-owner-ref`
 
-**2. TWOR: matchLabels auto-injection end-to-end**
-The unit test covers the injection function but there's no integration test creating a TWOR with `selector.matchLabels: null` and asserting the injected value contains the correct `temporal.io/build-id` and `temporal.io/deployment-name` labels.
+**2. TWOR: matchLabels auto-injection end-to-end** ✅ `twor-matchlabels-injection`
 
-**3. TWOR: multiple TWORs on the same TWD**
-Create two TWORs (an HPA and a PDB, or two HPAs with different names) referencing the same TWD. Assert both are applied, with correct names, and that their SSA field managers don't conflict.
+**3. TWOR: multiple TWORs on the same TWD** ✅ `twor-multiple-twors-same-twd`
 
-**4. TWOR: template variable rendering**
-Create a TWOR with `{{ .DeploymentName }}` in a string field (e.g., an annotation value) and assert the rendered resource contains the correct versioned Deployment name.
+**4. TWOR: template variable rendering** ✅ `twor-template-variable`
 
-**5. TWOR: multiple active versions (current + ramping)**
-Use the progressive strategy to put one version at ramp and another as current, then create a TWOR. Assert that two copies of the TWOR resource exist — one per worker version with a running Deployment.
+**5. TWOR: multiple active versions (current + ramping)** ✅ `twor-multiple-active-versions`
 
-**6. TWOR: apply failure → status.Applied:false**
-Create a TWOR for a resource type the controller doesn't have RBAC permission to manage (by not having it in the scheme/registered). Assert that `TWOR.status.versions[*].Applied` is false and `Message` contains an error.
+**6. TWOR: apply failure → status.Applied:false** ✅ `twor-apply-failure`
 
-**7. TWOR: SSA idempotency**
-Trigger multiple reconcile loops on the same TWOR (e.g., via annotation touch) and assert the resource is not re-created or has conflicting owner references — verifying SSA apply is truly idempotent.
+**7. TWOR: SSA idempotency** ✅ `twor-ssa-idempotency`
 
 ### Rollout Gaps (medium value)
 
-**8. Progressive rollout: full ramp progression to Current**
-Currently only the first ramp step is integration-tested. A test that runs through all steps (using a short pauseDuration, like the demo's 30s) to verify the controller actually promotes to Current at the end of the progression.
+**8. Progressive rollout: full ramp progression to Current** ✅ `progressive-ramp-to-current`
 
-**9. Connection spec change triggers rolling update**
-Update the `TemporalConnection` referenced by a running TWD (e.g., change the hostPort) and assert the controller generates a new Build ID and creates a new versioned Deployment. Currently only unit tested.
+**9. Connection spec change triggers rolling update** ✅ `connection-spec-change-rolling-update`
+The test corrupts the `ConnectionSpecHashAnnotation` directly on the live Deployment and asserts the controller repairs it, verifying the hash-comparison path in UpdateDeployments.
 
-**10. Gate input from ConfigMap / Secret**
-Create a TWD with `rollout.gate.inputFrom.configMapKeyRef`, create the ConfigMap, and assert the gate workflow is launched with the correct input. Same for `secretKeyRef`.
+**10. Gate input from ConfigMap** ✅ `gate-input-from-configmap`
+`secretKeyRef` variant remains untested.
 
 **11. TWD reconciles correctly after namespace-scoped controller restart**
 Delete the controller pod mid-reconcile (or pause/resume the manager) and verify the next reconcile loop converges to the expected state without creating duplicate resources. (Can be simulated by stopping and restarting the manager goroutine in tests.)
@@ -166,31 +160,19 @@ Delete the controller pod mid-reconcile (or pause/resume the manager) and verify
 **12. Status accurately reflects replica counts**
 Assert that `TWD.status.targetVersion.replicas` (if reported) matches what's actually in the Deployment spec.
 
-**13. Multiple DeprecatedVersions status entries**
-Drive a TWD through three rollouts so there are two deprecated versions simultaneously; assert status correctly reflects both.
+**13. Multiple DeprecatedVersions status entries** ✅ `multiple-deprecated-versions`
 
-### Webhook / Admission Control (envtest-capable)
+### Webhook / Admission Control (envtest-capable) — all implemented ✅
 
-**envtest capability clarification**: envtest's embedded kube-apiserver fully supports `SubjectAccessReview`. When `envtest.WebhookInstallOptions` is configured, the kube-apiserver actually calls the webhook server on create/update/delete — the full admission path runs. The infrastructure already exists in `api/v1alpha1/webhook_suite_test.go` (Ginkgo suite with `WebhookInstallOptions`, a running webhook server, and TLS managed by envtest). What's missing is:
-1. A TWOR `ValidatingWebhookConfiguration` in `config/webhook/manifests.yaml` (currently only has a stale TWD mutating webhook entry)
-2. The TWOR webhook registered in the test manager setup (`NewTemporalWorkerOwnedResourceValidator(mgr).SetupWebhookWithManager(mgr)`)
-3. Env vars set before validator creation (`POD_NAMESPACE`, `SERVICE_ACCOUNT_NAME`, `BANNED_KINDS`)
-4. Test RBAC objects (Role/RoleBinding) created per-test to control SAR pass/fail scenarios
+**14. Webhook: invalid TWOR spec is rejected (end-to-end admission call)** ✅
 
-**14. Webhook: invalid TWOR spec is rejected (end-to-end admission call)**
-Create a TWOR with a banned kind (e.g., `Deployment`) via the k8s client and assert the admission webhook rejects it with the expected error message. This exercises the full HTTP admission path, not just the validator function directly.
+**15. Webhook: SAR pass — user with permission can create TWOR embedding HPA** ✅
 
-**15. Webhook: SAR pass — user with permission can create TWOR embedding HPA**
-Create a Role granting `create horizontalpodautoscalers`, bind it to the test user, and assert TWOR creation is accepted.
+**16. Webhook: SAR fail — user without permission is rejected** ✅
 
-**16. Webhook: SAR fail — user without permission is rejected**
-Without any HPA RBAC, assert that creating a TWOR embedding an HPA is rejected with a permission error.
+**17. Webhook: SAR fail — controller SA lacks permission** ✅
 
-**17. Webhook: SAR fail — controller SA lacks permission**
-Grant the test user HPA permission but NOT the controller SA, and assert rejection. Tests the second SAR check.
-
-**18. Webhook: workerRef.name immutability enforced via real API admission**
-Create a TWOR, then attempt to update it changing `workerRef.name`, and assert the update is rejected by the webhook.
+**18. Webhook: workerRef.name immutability enforced via real API admission** ✅
 
 ---
 
@@ -373,11 +355,8 @@ Phase 5 — Metric accuracy spot-check
 ## Priority Recommendations
 
 **Add to envtest next (high value, low cost):**
-1. TWOR: Deployment owner ref on per-Build-ID copy (completes the GC story for when it can be tested)
-2. TWOR: matchLabels injection end-to-end
-3. TWOR: two TWORs on same TWD (field manager isolation)
-4. TWOR: apply failure → status.Applied:false
-5. Progressive rollout: full ramp to Current (catches ramp calculation bugs)
+All high-value envtest gaps (TWOR 1–7, rollout 8–10, 13, webhook 14–18) are now implemented.
+Remaining envtest candidates: rollout 11 (manager restart idempotency), rollout 12 (replica count in status), gate input from Secret.
 
 **Add to per-release real-cluster CI (must-haves before 1.0):**
 1. Helm install smoke test (controller starts, CRDs registered, webhook functional)
