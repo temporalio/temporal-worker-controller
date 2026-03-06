@@ -114,7 +114,7 @@ Real webhook server registered with TLS, but no Temporal server. Tests webhook H
 | TWOR: SSA idempotency across reconcile loops | ✅ | `twor-ssa-idempotency` |
 | TWOR: cleanup on rollout (old version TWOR instances) | ❌ | GC not present in envtest |
 | Gate input from ConfigMap | ✅ | `gate-input-from-configmap` |
-| Gate input from Secret | ❌ | Not tested |
+| Gate input from Secret | ✅ | `gate-input-from-secret` |
 | Multiple deprecated versions in status | ✅ | `multiple-deprecated-versions` |
 | Webhook: spec validation (no API) | ✅ | Comprehensive unit tests |
 | Webhook: SAR checks (end-to-end admission) | ✅ | `twor-webhook-*` tests in webhook suite |
@@ -150,7 +150,8 @@ These are all exercisable within the current envtest + real Temporal framework. 
 The test corrupts the `ConnectionSpecHashAnnotation` directly on the live Deployment and asserts the controller repairs it, verifying the hash-comparison path in UpdateDeployments.
 
 **10. Gate input from ConfigMap** ✅ `gate-input-from-configmap`
-`secretKeyRef` variant remains untested.
+
+**10b. Gate input from Secret** ✅ `gate-input-from-secret`
 
 **11. TWD reconciles correctly after namespace-scoped controller restart**
 Delete the controller pod mid-reconcile (or pause/resume the manager) and verify the next reconcile loop converges to the expected state without creating duplicate resources. (Can be simulated by stopping and restarting the manager goroutine in tests.)
@@ -356,7 +357,7 @@ Phase 5 — Metric accuracy spot-check
 
 **Add to envtest next (high value, low cost):**
 All high-value envtest gaps (TWOR 1–7, rollout 8–10, 13, webhook 14–18) are now implemented.
-Remaining envtest candidates: rollout 11 (manager restart idempotency), rollout 12 (replica count in status), gate input from Secret.
+Remaining envtest candidates: rollout 11 (manager restart idempotency), rollout 12 (replica count in status).
 
 **Add to per-release real-cluster CI (must-haves before 1.0):**
 1. Helm install smoke test (controller starts, CRDs registered, webhook functional)

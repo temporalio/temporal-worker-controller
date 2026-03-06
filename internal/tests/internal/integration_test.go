@@ -955,7 +955,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// Rollout integration tests: progressive auto-promotion, ConnectionSpecHash annotation
-	// repair, gate-blocked rollout unblocked by ConfigMap creation, and accumulation of
+	// repair, gate-blocked rollout unblocked by ConfigMap or Secret creation, and accumulation of
 	// multiple deprecated versions across successive image rollouts.
 	for _, tc := range rolloutTestCases() {
 		t.Run(tc.name, func(t *testing.T) {

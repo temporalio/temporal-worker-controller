@@ -32,10 +32,10 @@ import (
 // The annotation-repair test (connection-spec-change-rolling-update) uses ValidatorFunction to
 // corrupt and then verify repair of the ConnectionSpecHash annotation after the TWD is stable.
 //
-// The gate test (gate-input-from-configmap) uses WithTWDMutatorFunc to set
-// gate.InputFrom.ConfigMapKeyRef before creation, and WithPostTWDCreateFunc to assert the
-// rollout is blocked while the ConfigMap is absent, then creates it. The runner then proceeds
-// to wait for the version to become Current.
+// The gate-input-from-configmap and gate-input-from-secret tests use WithTWDMutatorFunc to
+// set gate.InputFrom before creation, and WithPostTWDCreateFunc to assert the rollout is
+// blocked while the ConfigMap/Secret is absent, then create it. The runner then proceeds to
+// wait for the version to become Current.
 func rolloutTestCases() []testCase {
 	return []testCase{
 		// Progressive rollout auto-promotes to Current after the pause expires.
@@ -230,6 +230,69 @@ func rolloutTestCases() []testCase {
 						t.Fatalf("failed to create gate ConfigMap: %v", err)
 					}
 					t.Log("Created gate ConfigMap — controller should now proceed with the rollout")
+				}),
+		},
+
+		// Gate input from Secret — controller blocks deployment until Secret exists.
+		// WithTWDMutatorFunc sets gate.InputFrom.SecretKeyRef on the TWD before creation.
+		// WithPostTWDCreateFunc asserts no Deployment is created while the Secret is absent,
+		// then creates the Secret. The runner then proceeds to create the Deployment and wait
+		// for the gate workflow to succeed and the version to become Current.
+		{
+			name: "gate-input-from-secret",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1", true, false),
+				).
+				WithTWDMutatorFunc(func(twd *temporaliov1alpha1.TemporalWorkerDeployment) {
+					secretName := "gate-secret-gate-input-from-secret"
+					twd.Spec.RolloutStrategy.Gate = &temporaliov1alpha1.GateWorkflowConfig{
+						WorkflowType: "successTestWorkflow",
+						InputFrom: &temporaliov1alpha1.GateInputSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+								Key:                  "data",
+							},
+						},
+					}
+				}).
+				WithPostTWDCreateFunc(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+					secretName := "gate-secret-gate-input-from-secret"
+
+					// Verify no versioned Deployment is created while the Secret is absent.
+					deadline := time.Now().Add(3 * time.Second)
+					for time.Now().Before(deadline) {
+						var dep appsv1.Deployment
+						if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: depName, Namespace: twd.Namespace}, &dep); err == nil {
+							t.Error("expected no Deployment to be created while gate Secret is missing, but one was found")
+							break
+						}
+						time.Sleep(500 * time.Millisecond)
+					}
+					t.Log("Confirmed: no versioned Deployment created while gate Secret is absent")
+
+					// Create the Secret to unblock the rollout.
+					secret := &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      secretName,
+							Namespace: twd.Namespace,
+						},
+						Data: map[string][]byte{"data": []byte(`{"proceed": true}`)},
+					}
+					if err := env.K8sClient.Create(ctx, secret); err != nil {
+						t.Fatalf("failed to create gate Secret: %v", err)
+					}
+					t.Log("Created gate Secret — controller should now proceed with the rollout")
 				}),
 		},
 
