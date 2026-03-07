@@ -32,6 +32,10 @@ type plan struct {
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
+	// ClaimManagerIdentity indicates the controller should call SetManagerIdentity(Self=true)
+	// because ManagerIdentity is currently unset on the Worker Deployment.
+	ClaimManagerIdentity bool
+
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
 
@@ -80,14 +84,12 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		ScaleDeployments:     make(map[*corev1.ObjectReference]uint32),
 	}
 
-	// Check if we need to force manual strategy due to external modification
+	// If ManagerIdentity is unset, the controller will claim it during plan execution
+	// (once a version config change is ready). If another client owns it, the routing
+	// config update will fail at the Temporal server level.
 	rolloutStrategy := w.Spec.RolloutStrategy
-	if w.Status.LastModifierIdentity != getControllerIdentity() &&
-		w.Status.LastModifierIdentity != serverDeleteVersionIdentity &&
-		w.Status.LastModifierIdentity != "" &&
-		!temporalState.IgnoreLastModifier {
-		l.Info(fmt.Sprintf("Forcing Manual rollout strategy since Worker Deployment was modified by a user with a different identity '%s'; to allow controller to make changes again, set 'temporal.io/ignore-last-modifier=true' in the metadata of your Current or Ramping Version; see ownership runbook at docs/ownership.md for more details.", w.Status.LastModifierIdentity))
-		rolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
+	if temporalState.ManagerIdentity == "" {
+		plan.ClaimManagerIdentity = true
 	}
 
 	// Resolve gate input if gate is configured

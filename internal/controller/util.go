@@ -26,7 +26,8 @@ const (
 	ReasonDeploymentUpdateFailed  = "DeploymentUpdateFailed"
 	ReasonTestWorkflowStartFailed = "TestWorkflowStartFailed"
 	ReasonVersionPromotionFailed  = "VersionPromotionFailed"
-	ReasonMetadataUpdateFailed    = "MetadataUpdateFailed"
+	ReasonMetadataUpdateFailed         = "MetadataUpdateFailed"
+	ReasonManagerIdentityClaimFailed   = "ManagerIdentityClaimFailed"
 )
 
 const (

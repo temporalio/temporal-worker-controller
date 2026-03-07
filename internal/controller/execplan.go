@@ -156,6 +156,22 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 		return nil
 	}
 
+	if p.ClaimManagerIdentity {
+		resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
+			Self:          true,
+			ConflictToken: vcfg.ConflictToken,
+		})
+		if err != nil {
+			l.Error(err, "unable to claim manager identity")
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonManagerIdentityClaimFailed,
+				"Failed to claim manager identity: %v", err)
+			return fmt.Errorf("unable to claim manager identity: %w", err)
+		}
+		l.Info("claimed manager identity", "identity", getControllerIdentity())
+		// Use the updated conflict token for the subsequent routing config change.
+		vcfg.ConflictToken = resp.ConflictToken
+	}
+
 	if vcfg.SetCurrent {
 		l.Info("registering new current version", "buildID", vcfg.BuildID)
 		if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
