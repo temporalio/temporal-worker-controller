@@ -11,6 +11,24 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 )
 
+// Event reason constants for TemporalWorkerDeployment.
+//
+// These strings appear in Kubernetes Event objects (kubectl get events) and are
+// internal to the controller's implementation. They are not part of the CRD
+// status API and may change between releases. Do not write alerting or automation
+// that depends on these strings.
+const (
+	ReasonPlanGenerationFailed    = "PlanGenerationFailed"
+	ReasonPlanExecutionFailed     = "PlanExecutionFailed"
+	ReasonDeploymentCreateFailed  = "DeploymentCreateFailed"
+	ReasonDeploymentDeleteFailed  = "DeploymentDeleteFailed"
+	ReasonDeploymentScaleFailed   = "DeploymentScaleFailed"
+	ReasonDeploymentUpdateFailed  = "DeploymentUpdateFailed"
+	ReasonTestWorkflowStartFailed = "TestWorkflowStartFailed"
+	ReasonVersionPromotionFailed  = "VersionPromotionFailed"
+	ReasonMetadataUpdateFailed    = "MetadataUpdateFailed"
+)
+
 const (
 	controllerIdentityMetadataKey = "temporal.io/controller"
 	controllerVersionMetadataKey  = "temporal.io/controller-version"

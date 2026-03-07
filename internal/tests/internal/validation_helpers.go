@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -14,7 +15,10 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/server/temporaltest"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -190,7 +194,7 @@ func verifyTemporalStateMatchesStatusEventually(
 
 		if cv := expectedDeploymentStatus.CurrentVersion; cv != nil {
 			if rc.CurrentVersion == nil {
-				return fmt.Errorf("expected CurrentVersion to be set")
+				return errors.New("expected CurrentVersion to be set")
 			}
 			if rc.CurrentVersion.BuildId != expectedDeploymentStatus.CurrentVersion.BuildID {
 				return fmt.Errorf("expected current build id to be '%s', got '%s'",
@@ -294,7 +298,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 		// validate current version
 		if expectedDeploymentStatus.CurrentVersion != nil {
 			if twd.Status.CurrentVersion == nil {
-				return fmt.Errorf("expected CurrentVersion to be set")
+				return errors.New("expected CurrentVersion to be set")
 			}
 			if twd.Status.CurrentVersion.BuildID != expectedDeploymentStatus.CurrentVersion.BuildID {
 				return fmt.Errorf("expected current build id to be '%s', got '%s'",
@@ -302,7 +306,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 					twd.Status.CurrentVersion.BuildID)
 			}
 			if twd.Status.CurrentVersion.Deployment == nil {
-				return fmt.Errorf("expected CurrentVersion.Deployment to be set")
+				return errors.New("expected CurrentVersion.Deployment to be set")
 			}
 			if twd.Status.CurrentVersion.Deployment.Name != expectedDeploymentStatus.CurrentVersion.Deployment.Name {
 				return fmt.Errorf("expected deployment name to be '%s', got '%s'",
@@ -416,6 +420,62 @@ func validateDeprecatedVersion(ctx context.Context, env testhelpers.TestEnv, exp
 			expectedDV.BuildID, expectedDV.DrainedSince, actualDV.DrainedSince)
 	}
 	return nil
+}
+
+// waitForCondition polls until the named condition on the TWD matches the expected
+// status and reason, or fatals on timeout.
+func waitForCondition(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	twdName, namespace, condType string,
+	expectedStatus metav1.ConditionStatus,
+	expectedReason string,
+	timeout, interval time.Duration,
+) {
+	t.Helper()
+	eventually(t, timeout, interval, func() error {
+		var twd temporaliov1alpha1.TemporalWorkerDeployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: twdName, Namespace: namespace}, &twd); err != nil {
+			return fmt.Errorf("failed to get TWD: %w", err)
+		}
+		for _, c := range twd.Status.Conditions {
+			if c.Type == condType {
+				if c.Status != expectedStatus {
+					return fmt.Errorf("condition %q: expected status %q, got %q", condType, expectedStatus, c.Status)
+				}
+				if c.Reason != expectedReason {
+					return fmt.Errorf("condition %q: expected reason %q, got %q", condType, expectedReason, c.Reason)
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("condition %q not found on TWD %s/%s", condType, namespace, twdName)
+	})
+}
+
+// waitForEvent polls until at least one Kubernetes Event for the named TWD exists
+// with the given reason, or fatals on timeout.
+func waitForEvent(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	twdName, namespace, reason string,
+	timeout, interval time.Duration,
+) {
+	t.Helper()
+	eventually(t, timeout, interval, func() error {
+		var eventList corev1.EventList
+		if err := k8sClient.List(ctx, &eventList, client.InNamespace(namespace)); err != nil {
+			return fmt.Errorf("failed to list events: %w", err)
+		}
+		for _, e := range eventList.Items {
+			if e.InvolvedObject.Name == twdName && e.Reason == reason {
+				return nil
+			}
+		}
+		return fmt.Errorf("no event with reason %q found for TWD %s/%s", reason, namespace, twdName)
+	})
 }
 
 func eventually(t *testing.T, timeout, interval time.Duration, check func() error) {

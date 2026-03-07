@@ -33,7 +33,7 @@ const (
 
 type ClientPoolKey struct {
 	HostPort   string
-	Namespace  string
+	Namespace  string   // Temporal namespace
 	SecretName string   // Include secret name in key to invalidate cache when the secret name changes
 	AuthMode   AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
 }
@@ -99,8 +99,7 @@ type NewClientOptions struct {
 	Spec              v1alpha1.TemporalConnectionSpec
 }
 
-func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (sdkclient.Client, error) {
-
+func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
@@ -116,19 +115,19 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	// Check if certificate is expired before creating the client
 	exp, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
 	if err != nil {
-		return nil, errors.New("failed to check certificate expiration: " + err.Error())
+		return nil, nil, nil, errors.New("failed to check certificate expiration: " + err.Error())
 	}
 	expired, err := isCertificateExpired(exp)
 	if err != nil {
-		return nil, errors.New("failed to check certificate expiration: " + err.Error())
+		return nil, nil, nil, errors.New("failed to check certificate expiration: " + err.Error())
 	}
 	if expired {
-		return nil, errors.New("certificate is expired or is going to expire soon")
+		return nil, nil, nil, errors.New("certificate is expired or is going to expire soon")
 	}
 
 	cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -141,24 +140,12 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	if caCert, ok := secret.Data["ca.crt"]; ok && len(caCert) > 0 {
 		rootCAs := x509.NewCertPool()
 		if !rootCAs.AppendCertsFromPEM(caCert) {
-			return nil, errors.New("failed to parse CA certificate from secret")
+			return nil, nil, nil, errors.New("failed to parse CA certificate from secret")
 		}
 		tlsCfg.RootCAs = rootCAs
 	}
 	clientOpts.ConnectionOptions.TLS = tlsCfg
 	expiryTime = exp
-
-	c, err := sdkclient.Dial(clientOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
-		panic(err)
-	}
-
-	cp.mux.Lock()
-	defer cp.mux.Unlock()
 
 	key := ClientPoolKey{
 		HostPort:   opts.Spec.HostPort,
@@ -166,18 +153,14 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 		SecretName: opts.Spec.MutualTLSSecretRef.Name,
 		AuthMode:   AuthModeTLS,
 	}
-	cp.clients[key] = ClientInfo{
-		client: c,
-		auth: ClientAuth{
-			mode: AuthModeTLS,
-			mTLS: &MTLSAuth{tlsConfig: clientOpts.ConnectionOptions.TLS, expiryTime: expiryTime},
-		},
+	auth := ClientAuth{
+		mode: AuthModeTLS,
+		mTLS: &MTLSAuth{tlsConfig: clientOpts.ConnectionOptions.TLS, expiryTime: expiryTime},
 	}
-
-	return c, nil
+	return &clientOpts, &key, &auth, nil
 }
 
-func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts NewClientOptions) (sdkclient.Client, error) {
+func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
@@ -191,41 +174,25 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 		return string(secret.Data[opts.Spec.APIKeySecretRef.Key]), nil
 	})
 
-	c, err := sdkclient.Dial(clientOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	cp.mux.Lock()
-	defer cp.mux.Unlock()
-
 	key := ClientPoolKey{
 		HostPort:   opts.Spec.HostPort,
 		Namespace:  opts.TemporalNamespace,
 		SecretName: opts.Spec.APIKeySecretRef.Name,
 		AuthMode:   AuthModeAPIKey,
 	}
-	cp.clients[key] = ClientInfo{
-		client: c,
-		auth: ClientAuth{
-			mode: AuthModeAPIKey,
-			mTLS: nil,
-		},
+	auth := ClientAuth{
+		mode: AuthModeAPIKey,
+		mTLS: nil,
 	}
 
-	return c, nil
+	return &clientOpts, &key, &auth, nil
 }
 
-func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (sdkclient.Client, error) {
+func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
-	}
-
-	c, err := sdkclient.Dial(clientOpts)
-	if err != nil {
-		return nil, err
 	}
 
 	key := ClientPoolKey{
@@ -234,19 +201,20 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (sdkc
 		SecretName: "",
 		AuthMode:   AuthModeNoCredentials,
 	}
-	cp.clients[key] = ClientInfo{
-		client: c,
-		auth: ClientAuth{
-			mode: AuthModeNoCredentials,
-			mTLS: nil,
-		},
+	auth := ClientAuth{
+		mode: AuthModeNoCredentials,
+		mTLS: nil,
 	}
 
-	return c, nil
+	return &clientOpts, &key, &auth, nil
 }
 
-func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authMode AuthMode, opts NewClientOptions) (sdkclient.Client, error) {
-
+func (cp *ClientPool) ParseClientSecret(
+	ctx context.Context,
+	secretName string,
+	authMode AuthMode,
+	opts NewClientOptions,
+) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	// Fetch the secret from k8s cluster, if it exists. Otherwise, create a connection with the server without using any credentials.
 	var secret corev1.Secret
 	if secretName != "" {
@@ -254,7 +222,7 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authM
 			Name:      secretName,
 			Namespace: opts.K8sNamespace,
 		}, &secret); err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 	}
 
@@ -263,14 +231,14 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authM
 	case AuthModeTLS:
 		if secret.Type != corev1.SecretTypeTLS {
 			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls", secret.Name)
-			return nil, err
+			return nil, nil, nil, err
 		}
 		return cp.fetchClientUsingMTLSSecret(secret, opts)
 
 	case AuthModeAPIKey:
 		if secret.Type != corev1.SecretTypeOpaque {
 			err := fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
-			return nil, err
+			return nil, nil, nil, err
 		}
 		return cp.fetchClientUsingAPIKeySecret(secret, opts)
 
@@ -278,9 +246,37 @@ func (cp *ClientPool) UpsertClient(ctx context.Context, secretName string, authM
 		return cp.fetchClientUsingNoCredentials(opts)
 
 	default:
-		return nil, fmt.Errorf("invalid auth mode: %s", authMode)
+		return nil, nil, nil, fmt.Errorf("invalid auth mode: %s", authMode)
+	}
+}
+
+func (cp *ClientPool) DialAndUpsertClient(clientOpts sdkclient.Options, clientPoolKey ClientPoolKey, clientAuth ClientAuth) (sdkclient.Client, error) {
+	c, err := sdkclient.Dial(clientOpts)
+	if err != nil {
+		return nil, err
 	}
 
+	if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("temporal server health check failed: %w", err)
+	}
+
+	cp.mux.Lock()
+	defer cp.mux.Unlock()
+
+	cp.clients[clientPoolKey] = ClientInfo{
+		client: c,
+		auth:   clientAuth,
+	}
+	return c, nil
+}
+
+// SetClientForTesting pre-populates the pool with a stub client, bypassing the network dial.
+// Intended for use in unit tests only.
+func (cp *ClientPool) SetClientForTesting(key ClientPoolKey, c sdkclient.Client) {
+	cp.mux.Lock()
+	defer cp.mux.Unlock()
+	cp.clients[key] = ClientInfo{client: c, auth: ClientAuth{mode: key.AuthMode}}
 }
 
 func (cp *ClientPool) Close() {
@@ -296,12 +292,12 @@ func (cp *ClientPool) Close() {
 
 func calculateCertificateExpirationTime(certBytes []byte, bufferTime time.Duration) (time.Time, error) {
 	if len(certBytes) == 0 {
-		return time.Time{}, fmt.Errorf("no certificate bytes provided")
+		return time.Time{}, errors.New("no certificate bytes provided")
 	}
 
 	block, _ := pem.Decode(certBytes)
 	if block == nil {
-		return time.Time{}, fmt.Errorf("failed to decode PEM block")
+		return time.Time{}, errors.New("failed to decode PEM block")
 	}
 
 	cert, err := x509.ParseCertificate(block.Bytes)
