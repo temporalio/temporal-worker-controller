@@ -130,7 +130,7 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 			VersioningOverride: &sdkclient.PinnedVersioningOverride{
 				Version: worker.WorkerDeploymentVersion{
 					DeploymentName: p.WorkerDeploymentName,
-					BuildId:        wf.buildID,
+					BuildID:        wf.buildID,
 				},
 			},
 		}
@@ -193,7 +193,7 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 	if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
 		Version: worker.WorkerDeploymentVersion{
 			DeploymentName: p.WorkerDeploymentName,
-			BuildId:        vcfg.BuildID,
+			BuildID:        vcfg.BuildID,
 		},
 		MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 			UpsertEntries: map[string]interface{}{
@@ -230,7 +230,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
 			Version: worker.WorkerDeploymentVersion{
 				DeploymentName: p.WorkerDeploymentName,
-				BuildId:        buildId,
+				BuildID:        buildId,
 			},
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				RemoveEntries: []string{temporal.IgnoreLastModifierKey},

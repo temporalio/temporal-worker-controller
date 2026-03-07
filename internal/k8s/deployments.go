@@ -32,7 +32,7 @@ const (
 	twdNameLabel                  = "temporal.io/deployment-name"
 	WorkerDeploymentNameSeparator = "/"
 	ResourceNameSeparator         = "-"
-	MaxBuildIdLen                 = 63
+	MaxBuildIDLen                 = 63
 	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation = "temporal.io/pod-template-spec-hash"
 )
@@ -119,7 +119,7 @@ func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	if override := w.Spec.WorkerOptions.UnsafeCustomBuildID; override != "" {
 		cleaned := cleanBuildID(override)
 		if cleaned != "" {
-			return TruncateString(cleaned, MaxBuildIdLen)
+			return TruncateString(cleaned, MaxBuildIDLen)
 		}
 		// Fall through to default hash-based generation if buildID is invalid after cleaning
 	}
@@ -127,7 +127,7 @@ func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
 			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
-			maxImgLen := MaxBuildIdLen - len(shortHashSuffix)
+			maxImgLen := MaxBuildIDLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
 			return cleanBuildID(imagePrefix + shortHashSuffix)
 		}
