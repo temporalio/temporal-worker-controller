@@ -20,4 +20,4 @@ TARGET_DEPLOYMENT_VERSION_ENCODED=$(printf '%s' "$1:$3" | sed 's/:/%3A/g; s/\//%
 
 echo ""
 echo "You can view the status of the impacted workflows at:"
-echo "https://cloud.temporal.io/namespaces/${NAMESPACE}/workflows?query=BuildIDs+IN+%28%22${SOURCE_BUILD_ID_ENCODED}%22%29+AND+TemporalWorkerDeploymentVersion+%3D+%22${TARGET_DEPLOYMENT_VERSION_ENCODED}%22"
+echo "https://cloud.temporal.io/namespaces/${NAMESPACE}/workflows?query=BuildIds+IN+%28%22${SOURCE_BUILD_ID_ENCODED}%22%29+AND+TemporalWorkerDeploymentVersion+%3D+%22${TARGET_DEPLOYMENT_VERSION_ENCODED}%22"
