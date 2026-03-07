@@ -72,7 +72,7 @@ func GetWorkerDeploymentState(
 	workerDeploymentName string,
 	namespace string,
 	k8sDeployments map[string]*appsv1.Deployment,
-	targetBuildId string,
+	targetBuildID string,
 	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
 	controllerIdentity string,
 ) (*TemporalWorkerState, error) {
@@ -99,10 +99,10 @@ func GetWorkerDeploymentState(
 
 	// Set basic information
 	if routingConfig.CurrentVersion != nil {
-		state.CurrentBuildID = routingConfig.CurrentVersion.BuildId
+		state.CurrentBuildID = routingConfig.CurrentVersion.BuildID
 	}
 	if routingConfig.RampingVersion != nil {
-		state.RampingBuildID = routingConfig.RampingVersion.BuildId
+		state.RampingBuildID = routingConfig.RampingVersion.BuildID
 	}
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
@@ -132,18 +132,18 @@ func GetWorkerDeploymentState(
 	for _, version := range workerDeploymentInfo.VersionSummaries {
 		versionInfo := &VersionInfo{
 			DeploymentName: version.Version.DeploymentName,
-			BuildID:        version.Version.BuildId,
+			BuildID:        version.Version.BuildID,
 		}
 
 		// Determine version status
 		drainageStatus := version.DrainageStatus
 		if routingConfig.CurrentVersion != nil &&
 			version.Version.DeploymentName == routingConfig.CurrentVersion.DeploymentName &&
-			version.Version.BuildId == routingConfig.CurrentVersion.BuildId {
+			version.Version.BuildID == routingConfig.CurrentVersion.BuildID {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusCurrent
 		} else if routingConfig.RampingVersion != nil &&
 			version.Version.DeploymentName == routingConfig.RampingVersion.DeploymentName &&
-			version.Version.BuildId == routingConfig.RampingVersion.BuildId {
+			version.Version.BuildID == routingConfig.RampingVersion.BuildID {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusRamping
 		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDraining {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
@@ -154,16 +154,16 @@ func GetWorkerDeploymentState(
 			var desc temporalClient.WorkerDeploymentVersionDescription
 			describeVersionUntilDrainTime := func() error {
 				desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-					BuildID: version.Version.BuildId,
+					BuildID: version.Version.BuildID,
 				})
 				if err != nil {
 					return err
 				}
 				if desc.Info.DrainageInfo == nil {
-					return fmt.Errorf("drainage info nil for build %s", version.Version.BuildId)
+					return fmt.Errorf("drainage info nil for build %s", version.Version.BuildID)
 				}
 				if desc.Info.DrainageInfo.DrainageStatus != temporalClient.WorkerDeploymentVersionDrainageStatusDrained {
-					return fmt.Errorf("version info does not say that build %s is drained", version.Version.BuildId)
+					return fmt.Errorf("version info does not say that build %s is drained", version.Version.BuildID)
 				}
 				return err
 			}
@@ -176,7 +176,7 @@ func GetWorkerDeploymentState(
 				drainedSince := desc.Info.DrainageInfo.LastChangedTime
 				versionInfo.DrainedSince = &drainedSince
 				// If the deployment exists and has replicas, we assume there are versioned pollers, no need to check
-				deployment, ok := k8sDeployments[version.Version.BuildId]
+				deployment, ok := k8sDeployments[version.Version.BuildID]
 				if !ok || deployment.Status.Replicas == 0 { //revive:disable-line:max-control-nesting
 					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, desc.Info.TaskQueuesInfos)
 				}
@@ -186,13 +186,13 @@ func GetWorkerDeploymentState(
 		} else {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
 			// get unversioned poller info to decide whether to fast-track rollout
-			if version.Version.BuildId == targetBuildId &&
+			if version.Version.BuildID == targetBuildID &&
 				routingConfig.CurrentVersion == nil &&
 				strategy == temporaliov1alpha1.UpdateProgressive {
 				var desc temporalClient.WorkerDeploymentVersionDescription
 				describeVersion := func() error {
 					desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-						BuildID: version.Version.BuildId,
+						BuildID: version.Version.BuildID,
 					})
 					return err
 				}
@@ -209,7 +209,7 @@ func GetWorkerDeploymentState(
 
 		}
 
-		state.Versions[version.Version.BuildId] = versionInfo
+		state.Versions[version.Version.BuildID] = versionInfo
 	}
 
 	return state, nil
@@ -353,14 +353,14 @@ func DeploymentShouldIgnoreLastModifier(
 	routingConfig temporalClient.WorkerDeploymentRoutingConfig,
 ) (shouldIgnore bool, err error) {
 	if routingConfig.CurrentVersion != nil {
-		shouldIgnore, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+		shouldIgnore, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildID)
 		if err != nil {
 			return false, err
 		}
 	}
 	if !shouldIgnore && // if someone has a non-nil Current Version, but only set the metadata in their Ramping Version, also count that
 		routingConfig.RampingVersion != nil {
-		return getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
+		return getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildID)
 	}
 	return shouldIgnore, nil
 }

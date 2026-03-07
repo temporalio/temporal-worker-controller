@@ -315,18 +315,18 @@ func setCurrentAndSetIgnoreModifierMetadata(t *testing.T, ctx context.Context, t
 
 	// set it back to what it was so that it's non-nil
 	_, err = deploymentHandle.SetCurrentVersion(ctx, temporalClient.WorkerDeploymentSetCurrentVersionOptions{
-		BuildID: resp.PreviousVersion.BuildId,
+		BuildID: resp.PreviousVersion.BuildID,
 	})
 	if err != nil {
 		t.Errorf("error restoring current version: %v", err)
 	}
-	t.Logf("set current version to build %v with non-controller identity", resp.PreviousVersion.BuildId)
+	t.Logf("set current version to build %v with non-controller identity", resp.PreviousVersion.BuildID)
 
 	// set the IgnoreLastModifier metadata
 	_, err = deploymentHandle.UpdateVersionMetadata(ctx, temporalClient.WorkerDeploymentUpdateVersionMetadataOptions{
 		Version: worker.WorkerDeploymentVersion{
 			DeploymentName: workerDeploymentName,
-			BuildId:        resp.PreviousVersion.BuildId,
+			BuildID:        resp.PreviousVersion.BuildID,
 		},
 		MetadataUpdate: temporalClient.WorkerDeploymentMetadataUpdate{
 			UpsertEntries: map[string]interface{}{

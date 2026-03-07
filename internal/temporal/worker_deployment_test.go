@@ -130,7 +130,7 @@ func TestGetIgnoreLastModifier(t *testing.T) {
 		_, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
 			Version: worker.WorkerDeploymentVersion{
 				DeploymentName: deploymentName,
-				BuildId:        buildId,
+				BuildID:        buildId,
 			},
 			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 				UpsertEntries: map[string]interface{}{

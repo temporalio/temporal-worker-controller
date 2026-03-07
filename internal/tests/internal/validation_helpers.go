@@ -103,11 +103,11 @@ func waitForVersionRegistrationInDeployment(
 			return fmt.Errorf("unable to describe worker deployment %s: %w", version.DeploymentName, err)
 		}
 		for _, vs := range resp.Info.VersionSummaries {
-			if vs.Version.DeploymentName == version.DeploymentName && vs.Version.BuildId == version.BuildId {
+			if vs.Version.DeploymentName == version.DeploymentName && vs.Version.BuildID == version.BuildID {
 				return nil
 			}
 		}
-		return fmt.Errorf("could not find version with build %s in worker deployment %s", version.BuildId, version.DeploymentName)
+		return fmt.Errorf("could not find version with build %s in worker deployment %s", version.BuildID, version.DeploymentName)
 	})
 	return
 }
@@ -121,7 +121,7 @@ func setCurrentVersion(
 	if buildID != "" {
 		waitForVersionRegistrationInDeployment(t, ctx, ts, &worker.WorkerDeploymentVersion{
 			DeploymentName: workerDeploymentName,
-			BuildId:        buildID,
+			BuildID:        buildID,
 		})
 	}
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
@@ -148,7 +148,7 @@ func setRampingVersion(
 	if buildID != "" {
 		waitForVersionRegistrationInDeployment(t, ctx, ts, &worker.WorkerDeploymentVersion{
 			DeploymentName: workerDeploymentName,
-			BuildId:        buildID,
+			BuildID:        buildID,
 		})
 	}
 	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
@@ -196,17 +196,17 @@ func verifyTemporalStateMatchesStatusEventually(
 			if rc.CurrentVersion == nil {
 				return errors.New("expected CurrentVersion to be set")
 			}
-			if rc.CurrentVersion.BuildId != expectedDeploymentStatus.CurrentVersion.BuildID {
+			if rc.CurrentVersion.BuildID != expectedDeploymentStatus.CurrentVersion.BuildID {
 				return fmt.Errorf("expected current build id to be '%s', got '%s'",
 					expectedDeploymentStatus.CurrentVersion.BuildID,
-					rc.CurrentVersion.BuildId)
+					rc.CurrentVersion.BuildID)
 			}
 		}
 		if tv := expectedDeploymentStatus.TargetVersion; tv.BuildID != "" {
 			switch tv.Status {
 			case temporaliov1alpha1.VersionStatusNotRegistered:
 				for _, vs := range resp.Info.VersionSummaries {
-					if vs.Version.BuildId == tv.BuildID {
+					if vs.Version.BuildID == tv.BuildID {
 						return fmt.Errorf("expected build id '%s' to not be registered, but found it", tv.BuildID)
 					}
 				}
@@ -214,8 +214,8 @@ func verifyTemporalStateMatchesStatusEventually(
 				if rc.RampingVersion == nil {
 					return fmt.Errorf("expected build id '%s' to be Ramping, but was nil was ramping instead", tv.BuildID)
 				} else {
-					if rc.RampingVersion.BuildId != tv.BuildID {
-						return fmt.Errorf("expected build id '%s' to be Ramping, but was '%s' was ramping instead", tv.BuildID, rc.RampingVersion.BuildId)
+					if rc.RampingVersion.BuildID != tv.BuildID {
+						return fmt.Errorf("expected build id '%s' to be Ramping, but was '%s' was ramping instead", tv.BuildID, rc.RampingVersion.BuildID)
 					}
 				}
 				if tv.RampPercentage == nil {
@@ -233,20 +233,20 @@ func verifyTemporalStateMatchesStatusEventually(
 				if rc.CurrentVersion == nil {
 					return fmt.Errorf("expected build id '%s' to be Current, but was nil was current instead", tv.BuildID)
 				} else {
-					if rc.CurrentVersion.BuildId != tv.BuildID {
-						return fmt.Errorf("expected build id '%s' to be Current, but was '%s' was Current instead", tv.BuildID, rc.CurrentVersion.BuildId)
+					if rc.CurrentVersion.BuildID != tv.BuildID {
+						return fmt.Errorf("expected build id '%s' to be Current, but was '%s' was Current instead", tv.BuildID, rc.CurrentVersion.BuildID)
 					}
 				}
 			case temporaliov1alpha1.VersionStatusInactive, temporaliov1alpha1.VersionStatusDraining, temporaliov1alpha1.VersionStatusDrained:
-				if rc.CurrentVersion != nil && rc.CurrentVersion.BuildId == tv.BuildID {
+				if rc.CurrentVersion != nil && rc.CurrentVersion.BuildID == tv.BuildID {
 					return fmt.Errorf("expected build id '%s' to be %v, but was Current", tv.BuildID, tv.Status)
 				}
-				if rc.RampingVersion != nil && rc.RampingVersion.BuildId == tv.BuildID {
+				if rc.RampingVersion != nil && rc.RampingVersion.BuildID == tv.BuildID {
 					return fmt.Errorf("expected build id '%s' to be %v, but was Ramping", tv.BuildID, tv.Status)
 				}
 				found := false
 				for _, vs := range resp.Info.VersionSummaries {
-					if vs.Version.BuildId == tv.BuildID {
+					if vs.Version.BuildID == tv.BuildID {
 						found = true
 						switch tv.Status {
 						case temporaliov1alpha1.VersionStatusInactive:

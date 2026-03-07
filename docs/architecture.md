@@ -14,7 +14,7 @@ flowchart TD
       twd[TemporalWorkerDeployment 'foo']
       
       subgraph "Current/default version"
-        d5["Deployment foo-v5, Version{DeploymentName: ns/foo, BuildId: v5}"]
+        d5["Deployment foo-v5, Version{DeploymentName: ns/foo, BuildID: v5}"]
         rs5["ReplicaSet foo-v5"]
         p5a["Pod foo-v5-a"]
         p5b["Pod foo-v5-b"]
@@ -26,7 +26,7 @@ flowchart TD
       end
 
       subgraph "Deprecated versions"
-        d1["Deployment foo-v1 Version{DeploymentName: ns/foo, BuildId: v1}"]
+        d1["Deployment foo-v1 Version{DeploymentName: ns/foo, BuildID: v1}"]
         rs1["ReplicaSet foo-v1"]
         p1a["Pod foo-v1-a"]
         p1b["Pod foo-v1-b"]
