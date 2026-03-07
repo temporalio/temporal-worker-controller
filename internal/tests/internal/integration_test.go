@@ -35,9 +35,9 @@ func TestIntegration(t *testing.T) {
 	// Create test Temporal server and client
 	dc := dynamicconfig.NewMemoryClient()
 	// make versions drain faster
-	dc.OverrideValue("matching.wv.VersionDrainageStatusVisibilityGracePeriod", testDrainageVisibilityGracePeriod)
-	dc.OverrideValue("matching.wv.VersionDrainageStatusRefreshInterval", testDrainageRefreshInterval)
-	dc.OverrideValue("matching.maxVersionsInDeployment", testMaxVersionsInDeployment)
+	dc.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusVisibilityGracePeriod"), testDrainageVisibilityGracePeriod)
+	dc.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusRefreshInterval"), testDrainageRefreshInterval)
+	dc.OverrideValue(dynamicconfig.MakeKey("matching.maxVersionsInDeployment"), testMaxVersionsInDeployment)
 	ts := temporaltest.NewServer(
 		temporaltest.WithT(t),
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dc)),
@@ -720,11 +720,11 @@ func TestIntegration(t *testing.T) {
 	// Create short TTL test Temporal server and client
 	dcShortTTL := dynamicconfig.NewMemoryClient()
 	// make versions eligible for deletion faster
-	dcShortTTL.OverrideValue("matching.PollerHistoryTTL", testShortPollerHistoryTTL) // default is 5 minutes
+	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.PollerHistoryTTL"), testShortPollerHistoryTTL) // default is 5 minutes
 	// make versions drain faster
-	dcShortTTL.OverrideValue("matching.wv.VersionDrainageStatusVisibilityGracePeriod", testDrainageVisibilityGracePeriod)
-	dcShortTTL.OverrideValue("matching.wv.VersionDrainageStatusRefreshInterval", testDrainageRefreshInterval)
-	dcShortTTL.OverrideValue("matching.maxVersionsInDeployment", testMaxVersionsInDeployment)
+	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusVisibilityGracePeriod"), testDrainageVisibilityGracePeriod)
+	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusRefreshInterval"), testDrainageRefreshInterval)
+	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.maxVersionsInDeployment"), testMaxVersionsInDeployment)
 	tsShortTTL := temporaltest.NewServer(
 		temporaltest.WithT(t),
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcShortTTL)),
