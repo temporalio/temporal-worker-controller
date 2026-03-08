@@ -30,7 +30,7 @@ func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) 
 		UseVersioning: true,
 		Version: worker.WorkerDeploymentVersion{
 			DeploymentName: mustGetEnv("TEMPORAL_DEPLOYMENT_NAME"),
-			BuildId:        mustGetEnv("TEMPORAL_WORKER_BUILD_ID"),
+			BuildID:        mustGetEnv("TEMPORAL_WORKER_BUILD_ID"),
 		},
 		DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 	}

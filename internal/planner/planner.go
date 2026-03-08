@@ -354,8 +354,9 @@ func getDeleteDeployments(
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
 			// 2. The deployment is scaled to 0 replicas.
-			if (time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
-				*d.Spec.Replicas == 0 {
+			if version.DrainedSince != nil &&
+				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
+				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		case temporaliov1alpha1.VersionStatusNotRegistered:
@@ -428,7 +429,7 @@ func getScaleDeployments(
 				scaleDeployments[version.Deployment] = uint32(replicas)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
-			if time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
+			if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
 				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
 				// Scale down drained deployments after delay
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {

@@ -229,7 +229,7 @@ workerOptions.DeploymentOptions = worker.DeploymentOptions{
   UseVersioning: true,
   Version: worker.WorkerDeploymentVersion{
     DeploymentName: deploymentName,
-    BuildId:        buildId,
+    BuildID:        buildId,
   },
 }
 worker := worker.New(client, "my-task-queue", workerOptions)

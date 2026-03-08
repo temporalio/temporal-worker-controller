@@ -444,12 +444,12 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 		expectedDeploymentReplicas: make(map[string]int32),
 	}
 	for _, info := range tcb.existingDeploymentInfos {
-		buildId := MakeBuildId(tcb.name, info.image, info.unsafeCustomBuildID, nil)
+		buildId := MakeBuildID(tcb.name, info.image, info.unsafeCustomBuildID, nil)
 		ret.existingDeploymentReplicas[buildId] = info.replicas
 		ret.existingDeploymentImages[buildId] = info.image
 	}
 	for _, info := range tcb.expectedDeploymentInfos {
-		buildId := MakeBuildId(tcb.name, info.image, info.unsafeCustomBuildID, nil)
+		buildId := MakeBuildID(tcb.name, info.image, info.unsafeCustomBuildID, nil)
 		ret.expectedDeploymentReplicas[buildId] = info.replicas
 	}
 	ret.twd.Spec.Template = SetTaskQueue(ret.twd.Spec.Template, tcb.name)
