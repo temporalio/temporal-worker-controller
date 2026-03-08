@@ -148,14 +148,14 @@ func ComputeVersionedDeploymentName(baseName, buildID string) string {
 	fullName := baseName + ResourceNameSeparator + buildID
 	if len(fullName) > MaxDeploymentNameLen {
 		hashName := HashString(fullName)[:10]
-		fullName = baseName[:10] + ResourceNameSeparator + buildID[:10] + ResourceNameSeparator + hashName
+		fullName = TruncateString(baseName, 10) + ResourceNameSeparator + TruncateString(buildID, 10) + ResourceNameSeparator + hashName
 	}
 	return CleanStringForDNS(fullName)
 }
 
 func HashString(s string) string {
 	h := sha256.New()
-	h.Write([]byte(s))
+	_, _ = h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
