@@ -86,6 +86,53 @@ type TemporalWorkerDeploymentSpec struct {
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
+// Condition type constants for TemporalWorkerDeployment.
+const (
+	// ConditionTemporalConnectionHealthy indicates whether the referenced TemporalConnection
+	// resource exists and is properly configured.
+	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
+
+	// ConditionRolloutComplete indicates whether the target version has been successfully
+	// registered as the current version, completing the rollout.
+	ConditionRolloutComplete = "RolloutComplete"
+)
+
+// Condition reason constants for TemporalWorkerDeployment.
+//
+// These strings appear in status.conditions[].reason and are part of the CRD's
+// status API. Operators, monitoring rules, and scripts may depend on them.
+// They should be treated as stable within an API version and renamed only with
+// a corresponding version bump.
+const (
+	// ReasonTemporalConnectionNotFound is set on ConditionTemporalConnectionHealthy
+	// when the referenced TemporalConnection resource cannot be found.
+	ReasonTemporalConnectionNotFound = "TemporalConnectionNotFound"
+
+	// ReasonAuthSecretInvalid is set on ConditionTemporalConnectionHealthy when the
+	// credential secret referenced by the TemporalConnection is misconfigured. This
+	// covers: (1) the secret reference has an empty name, (2) the named Kubernetes
+	// Secret cannot be fetched or has an unexpected type, and (3) the mTLS certificate
+	// in the secret is expired or about to expire.
+	ReasonAuthSecretInvalid = "AuthSecretInvalid"
+
+	// ReasonTemporalClientCreationFailed is set on ConditionTemporalConnectionHealthy
+	// when the Temporal SDK client cannot connect to the server (dial failure or failed
+	// health check). The credentials were valid; the server itself is unreachable.
+	ReasonTemporalClientCreationFailed = "TemporalClientCreationFailed"
+
+	// ReasonTemporalStateFetchFailed is set on ConditionTemporalConnectionHealthy
+	// when the controller cannot query the current worker deployment state from Temporal.
+	ReasonTemporalStateFetchFailed = "TemporalStateFetchFailed"
+
+	// ReasonTemporalConnectionHealthy is set on ConditionTemporalConnectionHealthy
+	// when the connection is reachable and the auth secret is resolved.
+	ReasonTemporalConnectionHealthy = "TemporalConnectionHealthy"
+
+	// ReasonRolloutComplete is set on ConditionRolloutComplete when the target
+	// version has been successfully registered as the current version.
+	ReasonRolloutComplete = "RolloutComplete"
+)
+
 // VersionStatus indicates the status of a version.
 // +enum
 type VersionStatus string
@@ -155,8 +202,9 @@ type TemporalWorkerDeploymentStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
 
-	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+	// Conditions represent the latest available observations of the TemporalWorkerDeployment's current state.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.

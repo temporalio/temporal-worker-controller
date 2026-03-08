@@ -192,10 +192,10 @@ func createStatus(
 		workerDeploymentName := k8s.ComputeWorkerDeploymentName(newTWD)
 		v := &worker.WorkerDeploymentVersion{
 			DeploymentName: workerDeploymentName,
-			BuildId:        prevVersion.BuildID,
+			BuildID:        prevVersion.BuildID,
 		}
-		prevTWD := recreateTWD(newTWD, env.ExistingDeploymentImages[v.BuildId], env.ExistingDeploymentReplicas[v.BuildId])
-		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildId)
+		prevTWD := recreateTWD(newTWD, env.ExistingDeploymentImages[v.BuildID], env.ExistingDeploymentReplicas[v.BuildID])
+		createWorkerDeployment(ctx, t, env, prevTWD, v.BuildID)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(prevTWD.Name, k8s.ComputeBuildID(prevTWD))
 		waitForExpectedTargetDeployment(t, prevTWD, env, 30*time.Second)
 		workerStopFuncs = applyDeployment(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
@@ -206,18 +206,18 @@ func createStatus(
 		case temporaliov1alpha1.VersionStatusInactive:
 			waitForVersionRegistrationInDeployment(t, ctx, env.Ts, v)
 		case temporaliov1alpha1.VersionStatusRamping:
-			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId, *rampPercentage) // rampPercentage won't be nil if the version is ramping
+			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildID, *rampPercentage) // rampPercentage won't be nil if the version is ramping
 		case temporaliov1alpha1.VersionStatusCurrent:
-			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId)
+			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildID)
 		case temporaliov1alpha1.VersionStatusDraining:
-			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId, 1)
+			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildID, 1)
 			// TODO(carlydf): start a workflow on v that does not complete -> will never drain
 			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, "", 0)
 		case temporaliov1alpha1.VersionStatusDrained:
-			if env.ExistingDeploymentReplicas[v.BuildId] == 0 {
+			if env.ExistingDeploymentReplicas[v.BuildID] == 0 {
 				startAndStopWorker(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
 			}
-			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildId)
+			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildID)
 			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, "")
 		}
 	}

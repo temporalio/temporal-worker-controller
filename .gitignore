@@ -8,6 +8,7 @@ skaffold.env
 certs
 
 .DS_Store
+cover.out
 
 .claude
-.config 
+config
