@@ -109,10 +109,10 @@ func MakeTWDWithImage(name, namespace, imageName string) *temporaliov1alpha1.Tem
 	return MakeTWD(name, namespace, 1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
 }
 
-// MakeBuildId computes a build id based on the image and
+// MakeBuildID computes a build id based on the image and
 // If no podSpec is provided, defaults to HelloWorldPodSpec with the given image name.
 // If you provide your own podSpec, make sure to give the first container your desired image name if success is expected.
-func MakeBuildId(twdName, imageName, unsafeCustomBuildID string, podSpec *corev1.PodTemplateSpec) string {
+func MakeBuildID(twdName, imageName, unsafeCustomBuildID string, podSpec *corev1.PodTemplateSpec) string {
 	if unsafeCustomBuildID != "" {
 		return unsafeCustomBuildID
 	}
@@ -187,7 +187,7 @@ func MakeDeprecatedVersion(namespace, twdName, imageName, unsafeCustomBuildID st
 }
 
 func MakeBaseVersion(namespace, twdName, imageName, unsafeCustomBuildID string, status temporaliov1alpha1.VersionStatus, createDeployment, hasDeployment bool) temporaliov1alpha1.BaseWorkerDeploymentVersion {
-	buildID := MakeBuildId(twdName, imageName, unsafeCustomBuildID, nil)
+	buildID := MakeBuildID(twdName, imageName, unsafeCustomBuildID, nil)
 
 	ret := temporaliov1alpha1.BaseWorkerDeploymentVersion{
 		BuildID:      buildID,

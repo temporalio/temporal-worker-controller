@@ -36,7 +36,7 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	if err != nil {
 		return nil, nil, err
 	}
-	workerBuildId, err := getEnv(podTemplateSpec, "TEMPORAL_WORKER_BUILD_ID")
+	workerBuildID, err := getEnv(podTemplateSpec, "TEMPORAL_WORKER_BUILD_ID")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -52,12 +52,12 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	if err != nil {
 		return nil, nil, err
 	}
-	return NewWorker(ctx, temporalDeploymentName, workerBuildId, temporalTaskQueue, temporalHostPort, temporalNamespace, true)
+	return NewWorker(ctx, temporalDeploymentName, workerBuildID, temporalTaskQueue, temporalHostPort, temporalNamespace, true)
 }
 
 func NewWorker(
 	ctx context.Context,
-	temporalDeploymentName, workerBuildId, temporalTaskQueue, temporalHostPort, temporalNamespace string,
+	temporalDeploymentName, workerBuildID, temporalTaskQueue, temporalHostPort, temporalNamespace string,
 	versioned bool,
 ) (w worker.Worker, stopFunc func(), err error) {
 	opts := worker.Options{}
@@ -66,7 +66,7 @@ func NewWorker(
 			UseVersioning: true,
 			Version: worker.WorkerDeploymentVersion{
 				DeploymentName: temporalDeploymentName,
-				BuildId:        workerBuildId,
+				BuildID:        workerBuildID,
 			},
 			DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 		}

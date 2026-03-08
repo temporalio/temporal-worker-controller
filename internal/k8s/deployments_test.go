@@ -303,7 +303,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", digestedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIDLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -314,7 +314,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", digestedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  digest[:k8s.MaxBuildIdLen-5],
+			expectedPrefix:  digest[:k8s.MaxBuildIDLen-5],
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -347,7 +347,7 @@ func TestGenerateBuildID(t *testing.T) {
 				twd := testhelpers.MakeTWDWithImage("", "", longImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
-			expectedPrefix:  k8s.TruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIdLen-5], -1),
+			expectedPrefix:  k8s.TruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIDLen-5], -1),
 			expectedHashLen: 4,
 			expectEquality:  false,
 		},
@@ -435,11 +435,11 @@ func TestGenerateBuildID(t *testing.T) {
 			var build1, build2 string
 			if twd1 != nil {
 				build1 = k8s.ComputeBuildID(twd1)
-				verifyBuildId(t, build1, tt.expectedPrefix, tt.expectedHashLen)
+				verifyBuildID(t, build1, tt.expectedPrefix, tt.expectedHashLen)
 			}
 			if twd2 != nil {
 				build2 = k8s.ComputeBuildID(twd2)
-				verifyBuildId(t, build2, tt.expectedPrefix, tt.expectedHashLen)
+				verifyBuildID(t, build2, tt.expectedPrefix, tt.expectedHashLen)
 			}
 
 			// Check equality based on test case
@@ -452,9 +452,9 @@ func TestGenerateBuildID(t *testing.T) {
 	}
 }
 
-func verifyBuildId(t *testing.T, build, expectedPrefix string, expectedHashLen int) {
+func verifyBuildID(t *testing.T, build, expectedPrefix string, expectedHashLen int) {
 	assert.Truef(t, strings.HasPrefix(build, expectedPrefix), "expected prefix %s in build %s", expectedPrefix, build)
-	assert.LessOrEqual(t, len(build), k8s.MaxBuildIdLen)
+	assert.LessOrEqual(t, len(build), k8s.MaxBuildIDLen)
 	assert.Equalf(t, k8s.TruncateString(build, -1), build, "expected build %s to be truncated", build)
 	split := strings.Split(build, k8s.ResourceNameSeparator)
 	assert.Equalf(t, expectedHashLen, len(split[len(split)-1]), "expected build %s to have %d-digit hash suffix", build, expectedHashLen)
