@@ -156,7 +156,7 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 		return nil
 	}
 
-	if p.ClaimManagerIdentity {
+	if vcfg.ClaimManagerIdentity {
 		resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 			Self:          true,
 			ConflictToken: vcfg.ConflictToken,
