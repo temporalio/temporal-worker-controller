@@ -67,6 +67,10 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 			}
 			return []string{owner.Name}
 		}).
+		WithIndex(&temporaliov1alpha1.TemporalWorkerOwnedResource{}, tworWorkerRefKey, func(rawObj client.Object) []string {
+			twor := rawObj.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
+			return []string{twor.Spec.WorkerRef.Name}
+		}).
 		WithInterceptorFuncs(funcs).
 		Build()
 

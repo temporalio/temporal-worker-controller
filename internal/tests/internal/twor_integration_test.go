@@ -247,7 +247,7 @@ func tworTestCases() []testCase {
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					buildIDv1 := k8s.ComputeBuildID(twd)
-					buildIDv0 := testhelpers.MakeBuildId(twd.Name, "v0", "", nil)
+					buildIDv0 := testhelpers.MakeBuildID(twd.Name, "v0", "", nil)
 					tworName := "multi-ver-hpa"
 
 					twor := makeHPATWOR(tworName, twd.Namespace, twd.Name)

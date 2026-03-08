@@ -73,7 +73,7 @@ func rolloutTestCases() []testCase {
 						t.Fatalf("failed to update TWD to v1 with progressive strategy: %v", err)
 					}
 
-					buildIDv1 := testhelpers.MakeBuildId(twd.Name, "v1", "", nil)
+					buildIDv1 := testhelpers.MakeBuildID(twd.Name, "v1", "", nil)
 					depNameV1 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv1)
 
 					eventually(t, 30*time.Second, time.Second, func() error {
@@ -318,7 +318,7 @@ func rolloutTestCases() []testCase {
 					buildIDv0 := k8s.ComputeBuildID(twd)
 
 					// --- Phase 2: roll to v1 by updating the image ---
-					buildIDv1 := testhelpers.MakeBuildId(twd.Name, "v1", "", nil)
+					buildIDv1 := testhelpers.MakeBuildID(twd.Name, "v1", "", nil)
 
 					var currentTWD temporaliov1alpha1.TemporalWorkerDeployment
 					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &currentTWD); err != nil {
@@ -354,7 +354,7 @@ func rolloutTestCases() []testCase {
 					t.Logf("Phase 2 complete: v1 (%s) is Current, v0 (%s) is Deprecated", buildIDv1, buildIDv0)
 
 					// --- Phase 3: roll to v2 by updating the image again ---
-					buildIDv2 := testhelpers.MakeBuildId(twd.Name, "v2", "", nil)
+					buildIDv2 := testhelpers.MakeBuildID(twd.Name, "v2", "", nil)
 
 					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &currentTWD); err != nil {
 						t.Fatalf("failed to get TWD (phase 3): %v", err)
