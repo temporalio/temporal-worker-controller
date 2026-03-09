@@ -164,6 +164,8 @@ We welcome all contributions! This includes:
 
 Want to try the controller locally? Check out the [local demo guide](internal/demo/README.md) for development setup.
 
+Need a test controller image from an unmerged branch? Run the `publish-branch-image` GitHub Actions workflow with the branch name.
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).

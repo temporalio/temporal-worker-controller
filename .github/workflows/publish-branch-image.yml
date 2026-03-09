@@ -1,0 +1,89 @@
+name: publish-branch-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to publish from. The workflow will build the current HEAD commit of this branch.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-branch-image-${{ inputs.branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish-branch-image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: temporalio/temporal-worker-controller
+    steps:
+      - name: Checkout branch head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PAT }}
+
+      - name: Compute image tags
+        id: image_tags
+        shell: bash
+        run: |
+          branch="${{ inputs.branch }}"
+          sanitized_branch="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9._-]+#-#g; s#(^-+|-+$)##g')"
+
+          if [[ -z "$sanitized_branch" ]]; then
+            echo "Could not derive a Docker-compatible tag from branch '$branch'" >&2
+            exit 1
+          fi
+
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          tracking_tag="branch-${sanitized_branch}"
+          immutable_tag="${tracking_tag}-${short_sha}"
+
+          {
+            echo "tracking_tag=${IMAGE_NAME}:${tracking_tag}"
+            echo "immutable_tag=${IMAGE_NAME}:${immutable_tag}"
+            echo "tags<<EOF"
+            echo "${IMAGE_NAME}:${tracking_tag}"
+            echo "${IMAGE_NAME}:${immutable_tag}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.image_tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=temporal-worker-controller
+            org.opencontainers.image.description=Temporal Worker Controller for Kubernetes
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.image_tags.outputs.immutable_tag }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Publish summary
+        run: |
+          echo "Published controller images:"
+          echo "  ${{ steps.image_tags.outputs.tracking_tag }}"
+          echo "  ${{ steps.image_tags.outputs.immutable_tag }}"
