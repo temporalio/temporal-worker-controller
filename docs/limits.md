@@ -11,5 +11,6 @@ Kubernetes operational best practice is to limit Deployment names to 47 characte
 The controller will first generate the Deployment name for each Version as follows: `<TemporalWorkerDeployment.Name>-<BuildID>`.
 If that name exceeds 47 characters, the controller will generate a unique less-than-47-character name for the Deployment.
 You can find the names of all the Deployment resources owned by a certain `TemporalWorkerDeployment` in the `Status` field of the `TemporalWorkerDeployment` resource.
+Note that the original untruncated deployment name and build ID can always be found in the `temporal.io/deployment-name` and `temporal.io/build-id` labels.
 
 For transparency, know that the controller will generate these unique short names as follows, but don't depend on this name format because it may change: `trunc(<TemporalWorkerDeployment.Name>)-trunc(<BuildID>)-hash(<TemporalWorkerDeployment.Name>-<BuildID>)`
