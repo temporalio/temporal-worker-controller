@@ -42,9 +42,11 @@ jobs:
 
       - name: Compute image tags
         id: image_tags
+        env:
+          BRANCH_NAME: ${{ inputs.branch }}
         shell: bash
         run: |
-          branch="${{ inputs.branch }}"
+          branch="${BRANCH_NAME}"
           sanitized_branch="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9._-]+#-#g; s#(^-+|-+$)##g')"
 
           if [[ -z "$sanitized_branch" ]]; then
