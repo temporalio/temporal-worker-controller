@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -478,27 +479,44 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 			buildID:      "image-v2.1.0-a1b2c3d4",
 			expectedName: "worker-name-image-v2-1-0-a1b2c3d4",
 		},
+		{
+			name:         "exceed max length",
+			baseName:     "worker-name-0123456789-0123456789",
+			buildID:      "image-v2.1.0-0123456789-0123456789",
+			expectedName: "worker-nam-image-v2-1-9c4f60cc97",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := k8s.ComputeVersionedDeploymentName(tt.baseName, tt.buildID)
 			assert.Equal(t, tt.expectedName, result)
-
-			// Verify the format is always baseName-buildID
-			expected := tt.baseName + k8s.ResourceNameSeparator + k8s.CleanStringForDNS(tt.buildID)
-			assert.Equal(t, expected, result)
-
-			// Verify it ends with the build ID
-			assert.True(t, strings.HasSuffix(result, k8s.ResourceNameSeparator+k8s.CleanStringForDNS(tt.buildID)),
-				"versioned deployment name should end with '-cleaned(buildID)'")
-
-			// Verify it starts with the base name
-			assert.True(t, strings.HasPrefix(result, tt.baseName),
-				"versioned deployment name should start with baseName")
-
-			// Verify it is cleaned for DNS
+			assert.LessOrEqual(t, len(result), k8s.MaxDeploymentNameLen)
 			assert.Equal(t, result, k8s.CleanStringForDNS(result))
+
+			if name := tt.baseName + k8s.ResourceNameSeparator + tt.buildID; len(name) <= k8s.MaxDeploymentNameLen {
+				// Verify it ends with the build ID
+				assert.True(t, strings.HasSuffix(result, k8s.ResourceNameSeparator+k8s.CleanStringForDNS(tt.buildID)),
+					"versioned deployment name should end with '-cleaned(buildID)'")
+
+				// Verify it starts with the base name
+				assert.True(t, strings.HasPrefix(result, tt.baseName),
+					"versioned deployment name should start with baseName")
+			} else { // we had to truncate the baseName
+				// Verify it contains the build ID
+				assert.True(t, strings.Contains(result, k8s.ResourceNameSeparator+k8s.CleanStringForDNS(tt.buildID[:10])),
+					"versioned deployment name should end with '-cleaned(buildID)'")
+
+				// Verify it starts with the truncated base name
+				assert.True(t, strings.HasPrefix(result, k8s.CleanStringForDNS(tt.baseName[:10])),
+					"versioned deployment name should start with baseName")
+
+				// Verify it ends with the hash suffix
+				assert.True(t, strings.HasSuffix(result, k8s.ResourceNameSeparator+k8s.HashString(name)[:10]),
+					fmt.Sprintf("versioned deployment name '%s' should end with hash suffix '%s'",
+						result, k8s.HashString(name)))
+			}
+
 		})
 	}
 }
