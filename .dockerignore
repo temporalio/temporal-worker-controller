@@ -3,3 +3,17 @@
 bin/
 helm/
 internal/demo
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# CI/CD
+.github
+.goreleaser.yml
+.goreleaser.publish-images.yml
+
+# Go
+go.work
+go.work.sum
