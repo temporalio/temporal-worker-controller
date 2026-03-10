@@ -27,6 +27,7 @@ type Plan struct {
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
+
 	// Build IDs of versions from which the controller should
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
@@ -45,6 +46,10 @@ type VersionConfig struct {
 	SetCurrent bool
 	// Acceptable values [0,100]
 	RampPercentage int32
+
+	// ClaimManagerIdentity indicates the controller should call SetManagerIdentity(Self=true)
+	// before applying this version config, because ManagerIdentity is currently unset.
+	ClaimManagerIdentity bool
 }
 
 // WorkflowConfig defines a workflow to be started
@@ -547,8 +552,9 @@ func getVersionConfigDiff(
 	}
 
 	vcfg := &VersionConfig{
-		ConflictToken: conflictToken,
-		BuildID:       status.TargetVersion.BuildID,
+		ConflictToken:        conflictToken,
+		BuildID:              status.TargetVersion.BuildID,
+		ClaimManagerIdentity: temporalState != nil && temporalState.ManagerIdentity == "",
 	}
 
 	// If there is no current version and presence of unversioned pollers is not confirmed for all

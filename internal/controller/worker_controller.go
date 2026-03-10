@@ -184,6 +184,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 			K8sNamespace:      workerDeploy.Namespace,
 			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 			Spec:              temporalConnection.Spec,
+			Identity:          getControllerIdentity(),
 		})
 		if err != nil {
 			l.Error(err, "invalid Temporal auth secret")
