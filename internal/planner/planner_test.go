@@ -6,6 +6,7 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -22,6 +23,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -41,6 +44,8 @@ func TestGeneratePlan(t *testing.T) {
 		expectConfigSetCurrent           *bool  // pointer so we can test nil
 		expectConfigRampPercent          *int32 // pointer so we can test nil, in percentage (0-100)
 		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
+		twors                            []temporaliov1alpha1.TemporalWorkerOwnedResource
+		expectOwnedResourceApplies       int
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -390,6 +395,65 @@ func TestGeneratePlan(t *testing.T) {
 			},
 			expectUpdate: 1,
 		},
+		{
+			name: "one TWOR with two deployments produces two owned resource applies",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*corev1.ObjectReference{},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "build-a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "worker-build-a"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				createTestTWOR("my-hpa", "my-worker"),
+			},
+			expectScale:                1,
+			expectOwnedResourceApplies: 2,
+		},
+		{
+			name: "no TWORs produces no owned resource applies",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*corev1.ObjectReference{},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "build-a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "worker-build-a"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state:                      &temporal.TemporalWorkerState{},
+			config:                     &Config{RolloutStrategy: temporaliov1alpha1.RolloutStrategy{}},
+			twors:                      nil,
+			expectScale:                1,
+			expectOwnedResourceApplies: 0,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -402,7 +466,7 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.twors, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -411,6 +475,7 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
+			assert.Equal(t, tc.expectOwnedResourceApplies, len(plan.ApplyOwnedResources), "unexpected number of owned resource applies")
 
 			if tc.expectConfig {
 				assert.NotNil(t, plan.VersionConfig, "expected version config")
@@ -1928,7 +1993,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false, nil, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
@@ -2824,4 +2889,402 @@ func TestResolveGateInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetOwnedResourceApplies(t *testing.T) {
+	testCases := []struct {
+		name        string
+		twors       []temporaliov1alpha1.TemporalWorkerOwnedResource
+		k8sState    *k8s.DeploymentState
+		expectCount int
+	}{
+		{
+			name:  "no TWORs produces no applies",
+			twors: nil,
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 0,
+		},
+		{
+			name: "no deployments produces no applies",
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				createTestTWOR("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{},
+			},
+			expectCount: 0,
+		},
+		{
+			name: "1 TWOR × 1 deployment produces 1 apply",
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				createTestTWOR("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 1,
+		},
+		{
+			name: "1 TWOR × 2 deployments produces 2 applies",
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				createTestTWOR("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+			},
+			expectCount: 2,
+		},
+		{
+			name: "2 TWORs × 1 deployment produces 2 applies",
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				createTestTWOR("my-hpa", "my-worker"),
+				createTestTWOR("my-pdb", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 2,
+		},
+		{
+			name: "2 TWORs × 2 deployments produces 4 applies",
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				createTestTWOR("my-hpa", "my-worker"),
+				createTestTWOR("my-pdb", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+			},
+			expectCount: 4,
+		},
+		{
+			name: "TWOR with nil Raw is skipped without blocking others",
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "nil-raw", Namespace: "default"},
+					Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+						WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+						Object:    runtime.RawExtension{Raw: nil},
+					},
+				},
+				createTestTWOR("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 1, // only the valid TWOR
+		},
+		{
+			name: "TWOR with invalid template is skipped without blocking others",
+			twors: []temporaliov1alpha1.TemporalWorkerOwnedResource{
+				createTestTWORWithInvalidTemplate("bad-template", "my-worker"),
+				createTestTWOR("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 1, // only the valid TWOR
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			applies := getOwnedResourceApplies(logr.Discard(), tc.twors, tc.k8sState, "test-temporal-ns")
+			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of owned resource applies")
+		})
+	}
+}
+
+func TestGetOwnedResourceApplies_ApplyContents(t *testing.T) {
+	twor := createTestTWOR("my-hpa", "my-worker")
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-abc": deployment,
+		},
+	}
+
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor}, k8sState, "test-temporal-ns")
+	require.Len(t, applies, 1)
+
+	apply := applies[0]
+
+	// Field manager must be the stable TWOR-scoped identifier
+	assert.Equal(t, k8s.OwnedResourceFieldManager(&twor), apply.FieldManager)
+
+	// Resource kind and apiVersion must come from the template
+	assert.Equal(t, "HorizontalPodAutoscaler", apply.Resource.GetKind())
+	assert.Equal(t, "autoscaling/v2", apply.Resource.GetAPIVersion())
+
+	// Resource must be owned by the versioned Deployment
+	ownerRefs := apply.Resource.GetOwnerReferences()
+	require.Len(t, ownerRefs, 1)
+	assert.Equal(t, deployment.Name, ownerRefs[0].Name)
+	assert.Equal(t, "Deployment", ownerRefs[0].Kind)
+	assert.Equal(t, types.UID("uid-abc"), ownerRefs[0].UID)
+
+	// Resource name must be deterministic
+	assert.Equal(t, k8s.ComputeOwnedResourceName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
+}
+
+func TestGetOwnedResourceApplies_FieldManagerDistinctPerTWOR(t *testing.T) {
+	twor1 := createTestTWOR("my-hpa", "my-worker")
+	twor2 := createTestTWOR("my-pdb", "my-worker")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+		},
+	}
+
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor1, twor2}, k8sState, "test-temporal-ns")
+	require.Len(t, applies, 2)
+
+	fms := make(map[string]bool)
+	for _, a := range applies {
+		fms[a.FieldManager] = true
+	}
+	assert.Len(t, fms, 2, "each TWOR must produce a distinct field manager")
+}
+
+// createTestTWOR builds a minimal valid TemporalWorkerOwnedResource for use in tests.
+// The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.
+func createTestTWOR(name, workerRefName string) temporaliov1alpha1.TemporalWorkerOwnedResource {
+	hpaSpec := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"scaleTargetRef": nil, // opt in to auto-injection
+			"minReplicas":    float64(1),
+			"maxReplicas":    float64(5),
+		},
+	}
+	raw, _ := json.Marshal(hpaSpec)
+	return temporaliov1alpha1.TemporalWorkerOwnedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerRefName},
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	}
+}
+
+// createDeploymentWithUID builds a Deployment with the given name and UID, with the default
+// connection spec hash annotation pre-set so it does not trigger an update during plan generation.
+func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			UID:       types.UID(uid),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						k8s.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(createDefaultConnectionSpec()),
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
+	// PDB with matchLabels opted in for auto-injection via null sentinel.
+	pdbSpec := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{
+				"matchLabels": nil, // null = opt in to auto-injection
+			},
+			"minAvailable": float64(1),
+		},
+	}
+	raw, _ := json.Marshal(pdbSpec)
+	twor := temporaliov1alpha1.TemporalWorkerOwnedResource{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
+		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
+	}
+
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor}, k8sState, "test-temporal-ns")
+	require.Len(t, applies, 1)
+
+	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	selector, ok := spec["selector"].(map[string]interface{})
+	require.True(t, ok)
+	matchLabels, ok := selector["matchLabels"].(map[string]interface{})
+	require.True(t, ok, "matchLabels should have been auto-injected")
+
+	// The injected labels must equal ComputeSelectorLabels(workerRef, buildID).
+	expected := k8s.ComputeSelectorLabels("my-worker", "build-abc")
+	for k, v := range expected {
+		assert.Equal(t, v, matchLabels[k], "injected matchLabels[%q]", k)
+	}
+	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
+}
+
+func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
+	// Arbitrary CRD that uses all three template variables.
+	objSpec := map[string]interface{}{
+		"apiVersion": "monitoring.example.com/v1",
+		"kind":       "WorkloadMonitor",
+		"spec": map[string]interface{}{
+			"targetWorkload":    "{{ .DeploymentName }}",
+			"versionLabel":      "build-{{ .BuildID }}",
+			"temporalNamespace": "{{ .TemporalNamespace }}",
+		},
+	}
+	raw, _ := json.Marshal(objSpec)
+	twor := temporaliov1alpha1.TemporalWorkerOwnedResource{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-monitor", Namespace: "k8s-production"},
+		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
+	}
+
+	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.TemporalWorkerOwnedResource{twor}, k8sState, "temporal-production")
+	require.Len(t, applies, 1)
+
+	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "my-worker-build-abc", spec["targetWorkload"], ".DeploymentName not rendered")
+	assert.Equal(t, "build-build-abc", spec["versionLabel"], ".BuildID not rendered")
+	assert.Equal(t, "temporal-production", spec["temporalNamespace"], ".TemporalNamespace not rendered")
+}
+
+// createTestTWORWithInvalidTemplate builds a TWOR whose spec.object contains a broken Go
+// template expression, causing RenderOwnedResource to return an error.
+func createTestTWORWithInvalidTemplate(name, workerRefName string) temporaliov1alpha1.TemporalWorkerOwnedResource {
+	badSpec := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"description": "{{ .NonExistentField }}", // will fail with missingkey=error
+		},
+	}
+	raw, _ := json.Marshal(badSpec)
+	return temporaliov1alpha1.TemporalWorkerOwnedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerRefName},
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	}
+}
+
+func TestGetTWOROwnerRefPatches(t *testing.T) {
+	const twdName = "my-worker"
+	const twdUID = types.UID("twd-uid-123")
+
+	newTWOR := func(name string, ownerRefs ...metav1.OwnerReference) temporaliov1alpha1.TemporalWorkerOwnedResource {
+		return temporaliov1alpha1.TemporalWorkerOwnedResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            name,
+				Namespace:       "default",
+				OwnerReferences: ownerRefs,
+			},
+		}
+	}
+
+	t.Run("all TWORs need owner ref", func(t *testing.T) {
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("twor-a"),
+			newTWOR("twor-b"),
+		}
+		patches := getTWOROwnerRefPatches(twors, twdName, twdUID)
+		require.Len(t, patches, 2)
+
+		// Base should be unchanged
+		assert.Empty(t, patches[0].Base.OwnerReferences)
+		assert.Empty(t, patches[1].Base.OwnerReferences)
+
+		// Patched should have the owner ref appended
+		require.Len(t, patches[0].Patched.OwnerReferences, 1)
+		assert.Equal(t, twdUID, patches[0].Patched.OwnerReferences[0].UID)
+		assert.Equal(t, true, *patches[0].Patched.OwnerReferences[0].Controller)
+	})
+
+	t.Run("TWOR already owned by this TWD is skipped", func(t *testing.T) {
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("already-owned", metav1.OwnerReference{
+				APIVersion: "temporal.io/v1alpha1", Kind: "TemporalWorkerDeployment",
+				Name: twdName, UID: twdUID, Controller: func() *bool { b := true; return &b }(),
+			}),
+			newTWOR("needs-ref"),
+		}
+		patches := getTWOROwnerRefPatches(twors, twdName, twdUID)
+		require.Len(t, patches, 1)
+		assert.Equal(t, "needs-ref", patches[0].Patched.Name)
+	})
+
+	t.Run("TWOR with different controller owner still gets patched", func(t *testing.T) {
+		otherUID := types.UID("other-uid")
+		otherController := true
+		otherRef := metav1.OwnerReference{UID: otherUID, Controller: &otherController}
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("other-owner", otherRef),
+		}
+		patches := getTWOROwnerRefPatches(twors, twdName, twdUID)
+		// The other controller has a different UID so we still add our ref
+		require.Len(t, patches, 1)
+		require.Len(t, patches[0].Patched.OwnerReferences, 2)
+	})
+
+	t.Run("empty TWOR list returns nil", func(t *testing.T) {
+		patches := getTWOROwnerRefPatches(nil, twdName, twdUID)
+		assert.Nil(t, patches)
+	})
+
+	t.Run("non-controller owner ref with same UID does not skip", func(t *testing.T) {
+		notController := false
+		nonControllerRef := metav1.OwnerReference{
+			UID:        twdUID,
+			Controller: &notController,
+		}
+		twors := []temporaliov1alpha1.TemporalWorkerOwnedResource{
+			newTWOR("non-controller-ref", nonControllerRef),
+		}
+		patches := getTWOROwnerRefPatches(twors, twdName, twdUID)
+		// controller=false with matching UID should still get the controller ref added
+		require.Len(t, patches, 1)
+	})
 }

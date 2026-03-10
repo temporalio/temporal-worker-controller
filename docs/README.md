@@ -30,6 +30,9 @@ Technical constraints and limitations of the Temporal Worker Controller system, 
 ### [Ownership](ownership.md)
 How the controller gets permission to manage a Worker Deployment, how a human client can take or give back control.
 
+### [TemporalWorkerOwnedResource](owned-resources.md)
+How to attach HPAs, PodDisruptionBudgets, and other Kubernetes resources to each active versioned Deployment. Covers the auto-injection model, RBAC setup, webhook TLS, and examples.
+
 ---
 
 *Note: This documentation structure is designed to grow with the project.*

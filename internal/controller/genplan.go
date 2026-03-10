@@ -16,6 +16,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -38,6 +39,13 @@ type plan struct {
 	// Build IDs of versions from which the controller should
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
+
+	// OwnedResources to apply via Server-Side Apply, one per (TWOR × Build ID) pair.
+	ApplyOwnedResources []planner.OwnedResourceApply
+
+	// TWORs that need a controller owner reference added, as (base, patched) pairs
+	// ready for client.MergeFrom patching in executePlan.
+	EnsureTWOROwnerRefs []planner.TWOROwnerRefPatch
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -128,6 +136,16 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		RolloutStrategy: rolloutStrategy,
 	}
 
+	// Fetch all TemporalWorkerOwnedResources that reference this TWD so that the planner
+	// can render one apply action per (TWOR × active Build ID) pair.
+	var tworList temporaliov1alpha1.TemporalWorkerOwnedResourceList
+	if err := r.List(ctx, &tworList,
+		client.InNamespace(w.Namespace),
+		client.MatchingFields{tworWorkerRefKey: w.Name},
+	); err != nil {
+		return nil, fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
+	}
+
 	planResult, err := planner.GeneratePlan(
 		l,
 		k8sState,
@@ -140,6 +158,9 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		r.MaxDeploymentVersionsIneligibleForDeletion,
 		gateInput,
 		isGateInputSecret,
+		tworList.Items,
+		w.Name,
+		w.UID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)
@@ -154,6 +175,8 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.UpdateVersionConfig = planResult.VersionConfig
 
 	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
+	plan.ApplyOwnedResources = planResult.ApplyOwnedResources
+	plan.EnsureTWOROwnerRefs = planResult.EnsureTWOROwnerRefs
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

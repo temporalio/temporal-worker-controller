@@ -5,7 +5,7 @@
 
 > 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases*. Core functionality is complete with stable APIs.
 > 
-> *Dynamic auto-scaling based on workflow load is not yet implemented. Use cases must work with fixed worker replica counts.
+> *Autoscaling based on Temporal task queue depth is not yet built in. You can attach Horizontal Pod Autoscalers or KEDA ScaledObjects to each versioned Deployment via [`TemporalWorkerOwnedResource`](docs/owned-resources.md).
 
 **The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
@@ -78,6 +78,7 @@ When you update the image, the controller automatically:
 - Helm [v3.0+](https://github.com/helm/helm/releases) if deploying via our Helm chart
 - [Temporal Server](https://docs.temporal.io/) (Cloud or self-hosted [v1.29.1](https://github.com/temporalio/temporal/releases/tag/v1.29.1))
 - Basic familiarity with Temporal [Workers](https://docs.temporal.io/workers), [Workflows](https://docs.temporal.io/workflows), and [Worker Versioning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning)
+- **[cert-manager](https://cert-manager.io/docs/installation/)** *(required for `TemporalWorkerOwnedResource`)* — the controller installs a validating webhook for TWOR objects that requires TLS. cert-manager handles certificate provisioning automatically. If cert-manager is not available in your cluster, see [Webhook TLS without cert-manager](docs/owned-resources.md#webhook-tls) for the manual setup.
 
 ### 🔧 Installation
 
@@ -104,7 +105,7 @@ helm install temporal-worker-controller \
 - ✅ **Deletion of resources** associated with drained Worker Deployment Versions
 - ✅ **Multiple rollout strategies**: `Manual`, `AllAtOnce`, and `Progressive` rollouts
 - ✅ **Gate workflows** - Test new versions with a [pre-deployment test](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#adding-a-pre-deployment-test) before routing real traffic to them
-- ⏳ **Load-based auto-scaling** - Not yet implemented (use fixed replica counts)
+- ✅ **Per-version attached resources** - Attach HPAs, KEDA ScaledObjects, PodDisruptionBudgets, or any namespaced Kubernetes resource to each worker version with running workers via [`TemporalWorkerOwnedResource`](docs/owned-resources.md) — this is also the recommended path for metric-based and backlog-based autoscaling
 
 
 ## 💡 Why Use This?
@@ -137,6 +138,7 @@ The Temporal Worker Controller eliminates this operational overhead by automatin
 | [Configuration](docs/configuration.md) | Complete configuration reference |
 | [Concepts](docs/concepts.md) | Key concepts and terminology |
 | [Limits](docs/limits.md) | Technical constraints and limitations |
+| [TemporalWorkerOwnedResource](docs/owned-resources.md) | Attach HPAs, PDBs, and other resources to each versioned Deployment |
 
 ## 🔧 Worker Configuration
 

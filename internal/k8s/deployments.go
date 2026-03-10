@@ -219,10 +219,7 @@ func NewDeploymentWithOwnerRef(
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
-	selectorLabels := map[string]string{
-		twdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
-		BuildIDLabel: TruncateString(buildID, 63),
-	}
+	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
 
 	// Set pod labels
 	podLabels := make(map[string]string)

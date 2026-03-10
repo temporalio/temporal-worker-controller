@@ -10,6 +10,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - Temporal Cloud account with API key or mTLS certificates
 - Understanding of [Worker Versioning concepts](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) (Pinned and Auto-Upgrade versioning behaviors)
+- **[cert-manager](https://cert-manager.io/docs/installation/)** — required for the `TemporalWorkerOwnedResource` validating webhook (TLS). Install it once into your Minikube cluster before deploying the controller (see step 3 below).
 
 > **Note**: This demo specifically showcases **Pinned** workflow behavior. All workflows in the demo will remain on the worker version where they started, demonstrating how the controller safely manages multiple worker versions simultaneously during deployments.
 
@@ -63,6 +64,13 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    - Note: Do not set both mTLS and API key for the same connection. If both present, the TemporalConnection Custom Resource
    Instance will not get installed in the k8s environment.
 
+3. Install cert-manager into Minikube (required for the TWOR validating webhook):
+   ```bash
+   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+   # Wait for cert-manager pods to be ready before continuing
+   kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=120s
+   ```
+
 4. Build and deploy the Controller image to the local k8s cluster:
    ```bash
    skaffold run --profile worker-controller
@@ -112,6 +120,34 @@ kubectl logs -n temporal-system deployments/temporal-worker-controller-manager -
 # View TemporalWorkerDeployment status
 kubectl get twd
 ```
+
+### Testing TemporalWorkerOwnedResource (per-version HPA)
+
+`TemporalWorkerOwnedResource` lets you attach Kubernetes resources — HPAs, PodDisruptionBudgets, etc. — to each worker version with running workers. The controller creates one copy per worker version with a running Deployment and wires it to the correct Deployment automatically.
+
+The `TemporalWorkerOwnedResource` validating webhook enforces that you have permission to create the embedded resource type yourself, and it requires TLS (provided by cert-manager, installed in step 3 above).
+
+After deploying the helloworld worker (step 5), apply the example HPA:
+
+```bash
+kubectl apply -f examples/twor-hpa.yaml
+```
+
+Watch the controller create an HPA for each worker version with running workers:
+
+```bash
+# See TemporalWorkerOwnedResource status (Applied: true once the controller reconciles)
+kubectl get temporalworkerownedresource
+
+# See the per-Build-ID HPAs
+kubectl get hpa
+```
+
+You should see one HPA per worker version with running workers, with `scaleTargetRef` automatically pointing at the correct versioned Deployment.
+
+When you deploy a new worker version (e.g., step 8), the controller creates a new HPA for the new Build ID and keeps the old one until that versioned Deployment is deleted during the sunset process.
+
+See [docs/owned-resources.md](../../docs/owned-resources.md) for full documentation.
 
 ### Cleanup
 
