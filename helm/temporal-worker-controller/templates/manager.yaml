@@ -67,7 +67,11 @@ spec:
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}
+        {{- if .Values.metrics.disableAuth }}
+        - "--metrics-bind-address=:{{ .Values.metrics.port }}"
+        {{- else }}
         - "--metrics-bind-address=127.0.0.1:{{ .Values.metrics.port }}"
+        {{- end }}
         {{- end }}
         - "--health-probe-bind-address=:8081"
         {{- if .Values.webhook.enabled }}
