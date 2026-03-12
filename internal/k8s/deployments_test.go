@@ -480,6 +480,12 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 			expectedName: "worker-name-image-v2-1-0-a1b2c3d4",
 		},
 		{
+			name:         "uppercase characters in build ID are lowercased",
+			baseName:     "worker-name",
+			buildID:      "master--HEAD",
+			expectedName: "worker-name-master--head",
+		},
+		{
 			name:         "exceed max length",
 			baseName:     "worker-name-0123456789-0123456789",
 			buildID:      "image-v2.1.0-0123456789-0123456789",
