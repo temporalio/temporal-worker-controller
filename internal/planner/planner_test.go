@@ -38,10 +38,10 @@ func TestGeneratePlan(t *testing.T) {
 		expectUpdate                     int
 		expectWorkflow                   int
 		expectConfig                     bool
-		expectConfigSetCurrent           *bool  // pointer so we can test nil
-		expectConfigRampPercent          *int32 // pointer so we can test nil, in percentage (0-100)
-		expectManagerIdentity             *string // pointer so nil means "don't assert"
-		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
+		expectConfigSetCurrent           *bool   // pointer so we can test nil
+		expectConfigRampPercent          *int32  // pointer so we can test nil, in percentage (0-100)
+		expectManagerIdentity            *string // pointer so nil means "don't assert"
+		maxVersionsIneligibleForDeletion *int32  // set by env if non-nil, else default 75
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -435,9 +435,9 @@ func TestGeneratePlan(t *testing.T) {
 					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 				},
 			},
-			expectConfig:               true,
-			expectConfigSetCurrent:     func() *bool { b := true; return &b }(),
-			expectManagerIdentity: func() *string { s := ""; return &s }(),
+			expectConfig:           true,
+			expectConfigSetCurrent: func() *bool { b := true; return &b }(),
+			expectManagerIdentity:  func() *string { s := ""; return &s }(),
 		},
 		{
 			// Same routing change scenario but ManagerIdentity is already set — no claim.
@@ -482,9 +482,9 @@ func TestGeneratePlan(t *testing.T) {
 					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 				},
 			},
-			expectConfig:               true,
-			expectConfigSetCurrent:     func() *bool { b := true; return &b }(),
-			expectManagerIdentity: func() *string { s := "some-other-client"; return &s }(),
+			expectConfig:           true,
+			expectConfigSetCurrent: func() *bool { b := true; return &b }(),
+			expectManagerIdentity:  func() *string { s := "some-other-client"; return &s }(),
 		},
 	}
 
