@@ -97,7 +97,7 @@ metadata:
   namespace: my-namespace
 spec:
   # Reference the TemporalWorkerDeployment to attach to.
-  workerRef:
+  temporalWorkerDeploymentRef:
     name: my-worker
 
   # The resource template. The controller creates one copy per worker version
@@ -131,7 +131,7 @@ metadata:
   name: my-worker-pdb
   namespace: my-namespace
 spec:
-  workerRef:
+  temporalWorkerDeploymentRef:
     name: my-worker
   object:
     apiVersion: policy/v1

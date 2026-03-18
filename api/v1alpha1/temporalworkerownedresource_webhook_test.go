@@ -18,7 +18,7 @@ import (
 )
 
 // newTWOR builds a TemporalWorkerOwnedResource with an arbitrary embedded object spec.
-func newTWOR(name, workerRefName string, embeddedObj map[string]interface{}) *temporaliov1alpha1.TemporalWorkerOwnedResource {
+func newTWOR(name, temporalWorkerDeploymentRefName string, embeddedObj map[string]interface{}) *temporaliov1alpha1.TemporalWorkerOwnedResource {
 	raw, _ := json.Marshal(embeddedObj)
 	return &temporaliov1alpha1.TemporalWorkerOwnedResource{
 		ObjectMeta: metav1.ObjectMeta{
@@ -26,8 +26,8 @@ func newTWOR(name, workerRefName string, embeddedObj map[string]interface{}) *te
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{
-				Name: workerRefName,
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
+				Name: temporalWorkerDeploymentRefName,
 			},
 			Object: runtime.RawExtension{Raw: raw},
 		},
@@ -69,8 +69,8 @@ func TestTemporalWorkerOwnedResource_ValidateCreate(t *testing.T) {
 			obj: &temporaliov1alpha1.TemporalWorkerOwnedResource{
 				ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 				Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-					WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-					Object:    runtime.RawExtension{Raw: nil},
+					TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+					Object:                      runtime.RawExtension{Raw: nil},
 				},
 			},
 			errorMsg: "object must be specified",
@@ -236,18 +236,18 @@ func TestTemporalWorkerOwnedResource_ValidateCreate(t *testing.T) {
 
 func TestTemporalWorkerOwnedResource_ValidateUpdate_Immutability(t *testing.T) {
 	tests := map[string]struct {
-		oldWorkerRef string
-		newWorkerRef string
-		errorMsg     string
+		oldTemporalWorkerDeploymentRef string
+		newTemporalWorkerDeploymentRef string
+		errorMsg                       string
 	}{
-		"same workerRef is valid": {
-			oldWorkerRef: "my-worker",
-			newWorkerRef: "my-worker",
+		"same temporalWorkerDeploymentRef is valid": {
+			oldTemporalWorkerDeploymentRef: "my-worker",
+			newTemporalWorkerDeploymentRef: "my-worker",
 		},
-		"changing workerRef is forbidden": {
-			oldWorkerRef: "my-worker",
-			newWorkerRef: "different-worker",
-			errorMsg:     "workerRef.name is immutable",
+		"changing temporalWorkerDeploymentRef is forbidden": {
+			oldTemporalWorkerDeploymentRef: "my-worker",
+			newTemporalWorkerDeploymentRef: "different-worker",
+			errorMsg:                       "temporalWorkerDeploymentRef.name is immutable",
 		},
 	}
 
@@ -256,8 +256,8 @@ func TestTemporalWorkerOwnedResource_ValidateUpdate_Immutability(t *testing.T) {
 			ctx := context.Background()
 			v := newValidatorNoAPI()
 
-			oldTWOR := newTWOR("my-hpa", tc.oldWorkerRef, validHPAObject())
-			newTWOR := newTWOR("my-hpa", tc.newWorkerRef, validHPAObject())
+			oldTWOR := newTWOR("my-hpa", tc.oldTemporalWorkerDeploymentRef, validHPAObject())
+			newTWOR := newTWOR("my-hpa", tc.newTemporalWorkerDeploymentRef, validHPAObject())
 
 			_, err := v.ValidateUpdate(ctx, oldTWOR, newTWOR)
 
@@ -316,8 +316,8 @@ func TestTemporalWorkerOwnedResource_ValidateDelete_NilRaw(t *testing.T) {
 	twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
 		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-			Object:    runtime.RawExtension{Raw: nil},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			Object:                      runtime.RawExtension{Raw: nil},
 		},
 	}
 	_, err := v.ValidateDelete(ctx, twor)

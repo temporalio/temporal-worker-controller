@@ -39,8 +39,8 @@ const (
 	deployOwnerKey = ".metadata.controller"
 	buildIDLabel   = "temporal.io/build-id"
 
-	// tworWorkerRefKey is the field index key for TemporalWorkerOwnedResource by workerRef.name.
-	tworWorkerRefKey = ".spec.workerRef.name"
+	// tworTemporalWorkerDeploymentRefKey is the field index key for TemporalWorkerOwnedResource by temporalWorkerDeploymentRef.name.
+	tworTemporalWorkerDeploymentRefKey = ".spec.temporalWorkerDeploymentRef.name"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -252,6 +252,16 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	status.Conditions = workerDeploy.Status.Conditions
 	workerDeploy.Status = *status
 
+	// Idempotently maintain RolloutComplete whenever the target version is already
+	// current. The condition is also set inside updateVersionConfig on the reconcile
+	// that actually calls SetCurrentVersion, but if that Status.Update was lost to a
+	// conflict the planner will return nil on the next reconcile (target already current)
+	// and never re-set it — this ensures the condition is always present.
+	if status.TargetVersion.Status == temporaliov1alpha1.VersionStatusCurrent {
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue,
+			temporaliov1alpha1.ReasonRolloutComplete, fmt.Sprintf("Rollout complete for buildID %s", status.TargetVersion.BuildID))
+	}
+
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	//                 (defaults were already set above, but have to be set again after status update)
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
@@ -350,14 +360,14 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
-	// Index TemporalWorkerOwnedResource by spec.workerRef.name for efficient listing.
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.TemporalWorkerOwnedResource{}, tworWorkerRefKey, func(rawObj client.Object) []string {
+	// Index TemporalWorkerOwnedResource by spec.temporalWorkerDeploymentRef.name for efficient listing.
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.TemporalWorkerOwnedResource{}, tworTemporalWorkerDeploymentRefKey, func(rawObj client.Object) []string {
 		twor, ok := rawObj.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
 		if !ok {
 			mgr.GetLogger().Error(errors.New("error indexing TemporalWorkerOwnedResources"), "could not convert raw object", rawObj)
 			return nil
 		}
-		return []string{twor.Spec.WorkerRef.Name}
+		return []string{twor.Spec.TemporalWorkerDeploymentRef.Name}
 	}); err != nil {
 		return err
 	}
@@ -384,7 +394,7 @@ func (r *TemporalWorkerDeploymentReconciler) findTWDsForOwnedResource(ctx contex
 	return []reconcile.Request{
 		{
 			NamespacedName: types.NamespacedName{
-				Name:      tworObj.Spec.WorkerRef.Name,
+				Name:      tworObj.Spec.TemporalWorkerDeploymentRef.Name,
 				Namespace: twor.GetNamespace(),
 			},
 		},

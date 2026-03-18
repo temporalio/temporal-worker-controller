@@ -25,7 +25,7 @@ metadata:
   namespace: default
 spec:
   # Must match the name of the TemporalWorkerDeployment.
-  workerRef:
+  temporalWorkerDeploymentRef:
     name: helloworld
 
   # The resource template. The controller creates one copy per active Build ID,

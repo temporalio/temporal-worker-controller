@@ -9,8 +9,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// WorkerDeploymentReference references a TemporalWorkerDeployment in the same namespace.
-type WorkerDeploymentReference struct {
+// TemporalWorkerDeploymentReference references a TemporalWorkerDeployment in the same Kubernetes namespace.
+type TemporalWorkerDeploymentReference struct {
 	// Name of the TemporalWorkerDeployment resource in the same namespace.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
@@ -19,9 +19,9 @@ type WorkerDeploymentReference struct {
 
 // TemporalWorkerOwnedResourceSpec defines the desired state of TemporalWorkerOwnedResource.
 type TemporalWorkerOwnedResourceSpec struct {
-	// WorkerRef references the TemporalWorkerDeployment to attach this resource to.
+	// TemporalWorkerDeploymentRef references the TemporalWorkerDeployment to attach this resource to.
 	// +kubebuilder:validation:Required
-	WorkerRef WorkerDeploymentReference `json:"workerRef"`
+	TemporalWorkerDeploymentRef TemporalWorkerDeploymentReference `json:"temporalWorkerDeploymentRef"`
 
 	// Object is the Kubernetes resource template to attach to each versioned Deployment.
 	// One copy of this resource is created per active Build ID, owned by the corresponding
@@ -74,7 +74,7 @@ type TemporalWorkerOwnedResourceStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=twor
-//+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.workerRef.name",description="Referenced TemporalWorkerDeployment"
+//+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.temporalWorkerDeploymentRef.name",description="Referenced TemporalWorkerDeployment"
 //+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.object.kind",description="Kind of owned resource"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 

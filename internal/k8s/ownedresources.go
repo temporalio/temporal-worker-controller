@@ -125,7 +125,7 @@ func RenderOwnedResource(
 		BuildID:           buildID,
 	}
 
-	selectorLabels := ComputeSelectorLabels(twor.Spec.WorkerRef.Name, buildID)
+	selectorLabels := ComputeSelectorLabels(twor.Spec.TemporalWorkerDeploymentRef.Name, buildID)
 
 	// Step 2: auto-inject scaleTargetRef and matchLabels into spec subtree
 	if spec, ok := raw["spec"].(map[string]interface{}); ok {
@@ -144,7 +144,7 @@ func RenderOwnedResource(
 	raw = renderedMap
 
 	// Step 4: set metadata
-	resourceName := ComputeOwnedResourceName(twor.Spec.WorkerRef.Name, twor.Name, buildID)
+	resourceName := ComputeOwnedResourceName(twor.Spec.TemporalWorkerDeploymentRef.Name, twor.Name, buildID)
 
 	meta, ok := raw["metadata"].(map[string]interface{})
 	if !ok || meta == nil {

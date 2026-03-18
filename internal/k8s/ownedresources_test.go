@@ -219,7 +219,7 @@ func TestRenderOwnedResource(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
 				Name: "my-worker",
 			},
 			Object: runtime.RawExtension{Raw: rawBytes},
@@ -280,7 +280,7 @@ func TestRenderOwnedResource_WithTemplates(t *testing.T) {
 			Namespace: "production",
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
 				Name: "my-worker",
 			},
 			Object: runtime.RawExtension{Raw: rawBytes},

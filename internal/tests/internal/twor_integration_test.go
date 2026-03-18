@@ -391,8 +391,8 @@ func tworTestCases() []testCase {
 
 // makeHPATWOR constructs a TemporalWorkerOwnedResource with an HPA spec where
 // scaleTargetRef is null (triggering auto-injection by the controller).
-func makeHPATWOR(name, namespace, workerRefName string) *temporaliov1alpha1.TemporalWorkerOwnedResource {
-	return makeTWORWithRaw(name, namespace, workerRefName, []byte(`{
+func makeHPATWOR(name, namespace, temporalWorkerDeploymentRefName string) *temporaliov1alpha1.TemporalWorkerOwnedResource {
+	return makeTWORWithRaw(name, namespace, temporalWorkerDeploymentRefName, []byte(`{
 		"apiVersion": "autoscaling/v2",
 		"kind": "HorizontalPodAutoscaler",
 		"spec": {
@@ -405,15 +405,15 @@ func makeHPATWOR(name, namespace, workerRefName string) *temporaliov1alpha1.Temp
 }
 
 // makeTWORWithRaw constructs a TemporalWorkerOwnedResource with the given raw JSON object spec.
-func makeTWORWithRaw(name, namespace, workerRefName string, raw []byte) *temporaliov1alpha1.TemporalWorkerOwnedResource {
+func makeTWORWithRaw(name, namespace, temporalWorkerDeploymentRefName string, raw []byte) *temporaliov1alpha1.TemporalWorkerOwnedResource {
 	return &temporaliov1alpha1.TemporalWorkerOwnedResource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerRefName},
-			Object:    runtime.RawExtension{Raw: raw},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: temporalWorkerDeploymentRefName},
+			Object:                      runtime.RawExtension{Raw: raw},
 		},
 	}
 }

@@ -141,7 +141,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	var tworList temporaliov1alpha1.TemporalWorkerOwnedResourceList
 	if err := r.List(ctx, &tworList,
 		client.InNamespace(w.Namespace),
-		client.MatchingFields{tworWorkerRefKey: w.Name},
+		client.MatchingFields{tworTemporalWorkerDeploymentRefKey: w.Name},
 	); err != nil {
 		return nil, fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
 	}

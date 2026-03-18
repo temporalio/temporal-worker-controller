@@ -43,7 +43,7 @@ Before analyzing coverage, it helps to be explicit about what the controller is 
 - Rejects non-null `scaleTargetRef` or `selector.matchLabels` (controller owns these)
 - Enforces SAR: the requesting user must be able to create/update the embedded resource type
 - Enforces SAR: the controller's service account must be able to create/update the embedded resource type
-- Makes `workerRef.name` immutable
+- Makes `temporalWorkerDeploymentRef.name` immutable
 
 ### 5. Kubernetes Correctness
 - All controller-created resources have the TWD as their controller owner reference
@@ -173,7 +173,7 @@ Assert that `TWD.status.targetVersion.replicas` (if reported) matches what's act
 
 **17. Webhook: SAR fail — controller SA lacks permission** ✅
 
-**18. Webhook: workerRef.name immutability enforced via real API admission** ✅
+**18. Webhook: temporalWorkerDeploymentRef.name immutability enforced via real API admission** ✅
 
 ---
 

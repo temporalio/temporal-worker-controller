@@ -2976,8 +2976,8 @@ func TestGetOwnedResourceApplies(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "nil-raw", Namespace: "default"},
 					Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-						WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-						Object:    runtime.RawExtension{Raw: nil},
+						TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+						Object:                      runtime.RawExtension{Raw: nil},
 					},
 				},
 				createTestTWOR("my-hpa", "my-worker"),
@@ -3065,7 +3065,7 @@ func TestGetOwnedResourceApplies_FieldManagerDistinctPerTWOR(t *testing.T) {
 
 // createTestTWOR builds a minimal valid TemporalWorkerOwnedResource for use in tests.
 // The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.
-func createTestTWOR(name, workerRefName string) temporaliov1alpha1.TemporalWorkerOwnedResource {
+func createTestTWOR(name, temporalWorkerDeploymentRefName string) temporaliov1alpha1.TemporalWorkerOwnedResource {
 	hpaSpec := map[string]interface{}{
 		"apiVersion": "autoscaling/v2",
 		"kind":       "HorizontalPodAutoscaler",
@@ -3082,8 +3082,8 @@ func createTestTWOR(name, workerRefName string) temporaliov1alpha1.TemporalWorke
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerRefName},
-			Object:    runtime.RawExtension{Raw: raw},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: temporalWorkerDeploymentRefName},
+			Object:                      runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -3125,8 +3125,8 @@ func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
 	twor := temporaliov1alpha1.TemporalWorkerOwnedResource{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-			Object:    runtime.RawExtension{Raw: raw},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			Object:                      runtime.RawExtension{Raw: raw},
 		},
 	}
 
@@ -3145,7 +3145,7 @@ func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
 	matchLabels, ok := selector["matchLabels"].(map[string]interface{})
 	require.True(t, ok, "matchLabels should have been auto-injected")
 
-	// The injected labels must equal ComputeSelectorLabels(workerRef, buildID).
+	// The injected labels must equal ComputeSelectorLabels(temporalWorkerDeploymentRef, buildID).
 	expected := k8s.ComputeSelectorLabels("my-worker", "build-abc")
 	for k, v := range expected {
 		assert.Equal(t, v, matchLabels[k], "injected matchLabels[%q]", k)
@@ -3168,8 +3168,8 @@ func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
 	twor := temporaliov1alpha1.TemporalWorkerOwnedResource{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-monitor", Namespace: "k8s-production"},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-			Object:    runtime.RawExtension{Raw: raw},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			Object:                      runtime.RawExtension{Raw: raw},
 		},
 	}
 
@@ -3190,7 +3190,7 @@ func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
 
 // createTestTWORWithInvalidTemplate builds a TWOR whose spec.object contains a broken Go
 // template expression, causing RenderOwnedResource to return an error.
-func createTestTWORWithInvalidTemplate(name, workerRefName string) temporaliov1alpha1.TemporalWorkerOwnedResource {
+func createTestTWORWithInvalidTemplate(name, temporalWorkerDeploymentRefName string) temporaliov1alpha1.TemporalWorkerOwnedResource {
 	badSpec := map[string]interface{}{
 		"apiVersion": "autoscaling/v2",
 		"kind":       "HorizontalPodAutoscaler",
@@ -3205,8 +3205,8 @@ func createTestTWORWithInvalidTemplate(name, workerRefName string) temporaliov1a
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			WorkerRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerRefName},
-			Object:    runtime.RawExtension{Raw: raw},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: temporalWorkerDeploymentRefName},
+			Object:                      runtime.RawExtension{Raw: raw},
 		},
 	}
 }

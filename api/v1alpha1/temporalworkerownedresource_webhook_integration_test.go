@@ -12,7 +12,7 @@ package v1alpha1
 //   - Spec-only rejections (banned kind) work end-to-end
 //   - SubjectAccessReview (SAR) checks for the requesting user are enforced
 //   - SAR checks for the controller service account are enforced
-//   - workerRef.name immutability is enforced via a real update request
+//   - temporalWorkerDeploymentRef.name immutability is enforced via a real update request
 //
 // Controller SA identity: POD_NAMESPACE=test-system, SERVICE_ACCOUNT_NAME=test-controller
 // (set in webhook_suite_test.go BeforeSuite before the validator is constructed).
@@ -47,7 +47,7 @@ func hpaObjForIntegration() map[string]interface{} {
 }
 
 // makeTWORForWebhook builds a TemporalWorkerOwnedResource in the given namespace.
-func makeTWORForWebhook(name, ns, workerRef string, embeddedObj map[string]interface{}) *TemporalWorkerOwnedResource {
+func makeTWORForWebhook(name, ns, temporalWorkerDeploymentRef string, embeddedObj map[string]interface{}) *TemporalWorkerOwnedResource {
 	raw, _ := json.Marshal(embeddedObj)
 	return &TemporalWorkerOwnedResource{
 		ObjectMeta: metav1.ObjectMeta{
@@ -55,8 +55,8 @@ func makeTWORForWebhook(name, ns, workerRef string, embeddedObj map[string]inter
 			Namespace: ns,
 		},
 		Spec: TemporalWorkerOwnedResourceSpec{
-			WorkerRef: WorkerDeploymentReference{Name: workerRef},
-			Object:    runtime.RawExtension{Raw: raw},
+			TemporalWorkerDeploymentRef: TemporalWorkerDeploymentReference{Name: temporalWorkerDeploymentRef},
+			Object:                      runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -198,10 +198,10 @@ var _ = Describe("TemporalWorkerOwnedResource webhook integration", func() {
 		Expect(err.Error()).To(ContainSubstring("not authorized"))
 	})
 
-	// Test 18: workerRef.name immutability enforced via a real HTTP update request.
-	// First create a valid TWOR, then attempt to change workerRef.name via k8sClient.Update.
+	// Test 18: temporalWorkerDeploymentRef.name immutability enforced via a real HTTP update request.
+	// First create a valid TWOR, then attempt to change temporalWorkerDeploymentRef.name via k8sClient.Update.
 	// The webhook must reject the update with a message about immutability.
-	It("rejects workerRef.name change via real HTTP update", func() {
+	It("rejects temporalWorkerDeploymentRef.name change via real HTTP update", func() {
 		ns := makeTestNamespace("wh-immutable")
 		grantControllerSAHPACreateAccess(ns)
 
@@ -212,10 +212,10 @@ var _ = Describe("TemporalWorkerOwnedResource webhook integration", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "t18-immutable", Namespace: ns}, &created)).To(Succeed())
 
 		updated := created.DeepCopy()
-		updated.Spec.WorkerRef.Name = "different-worker"
+		updated.Spec.TemporalWorkerDeploymentRef.Name = "different-worker"
 		err := k8sClient.Update(ctx, updated)
-		Expect(err).To(HaveOccurred(), "webhook must reject workerRef.name change")
-		Expect(err.Error()).To(ContainSubstring("workerRef.name"))
+		Expect(err).To(HaveOccurred(), "webhook must reject temporalWorkerDeploymentRef.name change")
+		Expect(err.Error()).To(ContainSubstring("temporalWorkerDeploymentRef.name"))
 		Expect(err.Error()).To(ContainSubstring("immutable"))
 	})
 })
