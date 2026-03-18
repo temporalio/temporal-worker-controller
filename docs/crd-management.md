@@ -7,9 +7,10 @@ Helm's `crds/` directory installs CRDs on `helm install` but **silently ignores 
 To provide an explicit, version-tracked CRD upgrade path, the temporal-worker-controller ships CRDs as a separate Helm chart: `temporal-worker-controller-crds`. This is the same pattern used by [Karpenter](https://karpenter.sh/docs/upgrading/upgrade-guide/) (`karpenter-crd`) and [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds).
 
 Benefits:
-- CRDs survive accidental `helm uninstall` of either chart (`helm.sh/resource-policy: keep`)
 - CRDs and the controller can be upgraded and rolled back independently
 - Clear versioning: both charts always use the same version number
+- CRDs won't be accidentally uninstalled via `helm uninstall` of `temporal-worker-controller` chart
+- CRDs can be uninstalled separately with `helm uninstall temporal-worker-controller-crds`
 
 ## Compatibility Commitment
 

@@ -153,10 +153,6 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	GOWORK=off GO111MODULE=on $(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true webhook paths=./api/... paths=./internal/... paths=./cmd/... \
     output:crd:artifacts:config=helm/temporal-worker-controller-crds/templates
-	@for f in helm/temporal-worker-controller-crds/templates/temporal.io_*.yaml; do \
-	    grep -q 'helm.sh/resource-policy' "$$f" || \
-	    awk '/^  annotations:/{print; print "    helm.sh/resource-policy: keep"; next}1' "$$f" > "$$f.tmp" && mv "$$f.tmp" "$$f"; \
-	done
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
