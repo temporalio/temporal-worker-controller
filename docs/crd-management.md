@@ -10,7 +10,7 @@ Benefits:
 - CRDs and the controller can be upgraded and rolled back independently
 - Clear versioning: both charts always use the same version number
 - CRDs won't be accidentally uninstalled via `helm uninstall` of `temporal-worker-controller` chart
-- CRDs can be uninstalled separately with `helm uninstall temporal-worker-controller-crds`
+- CRDs can be uninstalled separately with `helm uninstall temporal-worker-controller-crds`. WARNING: Uninstalling CRDs will delete all Custom Resources in your cluster that use those CRDs.
 
 ## Compatibility Commitment
 
