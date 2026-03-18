@@ -27,18 +27,6 @@ Benefits:
 - No existing fields may be removed or have their types changed within a minor version
 - These rules apply to both spec and status fields
 
-### Compatibility scenarios
-
-The table below defines what must hold true for the commitment to be considered met. "N" is the current release and "N+1" is the next.
-
-| Scenario | CRDs | Controller | Expected outcome |
-|---|---|---|---|
-| Normal upgrade (recommended order) | N → N+1 first | N → N+1 after | No issues |
-| CRDs ahead, controller not yet upgraded | N+1 | N | Safe: new fields are optional, so the older controller ignores unknown fields in reads and doesn't include them in its writes (which is acceptable since they're optional) |
-| Wrong order: controller upgraded first | N | N+1 (CRDs not yet upgraded) | Silent feature degradation: new status fields the N+1 controller writes are pruned by the API server (schema still at N). All existing CRs continue reconciling normally. New features depending on those fields don't work until CRDs are upgraded. No crashes, no per-CR errors. |
-| Controller rollback (CRDs stay at N+1) | N+1 | N+1 → N | Safe for spec (the controller never writes TWD spec). Status fields added in N+1 will be absent after the first reconciliation cycle — this is acceptable because status is fully reconstituted from live state, not preserved across reconciles. |
-| CRD rollback | N+1 → N | N | See [CRD rollback and field pruning](#crd-rollback-and-field-pruning) — this is the dangerous case. |
-
 ## Initial Installation
 
 Install the CRDs chart first, then the controller chart:
