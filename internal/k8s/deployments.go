@@ -187,7 +187,8 @@ func TruncateString(s string, n int) string {
 func CleanStringForDNS(s string) string {
 	// Keep only letters, numbers, and dashes.
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
-	return re.ReplaceAllString(s, ResourceNameSeparator)
+	// Lowercase to ensure RFC 1123 DNS label compliance for Kubernetes resource names.
+	return strings.ToLower(re.ReplaceAllString(s, ResourceNameSeparator))
 }
 
 // Build ID is used as a label in k8s, and as the build ID for
