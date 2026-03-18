@@ -113,7 +113,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	t.Log("bootstrapping test environment")
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			filepath.Join(getRepoRoot(t), "helm", "temporal-worker-controller", "crds"),
+			filepath.Join(getRepoRoot(t), "helm", "temporal-worker-controller-crds", "templates"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}
@@ -164,7 +164,9 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 
 	// Start manager
 	ctx, cancel := context.WithCancel(context.Background())
+	managerStopped := make(chan struct{})
 	go func() {
+		defer close(managerStopped)
 		if err := mgr.Start(ctx); err != nil {
 			t.Errorf("failed to start manager: %v", err)
 		}
@@ -173,6 +175,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	// Return cleanup function
 	cleanup := func() {
 		cancel()
+		<-managerStopped
 		if err := testEnv.Stop(); err != nil {
 			t.Errorf("failed to stop test environment: %v", err)
 		}
