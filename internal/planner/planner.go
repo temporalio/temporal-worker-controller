@@ -47,9 +47,10 @@ type VersionConfig struct {
 	// Acceptable values [0,100]
 	RampPercentage int32
 
-	// ClaimManagerIdentity indicates the controller should call SetManagerIdentity(Self=true)
-	// before applying this version config, because ManagerIdentity is currently unset.
-	ClaimManagerIdentity bool
+	// ManagerIdentity is the current manager identity of the worker deployment in Temporal.
+	// An empty string indicates the controller should claim the identity before applying
+	// any routing config changes.
+	ManagerIdentity string
 }
 
 // WorkflowConfig defines a workflow to be started
@@ -551,10 +552,14 @@ func getVersionConfigDiff(
 		}
 	}
 
+	managerIdentity := ""
+	if temporalState != nil {
+		managerIdentity = temporalState.ManagerIdentity
+	}
 	vcfg := &VersionConfig{
-		ConflictToken:        conflictToken,
-		BuildID:              status.TargetVersion.BuildID,
-		ClaimManagerIdentity: temporalState != nil && temporalState.ManagerIdentity == "",
+		ConflictToken:   conflictToken,
+		BuildID:         status.TargetVersion.BuildID,
+		ManagerIdentity: managerIdentity,
 	}
 
 	// If there is no current version and presence of unversioned pollers is not confirmed for all

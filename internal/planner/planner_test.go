@@ -40,7 +40,7 @@ func TestGeneratePlan(t *testing.T) {
 		expectConfig                     bool
 		expectConfigSetCurrent           *bool  // pointer so we can test nil
 		expectConfigRampPercent          *int32 // pointer so we can test nil, in percentage (0-100)
-		expectClaimManagerIdentity       *bool  // pointer so nil means "don't assert"
+		expectManagerIdentity             *string // pointer so nil means "don't assert"
 		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
 	}{
 		{
@@ -437,7 +437,7 @@ func TestGeneratePlan(t *testing.T) {
 			},
 			expectConfig:               true,
 			expectConfigSetCurrent:     func() *bool { b := true; return &b }(),
-			expectClaimManagerIdentity: func() *bool { b := true; return &b }(),
+			expectManagerIdentity: func() *string { s := ""; return &s }(),
 		},
 		{
 			// Same routing change scenario but ManagerIdentity is already set — no claim.
@@ -484,7 +484,7 @@ func TestGeneratePlan(t *testing.T) {
 			},
 			expectConfig:               true,
 			expectConfigSetCurrent:     func() *bool { b := true; return &b }(),
-			expectClaimManagerIdentity: func() *bool { b := false; return &b }(),
+			expectManagerIdentity: func() *string { s := "some-other-client"; return &s }(),
 		},
 	}
 
@@ -507,9 +507,9 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
-			if tc.expectClaimManagerIdentity != nil {
-				require.NotNil(t, plan.VersionConfig, "expected VersionConfig to be non-nil when asserting ClaimManagerIdentity")
-				assert.Equal(t, *tc.expectClaimManagerIdentity, plan.VersionConfig.ClaimManagerIdentity, "unexpected ClaimManagerIdentity")
+			if tc.expectManagerIdentity != nil {
+				require.NotNil(t, plan.VersionConfig, "expected VersionConfig to be non-nil when asserting ManagerIdentity")
+				assert.Equal(t, *tc.expectManagerIdentity, plan.VersionConfig.ManagerIdentity, "unexpected ManagerIdentity")
 			}
 
 			if tc.expectConfig {
