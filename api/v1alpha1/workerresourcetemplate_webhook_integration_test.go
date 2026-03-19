@@ -12,7 +12,7 @@ package v1alpha1
 //   - Spec-only rejections (kind not in allowed list) work end-to-end
 //   - SubjectAccessReview (SAR) checks for the requesting user are enforced
 //   - SAR checks for the controller service account are enforced
-//   - workerDeploymentRef.name immutability is enforced via a real update request
+//   - temporalWorkerDeploymentRef.name immutability is enforced via a real update request
 //
 // Controller SA identity: POD_NAMESPACE=test-system, SERVICE_ACCOUNT_NAME=test-controller
 // (set in webhook_suite_test.go BeforeSuite before the validator is constructed).
@@ -55,7 +55,7 @@ func makeWRTForWebhook(name, ns, workerDeploymentRef string, embeddedObj map[str
 			Namespace: ns,
 		},
 		Spec: WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: WorkerDeploymentReference{Name: workerDeploymentRef},
+			TemporalWorkerDeploymentRef: TemporalWorkerDeploymentReference{Name: workerDeploymentRef},
 			Object:              runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -198,8 +198,8 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(err.Error()).To(ContainSubstring("not authorized"))
 	})
 
-	// Test 18: workerDeploymentRef.name immutability enforced via a real HTTP update request.
-	// First create a valid WRT, then attempt to change workerDeploymentRef.name via k8sClient.Update.
+	// Test 18: temporalWorkerDeploymentRef.name immutability enforced via a real HTTP update request.
+	// First create a valid WRT, then attempt to change temporalWorkerDeploymentRef.name via k8sClient.Update.
 	// The webhook must reject the update with a message about immutability.
 	It("rejects workerDeploymentRef.name change via real HTTP update", func() {
 		ns := makeTestNamespace("wh-immutable")
@@ -212,10 +212,10 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "t18-immutable", Namespace: ns}, &created)).To(Succeed())
 
 		updated := created.DeepCopy()
-		updated.Spec.WorkerDeploymentRef.Name = "different-worker"
+		updated.Spec.TemporalWorkerDeploymentRef.Name = "different-worker"
 		err := k8sClient.Update(ctx, updated)
 		Expect(err).To(HaveOccurred(), "webhook must reject workerDeploymentRef.name change")
-		Expect(err.Error()).To(ContainSubstring("workerDeploymentRef.name"))
+		Expect(err.Error()).To(ContainSubstring("temporalWorkerDeploymentRef.name"))
 		Expect(err.Error()).To(ContainSubstring("immutable"))
 	})
 })

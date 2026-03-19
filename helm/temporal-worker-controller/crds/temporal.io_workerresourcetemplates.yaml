@@ -18,7 +18,7 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: Referenced TemporalWorkerDeployment
-      jsonPath: .spec.workerDeploymentRef.name
+      jsonPath: .spec.temporalWorkerDeploymentRef.name
       name: Worker
       type: string
     - description: Kind of owned resource
@@ -44,7 +44,7 @@ spec:
               object:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
-              workerDeploymentRef:
+              temporalWorkerDeploymentRef:
                 properties:
                   name:
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
@@ -54,7 +54,7 @@ spec:
                 type: object
             required:
             - object
-            - workerDeploymentRef
+            - temporalWorkerDeploymentRef
             type: object
           status:
             properties:

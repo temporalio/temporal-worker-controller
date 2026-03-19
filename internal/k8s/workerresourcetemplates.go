@@ -125,7 +125,7 @@ func RenderWorkerResourceTemplate(
 		BuildID:           buildID,
 	}
 
-	selectorLabels := ComputeSelectorLabels(wrt.Spec.WorkerDeploymentRef.Name, buildID)
+	selectorLabels := ComputeSelectorLabels(wrt.Spec.TemporalWorkerDeploymentRef.Name, buildID)
 
 	// Step 2: auto-inject scaleTargetRef and matchLabels into spec subtree
 	if spec, ok := raw["spec"].(map[string]interface{}); ok {
@@ -144,7 +144,7 @@ func RenderWorkerResourceTemplate(
 	raw = renderedMap
 
 	// Step 4: set metadata
-	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.WorkerDeploymentRef.Name, wrt.Name, buildID)
+	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.TemporalWorkerDeploymentRef.Name, wrt.Name, buildID)
 
 	meta, ok := raw["metadata"].(map[string]interface{})
 	if !ok || meta == nil {

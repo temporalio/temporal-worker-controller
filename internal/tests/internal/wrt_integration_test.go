@@ -412,7 +412,7 @@ func makeWRTWithRaw(name, namespace, workerDeploymentRefName string, raw []byte)
 			Namespace: namespace,
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
 			Object:              runtime.RawExtension{Raw: raw},
 		},
 	}
