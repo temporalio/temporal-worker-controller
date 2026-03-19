@@ -47,9 +47,11 @@ func validHPAObject() map[string]interface{} {
 }
 
 // newValidatorNoAPI creates a validator with no API client (API checks skipped).
+// AllowedKinds mirrors the default Helm values (HPA + PDB) so that most tests
+// use realistic allowed kinds while kinds like Deployment remain disallowed.
 func newValidatorNoAPI() *temporaliov1alpha1.TemporalWorkerOwnedResourceValidator {
 	return &temporaliov1alpha1.TemporalWorkerOwnedResourceValidator{
-		BannedKinds: []string{"Deployment", "StatefulSet", "Job", "Pod", "CronJob"},
+		AllowedKinds: []string{"HorizontalPodAutoscaler", "PodDisruptionBudget"},
 	}
 }
 
@@ -107,37 +109,37 @@ func TestTemporalWorkerOwnedResource_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: "metadata.namespace is set by the controller",
 		},
-		"banned kind Deployment": {
+		"kind not in allowed list — Deployment": {
 			obj: newTWOR("bad-deploy", "my-worker", map[string]interface{}{
 				"apiVersion": "apps/v1",
 				"kind":       "Deployment",
 				"spec":       map[string]interface{}{},
 			}),
-			errorMsg: `kind "Deployment" is not allowed`,
+			errorMsg: `kind "Deployment" is not in the allowed list`,
 		},
-		"banned kind StatefulSet": {
+		"kind not in allowed list — StatefulSet": {
 			obj: newTWOR("bad-sts", "my-worker", map[string]interface{}{
 				"apiVersion": "apps/v1",
 				"kind":       "StatefulSet",
 				"spec":       map[string]interface{}{},
 			}),
-			errorMsg: `kind "StatefulSet" is not allowed`,
+			errorMsg: `kind "StatefulSet" is not in the allowed list`,
 		},
-		"banned kind Pod": {
+		"kind not in allowed list — Pod": {
 			obj: newTWOR("bad-pod", "my-worker", map[string]interface{}{
 				"apiVersion": "v1",
 				"kind":       "Pod",
 				"spec":       map[string]interface{}{},
 			}),
-			errorMsg: `kind "Pod" is not allowed`,
+			errorMsg: `kind "Pod" is not in the allowed list`,
 		},
-		"banned kind case-insensitive": {
+		"allowed kind check is case-insensitive": {
 			obj: newTWOR("bad-job", "my-worker", map[string]interface{}{
 				"apiVersion": "batch/v1",
-				"kind":       "job", // lowercase
+				"kind":       "job", // lowercase — not in allowed list
 				"spec":       map[string]interface{}{},
 			}),
-			errorMsg: `kind "job" is not allowed`,
+			errorMsg: `kind "job" is not in the allowed list`,
 		},
 		"minReplicas is 0": {
 			obj: newTWOR("zero-replicas", "my-worker", map[string]interface{}{
@@ -275,7 +277,7 @@ func TestTemporalWorkerOwnedResource_ValidateUpdate_ValidatesNewSpec(t *testing.
 	ctx := context.Background()
 	v := newValidatorNoAPI()
 
-	// Update from a valid spec to one with banned kind should fail
+	// Update from a valid spec to one with a kind not in the allowed list should fail
 	oldTWOR := newTWOR("my-hpa", "my-worker", validHPAObject())
 	invalidNew := newTWOR("my-hpa", "my-worker", map[string]interface{}{
 		"apiVersion": "apps/v1",
@@ -285,7 +287,7 @@ func TestTemporalWorkerOwnedResource_ValidateUpdate_ValidatesNewSpec(t *testing.
 
 	_, err := v.ValidateUpdate(ctx, oldTWOR, invalidNew)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `kind "Deployment" is not allowed`)
+	assert.Contains(t, err.Error(), `kind "Deployment" is not in the allowed list`)
 }
 
 func TestTemporalWorkerOwnedResource_ValidateDelete(t *testing.T) {
@@ -346,28 +348,36 @@ func TestTemporalWorkerOwnedResource_ValidateUpdate_WrongObjectType(t *testing.T
 	assert.Contains(t, err.Error(), "expected a TemporalWorkerOwnedResource for new object")
 }
 
-func TestTemporalWorkerOwnedResource_CustomBannedKinds(t *testing.T) {
+func TestTemporalWorkerOwnedResource_AllowedKinds(t *testing.T) {
 	ctx := context.Background()
+
+	// Validator with an explicit allow list: only MyScaler is permitted.
 	v := &temporaliov1alpha1.TemporalWorkerOwnedResourceValidator{
-		BannedKinds: []string{"CustomBannedKind"},
+		AllowedKinds: []string{"MyScaler"},
 	}
 
-	// CustomBannedKind should be rejected
-	_, err := v.ValidateCreate(ctx, newTWOR("bad", "my-worker", map[string]interface{}{
+	// MyScaler is in the allowed list — passes kind check (API checks skipped).
+	_, err := v.ValidateCreate(ctx, newTWOR("ok", "my-worker", map[string]interface{}{
 		"apiVersion": "example.com/v1",
-		"kind":       "CustomBannedKind",
+		"kind":       "MyScaler",
 		"spec":       map[string]interface{}{},
 	}))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `kind "CustomBannedKind" is not allowed`)
+	require.NoError(t, err, "MyScaler should be allowed when it is in the AllowedKinds list")
 
-	// Default banned kinds (Deployment) should be allowed if custom list is set
-	_, err = v.ValidateCreate(ctx, newTWOR("deploy", "my-worker", map[string]interface{}{
+	// HPA is NOT in this allow list — should be rejected.
+	_, err = v.ValidateCreate(ctx, newTWOR("hpa", "my-worker", validHPAObject()))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `kind "HorizontalPodAutoscaler" is not in the allowed list`)
+
+	// Validator with empty AllowedKinds: all kinds are rejected (deny-all).
+	vEmpty := &temporaliov1alpha1.TemporalWorkerOwnedResourceValidator{}
+	_, err = vEmpty.ValidateCreate(ctx, newTWOR("deploy", "my-worker", map[string]interface{}{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
 		"spec":       map[string]interface{}{},
 	}))
-	require.NoError(t, err, "Deployment should be allowed when custom bannedKinds list does not include it")
+	require.Error(t, err, "Deployment should be rejected when AllowedKinds is empty (deny-all)")
+	assert.Contains(t, err.Error(), `kind "Deployment" is not in the allowed list`)
 }
 
 func TestTemporalWorkerOwnedResource_MultipleErrors(t *testing.T) {

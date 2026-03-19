@@ -9,7 +9,7 @@ package v1alpha1
 // These tests run through the real envtest HTTP admission path — the kube-apiserver
 // sends actual AdmissionRequests to the webhook server — validating that:
 //   - The webhook is correctly registered and called on TWOR create/update/delete
-//   - Spec-only rejections (banned kind) work end-to-end
+//   - Spec-only rejections (kind not in allowed list) work end-to-end
 //   - SubjectAccessReview (SAR) checks for the requesting user are enforced
 //   - SAR checks for the controller service account are enforced
 //   - temporalWorkerDeploymentRef.name immutability is enforced via a real update request
@@ -33,7 +33,7 @@ import (
 )
 
 // hpaObjForIntegration returns a minimal valid HPA embedded object spec.
-// HPA is not in the default banned kinds list and is namespace-scoped, making
+// HPA is in the default allowed kinds list and is namespace-scoped, making
 // it a suitable resource for webhook integration tests.
 func hpaObjForIntegration() map[string]interface{} {
 	return map[string]interface{}{
@@ -135,20 +135,20 @@ func impersonatedClient(username string) client.Client {
 
 var _ = Describe("TemporalWorkerOwnedResource webhook integration", func() {
 
-	// Test 14: Spec-level validation (banned kind) fires via real HTTP admission.
-	// Deployment is in the default banned-kinds list. The webhook must reject the
+	// Test 14: Spec-level validation (kind not in allowed list) fires via real HTTP admission.
+	// Deployment is not in the allowed kinds list. The webhook must reject the
 	// request with an error mentioning the kind before making any API calls.
-	It("rejects a banned kind via the real HTTP admission path", func() {
-		ns := makeTestNamespace("wh-banned")
-		twor := makeTWORForWebhook("t14-banned", ns, "my-worker", map[string]interface{}{
+	It("rejects a kind not in the allowed list via the real HTTP admission path", func() {
+		ns := makeTestNamespace("wh-notallowed")
+		twor := makeTWORForWebhook("t14-notallowed", ns, "my-worker", map[string]interface{}{
 			"apiVersion": "apps/v1",
 			"kind":       "Deployment",
 			"spec":       map[string]interface{}{"replicas": float64(1)},
 		})
 		err := k8sClient.Create(ctx, twor)
-		Expect(err).To(HaveOccurred(), "webhook must reject a banned kind")
+		Expect(err).To(HaveOccurred(), "webhook must reject a kind not in the allowed list")
 		Expect(err.Error()).To(ContainSubstring("Deployment"))
-		Expect(err.Error()).To(ContainSubstring("kind"))
+		Expect(err.Error()).To(ContainSubstring("not in the allowed list"))
 	})
 
 	// Test 15: SAR pass — both the requesting user (admin) and the controller SA have

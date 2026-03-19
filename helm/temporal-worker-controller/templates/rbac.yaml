@@ -148,20 +148,8 @@ rules:
     verbs:
       - create
   # Rules for managing resources attached via TemporalWorkerOwnedResource.
-  # Controlled by ownedResourceConfig.rbac in values.yaml.
-  {{- if .Values.ownedResourceConfig.rbac.wildcard }}
-  - apiGroups:
-      - "*"
-    resources:
-      - "*"
-    verbs:
-      - create
-      - delete
-      - get
-      - patch
-      - update
-  {{- else }}
-  {{- range .Values.ownedResourceConfig.rbac.rules }}
+  # Driven entirely by ownedResourceConfig.allowedResources in values.yaml.
+  {{- range .Values.ownedResourceConfig.allowedResources }}
   - apiGroups:
       {{- range .apiGroups }}
       - {{ . | quote }}
@@ -176,7 +164,6 @@ rules:
       - get
       - patch
       - update
-  {{- end }}
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

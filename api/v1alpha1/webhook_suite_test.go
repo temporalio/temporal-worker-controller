@@ -120,8 +120,10 @@ var _ = BeforeSuite(func() {
 	// Set env vars consumed by NewTemporalWorkerOwnedResourceValidator before constructing it.
 	// POD_NAMESPACE and SERVICE_ACCOUNT_NAME identify the controller SA for the SAR checks.
 	// "test-system" / "test-controller" are the values used in the integration tests.
+	// ALLOWED_KINDS mirrors the default Helm values so integration tests can create HPAs.
 	Expect(os.Setenv("POD_NAMESPACE", "test-system")).To(Succeed())
 	Expect(os.Setenv("SERVICE_ACCOUNT_NAME", "test-controller")).To(Succeed())
+	Expect(os.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler")).To(Succeed())
 
 	err = NewTemporalWorkerOwnedResourceValidator(mgr).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())

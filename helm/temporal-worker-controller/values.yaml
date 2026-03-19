@@ -85,46 +85,25 @@ webhook:
 
 # Configuration for TemporalWorkerOwnedResource objects.
 ownedResourceConfig:
-  # bannedKinds is the list of Kubernetes resource kinds that are not permitted as
-  # TemporalWorkerOwnedResource objects. The default list blocks workload types
-  # (Deployment, StatefulSet, Job, Pod, CronJob) to prevent misuse of the mechanism
-  # to run arbitrary services alongside the worker. Override this list if you have a
-  # legitimate use case for one of these kinds.
-  bannedKinds:
-    - Deployment
-    - StatefulSet
-    - Job
-    - Pod
-    - CronJob
-
-  # rbac controls which resource types the controller is permitted to manage on behalf
-  # of TemporalWorkerOwnedResource objects (i.e. the HPAs, PDBs, or custom CRDs that
-  # users attach to their versioned Deployments).
+  # allowedResources defines which resource kinds may be embedded in TWOR objects.
+  # The webhook rejects any kind not listed here, and the controller is granted RBAC
+  # to manage exactly these resource types. An empty list rejects all kinds — at
+  # least one entry must be configured.
   #
-  # The TemporalWorkerOwnedResource validating webhook enforces that requesting users
-  # already have permission to manage the embedded resource type, so the controller's
-  # permissions here act as the executor, not the gatekeeper.
-  rbac:
-    # wildcard: when true, grants the controller create/delete/get/patch/update on all
-    # resource types in all API groups. Convenient for development clusters or when
-    # users attach many different custom CRD types. Not recommended for production.
-    wildcard: false
-
-    # rules: explicit list of resource types the controller may manage. Each entry
-    # follows standard RBAC rule syntax (apiGroups + resources). Ignored when
-    # wildcard is true.
-    #
-    # Add one entry per API group your TWOR objects will use. For example, to support
-    # KEDA ScaledObjects alongside the defaults, add:
-    #   - apiGroups: ["keda.sh"]
-    #     resources: ["scaledobjects"]
-    rules:
-      # HPA (autoscaling/v1 and autoscaling/v2 share the same API group)
-      - apiGroups: ["autoscaling"]
-        resources: ["horizontalpodautoscalers"]
-      # PodDisruptionBudget
-      - apiGroups: ["policy"]
-        resources: ["poddisruptionbudgets"]
+  # Each entry has three fields:
+  #   kinds:      kind names the webhook will accept (case-insensitive)
+  #   apiGroups:  API groups for the controller's RBAC policy
+  #   resources:  resource names for the controller's RBAC policy
+  #
+  # Example — add KEDA ScaledObjects:
+  #   - kinds: ["ScaledObject"]
+  #     apiGroups: ["keda.sh"]
+  #     resources: ["scaledobjects"]
+  allowedResources:
+    # HPA (autoscaling/v1 and autoscaling/v2 share the same API group)
+    - kinds: ["HorizontalPodAutoscaler"]
+      apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
 
 certmanager:
   # enabled controls creation of the cert-manager Issuer and Certificate used for

@@ -23,11 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// defaultBannedKinds lists resource kinds that the controller blocks by default.
-// This prevents TWOR from being misused to run arbitrary services alongside the worker.
-// The operator can override this list via the BANNED_KINDS environment variable.
-var defaultBannedKinds = []string{"Deployment", "StatefulSet", "Job", "Pod", "CronJob"}
-
 // TemporalWorkerOwnedResourceValidator validates TemporalWorkerOwnedResource objects.
 // It holds API-dependent dependencies (client, RESTMapper, controller SA identity).
 // +kubebuilder:object:generate=false
@@ -36,7 +31,10 @@ type TemporalWorkerOwnedResourceValidator struct {
 	RESTMapper            meta.RESTMapper
 	ControllerSAName      string
 	ControllerSANamespace string
-	BannedKinds           []string
+	// AllowedKinds is the explicit list of resource kinds permitted as TWOR objects.
+	// Must be non-empty; when empty or nil, all kinds are rejected.
+	// Populated from the ALLOWED_KINDS environment variable (comma-separated).
+	AllowedKinds []string
 }
 
 var _ webhook.CustomValidator = &TemporalWorkerOwnedResourceValidator{}
@@ -53,18 +51,16 @@ var _ webhook.CustomValidator = &TemporalWorkerOwnedResourceValidator{}
 //     pod runs as; used when performing SubjectAccessReview checks for the controller
 //     SA. Populated via the downward API (fieldRef: spec.serviceAccountName).
 //
-//   - BANNED_KINDS — comma-separated list of kind names that are not allowed as
-//     TemporalWorkerOwnedResource objects (e.g. "Deployment,StatefulSet,Job,Pod,CronJob").
-//     Configurable via the ownedResources.bannedKinds Helm value. If unset, the
-//     built-in defaultBannedKinds list is used.
+//   - ALLOWED_KINDS — comma-separated list of kind names that are permitted as
+//     TemporalWorkerOwnedResource objects (e.g. "HorizontalPodAutoscaler,PodDisruptionBudget").
+//     Configurable via ownedResourceConfig.allowedResources[*].kinds in values.yaml.
+//     Must be set; when empty or unset, all TWOR kind submissions are rejected.
 func NewTemporalWorkerOwnedResourceValidator(mgr ctrl.Manager) *TemporalWorkerOwnedResourceValidator {
-	bannedKinds := defaultBannedKinds
-	if env := os.Getenv("BANNED_KINDS"); env != "" {
-		parts := strings.Split(env, ",")
-		bannedKinds = make([]string, 0, len(parts))
-		for _, p := range parts {
+	var allowedKinds []string
+	if env := os.Getenv("ALLOWED_KINDS"); env != "" {
+		for _, p := range strings.Split(env, ",") {
 			if trimmed := strings.TrimSpace(p); trimmed != "" {
-				bannedKinds = append(bannedKinds, trimmed)
+				allowedKinds = append(allowedKinds, trimmed)
 			}
 		}
 	}
@@ -73,7 +69,7 @@ func NewTemporalWorkerOwnedResourceValidator(mgr ctrl.Manager) *TemporalWorkerOw
 		RESTMapper:            mgr.GetRESTMapper(),
 		ControllerSAName:      os.Getenv("SERVICE_ACCOUNT_NAME"),
 		ControllerSANamespace: os.Getenv("POD_NAMESPACE"),
-		BannedKinds:           bannedKinds,
+		AllowedKinds:          allowedKinds,
 	}
 }
 
@@ -141,7 +137,7 @@ func (v *TemporalWorkerOwnedResourceValidator) validate(ctx context.Context, old
 	var warnings admission.Warnings
 
 	// Pure spec validation (no API calls needed)
-	specWarnings, specErrs := validateOwnedResourceSpec(new.Spec, v.BannedKinds)
+	specWarnings, specErrs := validateOwnedResourceSpec(new.Spec, v.AllowedKinds)
 	warnings = append(warnings, specWarnings...)
 	allErrs = append(allErrs, specErrs...)
 
@@ -180,7 +176,7 @@ func (v *TemporalWorkerOwnedResourceValidator) validate(ctx context.Context, old
 
 // validateOwnedResourceSpec performs pure (no-API) validation of the spec fields.
 // It checks structural constraints that can be evaluated without talking to the API server.
-func validateOwnedResourceSpec(spec TemporalWorkerOwnedResourceSpec, bannedKinds []string) (admission.Warnings, field.ErrorList) {
+func validateOwnedResourceSpec(spec TemporalWorkerOwnedResourceSpec, allowedKinds []string) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
 
@@ -234,19 +230,23 @@ func validateOwnedResourceSpec(spec TemporalWorkerOwnedResourceSpec, bannedKinds
 		}
 	}
 
-	// 3. Banned kinds
+	// 3. Allow-list check: kind must appear in allowedKinds. An empty list rejects all kinds.
 	if kind != "" {
-		for _, banned := range bannedKinds {
-			if strings.EqualFold(kind, banned) {
-				allErrs = append(allErrs, field.Forbidden(
-					field.NewPath("spec").Child("object").Child("kind"),
-					fmt.Sprintf("kind %q is not allowed; "+
-						"the owned resources mechanism is to attach resources that help the worker service run (e.g. scalers), "+
-						"not for running arbitrary additional services; "+
-						"your controller operator can change this requirement if you have a specific use case in mind", kind),
-				))
+		found := false
+		for _, allowed := range allowedKinds {
+			if strings.EqualFold(kind, allowed) {
+				found = true
 				break
 			}
+		}
+		if !found {
+			allErrs = append(allErrs, field.Forbidden(
+				field.NewPath("spec").Child("object").Child("kind"),
+				fmt.Sprintf("kind %q is not in the allowed list; "+
+					"only resource kinds listed in ownedResourceConfig.allowedResources are permitted "+
+					"as TemporalWorkerOwnedResource objects; "+
+					"ask your cluster operator to add this kind if you have a legitimate use case", kind),
+			))
 		}
 	}
 
