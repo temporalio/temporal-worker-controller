@@ -158,8 +158,8 @@ func getOwnedResourceApplies(
 	var applies []OwnedResourceApply
 	for i := range wrts {
 		wrt := &wrts[i]
-		if wrt.Spec.Object.Raw == nil {
-			l.Info("skipping WorkerResourceTemplate with empty spec.object", "name", wrt.Name)
+		if wrt.Spec.Template.Raw == nil {
+			l.Info("skipping WorkerResourceTemplate with empty spec.template", "name", wrt.Name)
 			continue
 		}
 		for buildID, deployment := range k8sState.Deployments {

@@ -30,7 +30,7 @@ spec:
 
   # The resource template. The controller creates one copy per active Build ID,
   # naming each one "<twdName>-<wrtName>-<buildID>".
-  object:
+  template:
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
     spec:

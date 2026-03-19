@@ -913,7 +913,7 @@ func TestIntegration(t *testing.T) {
 			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: twd.Name},
 				// scaleTargetRef is set to null to trigger auto-injection by the controller.
-				Object: runtime.RawExtension{Raw: []byte(`{
+				Template: runtime.RawExtension{Raw: []byte(`{
 					"apiVersion": "autoscaling/v2",
 					"kind": "HorizontalPodAutoscaler",
 					"spec": {

@@ -115,7 +115,7 @@ func RenderWorkerResourceTemplate(
 ) (*unstructured.Unstructured, error) {
 	// Step 1: unmarshal the raw object
 	var raw map[string]interface{}
-	if err := json.Unmarshal(wrt.Spec.Object.Raw, &raw); err != nil {
+	if err := json.Unmarshal(wrt.Spec.Template.Raw, &raw); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal spec.object: %w", err)
 	}
 

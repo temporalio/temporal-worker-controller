@@ -29,7 +29,7 @@ func newWRT(name, temporalWorkerDeploymentRefName string, embeddedObj map[string
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
 				Name: temporalWorkerDeploymentRefName,
 			},
-			Object: runtime.RawExtension{Raw: raw},
+			Template: runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -72,7 +72,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 				Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 					TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-					Object:              runtime.RawExtension{Raw: nil},
+					Template:            runtime.RawExtension{Raw: nil},
 				},
 			},
 			errorMsg: "object must be specified",
@@ -319,7 +319,7 @@ func TestWorkerResourceTemplate_ValidateDelete_NilRaw(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-			Object:              runtime.RawExtension{Raw: nil},
+			Template:            runtime.RawExtension{Raw: nil},
 		},
 	}
 	_, err := v.ValidateDelete(ctx, wrt)

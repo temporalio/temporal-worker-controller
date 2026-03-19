@@ -22,7 +22,7 @@ spec:
       name: Worker
       type: string
     - description: Kind of owned resource
-      jsonPath: .spec.object.kind
+      jsonPath: .spec.template.kind
       name: Kind
       type: string
     - description: Age
@@ -41,7 +41,7 @@ spec:
             type: object
           spec:
             properties:
-              object:
+              template:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
               temporalWorkerDeploymentRef:
@@ -53,7 +53,7 @@ spec:
                 - name
                 type: object
             required:
-            - object
+            - template
             - temporalWorkerDeploymentRef
             type: object
           status:

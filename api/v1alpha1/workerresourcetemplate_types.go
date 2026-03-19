@@ -36,12 +36,12 @@ type WorkerResourceTemplateSpec struct {
 	//   {{ .BuildID }}           - the Build ID for this version
 	//
 	// The controller also auto-injects two well-known fields. If your resource requires these fields,
-	// you must include them in the spec.object but leave them empty for the controller to fill in:
+	// you must include them in the spec.template but leave them empty for the controller to fill in:
 	//   scaleTargetRef - set to point at the versioned Deployment (for HPA, KEDA, WPA, etc.)
 	//   matchLabels    - set to the versioned Deployment's selector labels (for PDB, WPA, etc.)
 	// +kubebuilder:validation:Required
 	// +kubebuilder:pruning:PreserveUnknownFields
-	Object runtime.RawExtension `json:"object"`
+	Template runtime.RawExtension `json:"template"`
 }
 
 // WorkerResourceTemplateVersionStatus describes the status of a worker resource template for a single Build ID.
@@ -75,7 +75,7 @@ type WorkerResourceTemplateStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=wrt
 //+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.temporalWorkerDeploymentRef.name",description="Referenced TemporalWorkerDeployment"
-//+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.object.kind",description="Kind of owned resource"
+//+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.template.kind",description="Kind of owned resource"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // WorkerResourceTemplate attaches an arbitrary namespaced Kubernetes resource

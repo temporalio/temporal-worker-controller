@@ -2977,7 +2977,7 @@ func TestGetOwnedResourceApplies(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "nil-raw", Namespace: "default"},
 					Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 						TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-						Object:                      runtime.RawExtension{Raw: nil},
+						Template:                     runtime.RawExtension{Raw: nil},
 					},
 				},
 				createTestWRT("my-hpa", "my-worker"),
@@ -3083,7 +3083,7 @@ func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.Work
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
-			Object:              runtime.RawExtension{Raw: raw},
+			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -3126,7 +3126,7 @@ func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-			Object:                      runtime.RawExtension{Raw: raw},
+			Template:                     runtime.RawExtension{Raw: raw},
 		},
 	}
 
@@ -3169,7 +3169,7 @@ func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "my-monitor", Namespace: "k8s-production"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-			Object:                      runtime.RawExtension{Raw: raw},
+			Template:                     runtime.RawExtension{Raw: raw},
 		},
 	}
 
@@ -3206,7 +3206,7 @@ func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temp
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
-			Object:              runtime.RawExtension{Raw: raw},
+			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
 }

@@ -222,7 +222,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
 				Name: "my-worker",
 			},
-			Object: runtime.RawExtension{Raw: rawBytes},
+			Template: runtime.RawExtension{Raw: rawBytes},
 		},
 	}
 
@@ -283,7 +283,7 @@ func TestRenderWorkerResourceTemplate_WithTemplates(t *testing.T) {
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
 				Name: "my-worker",
 			},
-			Object: runtime.RawExtension{Raw: rawBytes},
+			Template: runtime.RawExtension{Raw: rawBytes},
 		},
 	}
 
