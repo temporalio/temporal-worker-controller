@@ -18,7 +18,9 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
+	"google.golang.org/grpc"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -215,6 +217,16 @@ type stubWDClient struct {
 
 func (s *stubWDClient) GetHandle(_ string) sdkclient.WorkerDeploymentHandle { return s.handle }
 
+// stubWorkflowServiceClient implements workflowservice.WorkflowServiceClient, returning
+// a NotFound error for DescribeWorkerDeployment (matching the default stub behavior).
+type stubWorkflowServiceClient struct {
+	workflowservice.WorkflowServiceClient
+}
+
+func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, _ *workflowservice.DescribeWorkerDeploymentRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentResponse, error) {
+	return nil, &serviceerror.NotFound{}
+}
+
 // stubTemporalClient implements sdkclient.Client, routing WorkerDeploymentClient and
 // ExecuteWorkflow to configurable stubs.
 type stubTemporalClient struct {
@@ -225,6 +237,10 @@ type stubTemporalClient struct {
 
 func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeploymentClient {
 	return s.wdClient
+}
+
+func (s *stubTemporalClient) WorkflowService() workflowservice.WorkflowServiceClient {
+	return &stubWorkflowServiceClient{}
 }
 
 func (s *stubTemporalClient) ExecuteWorkflow(_ context.Context, _ sdkclient.StartWorkflowOptions, _ interface{}, _ ...interface{}) (sdkclient.WorkflowRun, error) {

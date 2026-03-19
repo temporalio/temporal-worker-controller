@@ -19,7 +19,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
-	temporalWorker "go.temporal.io/sdk/worker"
+	sdkworker "go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -175,7 +175,7 @@ func GetWorkerDeploymentState(
 					BuildID: version.DeploymentVersion.BuildId,
 				})
 				var notFoundErr *serviceerror.NotFound
-				if descErr == nil {
+				if descErr == nil { //revive:disable-line:max-control-nesting
 					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, desc.Info.TaskQueuesInfos)
 				} else if errors.As(descErr, &notFoundErr) {
 					versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
@@ -220,13 +220,13 @@ func toSDKRoutingConfig(rc *deploymentpb.RoutingConfig) temporalClient.WorkerDep
 		RampingVersionPercentage: rc.RampingVersionPercentage,
 	}
 	if rc.CurrentDeploymentVersion != nil {
-		sdkRC.CurrentVersion = &temporalWorker.WorkerDeploymentVersion{
+		sdkRC.CurrentVersion = &sdkworker.WorkerDeploymentVersion{
 			BuildID:        rc.CurrentDeploymentVersion.BuildId,
 			DeploymentName: rc.CurrentDeploymentVersion.DeploymentName,
 		}
 	}
 	if rc.RampingDeploymentVersion != nil {
-		sdkRC.RampingVersion = &temporalWorker.WorkerDeploymentVersion{
+		sdkRC.RampingVersion = &sdkworker.WorkerDeploymentVersion{
 			BuildID:        rc.RampingDeploymentVersion.BuildId,
 			DeploymentName: rc.RampingDeploymentVersion.DeploymentName,
 		}
