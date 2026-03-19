@@ -126,7 +126,7 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
-      - temporalworkerownedresources
+      - workerresourcetemplates
     verbs:
       - get
       - list
@@ -136,7 +136,7 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
-      - temporalworkerownedresources/status
+      - workerresourcetemplates/status
     verbs:
       - get
       - patch
@@ -147,7 +147,7 @@ rules:
       - subjectaccessreviews
     verbs:
       - create
-  # Rules for managing resources attached via TemporalWorkerOwnedResource.
+  # Rules for managing resources attached via WorkerResourceTemplate.
   # Driven entirely by ownedResourceConfig.allowedResources in values.yaml.
   {{- range .Values.ownedResourceConfig.allowedResources }}
   - apiGroups:
@@ -286,19 +286,19 @@ rules:
     verbs:
       - get
 ---
-# permissions for end users to edit temporalworkerownedresources.
+# permissions for end users to edit workerresourcetemplates.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/component: rbac
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
-  name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalworkerownedresource-editor-role
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-workerresourcetemplate-editor-role
 rules:
   - apiGroups:
       - temporal.io
     resources:
-      - temporalworkerownedresources
+      - workerresourcetemplates
     verbs:
       - create
       - delete
@@ -310,23 +310,23 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
-      - temporalworkerownedresources/status
+      - workerresourcetemplates/status
     verbs:
       - get
 ---
-# permissions for end users to view temporalworkerownedresources.
+# permissions for end users to view workerresourcetemplates.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/component: rbac
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
-  name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalworkerownedresource-viewer-role
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-workerresourcetemplate-viewer-role
 rules:
   - apiGroups:
       - temporal.io
     resources:
-      - temporalworkerownedresources
+      - workerresourcetemplates
     verbs:
       - get
       - list
@@ -334,7 +334,7 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
-      - temporalworkerownedresources/status
+      - workerresourcetemplates/status
     verbs:
       - get
 ---

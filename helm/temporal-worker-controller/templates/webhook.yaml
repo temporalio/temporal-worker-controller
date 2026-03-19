@@ -15,9 +15,9 @@ spec:
   selector:
     {{- include "temporal-worker-controller.selectorLabels" . | nindent 4 }}
 ---
-# ValidatingWebhookConfiguration for TemporalWorkerOwnedResource.
+# ValidatingWebhookConfiguration for WorkerResourceTemplate.
 # Always installed — this webhook is a required security control that validates
-# all TemporalWorkerOwnedResource create/update/delete requests.
+# all WorkerResourceTemplate create/update/delete requests.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
@@ -31,7 +31,7 @@ metadata:
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ .Release.Name }}-serving-cert
   {{- end }}
 webhooks:
-  - name: vtemporalworkerownedresource.kb.io
+  - name: vworkerresourcetemplate.kb.io
     admissionReviewVersions: ["v1"]
     clientConfig:
       {{- if and (not .Values.certmanager.enabled) .Values.certmanager.caBundle }}
@@ -40,13 +40,13 @@ webhooks:
       service:
         name: {{ .Release.Name }}-webhook-service
         namespace: {{ .Release.Namespace }}
-        path: /validate-temporal-io-v1alpha1-temporalworkerownedresource
+        path: /validate-temporal-io-v1alpha1-workerresourcetemplate
     failurePolicy: Fail
     rules:
       - apiGroups: ["temporal.io"]
         apiVersions: ["v1alpha1"]
         operations: ["CREATE", "UPDATE", "DELETE"]
-        resources: ["temporalworkerownedresources"]
+        resources: ["workerresourcetemplates"]
     sideEffects: None
 {{- if .Values.webhook.enabled }}
 ---

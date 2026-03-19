@@ -20,18 +20,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// expectedOwnedResourceName replicates the naming logic for use in tests.
-func expectedOwnedResourceName(twdName, tworName, buildID string) string {
-	h := sha256.Sum256([]byte(twdName + tworName + buildID))
+// expectedWorkerResourceTemplateName replicates the naming logic for use in tests.
+func expectedWorkerResourceTemplateName(twdName, wrtName, buildID string) string {
+	h := sha256.Sum256([]byte(twdName + wrtName + buildID))
 	hashSuffix := hex.EncodeToString(h[:4])
-	raw := CleanStringForDNS(twdName + "-" + tworName + "-" + buildID)
+	raw := CleanStringForDNS(twdName + "-" + wrtName + "-" + buildID)
 	prefix := strings.TrimRight(TruncateString(raw, 47-9), "-")
 	return prefix + "-" + hashSuffix
 }
 
-func TestComputeOwnedResourceName(t *testing.T) {
+func TestComputeWorkerResourceTemplateName(t *testing.T) {
 	t.Run("short names produce human-readable result with hash suffix", func(t *testing.T) {
-		got := ComputeOwnedResourceName("my-worker", "my-hpa", "image-abc123")
+		got := ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "image-abc123")
 		// Should start with the human-readable prefix
 		assert.True(t, strings.HasPrefix(got, "my-worker-my-hpa-image-abc123-"), "got: %q", got)
 		// Should be ≤ 47 chars
@@ -39,32 +39,32 @@ func TestComputeOwnedResourceName(t *testing.T) {
 	})
 
 	t.Run("special chars are cleaned for DNS", func(t *testing.T) {
-		got := ComputeOwnedResourceName("my_worker", "my/hpa", "image:latest")
+		got := ComputeWorkerResourceTemplateName("my_worker", "my/hpa", "image:latest")
 		assert.True(t, strings.HasPrefix(got, "my-worker-my-hpa-image-latest-"), "got: %q", got)
 		assert.LessOrEqual(t, len(got), 47)
 	})
 
 	t.Run("deterministic — same inputs always produce same name", func(t *testing.T) {
-		a := ComputeOwnedResourceName("w", "r", "b1")
-		b := ComputeOwnedResourceName("w", "r", "b1")
+		a := ComputeWorkerResourceTemplateName("w", "r", "b1")
+		b := ComputeWorkerResourceTemplateName("w", "r", "b1")
 		assert.Equal(t, a, b)
 	})
 
 	t.Run("different buildIDs always produce different names (hash suffix)", func(t *testing.T) {
 		// Even if the prefix would be identical after truncation, the hash must differ.
-		name1 := ComputeOwnedResourceName("my-worker", "my-hpa", "build-aaa")
-		name2 := ComputeOwnedResourceName("my-worker", "my-hpa", "build-bbb")
+		name1 := ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-aaa")
+		name2 := ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-bbb")
 		assert.NotEqual(t, name1, name2)
 	})
 
 	t.Run("very long names are still ≤ 47 chars and distinct per buildID", func(t *testing.T) {
 		longTWD := strings.Repeat("w", 63)
-		longTWOR := strings.Repeat("r", 253) // maximum k8s object name
+		longWRT := strings.Repeat("r", 253) // maximum k8s object name
 		buildID1 := "build-" + strings.Repeat("a", 57)
 		buildID2 := "build-" + strings.Repeat("b", 57)
 
-		n1 := ComputeOwnedResourceName(longTWD, longTWOR, buildID1)
-		n2 := ComputeOwnedResourceName(longTWD, longTWOR, buildID2)
+		n1 := ComputeWorkerResourceTemplateName(longTWD, longWRT, buildID1)
+		n2 := ComputeWorkerResourceTemplateName(longTWD, longWRT, buildID2)
 
 		assert.LessOrEqual(t, len(n1), 47, "name1 length: %d", len(n1))
 		assert.LessOrEqual(t, len(n2), 47, "name2 length: %d", len(n2))
@@ -72,8 +72,8 @@ func TestComputeOwnedResourceName(t *testing.T) {
 	})
 
 	t.Run("name matches expected formula", func(t *testing.T) {
-		got := ComputeOwnedResourceName("my-worker", "my-hpa", "abc123")
-		assert.Equal(t, expectedOwnedResourceName("my-worker", "my-hpa", "abc123"), got)
+		got := ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "abc123")
+		assert.Equal(t, expectedWorkerResourceTemplateName("my-worker", "my-hpa", "abc123"), got)
 	})
 }
 
@@ -200,7 +200,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 	})
 }
 
-func TestRenderOwnedResource(t *testing.T) {
+func TestRenderWorkerResourceTemplate(t *testing.T) {
 	hpaSpec := map[string]interface{}{
 		"apiVersion": "autoscaling/v2",
 		"kind":       "HorizontalPodAutoscaler",
@@ -213,13 +213,13 @@ func TestRenderOwnedResource(t *testing.T) {
 	rawBytes, err := json.Marshal(hpaSpec)
 	require.NoError(t, err)
 
-	twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-hpa",
 			Namespace: "default",
 		},
-		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{
 				Name: "my-worker",
 			},
 			Object: runtime.RawExtension{Raw: rawBytes},
@@ -235,11 +235,11 @@ func TestRenderOwnedResource(t *testing.T) {
 	}
 	buildID := "abc123"
 
-	obj, err := RenderOwnedResource(twor, deployment, buildID, "my-temporal-ns")
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns")
 	require.NoError(t, err)
 
 	// Check metadata — name follows the hash-suffix formula
-	assert.Equal(t, expectedOwnedResourceName("my-worker", "my-hpa", "abc123"), obj.GetName())
+	assert.Equal(t, expectedWorkerResourceTemplateName("my-worker", "my-hpa", "abc123"), obj.GetName())
 	assert.Equal(t, "default", obj.GetNamespace())
 
 	// Check selector labels were added
@@ -262,7 +262,7 @@ func TestRenderOwnedResource(t *testing.T) {
 	assert.Equal(t, "my-worker-abc123", ref["name"])
 }
 
-func TestRenderOwnedResource_WithTemplates(t *testing.T) {
+func TestRenderWorkerResourceTemplate_WithTemplates(t *testing.T) {
 	objSpec := map[string]interface{}{
 		"apiVersion": "monitoring.example.com/v1",
 		"kind":       "WorkloadMonitor",
@@ -274,13 +274,13 @@ func TestRenderOwnedResource_WithTemplates(t *testing.T) {
 	rawBytes, err := json.Marshal(objSpec)
 	require.NoError(t, err)
 
-	twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-monitor",
 			Namespace: "production",
 		},
-		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{
 				Name: "my-worker",
 			},
 			Object: runtime.RawExtension{Raw: rawBytes},
@@ -295,7 +295,7 @@ func TestRenderOwnedResource_WithTemplates(t *testing.T) {
 		},
 	}
 
-	obj, err := RenderOwnedResource(twor, deployment, "abc123", "my-temporal-ns")
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, "abc123", "my-temporal-ns")
 	require.NoError(t, err)
 
 	spec, ok := obj.Object["spec"].(map[string]interface{})

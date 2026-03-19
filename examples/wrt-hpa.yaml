@@ -1,4 +1,4 @@
-# TemporalWorkerOwnedResource — HPA example
+# WorkerResourceTemplate — HPA example
 #
 # This example attaches a HorizontalPodAutoscaler to each active versioned Deployment
 # of the "helloworld" TemporalWorkerDeployment (from the local demo).
@@ -9,15 +9,15 @@
 #   - You have permission to create HPAs in this namespace
 #
 # Apply:
-#   kubectl apply -f examples/twor-hpa.yaml
+#   kubectl apply -f examples/wrt-hpa.yaml
 #
 # Verify:
-#   kubectl get twor              # shows Applied status per Build ID
-#   kubectl get hpa               # shows one HPA per active Build ID
+#   kubectl get wrt              # shows Applied status per Build ID
+#   kubectl get hpa              # shows one HPA per active Build ID
 #
 # See docs/owned-resources.md for full documentation.
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerOwnedResource
+kind: WorkerResourceTemplate
 metadata:
   name: helloworld-hpa
   # Deploy into the same namespace as the helloworld TemporalWorkerDeployment.
@@ -25,11 +25,11 @@ metadata:
   namespace: default
 spec:
   # Must match the name of the TemporalWorkerDeployment.
-  temporalWorkerDeploymentRef:
+  workerDeploymentRef:
     name: helloworld
 
   # The resource template. The controller creates one copy per active Build ID,
-  # naming each one "<twdName>-<tworName>-<buildID>".
+  # naming each one "<twdName>-<wrtName>-<buildID>".
   object:
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler

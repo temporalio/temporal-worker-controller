@@ -9,19 +9,19 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// TemporalWorkerDeploymentReference references a TemporalWorkerDeployment in the same Kubernetes namespace.
-type TemporalWorkerDeploymentReference struct {
+// WorkerDeploymentReference references a TemporalWorkerDeployment in the same Kubernetes namespace.
+type WorkerDeploymentReference struct {
 	// Name of the TemporalWorkerDeployment resource in the same namespace.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 }
 
-// TemporalWorkerOwnedResourceSpec defines the desired state of TemporalWorkerOwnedResource.
-type TemporalWorkerOwnedResourceSpec struct {
-	// TemporalWorkerDeploymentRef references the TemporalWorkerDeployment to attach this resource to.
+// WorkerResourceTemplateSpec defines the desired state of WorkerResourceTemplate.
+type WorkerResourceTemplateSpec struct {
+	// WorkerDeploymentRef references the TemporalWorkerDeployment to attach this resource to.
 	// +kubebuilder:validation:Required
-	TemporalWorkerDeploymentRef TemporalWorkerDeploymentReference `json:"temporalWorkerDeploymentRef"`
+	WorkerDeploymentRef WorkerDeploymentReference `json:"workerDeploymentRef"`
 
 	// Object is the Kubernetes resource template to attach to each versioned Deployment.
 	// One copy of this resource is created per active Build ID, owned by the corresponding
@@ -44,8 +44,8 @@ type TemporalWorkerOwnedResourceSpec struct {
 	Object runtime.RawExtension `json:"object"`
 }
 
-// OwnedResourceVersionStatus describes the status of an owned resource for a single Build ID.
-type OwnedResourceVersionStatus struct {
+// WorkerResourceTemplateVersionStatus describes the status of a worker resource template for a single Build ID.
+type WorkerResourceTemplateVersionStatus struct {
 	// BuildID is the Build ID of the versioned Deployment this status entry refers to.
 	BuildID string `json:"buildID"`
 
@@ -64,41 +64,41 @@ type OwnedResourceVersionStatus struct {
 	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
 }
 
-// TemporalWorkerOwnedResourceStatus defines the observed state of TemporalWorkerOwnedResource.
-type TemporalWorkerOwnedResourceStatus struct {
-	// Versions describes the per-Build-ID status of owned resources.
+// WorkerResourceTemplateStatus defines the observed state of WorkerResourceTemplate.
+type WorkerResourceTemplateStatus struct {
+	// Versions describes the per-Build-ID status of worker resource templates.
 	// +optional
-	Versions []OwnedResourceVersionStatus `json:"versions,omitempty"`
+	Versions []WorkerResourceTemplateVersionStatus `json:"versions,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:resource:shortName=twor
-//+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.temporalWorkerDeploymentRef.name",description="Referenced TemporalWorkerDeployment"
+//+kubebuilder:resource:shortName=wrt
+//+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.workerDeploymentRef.name",description="Referenced TemporalWorkerDeployment"
 //+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.object.kind",description="Kind of owned resource"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
-// TemporalWorkerOwnedResource attaches an arbitrary namespaced Kubernetes resource
+// WorkerResourceTemplate attaches an arbitrary namespaced Kubernetes resource
 // (HPA, PDB, WPA, custom CRDs, etc.) to each per-Build-ID versioned Deployment
 // managed by a TemporalWorkerDeployment. One copy of the resource is created per
 // active Build ID and is owned by the corresponding versioned Deployment.
-type TemporalWorkerOwnedResource struct {
+type WorkerResourceTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TemporalWorkerOwnedResourceSpec   `json:"spec,omitempty"`
-	Status TemporalWorkerOwnedResourceStatus `json:"status,omitempty"`
+	Spec   WorkerResourceTemplateSpec   `json:"spec,omitempty"`
+	Status WorkerResourceTemplateStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// TemporalWorkerOwnedResourceList contains a list of TemporalWorkerOwnedResource.
-type TemporalWorkerOwnedResourceList struct {
+// WorkerResourceTemplateList contains a list of WorkerResourceTemplate.
+type WorkerResourceTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []TemporalWorkerOwnedResource `json:"items"`
+	Items           []WorkerResourceTemplate `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&TemporalWorkerOwnedResource{}, &TemporalWorkerOwnedResourceList{})
+	SchemeBuilder.Register(&WorkerResourceTemplate{}, &WorkerResourceTemplateList{})
 }

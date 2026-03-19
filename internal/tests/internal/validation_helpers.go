@@ -523,49 +523,49 @@ func waitForOwnedHPAWithInjectedScaleTargetRef(
 		hpa.Spec.ScaleTargetRef.APIVersion, hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
 }
 
-// waitForTWORStatusApplied polls until TWOR.Status.Versions contains an entry for buildID with Applied: true.
-func waitForTWORStatusApplied(
+// waitForWRTStatusApplied polls until WRT.Status.Versions contains an entry for buildID with Applied: true.
+func waitForWRTStatusApplied(
 	t *testing.T,
 	ctx context.Context,
 	k8sClient client.Client,
-	namespace, tworName, buildID string,
+	namespace, wrtName, buildID string,
 	timeout time.Duration,
 ) {
 	t.Helper()
 	eventually(t, timeout, time.Second, func() error {
-		var twor temporaliov1alpha1.TemporalWorkerOwnedResource
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: tworName, Namespace: namespace}, &twor); err != nil {
+		var wrt temporaliov1alpha1.WorkerResourceTemplate
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: wrtName, Namespace: namespace}, &wrt); err != nil {
 			return err
 		}
-		for _, v := range twor.Status.Versions {
+		for _, v := range wrt.Status.Versions {
 			if v.BuildID == buildID && v.Applied {
 				return nil
 			}
 		}
-		return fmt.Errorf("TWOR status not yet updated for build ID %q (current versions: %+v)", buildID, twor.Status.Versions)
+		return fmt.Errorf("WRT status not yet updated for build ID %q (current versions: %+v)", buildID, wrt.Status.Versions)
 	})
-	t.Log("TWOR status shows Applied: true for build ID")
+	t.Log("WRT status shows Applied: true for build ID")
 }
 
-// assertTWORControllerOwnerRef asserts that the named TWOR has a controller owner reference
+// assertWRTControllerOwnerRef asserts that the named WRT has a controller owner reference
 // pointing to the TemporalWorkerDeployment named twdName.
-func assertTWORControllerOwnerRef(
+func assertWRTControllerOwnerRef(
 	t *testing.T,
 	ctx context.Context,
 	k8sClient client.Client,
-	namespace, tworName, twdName string,
+	namespace, wrtName, twdName string,
 ) {
 	t.Helper()
-	var twor temporaliov1alpha1.TemporalWorkerOwnedResource
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: tworName, Namespace: namespace}, &twor); err != nil {
-		t.Fatalf("failed to re-fetch TWOR: %v", err)
+	var wrt temporaliov1alpha1.WorkerResourceTemplate
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wrtName, Namespace: namespace}, &wrt); err != nil {
+		t.Fatalf("failed to re-fetch WRT: %v", err)
 	}
-	for _, ref := range twor.OwnerReferences {
+	for _, ref := range wrt.OwnerReferences {
 		if ref.Kind == "TemporalWorkerDeployment" && ref.Name == twdName && ref.Controller != nil && *ref.Controller {
-			t.Logf("TWOR correctly has controller owner reference to TWD %q", twdName)
+			t.Logf("WRT correctly has controller owner reference to TWD %q", twdName)
 			return
 		}
 	}
-	t.Errorf("TWOR %s/%s missing controller owner reference to TWD %s (refs: %+v)",
-		namespace, tworName, twdName, twor.OwnerReferences)
+	t.Errorf("WRT %s/%s missing controller owner reference to TWD %s (refs: %+v)",
+		namespace, wrtName, twdName, wrt.OwnerReferences)
 }

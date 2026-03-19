@@ -244,31 +244,31 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		}
 	}
 
-	// Patch any TWORs that are missing the owner reference to this TWD.
-	// Failures are logged but do not block the owned-resource apply step below —
-	// a TWOR may have been deleted between plan generation and execution, and
+	// Patch any WRTs that are missing the owner reference to this TWD.
+	// Failures are logged but do not block the worker resource template apply step below —
+	// a WRT may have been deleted between plan generation and execution, and
 	// applying resources is more important than setting owner references.
-	for _, ownerPatch := range p.EnsureTWOROwnerRefs {
+	for _, ownerPatch := range p.EnsureWRTOwnerRefs {
 		if err := r.Patch(ctx, ownerPatch.Patched, client.MergeFrom(ownerPatch.Base)); err != nil {
-			l.Error(err, "failed to patch TWOR with controller reference",
+			l.Error(err, "failed to patch WRT with controller reference",
 				"namespace", ownerPatch.Patched.Namespace,
 				"name", ownerPatch.Patched.Name,
 			)
 		}
 	}
 
-	// Apply owned resources via Server-Side Apply.
+	// Apply worker resource templates via Server-Side Apply.
 	// Partial failure isolation: all resources are attempted even if some fail;
 	// errors are collected and returned together.
-	type tworKey struct{ namespace, name string }
+	type wrtKey struct{ namespace, name string }
 	type applyResult struct {
 		buildID      string
 		resourceName string
 		err          error
 	}
-	tworResults := make(map[tworKey][]applyResult)
+	wrtResults := make(map[wrtKey][]applyResult)
 
-	for _, apply := range p.ApplyOwnedResources {
+	for _, apply := range p.ApplyWorkerResourceTemplates {
 		l.Info("applying owned resource",
 			"name", apply.Resource.GetName(),
 			"kind", apply.Resource.GetKind(),
@@ -293,39 +293,39 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				"kind", apply.Resource.GetKind(),
 			)
 		}
-		key := tworKey{apply.TWORNamespace, apply.TWORName}
-		tworResults[key] = append(tworResults[key], applyResult{
+		key := wrtKey{apply.WRTNamespace, apply.WRTName}
+		wrtResults[key] = append(wrtResults[key], applyResult{
 			buildID:      apply.BuildID,
 			resourceName: apply.Resource.GetName(),
 			err:          applyErr,
 		})
 	}
 
-	// Write per-Build-ID status back to each TWOR.
+	// Write per-Build-ID status back to each WRT.
 	// Done after all applies so a single failed apply does not prevent status
-	// updates for the other (TWOR, Build ID) pairs.
+	// updates for the other (WRT, Build ID) pairs.
 	var applyErrs, statusErrs []error
-	for key, results := range tworResults {
-		versions := make([]temporaliov1alpha1.OwnedResourceVersionStatus, 0, len(results))
+	for key, results := range wrtResults {
+		versions := make([]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, 0, len(results))
 		for _, result := range results {
 			var msg string
 			if result.err != nil {
 				applyErrs = append(applyErrs, result.err)
 				msg = result.err.Error()
 			}
-			versions = append(versions, k8s.OwnedResourceVersionStatusForBuildID(
+			versions = append(versions, k8s.WorkerResourceTemplateVersionStatusForBuildID(
 				result.buildID, result.resourceName, result.err == nil, msg,
 			))
 		}
 
-		twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, twor); err != nil {
-			statusErrs = append(statusErrs, fmt.Errorf("get TWOR %s/%s for status update: %w", key.namespace, key.name, err))
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
+			statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
 			continue
 		}
-		twor.Status.Versions = versions
-		if err := r.Status().Update(ctx, twor); err != nil {
-			statusErrs = append(statusErrs, fmt.Errorf("update status for TWOR %s/%s: %w", key.namespace, key.name, err))
+		wrt.Status.Versions = versions
+		if err := r.Status().Update(ctx, wrt); err != nil {
+			statusErrs = append(statusErrs, fmt.Errorf("update status for WRT %s/%s: %w", key.namespace, key.name, err))
 		}
 	}
 

@@ -19,41 +19,41 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// OwnedResourceFieldManager returns the SSA field manager string for a given TWOR.
+// WorkerResourceTemplateFieldManager returns the SSA field manager string for a given WRT.
 //
 // The field manager identity has two requirements:
 //  1. Stable across reconcile loops — the API server uses it to track which fields
 //     this controller "owns". Changing it abandons the old ownership records and
 //     causes spurious field conflicts until the old entries expire.
-//  2. Unique per TWOR instance — if two different TWORs both render resources into
+//  2. Unique per WRT instance — if two different WRTs both render resources into
 //     the same namespace, their field managers must differ so each can own its own
 //     set of fields without conflicting with the other.
 //
-// Using "twc/{namespace}/{name}" satisfies both: it never changes for a given TWOR
+// Using "twc/{namespace}/{name}" satisfies both: it never changes for a given WRT
 // and is globally unique within the cluster (namespace+name is a unique identifier).
 // The string is capped at 128 characters to stay within the Kubernetes API limit.
-func OwnedResourceFieldManager(twor *temporaliov1alpha1.TemporalWorkerOwnedResource) string {
-	fm := "twc/" + twor.Namespace + "/" + twor.Name
+func WorkerResourceTemplateFieldManager(wrt *temporaliov1alpha1.WorkerResourceTemplate) string {
+	fm := "twc/" + wrt.Namespace + "/" + wrt.Name
 	return TruncateString(fm, 128)
 }
 
 const (
-	// ownedResourceMaxNameLen is the maximum length of a generated owned resource name.
+	// workerResourceTemplateMaxNameLen is the maximum length of a generated worker resource template name.
 	// 47 is chosen to be safe for Deployment resources: a pod name is composed of
 	// "{deployment-name}-{rs-hash}-{pod-hash}" where the hashes add ~17 characters,
 	// and pod names must be ≤63 characters. Using 47 as the limit ensures that the
-	// generated names work even if the user un-bans Deployment as an owned resource
+	// generated names work even if the user un-bans Deployment as a worker resource template
 	// kind, avoiding special-casing per resource type.
-	ownedResourceMaxNameLen = 47
+	workerResourceTemplateMaxNameLen = 47
 
-	// ownedResourceHashLen is the number of hex characters used for the uniqueness suffix.
+	// workerResourceTemplateHashLen is the number of hex characters used for the uniqueness suffix.
 	// 8 hex chars = 4 bytes = 32 bits, giving negligible collision probability
 	// (< 1 in 10^7 even across thousands of resources in a cluster).
-	ownedResourceHashLen = 8
+	workerResourceTemplateHashLen = 8
 )
 
-// ComputeOwnedResourceName generates a deterministic, DNS-safe name for the owned resource
-// instance corresponding to a given (twdName, tworName, buildID) triple.
+// ComputeWorkerResourceTemplateName generates a deterministic, DNS-safe name for the worker resource template
+// instance corresponding to a given (twdName, wrtName, buildID) triple.
 //
 // The name has the form:
 //
@@ -63,17 +63,17 @@ const (
 // capping occurs. This guarantees that two different triples — including triples that
 // differ only in the buildID — always produce different names, even if the human-readable
 // prefix is truncated. The buildID is therefore always uniquely represented via the hash,
-// regardless of how long twdName or tworName are.
-func ComputeOwnedResourceName(twdName, tworName, buildID string) string {
+// regardless of how long twdName or wrtName are.
+func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string {
 	// Hash the full triple first, before any truncation.
-	h := sha256.Sum256([]byte(twdName + tworName + buildID))
-	hashSuffix := hex.EncodeToString(h[:ownedResourceHashLen/2]) // 4 bytes → 8 hex chars
+	h := sha256.Sum256([]byte(twdName + wrtName + buildID))
+	hashSuffix := hex.EncodeToString(h[:workerResourceTemplateHashLen/2]) // 4 bytes → 8 hex chars
 
 	// Build the human-readable prefix and truncate so the total fits in maxLen.
-	// suffixLen = len("-") + ownedResourceHashLen
-	const suffixLen = 1 + ownedResourceHashLen
-	raw := CleanStringForDNS(twdName + ResourceNameSeparator + tworName + ResourceNameSeparator + buildID)
-	prefix := TruncateString(raw, ownedResourceMaxNameLen-suffixLen)
+	// suffixLen = len("-") + workerResourceTemplateHashLen
+	const suffixLen = 1 + workerResourceTemplateHashLen
+	raw := CleanStringForDNS(twdName + ResourceNameSeparator + wrtName + ResourceNameSeparator + buildID)
+	prefix := TruncateString(raw, workerResourceTemplateMaxNameLen-suffixLen)
 	// Trim any trailing separator that results from truncating mid-segment.
 	prefix = strings.TrimRight(prefix, ResourceNameSeparator)
 
@@ -99,23 +99,23 @@ type TemplateData struct {
 	BuildID string
 }
 
-// RenderOwnedResource produces the Unstructured object to apply via SSA for a given
-// TemporalWorkerOwnedResource and versioned Deployment.
+// RenderWorkerResourceTemplate produces the Unstructured object to apply via SSA for a given
+// WorkerResourceTemplate and versioned Deployment.
 //
 // Processing order:
 //  1. Unmarshal spec.object into an Unstructured
 //  2. Auto-inject scaleTargetRef and matchLabels (Layer 1)
 //  3. Render Go templates in all string values (Layer 2)
 //  4. Set metadata (name, namespace, labels, owner reference)
-func RenderOwnedResource(
-	twor *temporaliov1alpha1.TemporalWorkerOwnedResource,
+func RenderWorkerResourceTemplate(
+	wrt *temporaliov1alpha1.WorkerResourceTemplate,
 	deployment *appsv1.Deployment,
 	buildID string,
 	temporalNamespace string,
 ) (*unstructured.Unstructured, error) {
 	// Step 1: unmarshal the raw object
 	var raw map[string]interface{}
-	if err := json.Unmarshal(twor.Spec.Object.Raw, &raw); err != nil {
+	if err := json.Unmarshal(wrt.Spec.Object.Raw, &raw); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal spec.object: %w", err)
 	}
 
@@ -125,7 +125,7 @@ func RenderOwnedResource(
 		BuildID:           buildID,
 	}
 
-	selectorLabels := ComputeSelectorLabels(twor.Spec.TemporalWorkerDeploymentRef.Name, buildID)
+	selectorLabels := ComputeSelectorLabels(wrt.Spec.WorkerDeploymentRef.Name, buildID)
 
 	// Step 2: auto-inject scaleTargetRef and matchLabels into spec subtree
 	if spec, ok := raw["spec"].(map[string]interface{}); ok {
@@ -144,14 +144,14 @@ func RenderOwnedResource(
 	raw = renderedMap
 
 	// Step 4: set metadata
-	resourceName := ComputeOwnedResourceName(twor.Spec.TemporalWorkerDeploymentRef.Name, twor.Name, buildID)
+	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.WorkerDeploymentRef.Name, wrt.Name, buildID)
 
 	meta, ok := raw["metadata"].(map[string]interface{})
 	if !ok || meta == nil {
 		meta = make(map[string]interface{})
 	}
 	meta["name"] = resourceName
-	meta["namespace"] = twor.Namespace
+	meta["namespace"] = wrt.Namespace
 
 	// Merge labels
 	existingLabels, ok := meta["labels"].(map[string]interface{})
@@ -164,7 +164,7 @@ func RenderOwnedResource(
 	meta["labels"] = existingLabels
 
 	// Set owner reference pointing to the versioned Deployment so k8s GC cleans up
-	// the owned resource when the Deployment is deleted.
+	// the worker resource template when the Deployment is deleted.
 	blockOwnerDeletion := true
 	isController := true
 	meta["ownerReferences"] = []interface{}{
@@ -302,9 +302,9 @@ func containsTemplateMarker(s string) bool {
 	return false
 }
 
-// OwnedResourceVersionStatusForBuildID is a helper to build a status entry.
-func OwnedResourceVersionStatusForBuildID(buildID, resourceName string, applied bool, message string) temporaliov1alpha1.OwnedResourceVersionStatus {
-	return temporaliov1alpha1.OwnedResourceVersionStatus{
+// WorkerResourceTemplateVersionStatusForBuildID is a helper to build a status entry.
+func WorkerResourceTemplateVersionStatusForBuildID(buildID, resourceName string, applied bool, message string) temporaliov1alpha1.WorkerResourceTemplateVersionStatus {
+	return temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
 		BuildID:            buildID,
 		Applied:            applied,
 		ResourceName:       resourceName,

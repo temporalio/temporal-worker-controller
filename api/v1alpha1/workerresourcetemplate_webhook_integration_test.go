@@ -4,15 +4,15 @@
 
 package v1alpha1
 
-// Integration tests for the TemporalWorkerOwnedResource validating webhook.
+// Integration tests for the WorkerResourceTemplate validating webhook.
 //
 // These tests run through the real envtest HTTP admission path — the kube-apiserver
 // sends actual AdmissionRequests to the webhook server — validating that:
-//   - The webhook is correctly registered and called on TWOR create/update/delete
+//   - The webhook is correctly registered and called on WRT create/update/delete
 //   - Spec-only rejections (kind not in allowed list) work end-to-end
 //   - SubjectAccessReview (SAR) checks for the requesting user are enforced
 //   - SAR checks for the controller service account are enforced
-//   - temporalWorkerDeploymentRef.name immutability is enforced via a real update request
+//   - workerDeploymentRef.name immutability is enforced via a real update request
 //
 // Controller SA identity: POD_NAMESPACE=test-system, SERVICE_ACCOUNT_NAME=test-controller
 // (set in webhook_suite_test.go BeforeSuite before the validator is constructed).
@@ -46,17 +46,17 @@ func hpaObjForIntegration() map[string]interface{} {
 	}
 }
 
-// makeTWORForWebhook builds a TemporalWorkerOwnedResource in the given namespace.
-func makeTWORForWebhook(name, ns, temporalWorkerDeploymentRef string, embeddedObj map[string]interface{}) *TemporalWorkerOwnedResource {
+// makeWRTForWebhook builds a WorkerResourceTemplate in the given namespace.
+func makeWRTForWebhook(name, ns, workerDeploymentRef string, embeddedObj map[string]interface{}) *WorkerResourceTemplate {
 	raw, _ := json.Marshal(embeddedObj)
-	return &TemporalWorkerOwnedResource{
+	return &WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 		},
-		Spec: TemporalWorkerOwnedResourceSpec{
-			TemporalWorkerDeploymentRef: TemporalWorkerDeploymentReference{Name: temporalWorkerDeploymentRef},
-			Object:                      runtime.RawExtension{Raw: raw},
+		Spec: WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: WorkerDeploymentReference{Name: workerDeploymentRef},
+			Object:              runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -97,23 +97,23 @@ func grantControllerSAHPACreateAccess(ns string) {
 	Expect(k8sClient.Create(ctx, rb)).To(Succeed())
 }
 
-// grantUserTWORCreateAccess grants a user permission to create TWORs in ns.
+// grantUserWRTCreateAccess grants a user permission to create WRTs in ns.
 // This is required so the kube-apiserver's RBAC check passes before calling the webhook.
-func grantUserTWORCreateAccess(ns, username string) {
+func grantUserWRTCreateAccess(ns, username string) {
 	role := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("twor-creator-%s", username), Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("wrt-creator-%s", username), Namespace: ns},
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{"temporal.io"},
-				Resources: []string{"temporalworkerownedresources"},
+				Resources: []string{"workerresourcetemplates"},
 				Verbs:     []string{"create", "update", "delete", "get", "list"},
 			},
 		},
 	}
 	Expect(k8sClient.Create(ctx, role)).To(Succeed())
 	rb := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("twor-creator-rb-%s", username), Namespace: ns},
-		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: fmt.Sprintf("twor-creator-%s", username)},
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("wrt-creator-rb-%s", username), Namespace: ns},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: fmt.Sprintf("wrt-creator-%s", username)},
 		Subjects:   []rbacv1.Subject{{Kind: "User", Name: username}},
 	}
 	Expect(k8sClient.Create(ctx, rb)).To(Succeed())
@@ -133,32 +133,32 @@ func impersonatedClient(username string) client.Client {
 	return c
 }
 
-var _ = Describe("TemporalWorkerOwnedResource webhook integration", func() {
+var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 
 	// Test 14: Spec-level validation (kind not in allowed list) fires via real HTTP admission.
 	// Deployment is not in the allowed kinds list. The webhook must reject the
 	// request with an error mentioning the kind before making any API calls.
 	It("rejects a kind not in the allowed list via the real HTTP admission path", func() {
 		ns := makeTestNamespace("wh-notallowed")
-		twor := makeTWORForWebhook("t14-notallowed", ns, "my-worker", map[string]interface{}{
+		wrt := makeWRTForWebhook("t14-notallowed", ns, "my-worker", map[string]interface{}{
 			"apiVersion": "apps/v1",
 			"kind":       "Deployment",
 			"spec":       map[string]interface{}{"replicas": float64(1)},
 		})
-		err := k8sClient.Create(ctx, twor)
+		err := k8sClient.Create(ctx, wrt)
 		Expect(err).To(HaveOccurred(), "webhook must reject a kind not in the allowed list")
 		Expect(err.Error()).To(ContainSubstring("Deployment"))
 		Expect(err.Error()).To(ContainSubstring("not in the allowed list"))
 	})
 
 	// Test 15: SAR pass — both the requesting user (admin) and the controller SA have
-	// HPA create permission in the namespace. The webhook must allow the TWOR creation.
+	// HPA create permission in the namespace. The webhook must allow the WRT creation.
 	It("allows creation when user and controller SA both have HPA permission", func() {
 		ns := makeTestNamespace("wh-sar-pass")
 		grantControllerSAHPACreateAccess(ns)
 
-		twor := makeTWORForWebhook("t15-sar-pass", ns, "my-worker", hpaObjForIntegration())
-		Expect(k8sClient.Create(ctx, twor)).To(Succeed(),
+		wrt := makeWRTForWebhook("t15-sar-pass", ns, "my-worker", hpaObjForIntegration())
+		Expect(k8sClient.Create(ctx, wrt)).To(Succeed(),
 			"admission must succeed when both user and controller SA can create HPAs")
 	})
 
@@ -170,14 +170,14 @@ var _ = Describe("TemporalWorkerOwnedResource webhook integration", func() {
 		grantControllerSAHPACreateAccess(ns)
 
 		const username = "webhook-test-alice"
-		// alice needs TWOR create permission to reach the webhook (kube-apiserver checks
+		// alice needs WRT create permission to reach the webhook (kube-apiserver checks
 		// this before forwarding the request to the admission webhook).
-		grantUserTWORCreateAccess(ns, username)
+		grantUserWRTCreateAccess(ns, username)
 		// Intentionally do NOT grant alice HPA create permission.
 
 		aliceClient := impersonatedClient(username)
-		twor := makeTWORForWebhook("t16-user-fail", ns, "my-worker", hpaObjForIntegration())
-		err := aliceClient.Create(ctx, twor)
+		wrt := makeWRTForWebhook("t16-user-fail", ns, "my-worker", hpaObjForIntegration())
+		err := aliceClient.Create(ctx, wrt)
 		Expect(err).To(HaveOccurred(), "webhook must reject when requesting user cannot create HPAs")
 		Expect(err.Error()).To(ContainSubstring(username))
 		Expect(err.Error()).To(ContainSubstring("not authorized"))
@@ -191,31 +191,31 @@ var _ = Describe("TemporalWorkerOwnedResource webhook integration", func() {
 		ns := makeTestNamespace("wh-sa-fail")
 		// Intentionally do NOT call grantControllerSAHPACreateAccess — the SA has no HPA RBAC here.
 
-		twor := makeTWORForWebhook("t17-sa-fail", ns, "my-worker", hpaObjForIntegration())
-		err := k8sClient.Create(ctx, twor)
+		wrt := makeWRTForWebhook("t17-sa-fail", ns, "my-worker", hpaObjForIntegration())
+		err := k8sClient.Create(ctx, wrt)
 		Expect(err).To(HaveOccurred(), "webhook must reject when controller SA cannot create HPAs")
 		Expect(err.Error()).To(ContainSubstring("test-controller"))
 		Expect(err.Error()).To(ContainSubstring("not authorized"))
 	})
 
-	// Test 18: temporalWorkerDeploymentRef.name immutability enforced via a real HTTP update request.
-	// First create a valid TWOR, then attempt to change temporalWorkerDeploymentRef.name via k8sClient.Update.
+	// Test 18: workerDeploymentRef.name immutability enforced via a real HTTP update request.
+	// First create a valid WRT, then attempt to change workerDeploymentRef.name via k8sClient.Update.
 	// The webhook must reject the update with a message about immutability.
-	It("rejects temporalWorkerDeploymentRef.name change via real HTTP update", func() {
+	It("rejects workerDeploymentRef.name change via real HTTP update", func() {
 		ns := makeTestNamespace("wh-immutable")
 		grantControllerSAHPACreateAccess(ns)
 
-		twor := makeTWORForWebhook("t18-immutable", ns, "original-worker", hpaObjForIntegration())
-		Expect(k8sClient.Create(ctx, twor)).To(Succeed(), "initial creation must succeed")
+		wrt := makeWRTForWebhook("t18-immutable", ns, "original-worker", hpaObjForIntegration())
+		Expect(k8sClient.Create(ctx, wrt)).To(Succeed(), "initial creation must succeed")
 
-		var created TemporalWorkerOwnedResource
+		var created WorkerResourceTemplate
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "t18-immutable", Namespace: ns}, &created)).To(Succeed())
 
 		updated := created.DeepCopy()
-		updated.Spec.TemporalWorkerDeploymentRef.Name = "different-worker"
+		updated.Spec.WorkerDeploymentRef.Name = "different-worker"
 		err := k8sClient.Update(ctx, updated)
-		Expect(err).To(HaveOccurred(), "webhook must reject temporalWorkerDeploymentRef.name change")
-		Expect(err.Error()).To(ContainSubstring("temporalWorkerDeploymentRef.name"))
+		Expect(err).To(HaveOccurred(), "webhook must reject workerDeploymentRef.name change")
+		Expect(err.Error()).To(ContainSubstring("workerDeploymentRef.name"))
 		Expect(err.Error()).To(ContainSubstring("immutable"))
 	})
 })

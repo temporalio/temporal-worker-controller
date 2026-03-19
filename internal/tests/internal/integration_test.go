@@ -840,12 +840,12 @@ func TestIntegration(t *testing.T) {
 		})
 	}
 
-	// TemporalWorkerOwnedResource integration test:
-	// Creates a TWOR with an HPA spec and verifies that the controller applies one HPA per active Build ID.
-	t.Run("twor-creates-hpa-per-build-id", func(t *testing.T) {
+	// WorkerResourceTemplate integration test:
+	// Creates a WRT with an HPA spec and verifies that the controller applies one HPA per active Build ID.
+	t.Run("wrt-creates-hpa-per-build-id", func(t *testing.T) {
 		ctx := context.Background()
-		twdName := "twor-hpa-test"
-		tworName := "test-hpa"
+		twdName := "wrt-hpa-test"
+		wrtName := "test-hpa"
 
 		// Build the TWD using the existing builder (sets connection ref, temporal namespace, task queue).
 		tc := testhelpers.NewTestCase().
@@ -899,18 +899,18 @@ func TestIntegration(t *testing.T) {
 		stopFuncs := applyDeployment(t, ctx, k8sClient, depName, testNamespace.Name)
 		defer handleStopFuncs(stopFuncs)
 
-		// Wait for TWD status to reach Current before creating the TWOR,
+		// Wait for TWD status to reach Current before creating the WRT,
 		// so that k8sState.Deployments already contains the active Build ID
 		// when the reconciler next runs.
 		verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, tc.GetExpectedStatus(), 30*time.Second, 5*time.Second)
 
-		t.Log("Creating TemporalWorkerOwnedResource with HPA spec")
-		twor := &temporaliov1alpha1.TemporalWorkerOwnedResource{
+		t.Log("Creating WorkerResourceTemplate with HPA spec")
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      tworName,
+				Name:      wrtName,
 				Namespace: testNamespace.Name,
 			},
-			Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
+			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: twd.Name},
 				// scaleTargetRef is set to null to trigger auto-injection by the controller.
 				Object: runtime.RawExtension{Raw: []byte(`{
@@ -925,29 +925,29 @@ func TestIntegration(t *testing.T) {
 				}`)},
 			},
 		}
-		if err := k8sClient.Create(ctx, twor); err != nil {
-			t.Fatalf("failed to create TemporalWorkerOwnedResource: %v", err)
+		if err := k8sClient.Create(ctx, wrt); err != nil {
+			t.Fatalf("failed to create WorkerResourceTemplate: %v", err)
 		}
 
 		// Compute expected HPA name using the same function the controller uses.
-		hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+		hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
 		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
 
 		// Poll until the HPA appears and verify scaleTargetRef was auto-injected.
 		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaName, expectedDeploymentName, 30*time.Second)
 
-		// Poll until TWOR.Status.Versions shows Applied: true for the build ID.
-		waitForTWORStatusApplied(t, ctx, k8sClient, testNamespace.Name, tworName, buildID, 30*time.Second)
+		// Poll until WRT.Status.Versions shows Applied: true for the build ID.
+		waitForWRTStatusApplied(t, ctx, k8sClient, testNamespace.Name, wrtName, buildID, 30*time.Second)
 
-		// Assert that the TWOR has the TWD as a controller owner reference.
-		assertTWORControllerOwnerRef(t, ctx, k8sClient, testNamespace.Name, tworName, twd.Name)
+		// Assert that the WRT has the TWD as a controller owner reference.
+		assertWRTControllerOwnerRef(t, ctx, k8sClient, testNamespace.Name, wrtName, twd.Name)
 	})
 
-	// TWOR integration tests: per-Build-ID HPA owner refs and scaleTargetRef injection,
-	// PDB matchLabels injection, multiple TWORs on the same TWD, template variable rendering,
+	// WRT integration tests: per-Build-ID HPA owner refs and scaleTargetRef injection,
+	// PDB matchLabels injection, multiple WRTs on the same TWD, template variable rendering,
 	// multi-version rollout copies, SSA apply failure handling, and SSA idempotency.
-	// Each entry uses the standard runner; TWOR-specific assertions are in ValidatorFunction.
-	for _, tc := range tworTestCases() {
+	// Each entry uses the standard runner; WRT-specific assertions are in ValidatorFunction.
+	for _, tc := range wrtTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))

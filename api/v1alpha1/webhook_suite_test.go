@@ -117,7 +117,7 @@ var _ = BeforeSuite(func() {
 	err = (&TemporalWorkerDeployment{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
-	// Set env vars consumed by NewTemporalWorkerOwnedResourceValidator before constructing it.
+	// Set env vars consumed by NewWorkerResourceTemplateValidator before constructing it.
 	// POD_NAMESPACE and SERVICE_ACCOUNT_NAME identify the controller SA for the SAR checks.
 	// "test-system" / "test-controller" are the values used in the integration tests.
 	// ALLOWED_KINDS mirrors the default Helm values so integration tests can create HPAs.
@@ -125,7 +125,7 @@ var _ = BeforeSuite(func() {
 	Expect(os.Setenv("SERVICE_ACCOUNT_NAME", "test-controller")).To(Succeed())
 	Expect(os.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler")).To(Succeed())
 
-	err = NewTemporalWorkerOwnedResourceValidator(mgr).SetupWebhookWithManager(mgr)
+	err = NewWorkerResourceTemplateValidator(mgr).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:webhook

@@ -39,8 +39,8 @@ const (
 	deployOwnerKey = ".metadata.controller"
 	buildIDLabel   = "temporal.io/build-id"
 
-	// tworTemporalWorkerDeploymentRefKey is the field index key for TemporalWorkerOwnedResource by temporalWorkerDeploymentRef.name.
-	tworTemporalWorkerDeploymentRefKey = ".spec.temporalWorkerDeploymentRef.name"
+	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by temporalWorkerDeploymentRef.name.
+	wrtWorkerRefKey = ".spec.temporalWorkerDeploymentRef.name"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -360,14 +360,14 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
-	// Index TemporalWorkerOwnedResource by spec.temporalWorkerDeploymentRef.name for efficient listing.
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.TemporalWorkerOwnedResource{}, tworTemporalWorkerDeploymentRefKey, func(rawObj client.Object) []string {
-		twor, ok := rawObj.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
+	// Index WorkerResourceTemplate by spec.temporalWorkerDeploymentRef.name for efficient listing.
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.WorkerResourceTemplate{}, wrtWorkerRefKey, func(rawObj client.Object) []string {
+		wrt, ok := rawObj.(*temporaliov1alpha1.WorkerResourceTemplate)
 		if !ok {
-			mgr.GetLogger().Error(errors.New("error indexing TemporalWorkerOwnedResources"), "could not convert raw object", rawObj)
+			mgr.GetLogger().Error(errors.New("error indexing WorkerResourceTemplates"), "could not convert raw object", rawObj)
 			return nil
 		}
-		return []string{twor.Spec.TemporalWorkerDeploymentRef.Name}
+		return []string{wrt.Spec.TemporalWorkerDeploymentRef.Name}
 	}); err != nil {
 		return err
 	}
@@ -377,7 +377,7 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.TemporalConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
-		Watches(&temporaliov1alpha1.TemporalWorkerOwnedResource{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsForOwnedResource)).
+		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsForWorkerResourceTemplate)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 			RecoverPanic:            &recoverPanic,
@@ -385,17 +385,17 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		Complete(r)
 }
 
-// findTWDsForOwnedResource maps a TemporalWorkerOwnedResource to the TWD reconcile request.
-func (r *TemporalWorkerDeploymentReconciler) findTWDsForOwnedResource(ctx context.Context, twor client.Object) []reconcile.Request {
-	tworObj, ok := twor.(*temporaliov1alpha1.TemporalWorkerOwnedResource)
+// findTWDsForWorkerResourceTemplate maps a WorkerResourceTemplate to the TWD reconcile request.
+func (r *TemporalWorkerDeploymentReconciler) findTWDsForWorkerResourceTemplate(ctx context.Context, wrt client.Object) []reconcile.Request {
+	wrtObj, ok := wrt.(*temporaliov1alpha1.WorkerResourceTemplate)
 	if !ok {
 		return nil
 	}
 	return []reconcile.Request{
 		{
 			NamespacedName: types.NamespacedName{
-				Name:      tworObj.Spec.TemporalWorkerDeploymentRef.Name,
-				Namespace: twor.GetNamespace(),
+				Name:      wrtObj.Spec.TemporalWorkerDeploymentRef.Name,
+				Namespace: wrt.GetNamespace(),
 			},
 		},
 	}

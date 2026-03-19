@@ -366,7 +366,7 @@ func (tcb *TestCaseBuilder) WithSetupFunction(f func(t *testing.T, ctx context.C
 // WithValidatorFunction defines a function called by the runner after both
 // verifyTemporalWorkerDeploymentStatusEventually and verifyTemporalStateMatchesStatusEventually
 // have confirmed the TWD has reached its expected state. Use it for additional assertions beyond
-// the standard TWD status and Temporal state checks — for example TWOR-specific resource
+// the standard TWD status and Temporal state checks — for example WRT-specific resource
 // inspection or multi-phase rollout scenarios that require further TWD updates.
 func (tcb *TestCaseBuilder) WithValidatorFunction(f func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)) *TestCaseBuilder {
 	tcb.validatorFunc = f

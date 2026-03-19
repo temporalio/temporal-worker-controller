@@ -77,7 +77,7 @@ spec:
             fieldRef:
               fieldPath: spec.serviceAccountName
         # ALLOWED_KINDS controls which resource kinds are accepted by the
-        # TemporalWorkerOwnedResource validating webhook. Derived from
+        # WorkerResourceTemplate validating webhook. Derived from
         # ownedResourceConfig.allowedResources[*].kinds in values.yaml.
         # An empty value rejects all kinds — at least one must be configured.
         {{- $allKinds := list -}}

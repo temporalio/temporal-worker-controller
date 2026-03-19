@@ -40,12 +40,12 @@ type plan struct {
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
 
-	// OwnedResources to apply via Server-Side Apply, one per (TWOR × Build ID) pair.
-	ApplyOwnedResources []planner.OwnedResourceApply
+	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
+	ApplyWorkerResourceTemplates []planner.OwnedResourceApply
 
-	// TWORs that need a controller owner reference added, as (base, patched) pairs
+	// WRTs that need a controller owner reference added, as (base, patched) pairs
 	// ready for client.MergeFrom patching in executePlan.
-	EnsureTWOROwnerRefs []planner.TWOROwnerRefPatch
+	EnsureWRTOwnerRefs []planner.WRTOwnerRefPatch
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -136,14 +136,14 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		RolloutStrategy: rolloutStrategy,
 	}
 
-	// Fetch all TemporalWorkerOwnedResources that reference this TWD so that the planner
-	// can render one apply action per (TWOR × active Build ID) pair.
-	var tworList temporaliov1alpha1.TemporalWorkerOwnedResourceList
-	if err := r.List(ctx, &tworList,
+	// Fetch all WorkerResourceTemplates that reference this TWD so that the planner
+	// can render one apply action per (WRT × active Build ID) pair.
+	var wrtList temporaliov1alpha1.WorkerResourceTemplateList
+	if err := r.List(ctx, &wrtList,
 		client.InNamespace(w.Namespace),
-		client.MatchingFields{tworTemporalWorkerDeploymentRefKey: w.Name},
+		client.MatchingFields{wrtWorkerRefKey: w.Name},
 	); err != nil {
-		return nil, fmt.Errorf("unable to list TemporalWorkerOwnedResources: %w", err)
+		return nil, fmt.Errorf("unable to list WorkerResourceTemplates: %w", err)
 	}
 
 	planResult, err := planner.GeneratePlan(
@@ -158,7 +158,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		r.MaxDeploymentVersionsIneligibleForDeletion,
 		gateInput,
 		isGateInputSecret,
-		tworList.Items,
+		wrtList.Items,
 		w.Name,
 		w.UID,
 	)
@@ -175,8 +175,8 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.UpdateVersionConfig = planResult.VersionConfig
 
 	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
-	plan.ApplyOwnedResources = planResult.ApplyOwnedResources
-	plan.EnsureTWOROwnerRefs = planResult.EnsureTWOROwnerRefs
+	plan.ApplyWorkerResourceTemplates = planResult.ApplyWorkerResourceTemplates
+	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

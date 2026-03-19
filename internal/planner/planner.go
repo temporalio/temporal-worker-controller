@@ -20,12 +20,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// OwnedResourceApply holds a rendered owned resource to apply via Server-Side Apply.
+// OwnedResourceApply holds a rendered worker resource template to apply via Server-Side Apply.
 type OwnedResourceApply struct {
 	Resource      *unstructured.Unstructured
 	FieldManager  string
-	TWORName      string
-	TWORNamespace string
+	WRTName      string
+	WRTNamespace string
 	BuildID       string
 }
 
@@ -41,19 +41,19 @@ type Plan struct {
 	// Build IDs of versions from which the controller should
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
-	// ApplyOwnedResources holds resources to apply via SSA, one per (TWOR × Build ID) pair.
-	ApplyOwnedResources []OwnedResourceApply
-	// EnsureTWOROwnerRefs holds (base, patched) pairs for TWORs that need a
+	// ApplyWorkerResourceTemplates holds resources to apply via SSA, one per (WRT × Build ID) pair.
+	ApplyWorkerResourceTemplates []OwnedResourceApply
+	// EnsureWRTOwnerRefs holds (base, patched) pairs for WRTs that need a
 	// controller owner reference added, ready for client.MergeFrom patching.
-	EnsureTWOROwnerRefs []TWOROwnerRefPatch
+	EnsureWRTOwnerRefs []WRTOwnerRefPatch
 }
 
-// TWOROwnerRefPatch holds a TWOR pair for a single merge-patch:
+// WRTOwnerRefPatch holds a WRT pair for a single merge-patch:
 // Base is the unmodified object (used as the patch base), Patched has the
 // controller owner reference already appended.
-type TWOROwnerRefPatch struct {
-	Base    *temporaliov1alpha1.TemporalWorkerOwnedResource
-	Patched *temporaliov1alpha1.TemporalWorkerOwnedResource
+type WRTOwnerRefPatch struct {
+	Base    *temporaliov1alpha1.WorkerResourceTemplate
+	Patched *temporaliov1alpha1.WorkerResourceTemplate
 }
 
 // VersionConfig defines version configuration for Temporal
@@ -102,7 +102,7 @@ func GeneratePlan(
 	maxVersionsIneligibleForDeletion int32,
 	gateInput []byte,
 	isGateInputSecret bool,
-	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	twdName string,
 	twdUID types.UID,
 ) (*Plan, error) {
@@ -141,41 +141,41 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	plan.ApplyOwnedResources = getOwnedResourceApplies(l, twors, k8sState, spec.WorkerOptions.TemporalNamespace)
-	plan.EnsureTWOROwnerRefs = getTWOROwnerRefPatches(twors, twdName, twdUID)
+	plan.ApplyWorkerResourceTemplates = getOwnedResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace)
+	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
 	return plan, nil
 }
 
-// getOwnedResourceApplies renders one OwnedResourceApply for each (TWOR × active Build ID) pair.
+// getOwnedResourceApplies renders one OwnedResourceApply for each (WRT × active Build ID) pair.
 // Pairs that fail to render are logged and skipped; they do not block the rest.
 func getOwnedResourceApplies(
 	l logr.Logger,
-	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	k8sState *k8s.DeploymentState,
 	temporalNamespace string,
 ) []OwnedResourceApply {
 	var applies []OwnedResourceApply
-	for i := range twors {
-		twor := &twors[i]
-		if twor.Spec.Object.Raw == nil {
-			l.Info("skipping TemporalWorkerOwnedResource with empty spec.object", "name", twor.Name)
+	for i := range wrts {
+		wrt := &wrts[i]
+		if wrt.Spec.Object.Raw == nil {
+			l.Info("skipping WorkerResourceTemplate with empty spec.object", "name", wrt.Name)
 			continue
 		}
 		for buildID, deployment := range k8sState.Deployments {
-			rendered, err := k8s.RenderOwnedResource(twor, deployment, buildID, temporalNamespace)
+			rendered, err := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
 			if err != nil {
-				l.Error(err, "failed to render TemporalWorkerOwnedResource",
-					"twor", twor.Name,
+				l.Error(err, "failed to render WorkerResourceTemplate",
+					"wrt", wrt.Name,
 					"buildID", buildID,
 				)
 				continue
 			}
 			applies = append(applies, OwnedResourceApply{
 				Resource:      rendered,
-				FieldManager:  k8s.OwnedResourceFieldManager(twor),
-				TWORName:      twor.Name,
-				TWORNamespace: twor.Namespace,
+				FieldManager:  k8s.WorkerResourceTemplateFieldManager(wrt),
+				WRTName:      wrt.Name,
+				WRTNamespace: wrt.Namespace,
 				BuildID:       buildID,
 			})
 		}
@@ -183,15 +183,15 @@ func getOwnedResourceApplies(
 	return applies
 }
 
-// getTWOROwnerRefPatches returns (base, patched) pairs for each TWOR that does not
+// getWRTOwnerRefPatches returns (base, patched) pairs for each WRT that does not
 // yet have a controller owner reference pointing to the given TWD. The patched copy
 // has the owner reference appended so that executePlan can apply a merge-patch to
 // add it without a full Update.
-func getTWOROwnerRefPatches(
-	twors []temporaliov1alpha1.TemporalWorkerOwnedResource,
+func getWRTOwnerRefPatches(
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	twdName string,
 	twdUID types.UID,
-) []TWOROwnerRefPatch {
+) []WRTOwnerRefPatch {
 	isController := true
 	blockOwnerDeletion := true
 	ownerRef := metav1.OwnerReference{
@@ -202,12 +202,12 @@ func getTWOROwnerRefPatches(
 		Controller:         &isController,
 		BlockOwnerDeletion: &blockOwnerDeletion,
 	}
-	var patches []TWOROwnerRefPatch
-	for i := range twors {
-		twor := &twors[i]
+	var patches []WRTOwnerRefPatch
+	for i := range wrts {
+		wrt := &wrts[i]
 		// Skip if this TWD is already the controller owner.
 		alreadyOwned := false
-		for _, ref := range twor.OwnerReferences {
+		for _, ref := range wrt.OwnerReferences {
 			if ref.Controller != nil && *ref.Controller && ref.UID == twdUID {
 				alreadyOwned = true
 				break
@@ -216,9 +216,9 @@ func getTWOROwnerRefPatches(
 		if alreadyOwned {
 			continue
 		}
-		patched := twor.DeepCopy()
+		patched := wrt.DeepCopy()
 		patched.OwnerReferences = append(patched.OwnerReferences, ownerRef)
-		patches = append(patches, TWOROwnerRefPatch{Base: twor, Patched: patched})
+		patches = append(patches, WRTOwnerRefPatch{Base: wrt, Patched: patched})
 	}
 	return patches
 }

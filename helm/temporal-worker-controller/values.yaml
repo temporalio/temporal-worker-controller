@@ -77,15 +77,15 @@ namespace:
 
 webhook:
   # enabled controls the optional TemporalWorkerDeployment validating webhook.
-  # The TemporalWorkerOwnedResource validating webhook is always enabled and does
+  # The WorkerResourceTemplate validating webhook is always enabled and does
   # not require this flag.
   enabled: false
   port: 9443
   certDir: /tmp/k8s-webhook-server/serving-certs
 
-# Configuration for TemporalWorkerOwnedResource objects.
+# Configuration for WorkerResourceTemplate objects.
 ownedResourceConfig:
-  # allowedResources defines which resource kinds may be embedded in TWOR objects.
+  # allowedResources defines which resource kinds may be embedded in WRT objects.
   # The webhook rejects any kind not listed here, and the controller is granted RBAC
   # to manage exactly these resource types. An empty list rejects all kinds — at
   # least one entry must be configured.

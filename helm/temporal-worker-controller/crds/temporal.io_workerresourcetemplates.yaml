@@ -4,21 +4,21 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: temporalworkerownedresources.temporal.io
+  name: workerresourcetemplates.temporal.io
 spec:
   group: temporal.io
   names:
-    kind: TemporalWorkerOwnedResource
-    listKind: TemporalWorkerOwnedResourceList
-    plural: temporalworkerownedresources
+    kind: WorkerResourceTemplate
+    listKind: WorkerResourceTemplateList
+    plural: workerresourcetemplates
     shortNames:
-    - twor
-    singular: temporalworkerownedresource
+    - wrt
+    singular: workerresourcetemplate
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - description: Referenced TemporalWorkerDeployment
-      jsonPath: .spec.temporalWorkerDeploymentRef.name
+      jsonPath: .spec.workerDeploymentRef.name
       name: Worker
       type: string
     - description: Kind of owned resource
@@ -44,7 +44,7 @@ spec:
               object:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
-              temporalWorkerDeploymentRef:
+              workerDeploymentRef:
                 properties:
                   name:
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
@@ -54,7 +54,7 @@ spec:
                 type: object
             required:
             - object
-            - temporalWorkerDeploymentRef
+            - workerDeploymentRef
             type: object
           status:
             properties:

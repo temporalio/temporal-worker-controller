@@ -21,25 +21,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// tworTestCases returns TWOR integration tests as a slice of testCase entries that run through
+// wrtTestCases returns WRT integration tests as a slice of testCase entries that run through
 // the standard testTemporalWorkerDeploymentCreation runner.
 //
 // Each entry:
 //   - Sets up a fresh TWD (AllAtOnce v1.0 → Current) via the shared runner, which confirms the
 //     TWD has reached its expected status via verifyTemporalWorkerDeploymentStatusEventually and
 //     verifyTemporalStateMatchesStatusEventually.
-//   - Uses WithValidatorFunction to exercise TWOR-specific behaviour after those checks pass.
+//   - Uses WithValidatorFunction to exercise WRT-specific behaviour after those checks pass.
 //
-// Exception: "twor-multiple-active-versions" uses a Progressive strategy with an existing v0
+// Exception: "wrt-multiple-active-versions" uses a Progressive strategy with an existing v0
 // Deployment so the runner leaves the TWD in a v1.0=Ramping + v0=Current state before the
-// ValidatorFunction creates the TWOR.
-func tworTestCases() []testCase {
+// ValidatorFunction creates the WRT.
+func wrtTestCases() []testCase {
 	return []testCase{
 		// Deployment owner ref on per-Build-ID resource copy.
 		// Verifies that each per-Build-ID HPA has the versioned Deployment (not the TWD) as its
 		// controller owner reference, so that k8s GC deletes the HPA when the Deployment is removed.
 		{
-			name: "twor-deployment-owner-ref",
+			name: "wrt-deployment-owner-ref",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -55,24 +55,24 @@ func tworTestCases() []testCase {
 					twd := tc.GetTWD()
 					buildID := k8s.ComputeBuildID(twd)
 					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
-					tworName := "ownerref-hpa"
+					wrtName := "ownerref-hpa"
 
-					twor := makeHPATWOR(tworName, twd.Namespace, twd.Name)
-					if err := env.K8sClient.Create(ctx, twor); err != nil {
-						t.Fatalf("failed to create TWOR: %v", err)
+					wrt := makeHPAWRT(wrtName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
 					}
 
-					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
 					assertHPAOwnerRefToDeployment(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName)
 				}),
 		},
 
 		// matchLabels auto-injection end-to-end.
-		// Verifies that a PDB TWOR with selector.matchLabels: null gets the controller-managed
+		// Verifies that a PDB WRT with selector.matchLabels: null gets the controller-managed
 		// selector labels injected before the resource is applied to the API server.
 		{
-			name: "twor-matchlabels-injection",
+			name: "wrt-matchlabels-injection",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -87,9 +87,9 @@ func tworTestCases() []testCase {
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					buildID := k8s.ComputeBuildID(twd)
-					tworName := "matchlabels-pdb"
+					wrtName := "matchlabels-pdb"
 
-					twor := makeTWORWithRaw(tworName, twd.Namespace, twd.Name, []byte(`{
+					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
 						"apiVersion": "policy/v1",
 						"kind": "PodDisruptionBudget",
 						"spec": {
@@ -99,20 +99,20 @@ func tworTestCases() []testCase {
 							}
 						}
 					}`))
-					if err := env.K8sClient.Create(ctx, twor); err != nil {
-						t.Fatalf("failed to create TWOR: %v", err)
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
 					}
 
-					pdbName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					pdbName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
 					waitForPDBWithInjectedMatchLabels(t, ctx, env.K8sClient, twd.Namespace, pdbName, twd.Name, buildID, 30*time.Second)
 				}),
 		},
 
-		// Multiple TWORs on the same TWD — SSA field manager isolation.
-		// Verifies that two TWORs (one HPA, one PDB) targeting the same TWD are applied
+		// Multiple WRTs on the same TWD — SSA field manager isolation.
+		// Verifies that two WRTs (one HPA, one PDB) targeting the same TWD are applied
 		// independently with no field manager conflict between them.
 		{
-			name: "twor-multiple-twors-same-twd",
+			name: "wrt-multiple-wrts-same-twd",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -127,15 +127,15 @@ func tworTestCases() []testCase {
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					buildID := k8s.ComputeBuildID(twd)
-					tworHPAName := "multi-hpa"
-					tworPDBName := "multi-pdb"
+					wrtHPAName := "multi-hpa"
+					wrtPDBName := "multi-pdb"
 
-					tworHPA := makeHPATWOR(tworHPAName, twd.Namespace, twd.Name)
-					if err := env.K8sClient.Create(ctx, tworHPA); err != nil {
-						t.Fatalf("failed to create HPA TWOR: %v", err)
+					wrtHPA := makeHPAWRT(wrtHPAName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, wrtHPA); err != nil {
+						t.Fatalf("failed to create HPA WRT: %v", err)
 					}
 
-					tworPDB := makeTWORWithRaw(tworPDBName, twd.Namespace, twd.Name, []byte(`{
+					wrtPDB := makeWRTWithRaw(wrtPDBName, twd.Namespace, twd.Name, []byte(`{
 						"apiVersion": "policy/v1",
 						"kind": "PodDisruptionBudget",
 						"spec": {
@@ -145,26 +145,26 @@ func tworTestCases() []testCase {
 							}
 						}
 					}`))
-					if err := env.K8sClient.Create(ctx, tworPDB); err != nil {
-						t.Fatalf("failed to create PDB TWOR: %v", err)
+					if err := env.K8sClient.Create(ctx, wrtPDB); err != nil {
+						t.Fatalf("failed to create PDB WRT: %v", err)
 					}
 
-					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworHPAName, buildID)
-					pdbName := k8s.ComputeOwnedResourceName(twd.Name, tworPDBName, buildID)
+					hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtHPAName, buildID)
+					pdbName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtPDBName, buildID)
 					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
 
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
 					waitForPDBWithInjectedMatchLabels(t, ctx, env.K8sClient, twd.Namespace, pdbName, twd.Name, buildID, 30*time.Second)
-					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworHPAName, buildID, 30*time.Second)
-					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworPDBName, buildID, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtHPAName, buildID, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtPDBName, buildID, 30*time.Second)
 				}),
 		},
 
 		// Template variable rendering end-to-end.
-		// Verifies that {{ .DeploymentName }} in a TWOR annotation is rendered to the actual
+		// Verifies that {{ .DeploymentName }} in a WRT annotation is rendered to the actual
 		// versioned Deployment name before the resource is applied.
 		{
-			name: "twor-template-variable",
+			name: "wrt-template-variable",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -179,10 +179,10 @@ func tworTestCases() []testCase {
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					buildID := k8s.ComputeBuildID(twd)
-					tworName := "template-hpa"
+					wrtName := "template-hpa"
 					expectedDepName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
 
-					twor := makeTWORWithRaw(tworName, twd.Namespace, twd.Name, []byte(`{
+					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
 						"apiVersion": "autoscaling/v2",
 						"kind": "HorizontalPodAutoscaler",
 						"metadata": {
@@ -197,11 +197,11 @@ func tworTestCases() []testCase {
 							"metrics": []
 						}
 					}`))
-					if err := env.K8sClient.Create(ctx, twor); err != nil {
-						t.Fatalf("failed to create TWOR: %v", err)
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
 					}
 
-					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, expectedDepName, 30*time.Second)
 
 					eventually(t, 30*time.Second, time.Second, func() error {
@@ -219,12 +219,12 @@ func tworTestCases() []testCase {
 				}),
 		},
 
-		// Multiple active versions (current + ramping) each get a TWOR copy.
+		// Multiple active versions (current + ramping) each get a WRT copy.
 		// Uses a Progressive strategy with v0 pre-seeded as Current so the controller leaves
 		// v1.0 in Ramping state. The ValidatorFunction then verifies that one HPA copy is
 		// created per active Build ID (both v0 and v1.0).
 		{
-			name: "twor-multiple-active-versions",
+			name: "wrt-multiple-active-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -248,30 +248,30 @@ func tworTestCases() []testCase {
 					twd := tc.GetTWD()
 					buildIDv1 := k8s.ComputeBuildID(twd)
 					buildIDv0 := testhelpers.MakeBuildID(twd.Name, "v0", "", nil)
-					tworName := "multi-ver-hpa"
+					wrtName := "multi-ver-hpa"
 
-					twor := makeHPATWOR(tworName, twd.Namespace, twd.Name)
-					if err := env.K8sClient.Create(ctx, twor); err != nil {
-						t.Fatalf("failed to create TWOR: %v", err)
+					wrt := makeHPAWRT(wrtName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
 					}
 
-					hpaNameV0 := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildIDv0)
-					hpaNameV1 := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildIDv1)
+					hpaNameV0 := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildIDv0)
+					hpaNameV1 := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildIDv1)
 					depNameV0 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv0)
 					depNameV1 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv1)
 
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaNameV0, depNameV0, 30*time.Second)
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaNameV1, depNameV1, 30*time.Second)
-					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildIDv0, 30*time.Second)
-					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildIDv1, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv0, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv1, 30*time.Second)
 				}),
 		},
 
 		// Apply failure → status.Applied:false.
 		// Uses an unknown GVK that the API server cannot recognise. The controller's SSA apply
-		// fails and the TWOR status must reflect Applied:false for that Build ID.
+		// fails and the WRT status must reflect Applied:false for that Build ID.
 		{
-			name: "twor-apply-failure",
+			name: "wrt-apply-failure",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -286,20 +286,20 @@ func tworTestCases() []testCase {
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					buildID := k8s.ComputeBuildID(twd)
-					tworName := "fail-resource"
+					wrtName := "fail-resource"
 
-					twor := makeTWORWithRaw(tworName, twd.Namespace, twd.Name, []byte(`{
+					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
 						"apiVersion": "nonexistent.example.com/v1",
 						"kind": "FakeResource",
 						"spec": {
 							"someField": "someValue"
 						}
 					}`))
-					if err := env.K8sClient.Create(ctx, twor); err != nil {
-						t.Fatalf("failed to create TWOR: %v", err)
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
 					}
 
-					waitForTWORStatusNotApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildID, 30*time.Second)
+					waitForWRTStatusNotApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildID, 30*time.Second)
 				}),
 		},
 
@@ -307,7 +307,7 @@ func tworTestCases() []testCase {
 		// Verifies that the HPA's resourceVersion and ownerReference count do not change after
 		// additional reconcile loops are triggered by patching the TWD annotation.
 		{
-			name: "twor-ssa-idempotency",
+			name: "wrt-ssa-idempotency",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -322,17 +322,17 @@ func tworTestCases() []testCase {
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					buildID := k8s.ComputeBuildID(twd)
-					tworName := "idempotent-hpa"
+					wrtName := "idempotent-hpa"
 
-					twor := makeHPATWOR(tworName, twd.Namespace, twd.Name)
-					if err := env.K8sClient.Create(ctx, twor); err != nil {
-						t.Fatalf("failed to create TWOR: %v", err)
+					wrt := makeHPAWRT(wrtName, twd.Namespace, twd.Name)
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
 					}
 
-					hpaName := k8s.ComputeOwnedResourceName(twd.Name, tworName, buildID)
+					hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
 					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
-					waitForTWORStatusApplied(t, ctx, env.K8sClient, twd.Namespace, tworName, buildID, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildID, 30*time.Second)
 
 					// Snapshot the HPA state before triggering extra reconciles.
 					var hpaBefore autoscalingv2.HorizontalPodAutoscaler
@@ -389,10 +389,10 @@ func tworTestCases() []testCase {
 	}
 }
 
-// makeHPATWOR constructs a TemporalWorkerOwnedResource with an HPA spec where
+// makeHPAWRT constructs a WorkerResourceTemplate with an HPA spec where
 // scaleTargetRef is null (triggering auto-injection by the controller).
-func makeHPATWOR(name, namespace, temporalWorkerDeploymentRefName string) *temporaliov1alpha1.TemporalWorkerOwnedResource {
-	return makeTWORWithRaw(name, namespace, temporalWorkerDeploymentRefName, []byte(`{
+func makeHPAWRT(name, namespace, workerDeploymentRefName string) *temporaliov1alpha1.WorkerResourceTemplate {
+	return makeWRTWithRaw(name, namespace, workerDeploymentRefName, []byte(`{
 		"apiVersion": "autoscaling/v2",
 		"kind": "HorizontalPodAutoscaler",
 		"spec": {
@@ -404,16 +404,16 @@ func makeHPATWOR(name, namespace, temporalWorkerDeploymentRefName string) *tempo
 	}`))
 }
 
-// makeTWORWithRaw constructs a TemporalWorkerOwnedResource with the given raw JSON object spec.
-func makeTWORWithRaw(name, namespace, temporalWorkerDeploymentRefName string, raw []byte) *temporaliov1alpha1.TemporalWorkerOwnedResource {
-	return &temporaliov1alpha1.TemporalWorkerOwnedResource{
+// makeWRTWithRaw constructs a WorkerResourceTemplate with the given raw JSON object spec.
+func makeWRTWithRaw(name, namespace, workerDeploymentRefName string, raw []byte) *temporaliov1alpha1.WorkerResourceTemplate {
+	return &temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: temporaliov1alpha1.TemporalWorkerOwnedResourceSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: temporalWorkerDeploymentRefName},
-			Object:                      runtime.RawExtension{Raw: raw},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
+			Object:              runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -472,30 +472,30 @@ func waitForPDBWithInjectedMatchLabels(
 	t.Logf("PDB %q has correctly injected matchLabels", pdbName)
 }
 
-// waitForTWORStatusNotApplied polls until the TWOR status contains an entry for buildID
+// waitForWRTStatusNotApplied polls until the WRT status contains an entry for buildID
 // with Applied:false (indicating the SSA apply failed).
-func waitForTWORStatusNotApplied(
+func waitForWRTStatusNotApplied(
 	t *testing.T,
 	ctx context.Context,
 	k8sClient client.Client,
-	namespace, tworName, buildID string,
+	namespace, wrtName, buildID string,
 	timeout time.Duration,
 ) {
 	t.Helper()
 	eventually(t, timeout, time.Second, func() error {
-		var twor temporaliov1alpha1.TemporalWorkerOwnedResource
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: tworName, Namespace: namespace}, &twor); err != nil {
+		var wrt temporaliov1alpha1.WorkerResourceTemplate
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: wrtName, Namespace: namespace}, &wrt); err != nil {
 			return err
 		}
-		for _, v := range twor.Status.Versions {
+		for _, v := range wrt.Status.Versions {
 			if v.BuildID == buildID {
 				if !v.Applied {
-					t.Logf("TWOR status correctly shows Applied:false for build ID %q, message: %s", buildID, v.Message)
+					t.Logf("WRT status correctly shows Applied:false for build ID %q, message: %s", buildID, v.Message)
 					return nil
 				}
-				return fmt.Errorf("TWOR status shows Applied:true for build ID %q, expected false", buildID)
+				return fmt.Errorf("WRT status shows Applied:true for build ID %q, expected false", buildID)
 			}
 		}
-		return fmt.Errorf("TWOR status has no entry for build ID %q (current: %+v)", buildID, twor.Status.Versions)
+		return fmt.Errorf("WRT status has no entry for build ID %q (current: %+v)", buildID, wrt.Status.Versions)
 	})
 }

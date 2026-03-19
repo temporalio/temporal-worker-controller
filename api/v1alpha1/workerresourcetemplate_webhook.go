@@ -23,23 +23,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// TemporalWorkerOwnedResourceValidator validates TemporalWorkerOwnedResource objects.
+// WorkerResourceTemplateValidator validates WorkerResourceTemplate objects.
 // It holds API-dependent dependencies (client, RESTMapper, controller SA identity).
 // +kubebuilder:object:generate=false
-type TemporalWorkerOwnedResourceValidator struct {
+type WorkerResourceTemplateValidator struct {
 	Client                client.Client
 	RESTMapper            meta.RESTMapper
 	ControllerSAName      string
 	ControllerSANamespace string
-	// AllowedKinds is the explicit list of resource kinds permitted as TWOR objects.
+	// AllowedKinds is the explicit list of resource kinds permitted as WRT objects.
 	// Must be non-empty; when empty or nil, all kinds are rejected.
 	// Populated from the ALLOWED_KINDS environment variable (comma-separated).
 	AllowedKinds []string
 }
 
-var _ webhook.CustomValidator = &TemporalWorkerOwnedResourceValidator{}
+var _ webhook.CustomValidator = &WorkerResourceTemplateValidator{}
 
-// NewTemporalWorkerOwnedResourceValidator creates a validator from a manager.
+// NewWorkerResourceTemplateValidator creates a validator from a manager.
 //
 // Three environment variables are read at startup (all injected by the Helm chart):
 //
@@ -52,10 +52,10 @@ var _ webhook.CustomValidator = &TemporalWorkerOwnedResourceValidator{}
 //     SA. Populated via the downward API (fieldRef: spec.serviceAccountName).
 //
 //   - ALLOWED_KINDS — comma-separated list of kind names that are permitted as
-//     TemporalWorkerOwnedResource objects (e.g. "HorizontalPodAutoscaler,PodDisruptionBudget").
+//     WorkerResourceTemplate objects (e.g. "HorizontalPodAutoscaler,PodDisruptionBudget").
 //     Configurable via ownedResourceConfig.allowedResources[*].kinds in values.yaml.
-//     Must be set; when empty or unset, all TWOR kind submissions are rejected.
-func NewTemporalWorkerOwnedResourceValidator(mgr ctrl.Manager) *TemporalWorkerOwnedResourceValidator {
+//     Must be set; when empty or unset, all WRT kind submissions are rejected.
+func NewWorkerResourceTemplateValidator(mgr ctrl.Manager) *WorkerResourceTemplateValidator {
 	var allowedKinds []string
 	if env := os.Getenv("ALLOWED_KINDS"); env != "" {
 		for _, p := range strings.Split(env, ",") {
@@ -64,7 +64,7 @@ func NewTemporalWorkerOwnedResourceValidator(mgr ctrl.Manager) *TemporalWorkerOw
 			}
 		}
 	}
-	return &TemporalWorkerOwnedResourceValidator{
+	return &WorkerResourceTemplateValidator{
 		Client:                mgr.GetClient(),
 		RESTMapper:            mgr.GetRESTMapper(),
 		ControllerSAName:      os.Getenv("SERVICE_ACCOUNT_NAME"),
@@ -75,55 +75,55 @@ func NewTemporalWorkerOwnedResourceValidator(mgr ctrl.Manager) *TemporalWorkerOw
 
 // SetupWebhookWithManager registers the validating webhook with the manager.
 //
-// +kubebuilder:webhook:path=/validate-temporal-io-v1alpha1-temporalworkerownedresource,mutating=false,failurePolicy=fail,sideEffects=None,groups=temporal.io,resources=temporalworkerownedresources,verbs=create;update;delete,versions=v1alpha1,name=vtemporalworkerownedresource.kb.io,admissionReviewVersions=v1
-func (v *TemporalWorkerOwnedResourceValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
+// +kubebuilder:webhook:path=/validate-temporal-io-v1alpha1-workerresourcetemplate,mutating=false,failurePolicy=fail,sideEffects=None,groups=temporal.io,resources=workerresourcetemplates,verbs=create;update;delete,versions=v1alpha1,name=vworkerresourcetemplate.kb.io,admissionReviewVersions=v1
+func (v *WorkerResourceTemplateValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).
-		For(&TemporalWorkerOwnedResource{}).
+		For(&WorkerResourceTemplate{}).
 		WithValidator(v).
 		Complete()
 }
 
-// ValidateCreate validates a new TemporalWorkerOwnedResource.
-func (v *TemporalWorkerOwnedResourceValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	twor, ok := obj.(*TemporalWorkerOwnedResource)
+// ValidateCreate validates a new WorkerResourceTemplate.
+func (v *WorkerResourceTemplateValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	wrt, ok := obj.(*WorkerResourceTemplate)
 	if !ok {
-		return nil, apierrors.NewBadRequest("expected a TemporalWorkerOwnedResource")
+		return nil, apierrors.NewBadRequest("expected a WorkerResourceTemplate")
 	}
-	return v.validate(ctx, nil, twor, "create")
+	return v.validate(ctx, nil, wrt, "create")
 }
 
-// ValidateUpdate validates an updated TemporalWorkerOwnedResource.
-func (v *TemporalWorkerOwnedResourceValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	old, ok := oldObj.(*TemporalWorkerOwnedResource)
+// ValidateUpdate validates an updated WorkerResourceTemplate.
+func (v *WorkerResourceTemplateValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	old, ok := oldObj.(*WorkerResourceTemplate)
 	if !ok {
-		return nil, apierrors.NewBadRequest("expected a TemporalWorkerOwnedResource for old object")
+		return nil, apierrors.NewBadRequest("expected a WorkerResourceTemplate for old object")
 	}
-	newTWOR, ok := newObj.(*TemporalWorkerOwnedResource)
+	newWRT, ok := newObj.(*WorkerResourceTemplate)
 	if !ok {
-		return nil, apierrors.NewBadRequest("expected a TemporalWorkerOwnedResource for new object")
+		return nil, apierrors.NewBadRequest("expected a WorkerResourceTemplate for new object")
 	}
-	return v.validate(ctx, old, newTWOR, "update")
+	return v.validate(ctx, old, newWRT, "update")
 }
 
 // ValidateDelete checks that the requesting user and the controller service account
 // are both authorized to delete the underlying resource kind. This prevents privilege
 // escalation: a user who cannot directly delete HPAs should not be able to delete a
-// TemporalWorkerOwnedResource that manages HPAs and thereby trigger their removal.
-func (v *TemporalWorkerOwnedResourceValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	twor, ok := obj.(*TemporalWorkerOwnedResource)
+// WorkerResourceTemplate that manages HPAs and thereby trigger their removal.
+func (v *WorkerResourceTemplateValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	wrt, ok := obj.(*WorkerResourceTemplate)
 	if !ok {
-		return nil, apierrors.NewBadRequest("expected a TemporalWorkerOwnedResource")
+		return nil, apierrors.NewBadRequest("expected a WorkerResourceTemplate")
 	}
 
-	if twor.Spec.Object.Raw == nil {
+	if wrt.Spec.Object.Raw == nil {
 		return nil, nil // nothing to check
 	}
 
-	warnings, errs := v.validateWithAPI(ctx, twor, "delete")
+	warnings, errs := v.validateWithAPI(ctx, wrt, "delete")
 	if len(errs) > 0 {
 		return warnings, apierrors.NewInvalid(
-			twor.GroupVersionKind().GroupKind(),
-			twor.GetName(),
+			wrt.GroupVersionKind().GroupKind(),
+			wrt.GetName(),
 			errs,
 		)
 	}
@@ -132,20 +132,20 @@ func (v *TemporalWorkerOwnedResourceValidator) ValidateDelete(ctx context.Contex
 
 // validate runs all validation checks (pure spec + API-dependent).
 // verb is the RBAC verb to check for the underlying resource ("create" on create, "update" on update).
-func (v *TemporalWorkerOwnedResourceValidator) validate(ctx context.Context, old, new *TemporalWorkerOwnedResource, verb string) (admission.Warnings, error) {
+func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, old, new *WorkerResourceTemplate, verb string) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
 
 	// Pure spec validation (no API calls needed)
-	specWarnings, specErrs := validateOwnedResourceSpec(new.Spec, v.AllowedKinds)
+	specWarnings, specErrs := validateWorkerResourceTemplateSpec(new.Spec, v.AllowedKinds)
 	warnings = append(warnings, specWarnings...)
 	allErrs = append(allErrs, specErrs...)
 
-	// Immutability: temporalWorkerDeploymentRef.name must not change on update
-	if old != nil && old.Spec.TemporalWorkerDeploymentRef.Name != new.Spec.TemporalWorkerDeploymentRef.Name {
+	// Immutability: workerDeploymentRef.name must not change on update
+	if old != nil && old.Spec.WorkerDeploymentRef.Name != new.Spec.WorkerDeploymentRef.Name {
 		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec").Child("temporalWorkerDeploymentRef").Child("name"),
-			"temporalWorkerDeploymentRef.name is immutable and cannot be changed after creation",
+			field.NewPath("spec").Child("workerDeploymentRef").Child("name"),
+			"workerDeploymentRef.name is immutable and cannot be changed after creation",
 		))
 	}
 
@@ -174,9 +174,9 @@ func (v *TemporalWorkerOwnedResourceValidator) validate(ctx context.Context, old
 	return warnings, nil
 }
 
-// validateOwnedResourceSpec performs pure (no-API) validation of the spec fields.
+// validateWorkerResourceTemplateSpec performs pure (no-API) validation of the spec fields.
 // It checks structural constraints that can be evaluated without talking to the API server.
-func validateOwnedResourceSpec(spec TemporalWorkerOwnedResourceSpec, allowedKinds []string) (admission.Warnings, field.ErrorList) {
+func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowedKinds []string) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
 
@@ -244,7 +244,7 @@ func validateOwnedResourceSpec(spec TemporalWorkerOwnedResourceSpec, allowedKind
 				field.NewPath("spec").Child("object").Child("kind"),
 				fmt.Sprintf("kind %q is not in the allowed list; "+
 					"only resource kinds listed in ownedResourceConfig.allowedResources are permitted "+
-					"as TemporalWorkerOwnedResource objects; "+
+					"as WorkerResourceTemplate objects; "+
 					"ask your cluster operator to add this kind if you have a legitimate use case", kind),
 			))
 		}
@@ -326,7 +326,7 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 // SubjectAccessReview for both the requesting user and the controller service account.
 // verb is the RBAC verb to check ("create" on create/update, "delete" on delete).
 // It is a no-op when Client or RESTMapper is nil (e.g., in unit tests).
-func (v *TemporalWorkerOwnedResourceValidator) validateWithAPI(ctx context.Context, twor *TemporalWorkerOwnedResource, verb string) (admission.Warnings, field.ErrorList) {
+func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, wrt *WorkerResourceTemplate, verb string) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
 
@@ -335,13 +335,13 @@ func (v *TemporalWorkerOwnedResourceValidator) validateWithAPI(ctx context.Conte
 	}
 
 	var obj map[string]interface{}
-	if err := json.Unmarshal(twor.Spec.Object.Raw, &obj); err != nil {
-		return warnings, allErrs // already caught in validateOwnedResourceSpec
+	if err := json.Unmarshal(wrt.Spec.Object.Raw, &obj); err != nil {
+		return warnings, allErrs // already caught in validateWorkerResourceTemplateSpec
 	}
 	apiVersionStr, _ := obj["apiVersion"].(string)
 	kind, _ := obj["kind"].(string)
 	if apiVersionStr == "" || kind == "" {
-		return warnings, allErrs // already caught in validateOwnedResourceSpec
+		return warnings, allErrs // already caught in validateWorkerResourceTemplateSpec
 	}
 
 	gv, err := schema.ParseGroupVersion(apiVersionStr)
@@ -370,7 +370,7 @@ func (v *TemporalWorkerOwnedResourceValidator) validateWithAPI(ctx context.Conte
 		if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
 			allErrs = append(allErrs, field.Forbidden(
 				field.NewPath("spec").Child("object").Child("kind"),
-				fmt.Sprintf("kind %q is not namespace-scoped; only namespaced resources are allowed in TemporalWorkerOwnedResource", kind),
+				fmt.Sprintf("kind %q is not namespace-scoped; only namespaced resources are allowed in WorkerResourceTemplate", kind),
 			))
 			return warnings, allErrs
 		}
@@ -387,7 +387,7 @@ func (v *TemporalWorkerOwnedResourceValidator) validateWithAPI(ctx context.Conte
 				User:   req.UserInfo.Username,
 				Groups: req.UserInfo.Groups,
 				ResourceAttributes: &authorizationv1.ResourceAttributes{
-					Namespace: twor.Namespace,
+					Namespace: wrt.Namespace,
 					Verb:      verb,
 					Group:     gv.Group,
 					Version:   gv.Version,
@@ -408,7 +408,7 @@ func (v *TemporalWorkerOwnedResourceValidator) validateWithAPI(ctx context.Conte
 			allErrs = append(allErrs, field.Forbidden(
 				field.NewPath("spec").Child("object"),
 				fmt.Sprintf("requesting user %q is not authorized to %s %s in namespace %q: %s",
-					req.UserInfo.Username, verb, kind, twor.Namespace, reason),
+					req.UserInfo.Username, verb, kind, wrt.Namespace, reason),
 			))
 		}
 	}
@@ -432,7 +432,7 @@ func (v *TemporalWorkerOwnedResourceValidator) validateWithAPI(ctx context.Conte
 					"system:authenticated",
 				},
 				ResourceAttributes: &authorizationv1.ResourceAttributes{
-					Namespace: twor.Namespace,
+					Namespace: wrt.Namespace,
 					Verb:      verb,
 					Group:     gv.Group,
 					Version:   gv.Version,
@@ -454,7 +454,7 @@ func (v *TemporalWorkerOwnedResourceValidator) validateWithAPI(ctx context.Conte
 				field.NewPath("spec").Child("object"),
 				fmt.Sprintf("controller service account %q is not authorized to %s %s in namespace %q: %s; "+
 					"grant it the required RBAC permissions via the Helm chart configuration",
-					controllerUser, verb, kind, twor.Namespace, reason),
+					controllerUser, verb, kind, wrt.Namespace, reason),
 			))
 		}
 	}
