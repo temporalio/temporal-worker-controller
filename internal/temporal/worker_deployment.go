@@ -159,18 +159,16 @@ func GetWorkerDeploymentState(
 		} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINED {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
 
-			// Extract DrainedSince directly from the gRPC version summary's drainage info,
-			// avoiding a per-version DescribeVersion call.
+			// Extract DrainedSince directly from the gRPC version summary's drainage info
 			if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil {
 				drainedSince := version.DrainageInfo.LastChangedTime.AsTime()
 				versionInfo.DrainedSince = &drainedSince
 			}
 
-			// Only check pollers if a k8s Deployment exists for this version.
-			// If the k8s Deployment has already been deleted, there's no action to take,
-			// so we skip the DescribeVersion call entirely.
+			// If the k8s Deployment exists and has replicas, assume versioned pollers
+			// are present and skip the DescribeVersion + DescribeTaskQueue calls.
 			deployment, ok := k8sDeployments[version.DeploymentVersion.BuildId]
-			if ok && deployment.Status.Replicas == 0 {
+			if !ok || deployment.Status.Replicas == 0 {
 				desc, descErr := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
 					BuildID: version.DeploymentVersion.BuildId,
 				})
