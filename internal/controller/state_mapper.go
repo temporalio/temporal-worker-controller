@@ -159,7 +159,7 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 
 	eligibleForDeletion := false
 	if vInfo, exists := m.temporalState.Versions[buildID]; exists {
-		eligibleForDeletion = vInfo.Status == v1alpha1.VersionStatusDrained && vInfo.NoTaskQueuesHaveVersionedPoller
+		eligibleForDeletion = vInfo.Status == v1alpha1.VersionStatusDrained
 	}
 
 	version := &v1alpha1.DeprecatedWorkerDeploymentVersion{

@@ -219,12 +219,17 @@ type stubWDClient struct {
 func (s *stubWDClient) GetHandle(_ string) sdkclient.WorkerDeploymentHandle { return s.handle }
 
 // stubWorkflowServiceClient implements workflowservice.WorkflowServiceClient, returning
-// a NotFound error for DescribeWorkerDeployment (matching the default stub behavior).
+// a valid empty response for DescribeWorkerDeployment (no versions, no routing config),
+// or a configurable error if describeDeploymentErr is set.
 type stubWorkflowServiceClient struct {
 	workflowservice.WorkflowServiceClient
+	describeDeploymentErr error
 }
 
 func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, _ *workflowservice.DescribeWorkerDeploymentRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentResponse, error) {
+	if s.describeDeploymentErr != nil {
+		return nil, s.describeDeploymentErr
+	}
 	return &workflowservice.DescribeWorkerDeploymentResponse{
 		WorkerDeploymentInfo: &deploymentpb.WorkerDeploymentInfo{
 			RoutingConfig: &deploymentpb.RoutingConfig{},
@@ -236,8 +241,9 @@ func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, 
 // ExecuteWorkflow to configurable stubs.
 type stubTemporalClient struct {
 	sdkclient.Client
-	wdClient sdkclient.WorkerDeploymentClient
-	execErr  error
+	wdClient              sdkclient.WorkerDeploymentClient
+	execErr               error
+	describeDeploymentErr error
 }
 
 func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeploymentClient {
@@ -245,15 +251,15 @@ func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeployment
 }
 
 func (s *stubTemporalClient) WorkflowService() workflowservice.WorkflowServiceClient {
-	return &stubWorkflowServiceClient{}
+	return &stubWorkflowServiceClient{describeDeploymentErr: s.describeDeploymentErr}
 }
 
 func (s *stubTemporalClient) ExecuteWorkflow(_ context.Context, _ sdkclient.StartWorkflowOptions, _ interface{}, _ ...interface{}) (sdkclient.WorkflowRun, error) {
 	return nil, s.execErr
 }
 
-// newStubTemporalClient returns a stub client whose Describe returns NotFound (no existing
-// Worker Deployment), and whose ExecuteWorkflow returns execErr.
+// newStubTemporalClient returns a stub client whose WorkflowService().DescribeWorkerDeployment
+// returns a valid empty response, and whose ExecuteWorkflow returns execErr.
 func newStubTemporalClient(execErr error) *stubTemporalClient {
 	handle := &stubWDHandle{describeErr: &serviceerror.NotFound{}}
 	return &stubTemporalClient{
@@ -530,6 +536,36 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 
 	require.Error(t, err)
 	assertEventEmitted(t, drainEvents(recorder), ReasonPlanExecutionFailed)
+}
+
+// TestReconcile_DescribeWorkerDeploymentNotFound verifies that when the gRPC
+// DescribeWorkerDeployment call returns NotFound (no deployment exists in Temporal yet),
+// reconciliation succeeds and proceeds to plan generation (creating a new k8s Deployment).
+func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
+	k8sNamespace := "default"
+	hostPort := "localhost:7233"
+
+	tc := makeNoCredsTemporalConnection("my-conn", k8sNamespace, hostPort)
+	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
+
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{})
+
+	stub := newStubTemporalClient(nil)
+	stub.describeDeploymentErr = &serviceerror.NotFound{}
+	r.TemporalClientPool.SetClientForTesting(
+		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
+		stub,
+	)
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+
+	// NotFound on the first reconcile means the Worker Deployment has not come up on the
+	// server side yet; however, the k8s Deployment would be created by the controller
+	// with no reconciliation errors.
+	require.NoError(t, err)
+	assertNoEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
 }
 
 // ─── executeK8sOperations tests ──────────────────────────────────────────────

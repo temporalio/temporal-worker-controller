@@ -95,8 +95,14 @@ func GetWorkerDeploymentState(
 		return nil, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
 	}
 
-	workerDeploymentInfo := resp.WorkerDeploymentInfo
-	routingConfig := workerDeploymentInfo.RoutingConfig
+	workerDeploymentInfo := resp.GetWorkerDeploymentInfo()
+	if workerDeploymentInfo == nil {
+		return state, nil
+	}
+	routingConfig := workerDeploymentInfo.GetRoutingConfig()
+	if routingConfig == nil {
+		return state, nil
+	}
 
 	// Set basic information
 	if routingConfig.CurrentDeploymentVersion != nil {
@@ -154,25 +160,16 @@ func GetWorkerDeploymentState(
 		} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINED {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
 
-			// Extract DrainedSince directly from the gRPC version summary's drainage info
-			if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil {
+			// If there is no controller-managed k8s Deployment for this drained version,
+			// treat it as NotRegistered so the planner can immediately clean up any
+			// orphaned resources rather than waiting for sunset delays.
+			if _, ok := k8sDeployments[version.DeploymentVersion.BuildId]; !ok {
+				versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
+			} else if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil {
+				// Extract DrainedSince directly from the version summary's drainage info,
+				// avoiding a per-version DescribeVersion call.
 				drainedSince := version.DrainageInfo.LastChangedTime.AsTime()
 				versionInfo.DrainedSince = &drainedSince
-			}
-
-			// If the k8s Deployment exists and has replicas, assume versioned pollers
-			// are present and skip the DescribeVersion + DescribeTaskQueue calls.
-			deployment, ok := k8sDeployments[version.DeploymentVersion.BuildId]
-			if !ok || deployment.Status.Replicas == 0 {
-				desc, descErr := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-					BuildID: version.DeploymentVersion.BuildId,
-				})
-				var notFoundErr *serviceerror.NotFound
-				if descErr == nil { //revive:disable-line:max-control-nesting
-					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, desc.Info.TaskQueuesInfos)
-				} else if errors.As(descErr, &notFoundErr) {
-					versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
-				}
 			}
 		} else {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
@@ -407,24 +404,6 @@ func getShouldIgnoreLastModifier(
 	return false, nil
 }
 
-func HasNoVersionedPollers(ctx context.Context,
-	client temporalClient.Client,
-	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
-) (bool, error) {
-	pollers, err := getPollers(ctx, client, taskQueueInfo)
-	if err != nil {
-		return false, fmt.Errorf("unable to confirm absence of versioned pollers: %w", err)
-	}
-	for _, p := range pollers {
-		switch p.GetDeploymentOptions().GetWorkerVersioningMode() {
-		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
-		case temporalClient.WorkerVersioningModeVersioned:
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
 func getPollers(ctx context.Context,
 	client temporalClient.Client,
 	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
@@ -441,21 +420,6 @@ func getPollers(ctx context.Context,
 		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
 	}
 	return resp.GetPollers(), nil
-}
-
-func noTaskQueuesHaveVersionedPollers(
-	ctx context.Context,
-	client temporalClient.Client,
-	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
-) bool {
-	countHasNoVersionedPollers := 0
-	for _, tqInfo := range tqs {
-		hasNoVersionedPollers, _ := HasNoVersionedPollers(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
-		if hasNoVersionedPollers {
-			countHasNoVersionedPollers++
-		}
-	}
-	return countHasNoVersionedPollers == len(tqs)
 }
 
 func allTaskQueuesHaveUnversionedPoller(
