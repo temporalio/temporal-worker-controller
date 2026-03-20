@@ -157,9 +157,19 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 		return nil
 	}
 
+	// A drained version is eligible for server-side auto-deletion only if its pollers
+	// have stopped. We approximate this by checking whether a controller-managed k8s
+	// Deployment with active replicas exists; if so, pollers are likely still running
+	// and the server cannot delete the version yet, making it ineligible for deletion.
+	// Note: This only considers pollers managed by the worker-controller. External
+	// pollers (e.g., manually deployed workers) are not accounted for.
 	eligibleForDeletion := false
 	if vInfo, exists := m.temporalState.Versions[buildID]; exists {
-		eligibleForDeletion = vInfo.Status == v1alpha1.VersionStatusDrained && vInfo.NoTaskQueuesHaveVersionedPoller
+		hasActiveDeployment := false
+		if d, ok := m.k8sState.Deployments[buildID]; ok {
+			hasActiveDeployment = d.Status.Replicas > 0
+		}
+		eligibleForDeletion = vInfo.Status == v1alpha1.VersionStatusDrained && !hasActiveDeployment
 	}
 
 	version := &v1alpha1.DeprecatedWorkerDeploymentVersion{

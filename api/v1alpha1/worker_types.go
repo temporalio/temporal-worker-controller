@@ -308,9 +308,14 @@ type DeprecatedWorkerDeploymentVersion struct {
 	// +optional
 	DrainedSince *metav1.Time `json:"drainedSince,omitempty"`
 
-	// A Version is eligible for deletion if it is drained and has no pollers on any task queue.
-	// After pollers stop polling, the server will still consider them present until `matching.PollerHistoryTTL`
-	// has passed.
+	// A Version is considered eligible for deletion if it is drained and has no
+	// controller-managed workers with active replicas polling on its task queues.
+	// The server automatically deletes eligible versions when it needs to make room for new ones.
+	// If this version has pollers that are not managed by the controller, the server
+	// will not be able to delete the version. `EligibleForDeletion=true` does not consider
+	// that scenario, because it is rare and it is too expensive to cover (requires describing
+	// every drained version without controller-managed pollers and all task queues in
+	// that version).
 	// +optional
 	EligibleForDeletion bool `json:"eligibleForDeletion,omitempty"`
 }
