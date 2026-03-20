@@ -5,17 +5,12 @@
 package temporal
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	enumspb "go.temporal.io/api/enums/v1"
-	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/worker"
-	"go.temporal.io/server/temporaltest"
 )
 
 func TestMapWorkflowStatus(t *testing.T) {
@@ -104,51 +99,6 @@ func TestGetTestWorkflowID(t *testing.T) {
 			assert.Equal(t, tt.expected, id)
 		})
 	}
-}
-
-func TestGetIgnoreLastModifier(t *testing.T) {
-	ctx := context.Background()
-	deploymentName := "test-dep"
-	buildId := "v1"
-	tq := "test-tq"
-
-	ts := temporaltest.NewServer(temporaltest.WithT(t))
-
-	// create version
-	w, stopFunc, err := testhelpers.NewWorker(ctx, deploymentName, buildId, tq, ts.GetFrontendHostPort(), ts.GetDefaultNamespace(), true)
-	if err != nil {
-		t.Error(err)
-	}
-	if err = w.Start(); err != nil {
-		t.Errorf("error starting unversioned worker %v", err)
-	}
-	defer stopFunc()
-
-	deploymentHandler := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(deploymentName)
-
-	eventually(t, 5*time.Second, 100*time.Millisecond, func() error {
-		_, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-			Version: worker.WorkerDeploymentVersion{
-				DeploymentName: deploymentName,
-				BuildID:        buildId,
-			},
-			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
-				UpsertEntries: map[string]interface{}{
-					IgnoreLastModifierKey: "true",
-				},
-			},
-		})
-		return err
-	})
-
-	shouldIgnore, err := getShouldIgnoreLastModifier(ctx, deploymentHandler, buildId)
-	if err != nil {
-		t.Error(err)
-	}
-	if !shouldIgnore {
-		t.Error("expected true, got false")
-	}
-
 }
 
 func eventually(t *testing.T, timeout, interval time.Duration, check func() error) {

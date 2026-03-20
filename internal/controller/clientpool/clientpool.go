@@ -97,6 +97,7 @@ type NewClientOptions struct {
 	TemporalNamespace string
 	K8sNamespace      string
 	Spec              v1alpha1.TemporalConnectionSpec
+	Identity          string
 }
 
 func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
@@ -104,6 +105,7 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
+		Identity:  opts.Identity,
 	}
 
 	var pemCert []byte
@@ -170,6 +172,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
+		Identity:  opts.Identity,
 		ConnectionOptions: sdkclient.ConnectionOptions{
 			TLS: &tls.Config{},
 		},
@@ -198,6 +201,7 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (*sdk
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
+		Identity:  opts.Identity,
 	}
 
 	key := ClientPoolKey{

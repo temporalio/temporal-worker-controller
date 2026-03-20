@@ -12,20 +12,13 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/converter"
-	sdkworker "go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-const (
-	IgnoreLastModifierKey = "temporal.io/ignore-last-modifier"
 )
 
 // VersionInfo contains information about a specific version
@@ -59,7 +52,7 @@ type TemporalWorkerState struct {
 	// Versions indexed by build ID
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
-	IgnoreLastModifier   bool
+	ManagerIdentity      string
 }
 
 // GetWorkerDeploymentState queries Temporal to get the state of a worker deployment
@@ -113,16 +106,8 @@ func GetWorkerDeploymentState(
 	}
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
+	state.ManagerIdentity = workerDeploymentInfo.ManagerIdentity
 	state.VersionConflictToken = resp.ConflictToken
-
-	// Decide whether to ignore LastModifierIdentity
-	if state.LastModifierIdentity != controllerIdentity && state.LastModifierIdentity != "" {
-		sdkRoutingConfig := toSDKRoutingConfig(routingConfig)
-		state.IgnoreLastModifier, err = DeploymentShouldIgnoreLastModifier(ctx, deploymentHandler, sdkRoutingConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	// TODO(jlegrone): Re-enable stats once available in versioning v3.
 
@@ -196,33 +181,6 @@ func GetWorkerDeploymentState(
 	}
 
 	return state, nil
-}
-
-// toSDKRoutingConfig converts a gRPC RoutingConfig to the SDK wrapper type
-// needed by DeploymentShouldIgnoreLastModifier.
-func toSDKRoutingConfig(rc *deploymentpb.RoutingConfig) temporalClient.WorkerDeploymentRoutingConfig {
-	sdkRC := temporalClient.WorkerDeploymentRoutingConfig{
-		RampingVersionPercentage: rc.RampingVersionPercentage,
-	}
-	if rc.CurrentDeploymentVersion != nil {
-		sdkRC.CurrentVersion = &sdkworker.WorkerDeploymentVersion{
-			BuildID:        rc.CurrentDeploymentVersion.BuildId,
-			DeploymentName: rc.CurrentDeploymentVersion.DeploymentName,
-		}
-	}
-	if rc.RampingDeploymentVersion != nil {
-		sdkRC.RampingVersion = &sdkworker.WorkerDeploymentVersion{
-			BuildID:        rc.RampingDeploymentVersion.BuildId,
-			DeploymentName: rc.RampingDeploymentVersion.DeploymentName,
-		}
-	}
-	if rc.RampingVersionChangedTime != nil {
-		sdkRC.RampingVersionChangedTime = rc.RampingVersionChangedTime.AsTime()
-	}
-	if rc.RampingVersionPercentageChangedTime != nil {
-		sdkRC.RampingVersionPercentageChangedTime = rc.RampingVersionPercentageChangedTime.AsTime()
-	}
-	return sdkRC
 }
 
 func withBackoff(timeout time.Duration, tick time.Duration, fn func() error) error {
@@ -352,48 +310,6 @@ func HasUnversionedPoller(ctx context.Context,
 		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
 			return true, nil
 		case temporalClient.WorkerVersioningModeVersioned:
-		}
-	}
-	return false, nil
-}
-
-func DeploymentShouldIgnoreLastModifier(
-	ctx context.Context,
-	deploymentHandler temporalClient.WorkerDeploymentHandle,
-	routingConfig temporalClient.WorkerDeploymentRoutingConfig,
-) (shouldIgnore bool, err error) {
-	if routingConfig.CurrentVersion != nil {
-		shouldIgnore, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildID)
-		if err != nil {
-			return false, err
-		}
-	}
-	if !shouldIgnore && // if someone has a non-nil Current Version, but only set the metadata in their Ramping Version, also count that
-		routingConfig.RampingVersion != nil {
-		return getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildID)
-	}
-	return shouldIgnore, nil
-}
-
-func getShouldIgnoreLastModifier(
-	ctx context.Context,
-	deploymentHandler temporalClient.WorkerDeploymentHandle,
-	buildId string,
-) (bool, error) {
-	desc, err := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-		BuildID: buildId,
-	})
-	if err != nil {
-		return false, fmt.Errorf("unable to describe version: %w", err)
-	}
-	for k, v := range desc.Info.Metadata {
-		if k == IgnoreLastModifierKey {
-			var s string
-			err = converter.GetDefaultDataConverter().FromPayload(v, &s)
-			if err != nil {
-				return false, fmt.Errorf("unable to decode metadata payload for key %s: %w", IgnoreLastModifierKey, err)
-			}
-			return s == "true", nil
 		}
 	}
 	return false, nil

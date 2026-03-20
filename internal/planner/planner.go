@@ -27,9 +27,6 @@ type Plan struct {
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
-	// Build IDs of versions from which the controller should
-	// remove IgnoreLastModifierKey from the version metadata
-	RemoveIgnoreLastModifierBuilds []string
 }
 
 // VersionConfig defines version configuration for Temporal
@@ -45,6 +42,11 @@ type VersionConfig struct {
 	SetCurrent bool
 	// Acceptable values [0,100]
 	RampPercentage int32
+
+	// ManagerIdentity is the current manager identity of the worker deployment in Temporal.
+	// An empty string indicates the controller should claim the identity before applying
+	// any routing config changes.
+	ManagerIdentity string
 }
 
 // WorkflowConfig defines a workflow to be started
@@ -99,17 +101,6 @@ func GeneratePlan(
 
 	// Determine version config changes
 	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
-
-	// Only remove the IgnoreLastModifier metadata after it's been used to make a version config change, which will
-	// make the controller the LastModifier again
-	if temporalState != nil && temporalState.IgnoreLastModifier && plan.VersionConfig != nil {
-		if temporalState.RampingBuildID != "" {
-			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.RampingBuildID)
-		}
-		if temporalState.CurrentBuildID != "" {
-			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.CurrentBuildID)
-		}
-	}
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
@@ -546,9 +537,14 @@ func getVersionConfigDiff(
 		}
 	}
 
+	managerIdentity := ""
+	if temporalState != nil {
+		managerIdentity = temporalState.ManagerIdentity
+	}
 	vcfg := &VersionConfig{
-		ConflictToken: conflictToken,
-		BuildID:       status.TargetVersion.BuildID,
+		ConflictToken:   conflictToken,
+		BuildID:         status.TargetVersion.BuildID,
+		ManagerIdentity: managerIdentity,
 	}
 
 	// If there is no current version and presence of unversioned pollers is not confirmed for all

@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -150,10 +150,44 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 	return nil
 }
 
+func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
+	return vcfg.ManagerIdentity == ""
+}
+
+func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	deploymentHandler sdkclient.WorkerDeploymentHandle,
+	vcfg *planner.VersionConfig,
+) error {
+	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
+		Self:          true,
+		ConflictToken: vcfg.ConflictToken,
+		Identity:      getControllerIdentity(),
+	})
+	if err != nil {
+		l.Error(err, "unable to claim manager identity")
+		r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonManagerIdentityClaimFailed,
+			"Failed to claim manager identity: %v", err)
+		return err
+	}
+	l.Info("claimed manager identity", "identity", getControllerIdentity())
+	// Use the updated conflict token for the subsequent routing config change.
+	vcfg.ConflictToken = resp.ConflictToken
+	return nil
+}
+
 func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, deploymentHandler sdkclient.WorkerDeploymentHandle, p *plan) error {
 	vcfg := p.UpdateVersionConfig
 	if vcfg == nil {
 		return nil
+	}
+
+	if r.shouldClaimManagerIdentity(vcfg) {
+		if err := r.claimManagerIdentity(ctx, l, workerDeploy, deploymentHandler, vcfg); err != nil {
+			return fmt.Errorf("unable to claim manager identity: %w", err)
+		}
 	}
 
 	if vcfg.SetCurrent {
@@ -224,21 +258,6 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 
 	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
 		return err
-	}
-
-	for _, buildId := range p.RemoveIgnoreLastModifierBuilds {
-		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-			Version: worker.WorkerDeploymentVersion{
-				DeploymentName: p.WorkerDeploymentName,
-				BuildID:        buildId,
-			},
-			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
-				RemoveEntries: []string{temporal.IgnoreLastModifierKey},
-			},
-		}); err != nil {
-			l.Error(err, "unable to remove ignore-last-modifier metadata", "buildID", buildId)
-			return fmt.Errorf("unable to update metadata to remove %s deployment: %w", temporal.IgnoreLastModifierKey, err)
-		}
 	}
 
 	return nil
