@@ -2991,7 +2991,7 @@ func TestResolveGateInput(t *testing.T) {
 	}
 }
 
-func TestgetWorkerResourceApplies(t *testing.T) {
+func TestGetWorkerResourceApplies(t *testing.T) {
 	testCases := []struct {
 		name        string
 		wrts        []temporaliov1alpha1.WorkerResourceTemplate
@@ -3112,7 +3112,7 @@ func TestgetWorkerResourceApplies(t *testing.T) {
 	}
 }
 
-func TestgetWorkerResourceApplies_ApplyContents(t *testing.T) {
+func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	wrt := createTestWRT("my-hpa", "my-worker")
 	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
 	k8sState := &k8s.DeploymentState{
@@ -3144,7 +3144,7 @@ func TestgetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
 }
 
-func TestgetWorkerResourceApplies_FieldManagerConstant(t *testing.T) {
+func TestGetWorkerResourceApplies_FieldManagerConstant(t *testing.T) {
 	twor1 := createTestWRT("my-hpa", "my-worker")
 	twor2 := createTestWRT("my-pdb", "my-worker")
 	k8sState := &k8s.DeploymentState{
@@ -3207,7 +3207,7 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 	}
 }
 
-func TestgetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
+func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 	// PDB with matchLabels opted in for auto-injection via null sentinel.
 	pdbSpec := map[string]interface{}{
 		"apiVersion": "policy/v1",
@@ -3251,7 +3251,7 @@ func TestgetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
 }
 
-func TestgetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
+func TestGetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
 	// Arbitrary CRD that uses all three template variables.
 	objSpec := map[string]interface{}{
 		"apiVersion": "monitoring.example.com/v1",
