@@ -46,6 +46,12 @@ type Plan struct {
 	ApplyWorkerResources []WorkerResourceApply
 	// EnsureWRTOwnerRefs holds (base, patched) pairs for WRTs that need a
 	// controller owner reference added, ready for client.MergeFrom patching.
+	// This is distinct from the owner refs set on the rendered resource copies
+	// (e.g. per-version HPAs): those point from each rendered copy → its versioned
+	// Deployment, so they are GC'd when a version sunsets. These point from the
+	// WRT itself → the TWD, so the WRT is GC'd when the TWD is deleted. The
+	// controller sets this (rather than the webhook) because the owner ref requires
+	// the TWD's UID, which the controller resolves from spec.temporalWorkerDeploymentRef.
 	EnsureWRTOwnerRefs []WRTOwnerRefPatch
 }
 

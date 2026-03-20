@@ -1,7 +1,6 @@
 {{- if .Values.certmanager.enabled }}
 # Self-signed issuer and certificate for the webhook server TLS.
 # Requires cert-manager to be installed in the cluster.
-# See https://cert-manager.io/docs/installation/ for installation instructions.
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:

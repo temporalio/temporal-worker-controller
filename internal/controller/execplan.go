@@ -312,7 +312,11 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		// client.Apply uses Server-Side Apply, which is a create-or-update operation:
 		// if the resource does not yet exist the API server creates it; if it already
 		// exists the API server merges only the fields owned by this field manager,
-		// leaving fields owned by other managers (e.g. the HPA controller) untouched.
+		// leaving fields owned by other managers (e.g. a user patching the resource
+		// directly via kubectl) untouched.
+		// Note: the HPA controller does not compete with SSA here — it only writes to
+		// the status subresource (currentReplicas, desiredReplicas, conditions), which
+		// is a separate API endpoint that SSA apply never touches.
 		// client.ForceOwnership allows this field manager to claim any fields that were
 		// previously owned by a different manager (e.g. after a field manager rename).
 		applyErr := r.Client.Patch(

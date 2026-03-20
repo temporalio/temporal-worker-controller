@@ -253,16 +253,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	status.Conditions = workerDeploy.Status.Conditions
 	workerDeploy.Status = *status
 
-	// Idempotently maintain RolloutComplete whenever the target version is already
-	// current. The condition is also set inside updateVersionConfig on the reconcile
-	// that actually calls SetCurrentVersion, but if that Status.Update was lost to a
-	// conflict the planner will return nil on the next reconcile (target already current)
-	// and never re-set it — this ensures the condition is always present.
-	if status.TargetVersion.Status == temporaliov1alpha1.VersionStatusCurrent {
-		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue,
-			temporaliov1alpha1.ReasonRolloutComplete, fmt.Sprintf("Rollout complete for buildID %s", status.TargetVersion.BuildID))
-	}
-
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	//                 (defaults were already set above, but have to be set again after status update)
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
