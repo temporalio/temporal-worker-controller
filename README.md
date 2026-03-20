@@ -104,6 +104,8 @@ See [docs/crd-management.md](docs/crd-management.md) for upgrade, rollback, and 
 
 **New to deploying workers with this controller?** → Start with our [Migration Guide](docs/migration-to-versioned.md) to learn how to safely transition from traditional deployments.
 
+**Setting up CI/CD for steady-state rollouts?** → See the [CD Rollouts Guide](docs/cd-rollouts.md) for Helm, kubectl, ArgoCD, and Flux integration patterns.
+
 **Ready to dive deeper?** → Check out the [Architecture Guide](docs/architecture.md) to understand how the controller works, or the [Temporal Worker Versioning docs](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) to learn about the underlying Temporal feature.
 
 **Need configuration help?** → See the [Configuration Reference](docs/configuration.md) for all available options.
@@ -145,6 +147,7 @@ The Temporal Worker Controller eliminates this operational overhead by automatin
 |----------|-------------|
 | [Migration Guide](docs/migration-to-versioned.md) | Step-by-step guide for migrating from traditional deployments |
 | [Reversion Guide](docs/migration-to-unversioned.md) | Step-by-step guide for migrating back to unversioned deployment |
+| [CD Rollouts](docs/cd-rollouts.md) | Helm, kubectl, ArgoCD, and Flux integration for steady-state rollouts |
 | [Architecture](docs/architecture.md) | Technical deep-dive into how the controller works |
 | [Configuration](docs/configuration.md) | Complete configuration reference |
 | [Concepts](docs/concepts.md) | Key concepts and terminology |

@@ -203,8 +203,6 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 				"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
 			return fmt.Errorf("unable to set current deployment version: %w", err)
 		}
-		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue,
-			temporaliov1alpha1.ReasonRolloutComplete, fmt.Sprintf("Rollout complete for buildID %s", vcfg.BuildID))
 	} else {
 		if vcfg.RampPercentage > 0 {
 			l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
