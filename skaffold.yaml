@@ -31,6 +31,7 @@ profiles:
               image.tag: latest
               image.pullPolicy: IfNotPresent
               namespace.create: true
+              certmanager.install: true
             valuesFiles:
               - helm/temporal-worker-controller/values.yaml
 

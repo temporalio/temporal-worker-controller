@@ -10,7 +10,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - Temporal Cloud account with API key or mTLS certificates
 - Understanding of [Worker Versioning concepts](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) (Pinned and Auto-Upgrade versioning behaviors)
-- **[cert-manager](https://cert-manager.io/docs/installation/)** — required for the `WorkerResourceTemplate` validating webhook (TLS). Install it once into your Minikube cluster before deploying the controller (see step 3 below).
+- cert-manager is required for the `WorkerResourceTemplate` validating webhook (TLS). The controller Helm chart installs it automatically as a subchart (`certmanager.install: true` is set in the Skaffold profile).
 
 > **Note**: This demo specifically showcases **Pinned** workflow behavior. All workflows in the demo will remain on the worker version where they started, demonstrating how the controller safely manages multiple worker versions simultaneously during deployments.
 
@@ -64,14 +64,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    - Note: Do not set both mTLS and API key for the same connection. If both present, the TemporalConnection Custom Resource
    Instance will not get installed in the k8s environment.
 
-3. Install cert-manager into Minikube (required for the TWOR validating webhook):
-   ```bash
-   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
-   # Wait for cert-manager pods to be ready before continuing
-   kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=120s
-   ```
-
-4. Build and deploy the Controller image to the local k8s cluster:
+3. Build and deploy the Controller image to the local k8s cluster:
    ```bash
    skaffold run --profile worker-controller
    ```
@@ -130,7 +123,7 @@ The `WorkerResourceTemplate` validating webhook enforces that you have permissio
 After deploying the helloworld worker (step 5), apply the example HPA:
 
 ```bash
-kubectl apply -f examples/twor-hpa.yaml
+kubectl apply -f examples/wrt-hpa.yaml
 ```
 
 Watch the controller create an HPA for each worker version with running workers:
