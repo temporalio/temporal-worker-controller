@@ -19,23 +19,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// WorkerResourceTemplateFieldManager returns the SSA field manager string for a given WRT.
-//
-// The field manager identity has two requirements:
-//  1. Stable across reconcile loops — the API server uses it to track which fields
-//     this controller "owns". Changing it abandons the old ownership records and
-//     causes spurious field conflicts until the old entries expire.
-//  2. Unique per WRT instance — if two different WRTs both render resources into
-//     the same namespace, their field managers must differ so each can own its own
-//     set of fields without conflicting with the other.
-//
-// Using "twc/{namespace}/{name}" satisfies both: it never changes for a given WRT
-// and is globally unique within the cluster (namespace+name is a unique identifier).
-// The string is capped at 128 characters to stay within the Kubernetes API limit.
-func WorkerResourceTemplateFieldManager(wrt *temporaliov1alpha1.WorkerResourceTemplate) string {
-	fm := "twc/" + wrt.Namespace + "/" + wrt.Name
-	return TruncateString(fm, 128)
-}
+// WorkerResourceTemplateFieldManager is the SSA field manager name used when applying
+// WorkerResourceTemplate-rendered resources. A single constant per controller is the
+// standard Kubernetes pattern (see e.g. the ResourceClaim controller).
+const WorkerResourceTemplateFieldManager = "temporal-worker-controller"
 
 const (
 	// workerResourceTemplateMaxNameLen is the maximum length of a generated worker resource template name.

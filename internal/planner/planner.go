@@ -173,7 +173,7 @@ func getOwnedResourceApplies(
 			}
 			applies = append(applies, OwnedResourceApply{
 				Resource:      rendered,
-				FieldManager:  k8s.WorkerResourceTemplateFieldManager(wrt),
+				FieldManager:  k8s.WorkerResourceTemplateFieldManager,
 				WRTName:      wrt.Name,
 				WRTNamespace: wrt.Namespace,
 				BuildID:       buildID,
