@@ -46,7 +46,7 @@ func TestGeneratePlan(t *testing.T) {
 		expectManagerIdentity            *string // pointer so nil means "don't assert"
 		maxVersionsIneligibleForDeletion *int32  // set by env if non-nil, else default 75
 		wrts                             []temporaliov1alpha1.WorkerResourceTemplate
-		expectOwnedResourceApplies       int
+		expectWorkerResourceApplies      int
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -425,8 +425,8 @@ func TestGeneratePlan(t *testing.T) {
 			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
 				createTestWRT("my-hpa", "my-worker"),
 			},
-			expectScale:                1,
-			expectOwnedResourceApplies: 2,
+			expectScale:                 1,
+			expectWorkerResourceApplies: 2,
 		},
 		{
 			name: "no WRTs produces no owned resource applies",
@@ -449,11 +449,11 @@ func TestGeneratePlan(t *testing.T) {
 			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			state:                      &temporal.TemporalWorkerState{},
-			config:                     &Config{RolloutStrategy: temporaliov1alpha1.RolloutStrategy{}},
-			wrts:                       nil,
-			expectScale:                1,
-			expectOwnedResourceApplies: 0,
+			state:                       &temporal.TemporalWorkerState{},
+			config:                      &Config{RolloutStrategy: temporaliov1alpha1.RolloutStrategy{}},
+			wrts:                        nil,
+			expectScale:                 1,
+			expectWorkerResourceApplies: 0,
 		},
 		{
 			// VersionConfig is non-nil because a new healthy target needs to be promoted.
@@ -571,7 +571,7 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
-			assert.Equal(t, tc.expectOwnedResourceApplies, len(plan.ApplyWorkerResourceTemplates), "unexpected number of owned resource applies")
+			assert.Equal(t, tc.expectWorkerResourceApplies, len(plan.ApplyWorkerResources), "unexpected number of owned resource applies")
 			if tc.expectManagerIdentity != nil {
 				require.NotNil(t, plan.VersionConfig, "expected VersionConfig to be non-nil when asserting ManagerIdentity")
 				assert.Equal(t, *tc.expectManagerIdentity, plan.VersionConfig.ManagerIdentity, "unexpected ManagerIdentity")
@@ -2991,7 +2991,7 @@ func TestResolveGateInput(t *testing.T) {
 	}
 }
 
-func TestGetOwnedResourceApplies(t *testing.T) {
+func TestgetWorkerResourceApplies(t *testing.T) {
 	testCases := []struct {
 		name        string
 		wrts        []temporaliov1alpha1.WorkerResourceTemplate
@@ -3106,13 +3106,13 @@ func TestGetOwnedResourceApplies(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getOwnedResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns")
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns")
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of owned resource applies")
 		})
 	}
 }
 
-func TestGetOwnedResourceApplies_ApplyContents(t *testing.T) {
+func TestgetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	wrt := createTestWRT("my-hpa", "my-worker")
 	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
 	k8sState := &k8s.DeploymentState{
@@ -3121,7 +3121,7 @@ func TestGetOwnedResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns")
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -3144,7 +3144,7 @@ func TestGetOwnedResourceApplies_ApplyContents(t *testing.T) {
 	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
 }
 
-func TestGetOwnedResourceApplies_FieldManagerConstant(t *testing.T) {
+func TestgetWorkerResourceApplies_FieldManagerConstant(t *testing.T) {
 	twor1 := createTestWRT("my-hpa", "my-worker")
 	twor2 := createTestWRT("my-pdb", "my-worker")
 	k8sState := &k8s.DeploymentState{
@@ -3153,7 +3153,7 @@ func TestGetOwnedResourceApplies_FieldManagerConstant(t *testing.T) {
 		},
 	}
 
-	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{twor1, twor2}, k8sState, "test-temporal-ns")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{twor1, twor2}, k8sState, "test-temporal-ns")
 	require.Len(t, applies, 2)
 
 	for _, a := range applies {
@@ -3207,7 +3207,7 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 	}
 }
 
-func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
+func TestgetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 	// PDB with matchLabels opted in for auto-injection via null sentinel.
 	pdbSpec := map[string]interface{}{
 		"apiVersion": "policy/v1",
@@ -3233,7 +3233,7 @@ func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns")
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -3251,7 +3251,7 @@ func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
 	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
 }
 
-func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
+func TestgetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
 	// Arbitrary CRD that uses all three template variables.
 	objSpec := map[string]interface{}{
 		"apiVersion": "monitoring.example.com/v1",
@@ -3276,7 +3276,7 @@ func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getOwnedResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "temporal-production")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "temporal-production")
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -3286,7 +3286,7 @@ func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
 	assert.Equal(t, "temporal-production", spec["temporalNamespace"], ".TemporalNamespace not rendered")
 }
 
-// createTestWRTWithInvalidTemplate builds a WRT whose spec.object contains a broken Go
+// createTestWRTWithInvalidTemplate builds a WRT whose spec.template contains a broken Go
 // template expression, causing RenderWorkerResourceTemplate to return an error.
 func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temporaliov1alpha1.WorkerResourceTemplate {
 	badSpec := map[string]interface{}{

@@ -84,7 +84,7 @@ webhook:
   certDir: /tmp/k8s-webhook-server/serving-certs
 
 # Configuration for WorkerResourceTemplate objects.
-ownedResourceConfig:
+workerResourceTemplate:
   # allowedResources defines which resource kinds may be embedded in WRT objects.
   # The webhook rejects any kind not listed here, and the controller is granted RBAC
   # to manage exactly these resource types. An empty list rejects all kinds — at

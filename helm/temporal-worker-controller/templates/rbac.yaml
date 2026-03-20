@@ -148,8 +148,8 @@ rules:
     verbs:
       - create
   # Rules for managing resources attached via WorkerResourceTemplate.
-  # Driven entirely by ownedResourceConfig.allowedResources in values.yaml.
-  {{- range .Values.ownedResourceConfig.allowedResources }}
+  # Driven entirely by workerResourceTemplate.allowedResources in values.yaml.
+  {{- range .Values.workerResourceTemplate.allowedResources }}
   - apiGroups:
       {{- range .apiGroups }}
       - {{ . | quote }}

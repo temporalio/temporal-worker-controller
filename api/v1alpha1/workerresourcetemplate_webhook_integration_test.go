@@ -131,7 +131,7 @@ func impersonatedClient(username string) client.Client {
 
 var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 
-	// Test 14: Spec-level validation (kind not in allowed list) fires via real HTTP admission.
+	// Spec-level validation (kind not in allowed list) fires via real HTTP admission.
 	// Deployment is not in the allowed kinds list. The webhook must reject the
 	// request with an error mentioning the kind before making any API calls.
 	It("rejects a kind not in the allowed list via the real HTTP admission path", func() {
@@ -147,7 +147,7 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(err.Error()).To(ContainSubstring("not in the allowed list"))
 	})
 
-	// Test 15: SAR pass — both the requesting user (admin) and the controller SA have
+	// SAR pass — both the requesting user (admin) and the controller SA have
 	// HPA create permission in the namespace. The webhook must allow the WRT creation.
 	It("allows creation when user and controller SA both have HPA permission", func() {
 		ns := makeTestNamespace("wh-sar-pass")
@@ -158,7 +158,7 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 			"admission must succeed when both user and controller SA can create HPAs")
 	})
 
-	// Test 16: SAR fail — requesting user lacks HPA create permission.
+	// SAR fail — requesting user lacks HPA create permission.
 	// The controller SA has HPA access (so that check passes), but the requesting user
 	// (impersonated as "webhook-test-alice") has no HPA RBAC. The webhook must reject.
 	It("rejects creation when the requesting user lacks HPA permission", func() {
@@ -179,7 +179,7 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(err.Error()).To(ContainSubstring("not authorized"))
 	})
 
-	// Test 17: SAR fail — controller SA lacks HPA create permission.
+	// SAR fail — controller SA lacks HPA create permission.
 	// The admin user (k8sClient) has all permissions, so the user SAR passes. However,
 	// system:serviceaccount:test-system:test-controller has no HPA RBAC in this namespace,
 	// so the controller SA SAR must fail and the webhook must reject.
@@ -194,7 +194,7 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(err.Error()).To(ContainSubstring("not authorized"))
 	})
 
-	// Test 18: temporalWorkerDeploymentRef.name immutability enforced via a real HTTP update request.
+	// temporalWorkerDeploymentRef.name immutability enforced via a real HTTP update request.
 	// First create a valid WRT, then attempt to change temporalWorkerDeploymentRef.name via k8sClient.Update.
 	// The webhook must reject the update with a message about immutability.
 	It("rejects workerDeploymentRef.name change via real HTTP update", func() {

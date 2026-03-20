@@ -20,8 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// OwnedResourceApply holds a rendered worker resource template to apply via Server-Side Apply.
-type OwnedResourceApply struct {
+// WorkerResourceApply holds a rendered worker resource template to apply via Server-Side Apply.
+type WorkerResourceApply struct {
 	Resource     *unstructured.Unstructured
 	FieldManager string
 	WRTName      string
@@ -42,8 +42,8 @@ type Plan struct {
 	// Build IDs of versions from which the controller should
 	// remove IgnoreLastModifierKey from the version metadata
 	RemoveIgnoreLastModifierBuilds []string
-	// ApplyWorkerResourceTemplates holds resources to apply via SSA, one per (WRT × Build ID) pair.
-	ApplyWorkerResourceTemplates []OwnedResourceApply
+	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
+	ApplyWorkerResources []WorkerResourceApply
 	// EnsureWRTOwnerRefs holds (base, patched) pairs for WRTs that need a
 	// controller owner reference added, ready for client.MergeFrom patching.
 	EnsureWRTOwnerRefs []WRTOwnerRefPatch
@@ -147,21 +147,21 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	plan.ApplyWorkerResourceTemplates = getOwnedResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace)
+	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
 	return plan, nil
 }
 
-// getOwnedResourceApplies renders one OwnedResourceApply for each (WRT × active Build ID) pair.
+// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID) pair.
 // Pairs that fail to render are logged and skipped; they do not block the rest.
-func getOwnedResourceApplies(
+func getWorkerResourceApplies(
 	l logr.Logger,
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	k8sState *k8s.DeploymentState,
 	temporalNamespace string,
-) []OwnedResourceApply {
-	var applies []OwnedResourceApply
+) []WorkerResourceApply {
+	var applies []WorkerResourceApply
 	for i := range wrts {
 		wrt := &wrts[i]
 		if wrt.Spec.Template.Raw == nil {
@@ -177,7 +177,7 @@ func getOwnedResourceApplies(
 				)
 				continue
 			}
-			applies = append(applies, OwnedResourceApply{
+			applies = append(applies, WorkerResourceApply{
 				Resource:     rendered,
 				FieldManager: k8s.WorkerResourceTemplateFieldManager,
 				WRTName:      wrt.Name,

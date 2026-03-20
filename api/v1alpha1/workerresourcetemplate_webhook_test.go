@@ -310,7 +310,7 @@ func TestWorkerResourceTemplate_ValidateDelete_NilRaw(t *testing.T) {
 	ctx := context.Background()
 	v := newValidatorNoAPI()
 
-	// WRT with nil spec.object should be permitted (nothing to check)
+	// WRT with nil spec.template should be permitted (nothing to check)
 	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{

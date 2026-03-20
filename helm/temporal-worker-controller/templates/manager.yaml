@@ -78,10 +78,10 @@ spec:
               fieldPath: spec.serviceAccountName
         # ALLOWED_KINDS controls which resource kinds are accepted by the
         # WorkerResourceTemplate validating webhook. Derived from
-        # ownedResourceConfig.allowedResources[*].kinds in values.yaml.
+        # workerResourceTemplate.allowedResources[*].kinds in values.yaml.
         # An empty value rejects all kinds — at least one must be configured.
         {{- $allKinds := list -}}
-        {{- range .Values.ownedResourceConfig.allowedResources -}}
+        {{- range .Values.workerResourceTemplate.allowedResources -}}
           {{- range .kinds -}}
             {{- $allKinds = append $allKinds . -}}
           {{- end -}}

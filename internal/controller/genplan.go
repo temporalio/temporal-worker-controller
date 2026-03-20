@@ -41,7 +41,7 @@ type plan struct {
 	RemoveIgnoreLastModifierBuilds []string
 
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
-	ApplyWorkerResourceTemplates []planner.OwnedResourceApply
+	ApplyWorkerResources []planner.WorkerResourceApply
 
 	// WRTs that need a controller owner reference added, as (base, patched) pairs
 	// ready for client.MergeFrom patching in executePlan.
@@ -167,7 +167,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	plan.UpdateVersionConfig = planResult.VersionConfig
 
 	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
-	plan.ApplyWorkerResourceTemplates = planResult.ApplyWorkerResourceTemplates
+	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 
 	// Convert test workflows

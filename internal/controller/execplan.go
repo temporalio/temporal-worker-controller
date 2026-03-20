@@ -303,7 +303,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	}
 	wrtResults := make(map[wrtKey][]applyResult)
 
-	for _, apply := range p.ApplyWorkerResourceTemplates {
+	for _, apply := range p.ApplyWorkerResources {
 		l.Info("applying owned resource",
 			"name", apply.Resource.GetName(),
 			"kind", apply.Resource.GetKind(),

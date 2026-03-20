@@ -26,7 +26,7 @@ Before analyzing coverage, it helps to be explicit about what the controller is 
 - Re-grants controller authority when `temporal.io/ignore-last-modifier=true` is set
 - Correctly tracks per-version drainage and status (Inactive → Ramping → Current → Draining → Drained)
 
-### 3. TemporalWorkerOwnedResource (TWOR)
+### 3. WorkerResourceTemplate (TWOR)
 - Creates one copy of the attached resource per worker version with a running Deployment
 - Auto-injects `scaleTargetRef` (when null) to point at the correct versioned Deployment
 - Auto-injects `selector.matchLabels` (when null) with the correct per-version labels
@@ -36,8 +36,8 @@ Before analyzing coverage, it helps to be explicit about what the controller is 
 - Sets owner ref on each per-Build-ID resource copy pointing to the versioned Deployment (GC on sunset)
 
 ### 4. Webhook Admission Control (TWOR)
-- Requires `apiVersion` and `kind` in `spec.object`
-- Forbids `metadata.name` and `metadata.namespace` in `spec.object`
+- Requires `apiVersion` and `kind` in `spec.template`
+- Forbids `metadata.name` and `metadata.namespace` in `spec.template`
 - Rejects banned resource kinds (Deployment, StatefulSet, Job, Pod, CronJob by default)
 - Rejects `minReplicas: 0` in specs with a `minReplicas` field (such as HPA)
 - Rejects non-null `scaleTargetRef` or `selector.matchLabels` (controller owns these)
@@ -47,9 +47,9 @@ Before analyzing coverage, it helps to be explicit about what the controller is 
 
 ### 5. Kubernetes Correctness
 - All controller-created resources have the TWD as their controller owner reference
-- All per-Build-ID `TemporalWorkerOwnedResource` copies have the versioned Deployment as their controller owner reference
+- All per-Build-ID `WorkerResourceTemplate` copies have the versioned Deployment as their controller owner reference
 - Build ID naming is deterministic and DNS-safe
-- `TemporalWorkerOwnedResource`-derived resource names are unique per `(twdName, tworName, buildID)` triple and ≤47 chars
+- `WorkerResourceTemplate`-derived resource names are unique per `(twdName, tworName, buildID)` triple and ≤47 chars
 
 ---
 
@@ -60,7 +60,7 @@ No Kubernetes API server, no Temporal server. Tests call functions directly.
 
 **Files:**
 - `api/v1alpha1/temporalworker_webhook_test.go` — TWD webhook spec validation
-- `api/v1alpha1/temporalworkerownedresource_webhook_test.go` — TWOR webhook spec validation (no SAR)
+- `api/v1alpha1/WorkerResourceTemplate_webhook_test.go` — TWOR webhook spec validation (no SAR)
 - `internal/k8s/deployments_test.go` — build ID computation, deployment spec generation, health detection
 - `internal/k8s/ownedresources_test.go` — owned resource naming, auto-injection, template rendering
 - `internal/planner/planner_test.go` — plan generation logic (create/scale/update/delete decisions)
@@ -76,7 +76,7 @@ Full k8s fake API (envtest) with a real in-process Temporal server (`temporaltes
 ### Webhook Suite (Envtest + Webhook Server)
 Real webhook server registered with TLS, but no Temporal server. Tests webhook HTTP responses directly.
 
-**File:** `api/v1alpha1/temporalworkerownedresource_webhook_integration_test.go` (5 subtests via Ginkgo suite in `webhook_suite_test.go`)
+**File:** `api/v1alpha1/WorkerResourceTemplate_webhook_integration_test.go` (5 subtests via Ginkgo suite in `webhook_suite_test.go`)
 
 ---
 
@@ -296,7 +296,7 @@ This test cannot run in envtest. It requires a real cluster with:
 - Prometheus scraping the Temporal server
 - Prometheus Adapter configured to expose `approximate_backlog_count` to the k8s custom metrics API
 - The temporal-worker-controller installed with a running TWD
-- `TemporalWorkerOwnedResource` with an HPA using `external` metric type applied
+- `WorkerResourceTemplate` with an HPA using `external` metric type applied
 - A workflow client that can generate controlled bursts of tasks
 - Access to the k8s metrics API and/or Prometheus query API
 

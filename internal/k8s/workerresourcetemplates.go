@@ -72,7 +72,7 @@ func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 	}
 }
 
-// TemplateData holds the variables available in Go template expressions within spec.object.
+// TemplateData holds the variables available in Go template expressions within spec.template.
 type TemplateData struct {
 	// DeploymentName is the controller-generated versioned Deployment name.
 	DeploymentName string
@@ -86,7 +86,7 @@ type TemplateData struct {
 // WorkerResourceTemplate and versioned Deployment.
 //
 // Processing order:
-//  1. Unmarshal spec.object into an Unstructured
+//  1. Unmarshal spec.template into an Unstructured
 //  2. Auto-inject scaleTargetRef and matchLabels (Layer 1)
 //  3. Render Go templates in all string values (Layer 2)
 //  4. Set metadata (name, namespace, labels, owner reference)
@@ -164,7 +164,7 @@ func RenderWorkerResourceTemplate(
 
 // autoInjectFields recursively traverses obj and injects scaleTargetRef and matchLabels
 // wherever the key is present with a null value. Users signal intent by writing
-// `scaleTargetRef: null` or `matchLabels: null` in their spec.object. This covers Layer 1
+// `scaleTargetRef: null` or `matchLabels: null` in their spec.template. This covers Layer 1
 // auto-injection without the risk of adding unknown fields to resource types that don't use them.
 func autoInjectFields(obj map[string]interface{}, deploymentName string, selectorLabels map[string]string) {
 	for k, v := range obj {

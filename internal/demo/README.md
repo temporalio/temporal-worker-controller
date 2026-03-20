@@ -10,7 +10,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - Temporal Cloud account with API key or mTLS certificates
 - Understanding of [Worker Versioning concepts](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) (Pinned and Auto-Upgrade versioning behaviors)
-- **[cert-manager](https://cert-manager.io/docs/installation/)** — required for the `TemporalWorkerOwnedResource` validating webhook (TLS). Install it once into your Minikube cluster before deploying the controller (see step 3 below).
+- **[cert-manager](https://cert-manager.io/docs/installation/)** — required for the `WorkerResourceTemplate` validating webhook (TLS). Install it once into your Minikube cluster before deploying the controller (see step 3 below).
 
 > **Note**: This demo specifically showcases **Pinned** workflow behavior. All workflows in the demo will remain on the worker version where they started, demonstrating how the controller safely manages multiple worker versions simultaneously during deployments.
 
@@ -121,11 +121,11 @@ kubectl logs -n temporal-system deployments/temporal-worker-controller-manager -
 kubectl get twd
 ```
 
-### Testing TemporalWorkerOwnedResource (per-version HPA)
+### Testing WorkerResourceTemplate (per-version HPA)
 
-`TemporalWorkerOwnedResource` lets you attach Kubernetes resources — HPAs, PodDisruptionBudgets, etc. — to each worker version with running workers. The controller creates one copy per worker version with a running Deployment and wires it to the correct Deployment automatically.
+`WorkerResourceTemplate` lets you attach Kubernetes resources — HPAs, PodDisruptionBudgets, etc. — to each worker version with running workers. The controller creates one copy per worker version with a running Deployment and wires it to the correct Deployment automatically.
 
-The `TemporalWorkerOwnedResource` validating webhook enforces that you have permission to create the embedded resource type yourself, and it requires TLS (provided by cert-manager, installed in step 3 above).
+The `WorkerResourceTemplate` validating webhook enforces that you have permission to create the embedded resource type yourself, and it requires TLS (provided by cert-manager, installed in step 3 above).
 
 After deploying the helloworld worker (step 5), apply the example HPA:
 
@@ -136,8 +136,8 @@ kubectl apply -f examples/twor-hpa.yaml
 Watch the controller create an HPA for each worker version with running workers:
 
 ```bash
-# See TemporalWorkerOwnedResource status (Applied: true once the controller reconciles)
-kubectl get temporalworkerownedresource
+# See WorkerResourceTemplate status (Applied: true once the controller reconciles)
+kubectl get WorkerResourceTemplate
 
 # See the per-Build-ID HPAs
 kubectl get hpa
@@ -147,7 +147,7 @@ You should see one HPA per worker version with running workers, with `scaleTarge
 
 When you deploy a new worker version (e.g., step 8), the controller creates a new HPA for the new Build ID and keeps the old one until that versioned Deployment is deleted during the sunset process.
 
-See [docs/owned-resources.md](../../docs/owned-resources.md) for full documentation.
+See [docs/owned-resources.md](../../docs/worker-resource-templates.md) for full documentation.
 
 ### Cleanup
 

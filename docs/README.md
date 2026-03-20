@@ -33,7 +33,7 @@ See [Migration to Unversioned](migration-to-unversioned.md) for how to migrate b
 ### [Ownership](ownership.md)
 How the controller gets permission to manage a Worker Deployment, how a human client can take or give back control.
 
-### [TemporalWorkerOwnedResource](owned-resources.md)
+### [WorkerResourceTemplate](worker-resource-templates.md)
 How to attach HPAs, PodDisruptionBudgets, and other Kubernetes resources to each active versioned Deployment. Covers the auto-injection model, RBAC setup, webhook TLS, and examples.
 
 ---

@@ -15,7 +15,7 @@
 #   kubectl get wrt              # shows Applied status per Build ID
 #   kubectl get hpa              # shows one HPA per active Build ID
 #
-# See docs/owned-resources.md for full documentation.
+# See docs/worker-resource-templates.md for full documentation.
 apiVersion: temporal.io/v1alpha1
 kind: WorkerResourceTemplate
 metadata:
