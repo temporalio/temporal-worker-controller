@@ -41,11 +41,11 @@ func TestGeneratePlan(t *testing.T) {
 		expectUpdate                     int
 		expectWorkflow                   int
 		expectConfig                     bool
-		expectConfigSetCurrent           *bool  // pointer so we can test nil
-		expectConfigRampPercent          *int32 // pointer so we can test nil, in percentage (0-100)
+		expectConfigSetCurrent           *bool   // pointer so we can test nil
+		expectConfigRampPercent          *int32  // pointer so we can test nil, in percentage (0-100)
 		expectManagerIdentity            *string // pointer so nil means "don't assert"
-		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
-		wrts                            []temporaliov1alpha1.WorkerResourceTemplate
+		maxVersionsIneligibleForDeletion *int32  // set by env if non-nil, else default 75
+		wrts                             []temporaliov1alpha1.WorkerResourceTemplate
 		expectOwnedResourceApplies       int
 	}{
 		{
@@ -2994,12 +2994,12 @@ func TestResolveGateInput(t *testing.T) {
 func TestGetOwnedResourceApplies(t *testing.T) {
 	testCases := []struct {
 		name        string
-		wrts       []temporaliov1alpha1.WorkerResourceTemplate
+		wrts        []temporaliov1alpha1.WorkerResourceTemplate
 		k8sState    *k8s.DeploymentState
 		expectCount int
 	}{
 		{
-			name:  "no WRTs produces no applies",
+			name: "no WRTs produces no applies",
 			wrts: nil,
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
@@ -3077,7 +3077,7 @@ func TestGetOwnedResourceApplies(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "nil-raw", Namespace: "default"},
 					Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 						TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-						Template:                     runtime.RawExtension{Raw: nil},
+						Template:                    runtime.RawExtension{Raw: nil},
 					},
 				},
 				createTestWRT("my-hpa", "my-worker"),
@@ -3181,7 +3181,7 @@ func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.Work
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
-			Template:            runtime.RawExtension{Raw: raw},
+			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -3224,7 +3224,7 @@ func TestGetOwnedResourceApplies_MatchLabelsInjection(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-			Template:                     runtime.RawExtension{Raw: raw},
+			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
 
@@ -3267,7 +3267,7 @@ func TestGetOwnedResourceApplies_GoTemplateRendering(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "my-monitor", Namespace: "k8s-production"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-			Template:                     runtime.RawExtension{Raw: raw},
+			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
 
@@ -3304,7 +3304,7 @@ func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temp
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
-			Template:            runtime.RawExtension{Raw: raw},
+			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
 }

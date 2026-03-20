@@ -22,11 +22,11 @@ import (
 
 // OwnedResourceApply holds a rendered worker resource template to apply via Server-Side Apply.
 type OwnedResourceApply struct {
-	Resource      *unstructured.Unstructured
-	FieldManager  string
+	Resource     *unstructured.Unstructured
+	FieldManager string
 	WRTName      string
 	WRTNamespace string
-	BuildID       string
+	BuildID      string
 }
 
 // Plan holds the actions to execute during reconciliation
@@ -178,11 +178,11 @@ func getOwnedResourceApplies(
 				continue
 			}
 			applies = append(applies, OwnedResourceApply{
-				Resource:      rendered,
-				FieldManager:  k8s.WorkerResourceTemplateFieldManager,
+				Resource:     rendered,
+				FieldManager: k8s.WorkerResourceTemplateFieldManager,
 				WRTName:      wrt.Name,
 				WRTNamespace: wrt.Namespace,
-				BuildID:       buildID,
+				BuildID:      buildID,
 			})
 		}
 	}
