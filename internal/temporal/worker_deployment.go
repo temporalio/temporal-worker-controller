@@ -160,14 +160,9 @@ func GetWorkerDeploymentState(
 		} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINED {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
 
-			// If there is no controller-managed k8s Deployment for this drained version,
-			// treat it as NotRegistered so the planner can immediately clean up any
-			// orphaned resources rather than waiting for sunset delays.
-			if _, ok := k8sDeployments[version.DeploymentVersion.BuildId]; !ok {
-				versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
-			} else if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil { //revive:disable-line:max-control-nesting
-				// Extract DrainedSince directly from the version summary's drainage info,
-				// avoiding a per-version DescribeVersion call.
+			// Extract DrainedSince directly from the version summary's drainage info,
+			// avoiding a per-version DescribeVersion call.
+			if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil {
 				drainedSince := version.DrainageInfo.LastChangedTime.AsTime()
 				versionInfo.DrainedSince = &drainedSince
 			}
