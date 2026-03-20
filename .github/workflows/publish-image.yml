@@ -1,0 +1,96 @@
+name: publish-image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: >
+          Branch to publish from (defaults to the branch selected in the UI).
+          The image will be tagged "main" for main, or "branch-<name>" otherwise.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-image-${{ inputs.branch || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish-image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: temporalio/temporal-worker-controller
+    steps:
+      - name: Determine ref and image tag
+        id: meta
+        shell: bash
+        env:
+          INPUT_BRANCH: ${{ inputs.branch }}
+        run: |
+          # Resolve the effective branch.
+          # workflow_dispatch may supply an explicit branch; otherwise
+          # fall back to the ref that triggered the workflow.
+          branch="${INPUT_BRANCH:-$GITHUB_REF_NAME}"
+
+          if [[ "$branch" == "main" ]]; then
+            echo "image_tag=main" >> "$GITHUB_OUTPUT"
+          else
+            sanitized="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9._-]+#-#g; s#(^-+|-+$)##g')"
+            if [[ -z "$sanitized" ]]; then
+              echo "Could not derive a Docker-compatible tag from branch '$branch'" >&2
+              exit 1
+            fi
+            echo "image_tag=branch-${sanitized}" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "ref=${branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        with:
+          go-version-file: "go.mod"
+          check-latest: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PAT }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
+        with:
+          version: v2.11.2
+          args: release --config .goreleaser.publish-images.yml --snapshot --clean
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
+
+      - name: Push snapshot images
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
+        run: |
+          docker push "${IMAGE_NAME}:${IMAGE_TAG}-amd64"
+          docker push "${IMAGE_NAME}:${IMAGE_TAG}-arm64"
+
+      - name: Create and push manifest
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
+        run: |
+          docker manifest create "${IMAGE_NAME}:${IMAGE_TAG}" "${IMAGE_NAME}:${IMAGE_TAG}-amd64" "${IMAGE_NAME}:${IMAGE_TAG}-arm64"
+          docker manifest push "${IMAGE_NAME}:${IMAGE_TAG}"

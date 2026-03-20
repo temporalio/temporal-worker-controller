@@ -1,0 +1,75 @@
+name: Helm Image Check
+
+on:
+  push:
+    branches: [main]
+    paths: ["helm/**"]
+  pull_request:
+    paths: ["helm/**"]
+  schedule:
+    - cron: "0 9 * * 1"  # Weekly Monday 9am UTC — catches registry deprecations
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-images:
+    name: Verify Helm Chart Images Exist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.3
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Render chart and verify images
+        run: |
+          set -euo pipefail
+
+          # Render all config variants (mirrors helm-validate.yml) so images behind
+          # non-default flags are also checked
+          helm template test-release helm/temporal-worker-controller \
+            > /tmp/rendered-default.yaml
+          helm template test-release helm/temporal-worker-controller \
+            --set namespace.create=true \
+            > /tmp/rendered-namespace.yaml
+          helm template test-release helm/temporal-worker-controller \
+            --set authProxy.enabled=false \
+            --set metrics.disableAuth=true \
+            > /tmp/rendered-no-auth.yaml
+
+          # Union all image: values across all renders
+          images=$(cat /tmp/rendered-default.yaml /tmp/rendered-namespace.yaml /tmp/rendered-no-auth.yaml \
+            | grep -E '^\s+image:' \
+            | sed 's/.*image:[[:space:]]*//' \
+            | tr -d '"' \
+            | sort -u)
+
+          echo "Images to verify:"
+          echo "$images"
+          echo ""
+
+          failed=0
+          while IFS= read -r image; do
+            [ -z "$image" ] && continue
+            echo -n "Checking $image ... "
+            if crane manifest "$image" > /dev/null 2>&1; then
+              echo "OK"
+            else
+              echo "FAILED"
+              failed=1
+            fi
+          done <<< "$images"
+
+          if [ "$failed" -ne 0 ]; then
+            echo ""
+            echo "One or more images could not be verified."
+            echo "Update image references to valid, accessible registry paths."
+            exit 1
+          fi

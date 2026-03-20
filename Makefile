@@ -152,7 +152,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	GOWORK=off GO111MODULE=on $(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true webhook paths=./api/... paths=./internal/... paths=./cmd/... \
-    output:crd:artifacts:config=helm/temporal-worker-controller/crds
+    output:crd:artifacts:config=helm/temporal-worker-controller-crds/templates
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -268,15 +268,16 @@ endif
 
 .PHONY: install
 install: manifests ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	$(KUBECTL) apply --context $(K8S_CONTEXT) -f helm/temporal-worker-controller/crds
+	$(KUBECTL) apply --context $(K8S_CONTEXT) -f helm/temporal-worker-controller-crds/templates
 
 .PHONY: uninstall
 uninstall: manifests ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUBECTL) delete --context $(K8S_CONTEXT) --ignore-not-found=$(ignore-not-found) -f helm/temporal-worker-controller/crds
+	$(KUBECTL) delete --context $(K8S_CONTEXT) --ignore-not-found=$(ignore-not-found) -f helm/temporal-worker-controller-crds/templates
 
 .PHONY: deploy
 deploy: manifests helm ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	helm install temporal-worker-controller ./helm/temporal-worker-controller --create-namespace --namespace temporal-system
+	helm install temporal-worker-controller-crds ./helm/temporal-worker-controller-crds --create-namespace --namespace temporal-system
+	helm install temporal-worker-controller ./helm/temporal-worker-controller --namespace temporal-system
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.

@@ -82,12 +82,24 @@ When you update the image, the controller automatically:
 
 ### 🔧 Installation
 
+CRDs are shipped as a separate Helm chart so they can be upgraded independently of the controller. Install the CRDs chart first, then the controller chart:
+
 ```bash
-# Install using Helm in your preferred namespace
+# 1. Install CRDs
+helm install temporal-worker-controller-crds \
+  oci://docker.io/temporalio/temporal-worker-controller-crds \
+  --version <version> \
+  --namespace <your-namespace> \
+  --create-namespace
+
+# 2. Install the controller
 helm install temporal-worker-controller \
   oci://docker.io/temporalio/temporal-worker-controller \
+  --version <version> \
   --namespace <your-namespace>
 ```
+
+See [docs/crd-management.md](docs/crd-management.md) for upgrade, rollback, and migration instructions.
 
 ### Next Steps
 
@@ -130,15 +142,16 @@ The Temporal Worker Controller eliminates this operational overhead by automatin
 
 ## 📖 Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Migration Guide](docs/migration-to-versioned.md) | Step-by-step guide for migrating from traditional deployments |
-| [Reversion Guide](docs/migration-to-unversioned.md) | Step-by-step guide for migrating back to unversioned deployment |
-| [Architecture](docs/architecture.md) | Technical deep-dive into how the controller works |
-| [Configuration](docs/configuration.md) | Complete configuration reference |
-| [Concepts](docs/concepts.md) | Key concepts and terminology |
-| [Limits](docs/limits.md) | Technical constraints and limitations |
+| Document                                               | Description |
+|--------------------------------------------------------|-------------|
+| [Migration Guide](docs/migration-to-versioned.md)      | Step-by-step guide for migrating from traditional deployments |
+| [Reversion Guide](docs/migration-to-unversioned.md)    | Step-by-step guide for migrating back to unversioned deployment |
+| [Architecture](docs/architecture.md)                   | Technical deep-dive into how the controller works |
+| [Configuration](docs/configuration.md)                 | Complete configuration reference |
+| [Concepts](docs/concepts.md)                           | Key concepts and terminology |
+| [Limits](docs/limits.md)                               | Technical constraints and limitations |
 | [TemporalWorkerOwnedResource](docs/owned-resources.md) | Attach HPAs, PDBs, and other resources to each versioned Deployment |
+| [CRD Management](docs/crd-management.md)               | CRD upgrade, rollback, and migration guide |
 
 ## 🔧 Worker Configuration
 
@@ -165,6 +178,8 @@ We welcome all contributions! This includes:
 ## 🛠️ Development
 
 Want to try the controller locally? Check out the [local demo guide](internal/demo/README.md) for development setup.
+
+Need a test controller image from an unmerged branch? Run the `publish-branch-image` GitHub Actions workflow with the branch name.
 
 ## 📄 License
 

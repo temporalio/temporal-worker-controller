@@ -31,7 +31,7 @@ internal/demo
 # CI/CD
 .github
 .goreleaser.yml
-.goreleaser.main.yml
+.goreleaser.publish-images.yml
 
 # Go
 go.work

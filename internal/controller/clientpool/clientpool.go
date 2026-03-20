@@ -97,6 +97,7 @@ type NewClientOptions struct {
 	TemporalNamespace string
 	K8sNamespace      string
 	Spec              v1alpha1.TemporalConnectionSpec
+	Identity          string
 }
 
 func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
@@ -104,6 +105,7 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
+		Identity:  opts.Identity,
 	}
 
 	var pemCert []byte
@@ -132,13 +134,18 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
-	// If the secret contains a CA certificate, use it as the trusted root for server
-	// certificate verification. This enables connecting to Temporal servers whose TLS
-	// certificates are signed by private or internal CAs (e.g. cert-manager in a test
-	// cluster). When ca.crt is absent, Go falls back to the system CA bundle, which is
-	// the correct behaviour for Temporal Cloud and other publicly-signed endpoints.
+	// If the secret contains a CA certificate, append it to the system CA pool for
+	// server certificate verification. This enables connecting to Temporal servers whose
+	// TLS certificates are signed by private or internal CAs (e.g. cert-manager in a
+	// self-hosted cluster) while still trusting publicly-signed endpoints like Temporal
+	// Cloud. When ca.crt is absent, RootCAs remains unset and Go's TLS implementation
+	// uses the system CA bundle by default.
 	if caCert, ok := secret.Data["ca.crt"]; ok && len(caCert) > 0 {
-		rootCAs := x509.NewCertPool()
+		rootCAs, err := x509.SystemCertPool()
+		if err != nil {
+			cp.logger.Warn("Failed to load system CA pool, falling back to empty pool", "error", err)
+			rootCAs = x509.NewCertPool()
+		}
 		if !rootCAs.AppendCertsFromPEM(caCert) {
 			return nil, nil, nil, errors.New("failed to parse CA certificate from secret")
 		}
@@ -165,6 +172,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
+		Identity:  opts.Identity,
 		ConnectionOptions: sdkclient.ConnectionOptions{
 			TLS: &tls.Config{},
 		},
@@ -193,6 +201,7 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (*sdk
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
+		Identity:  opts.Identity,
 	}
 
 	key := ClientPoolKey{
