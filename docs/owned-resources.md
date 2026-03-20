@@ -1,6 +1,6 @@
 # TemporalWorkerOwnedResource
 
-`TemporalWorkerOwnedResource` lets you attach arbitrary Kubernetes resources — HPAs, PodDisruptionBudgets, KEDA ScaledObjects, custom CRDs — to each worker version that has running workers. The controller creates one copy of the resource per worker version with a running Deployment, automatically wired to the correct versioned Deployment.
+`TemporalWorkerOwnedResource` lets you attach arbitrary Kubernetes resources — HPAs, PodDisruptionBudgets, custom CRDs — to each worker version that has running workers. The controller creates one copy of the resource per worker version with a running Deployment, automatically wired to the correct versioned Deployment.
 
 ## Why you need this
 
@@ -8,7 +8,7 @@ The Temporal Worker Controller creates one Kubernetes `Deployment` per worker ve
 
 `TemporalWorkerOwnedResource` solves this by treating the attached resource as a template. The controller renders one instance per worker version with running workers, injects the correct versioned Deployment name, and cleans up automatically when the versioned Deployment is deleted (e.g., during the sunset process after traffic has drained).
 
-This is also the recommended mechanism for metric-based or backlog-based autoscaling: attach a KEDA `ScaledObject` (or a standard HPA with custom metrics) to your workers and the controller keeps one per running worker version, each pointing at the right Deployment.
+This is also the recommended mechanism for metric-based or backlog-based autoscaling: attach a standard HPA with custom metrics to your workers and the controller keeps one per running worker version, each pointing at the right Deployment.
 
 ## How it works
 
@@ -29,7 +29,7 @@ The controller auto-injects two fields when you set them to `null` in `spec.obje
 | `spec.scaleTargetRef` (any resource with this field) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}` |
 | `spec.selector.matchLabels` (any resource with this field) | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <twdName>}` |
 
-The `scaleTargetRef` injection applies to any resource type that has a `scaleTargetRef` field — not just HPAs. KEDA `ScaledObjects` and other autoscaler CRDs use the same field and benefit from the same injection.
+The `scaleTargetRef` injection applies to any resource type that has a `scaleTargetRef` field — not just HPAs. Other autoscaler CRDs use the same field and benefit from the same injection.
 
 ## Resource naming
 
@@ -77,7 +77,7 @@ ownedResourceConfig:
         resources: ["poddisruptionbudgets"]
 ```
 
-Add entries for any other resource types you want to attach (e.g., KEDA `ScaledObjects`). For development clusters you can set `rbac.wildcard: true` to grant access to all resource types, but this is not recommended for production.
+Add entries for any other resource types you want to attach.
 
 ### What to configure for your users
 

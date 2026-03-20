@@ -95,10 +95,6 @@ ownedResourceConfig:
   #   apiGroups:  API groups for the controller's RBAC policy
   #   resources:  resource names for the controller's RBAC policy
   #
-  # Example — add KEDA ScaledObjects:
-  #   - kinds: ["ScaledObject"]
-  #     apiGroups: ["keda.sh"]
-  #     resources: ["scaledobjects"]
   allowedResources:
     # HPA (autoscaling/v1 and autoscaling/v2 share the same API group)
     - kinds: ["HorizontalPodAutoscaler"]

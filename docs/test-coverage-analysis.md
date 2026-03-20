@@ -202,10 +202,7 @@ Similar GC chain for the Deployments themselves.
 **H1. HPA actually reacts to CPU/memory metrics**
 Requires metrics-server in the cluster, real pods with real CPU load. The HPA controller (absent from envtest) must read metrics and update `DesiredReplicas`. This is really testing Kubernetes HPA behavior, not the controller's behavior — but validating the integration matters.
 
-**H2. KEDA ScaledObject reacts to custom metrics**
-If users attach KEDA ScaledObjects via TWOR, KEDA must be installed, the scaler must be configured, and KEDA must successfully scale the versioned Deployment.
-
-**H3. Per-version HPA scaleTargetRef correctly isolated**
+**H2. Per-version HPA scaleTargetRef correctly isolated**
 In a multi-version rollout (current + ramping), each versioned Deployment has its own HPA. The v1 HPA should scale only v1 pods; the v2 HPA should scale only v2 pods. This requires real pods and HPA controller to verify.
 
 ### Real Worker & Temporal Integration

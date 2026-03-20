@@ -5,7 +5,7 @@
 
 > 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases*. Core functionality is complete with stable APIs.
 > 
-> *Autoscaling based on Temporal task queue depth is not yet built in. You can attach Horizontal Pod Autoscalers or KEDA ScaledObjects to each versioned Deployment via [`TemporalWorkerOwnedResource`](docs/owned-resources.md).
+> *Autoscaling based on Temporal task queue depth is not yet built in. You can attach Horizontal Pod Autoscalers or other custom scalers to each versioned Deployment via [`TemporalWorkerOwnedResource`](docs/owned-resources.md).
 
 **The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
@@ -117,7 +117,7 @@ See [docs/crd-management.md](docs/crd-management.md) for upgrade, rollback, and 
 - ✅ **Deletion of resources** associated with drained Worker Deployment Versions
 - ✅ **Multiple rollout strategies**: `Manual`, `AllAtOnce`, and `Progressive` rollouts
 - ✅ **Gate workflows** - Test new versions with a [pre-deployment test](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning#adding-a-pre-deployment-test) before routing real traffic to them
-- ✅ **Per-version attached resources** - Attach HPAs, KEDA ScaledObjects, PodDisruptionBudgets, or any namespaced Kubernetes resource to each worker version with running workers via [`TemporalWorkerOwnedResource`](docs/owned-resources.md) — this is also the recommended path for metric-based and backlog-based autoscaling
+- ✅ **Per-version attached resources** - Attach HPAs, PodDisruptionBudgets, or any namespaced Kubernetes resource to each worker version with running workers via [`TemporalWorkerOwnedResource`](docs/owned-resources.md) — this is also the recommended path for metric-based and backlog-based autoscaling
 
 
 ## 💡 Why Use This?
