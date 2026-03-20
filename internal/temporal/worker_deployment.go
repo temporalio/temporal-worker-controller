@@ -12,12 +12,14 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
+	sdkworker "go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -43,11 +45,6 @@ type VersionInfo struct {
 	//   - Strategy is Progressive, and
 	//   - Presence of unversioned pollers in all task queues of target version cannot be confirmed.
 	AllTaskQueuesHaveUnversionedPoller bool
-	// True if all task queues in this version have no versioned pollers.
-	// False could just mean unknown / not checked / not checked successfully.
-	// Only checked for Drained versions that don't have controller-managed Deployments.
-	// Used to compute status.VersionCountIneligibleForDeletion.
-	NoTaskQueuesHaveVersionedPoller bool
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -83,8 +80,12 @@ func GetWorkerDeploymentState(
 	// Get deployment handler
 	deploymentHandler := client.WorkerDeploymentClient().GetHandle(workerDeploymentName)
 
-	// Describe the worker deployment
-	resp, err := deploymentHandler.Describe(ctx, temporalClient.WorkerDeploymentDescribeOptions{})
+	// Describe the worker deployment using gRPC API directly to get full version summary info
+	// (including drainage timestamps) without needing per-version DescribeVersion calls.
+	resp, err := client.WorkflowService().DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
+		Namespace:      namespace,
+		DeploymentName: workerDeploymentName,
+	})
 	if err != nil {
 		var notFound *serviceerror.NotFound
 		if errors.As(err, &notFound) {
@@ -94,15 +95,21 @@ func GetWorkerDeploymentState(
 		return nil, fmt.Errorf("unable to describe worker deployment %s: %w", workerDeploymentName, err)
 	}
 
-	workerDeploymentInfo := resp.Info
-	routingConfig := workerDeploymentInfo.RoutingConfig
+	workerDeploymentInfo := resp.GetWorkerDeploymentInfo()
+	if workerDeploymentInfo == nil {
+		return state, nil
+	}
+	routingConfig := workerDeploymentInfo.GetRoutingConfig()
+	if routingConfig == nil {
+		return state, nil
+	}
 
 	// Set basic information
-	if routingConfig.CurrentVersion != nil {
-		state.CurrentBuildID = routingConfig.CurrentVersion.BuildID
+	if routingConfig.CurrentDeploymentVersion != nil {
+		state.CurrentBuildID = routingConfig.CurrentDeploymentVersion.BuildId
 	}
-	if routingConfig.RampingVersion != nil {
-		state.RampingBuildID = routingConfig.RampingVersion.BuildID
+	if routingConfig.RampingDeploymentVersion != nil {
+		state.RampingBuildID = routingConfig.RampingDeploymentVersion.BuildId
 	}
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
@@ -110,7 +117,8 @@ func GetWorkerDeploymentState(
 
 	// Decide whether to ignore LastModifierIdentity
 	if state.LastModifierIdentity != controllerIdentity && state.LastModifierIdentity != "" {
-		state.IgnoreLastModifier, err = DeploymentShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig)
+		sdkRoutingConfig := toSDKRoutingConfig(routingConfig)
+		state.IgnoreLastModifier, err = DeploymentShouldIgnoreLastModifier(ctx, deploymentHandler, sdkRoutingConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -119,80 +127,55 @@ func GetWorkerDeploymentState(
 	// TODO(jlegrone): Re-enable stats once available in versioning v3.
 
 	// Set ramping since time if applicable
-	if routingConfig.RampingVersion != nil {
-		var (
-			rampingSinceTime   = metav1.NewTime(routingConfig.RampingVersionChangedTime)
-			lastRampUpdateTime = metav1.NewTime(routingConfig.RampingVersionPercentageChangedTime)
-		)
-		state.RampingSince = &rampingSinceTime
-		state.RampLastModifiedAt = &lastRampUpdateTime
+	if routingConfig.RampingDeploymentVersion != nil {
+		if routingConfig.RampingVersionChangedTime != nil {
+			rampingSinceTime := metav1.NewTime(routingConfig.RampingVersionChangedTime.AsTime())
+			state.RampingSince = &rampingSinceTime
+		}
+		if routingConfig.RampingVersionPercentageChangedTime != nil {
+			lastRampUpdateTime := metav1.NewTime(routingConfig.RampingVersionPercentageChangedTime.AsTime())
+			state.RampLastModifiedAt = &lastRampUpdateTime
+		}
 	}
 
 	// Process each version
 	for _, version := range workerDeploymentInfo.VersionSummaries {
 		versionInfo := &VersionInfo{
-			DeploymentName: version.Version.DeploymentName,
-			BuildID:        version.Version.BuildID,
+			DeploymentName: version.DeploymentVersion.DeploymentName,
+			BuildID:        version.DeploymentVersion.BuildId,
 		}
 
 		// Determine version status
-		drainageStatus := version.DrainageStatus
-		if routingConfig.CurrentVersion != nil &&
-			version.Version.DeploymentName == routingConfig.CurrentVersion.DeploymentName &&
-			version.Version.BuildID == routingConfig.CurrentVersion.BuildID {
+		drainageStatus := version.DrainageInfo.GetStatus()
+		if routingConfig.CurrentDeploymentVersion != nil &&
+			version.DeploymentVersion.DeploymentName == routingConfig.CurrentDeploymentVersion.DeploymentName &&
+			version.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusCurrent
-		} else if routingConfig.RampingVersion != nil &&
-			version.Version.DeploymentName == routingConfig.RampingVersion.DeploymentName &&
-			version.Version.BuildID == routingConfig.RampingVersion.BuildID {
+		} else if routingConfig.RampingDeploymentVersion != nil &&
+			version.DeploymentVersion.DeploymentName == routingConfig.RampingDeploymentVersion.DeploymentName &&
+			version.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusRamping
-		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDraining {
+		} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINING {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
-		} else if drainageStatus == temporalClient.WorkerDeploymentVersionDrainageStatusDrained {
+		} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINED {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
 
-			// Get drain time information
-			var desc temporalClient.WorkerDeploymentVersionDescription
-			describeVersionUntilDrainTime := func() error {
-				desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-					BuildID: version.Version.BuildID,
-				})
-				if err != nil {
-					return err
-				}
-				if desc.Info.DrainageInfo == nil {
-					return fmt.Errorf("drainage info nil for build %s", version.Version.BuildID)
-				}
-				if desc.Info.DrainageInfo.DrainageStatus != temporalClient.WorkerDeploymentVersionDrainageStatusDrained {
-					return fmt.Errorf("version info does not say that build %s is drained", version.Version.BuildID)
-				}
-				return err
-			}
-			// At first, version is found in DeploymentInfo.VersionSummaries but may not have the full drainage info in
-			// describe version, so we describe with backoff.
-			// If the version was just deleted by the server, we may never succeed at describing it, and it should
-			// be treated as NotRegistered, since it no longer exists in Temporal.
-			var notFound *serviceerror.NotFound
-			if err = withBackoff(10*time.Second, 1*time.Second, describeVersionUntilDrainTime); err == nil { //revive:disable-line:max-control-nesting
-				drainedSince := desc.Info.DrainageInfo.LastChangedTime
+			// Extract DrainedSince directly from the version summary's drainage info,
+			// avoiding a per-version DescribeVersion call.
+			if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil {
+				drainedSince := version.DrainageInfo.LastChangedTime.AsTime()
 				versionInfo.DrainedSince = &drainedSince
-				// If the deployment exists and has replicas, we assume there are versioned pollers, no need to check
-				deployment, ok := k8sDeployments[version.Version.BuildID]
-				if !ok || deployment.Status.Replicas == 0 { //revive:disable-line:max-control-nesting
-					versionInfo.NoTaskQueuesHaveVersionedPoller = noTaskQueuesHaveVersionedPollers(ctx, client, desc.Info.TaskQueuesInfos)
-				}
-			} else if errors.As(err, &notFound) { //revive:disable-line:max-control-nesting
-				versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
 			}
 		} else {
 			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
 			// get unversioned poller info to decide whether to fast-track rollout
-			if version.Version.BuildID == targetBuildID &&
-				routingConfig.CurrentVersion == nil &&
+			if version.DeploymentVersion.BuildId == targetBuildID &&
+				routingConfig.CurrentDeploymentVersion == nil &&
 				strategy == temporaliov1alpha1.UpdateProgressive {
 				var desc temporalClient.WorkerDeploymentVersionDescription
 				describeVersion := func() error {
 					desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-						BuildID: version.Version.BuildID,
+						BuildID: version.DeploymentVersion.BuildId,
 					})
 					return err
 				}
@@ -209,10 +192,37 @@ func GetWorkerDeploymentState(
 
 		}
 
-		state.Versions[version.Version.BuildID] = versionInfo
+		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
 	return state, nil
+}
+
+// toSDKRoutingConfig converts a gRPC RoutingConfig to the SDK wrapper type
+// needed by DeploymentShouldIgnoreLastModifier.
+func toSDKRoutingConfig(rc *deploymentpb.RoutingConfig) temporalClient.WorkerDeploymentRoutingConfig {
+	sdkRC := temporalClient.WorkerDeploymentRoutingConfig{
+		RampingVersionPercentage: rc.RampingVersionPercentage,
+	}
+	if rc.CurrentDeploymentVersion != nil {
+		sdkRC.CurrentVersion = &sdkworker.WorkerDeploymentVersion{
+			BuildID:        rc.CurrentDeploymentVersion.BuildId,
+			DeploymentName: rc.CurrentDeploymentVersion.DeploymentName,
+		}
+	}
+	if rc.RampingDeploymentVersion != nil {
+		sdkRC.RampingVersion = &sdkworker.WorkerDeploymentVersion{
+			BuildID:        rc.RampingDeploymentVersion.BuildId,
+			DeploymentName: rc.RampingDeploymentVersion.DeploymentName,
+		}
+	}
+	if rc.RampingVersionChangedTime != nil {
+		sdkRC.RampingVersionChangedTime = rc.RampingVersionChangedTime.AsTime()
+	}
+	if rc.RampingVersionPercentageChangedTime != nil {
+		sdkRC.RampingVersionPercentageChangedTime = rc.RampingVersionPercentageChangedTime.AsTime()
+	}
+	return sdkRC
 }
 
 func withBackoff(timeout time.Duration, tick time.Duration, fn func() error) error {
@@ -389,24 +399,6 @@ func getShouldIgnoreLastModifier(
 	return false, nil
 }
 
-func HasNoVersionedPollers(ctx context.Context,
-	client temporalClient.Client,
-	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
-) (bool, error) {
-	pollers, err := getPollers(ctx, client, taskQueueInfo)
-	if err != nil {
-		return false, fmt.Errorf("unable to confirm absence of versioned pollers: %w", err)
-	}
-	for _, p := range pollers {
-		switch p.GetDeploymentOptions().GetWorkerVersioningMode() {
-		case temporalClient.WorkerVersioningModeUnversioned, temporalClient.WorkerVersioningModeUnspecified:
-		case temporalClient.WorkerVersioningModeVersioned:
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
 func getPollers(ctx context.Context,
 	client temporalClient.Client,
 	taskQueueInfo temporalClient.WorkerDeploymentTaskQueueInfo,
@@ -423,21 +415,6 @@ func getPollers(ctx context.Context,
 		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
 	}
 	return resp.GetPollers(), nil
-}
-
-func noTaskQueuesHaveVersionedPollers(
-	ctx context.Context,
-	client temporalClient.Client,
-	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
-) bool {
-	countHasNoVersionedPollers := 0
-	for _, tqInfo := range tqs {
-		hasNoVersionedPollers, _ := HasNoVersionedPollers(ctx, client, tqInfo) // TODO(carlydf): consider logging this error
-		if hasNoVersionedPollers {
-			countHasNoVersionedPollers++
-		}
-	}
-	return countHasNoVersionedPollers == len(tqs)
 }
 
 func allTaskQueuesHaveUnversionedPoller(
