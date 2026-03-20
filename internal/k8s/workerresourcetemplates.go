@@ -113,10 +113,10 @@ func RenderWorkerResourceTemplate(
 	buildID string,
 	temporalNamespace string,
 ) (*unstructured.Unstructured, error) {
-	// Step 1: unmarshal the raw object
-	var raw map[string]interface{}
-	if err := json.Unmarshal(wrt.Spec.Template.Raw, &raw); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal spec.object: %w", err)
+	// Step 1: unmarshal the raw template directly into an Unstructured object.
+	obj := &unstructured.Unstructured{}
+	if err := json.Unmarshal(wrt.Spec.Template.Raw, &obj.Object); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal spec.template: %w", err)
 	}
 
 	data := TemplateData{
@@ -127,13 +127,16 @@ func RenderWorkerResourceTemplate(
 
 	selectorLabels := ComputeSelectorLabels(wrt.Spec.TemporalWorkerDeploymentRef.Name, buildID)
 
-	// Step 2: auto-inject scaleTargetRef and matchLabels into spec subtree
-	if spec, ok := raw["spec"].(map[string]interface{}); ok {
-		autoInjectFields(spec, data.DeploymentName, selectorLabels)
+	// Step 2: auto-inject scaleTargetRef and matchLabels into spec subtree.
+	// NestedFieldNoCopy returns a live reference so mutations are reflected in obj.Object directly.
+	if specRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec"); ok {
+		if spec, ok := specRaw.(map[string]interface{}); ok {
+			autoInjectFields(spec, data.DeploymentName, selectorLabels)
+		}
 	}
 
-	// Step 3: render Go templates in all string values
-	rendered, err := renderTemplateValues(raw, data)
+	// Step 3: render Go templates in all string values.
+	rendered, err := renderTemplateValues(obj.Object, data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render templates: %w", err)
 	}
@@ -141,46 +144,38 @@ func RenderWorkerResourceTemplate(
 	if !ok {
 		return nil, fmt.Errorf("unexpected type after template rendering: %T", rendered)
 	}
-	raw = renderedMap
+	obj.Object = renderedMap
 
-	// Step 4: set metadata
+	// Step 4: set metadata using Unstructured typed methods.
 	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.TemporalWorkerDeploymentRef.Name, wrt.Name, buildID)
+	obj.SetName(resourceName)
+	obj.SetNamespace(wrt.Namespace)
 
-	meta, ok := raw["metadata"].(map[string]interface{})
-	if !ok || meta == nil {
-		meta = make(map[string]interface{})
-	}
-	meta["name"] = resourceName
-	meta["namespace"] = wrt.Namespace
-
-	// Merge labels
-	existingLabels, ok := meta["labels"].(map[string]interface{})
-	if !ok || existingLabels == nil {
-		existingLabels = make(map[string]interface{})
+	// Merge selector labels into any labels already present in the template.
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
 	}
 	for k, v := range selectorLabels {
-		existingLabels[k] = v
+		labels[k] = v
 	}
-	meta["labels"] = existingLabels
+	obj.SetLabels(labels)
 
 	// Set owner reference pointing to the versioned Deployment so k8s GC cleans up
 	// the worker resource template when the Deployment is deleted.
 	blockOwnerDeletion := true
 	isController := true
-	meta["ownerReferences"] = []interface{}{
-		map[string]interface{}{
-			"apiVersion":         appsv1.SchemeGroupVersion.String(),
-			"kind":               "Deployment",
-			"name":               deployment.Name,
-			"uid":                string(deployment.UID),
-			"blockOwnerDeletion": blockOwnerDeletion,
-			"controller":         isController,
+	obj.SetOwnerReferences([]metav1.OwnerReference{
+		{
+			APIVersion:         appsv1.SchemeGroupVersion.String(),
+			Kind:               "Deployment",
+			Name:               deployment.Name,
+			UID:                deployment.UID,
+			BlockOwnerDeletion: &blockOwnerDeletion,
+			Controller:         &isController,
 		},
-	}
+	})
 
-	raw["metadata"] = meta
-
-	obj := &unstructured.Unstructured{Object: raw}
 	return obj, nil
 }
 
@@ -194,12 +189,12 @@ func autoInjectFields(obj map[string]interface{}, deploymentName string, selecto
 		case "scaleTargetRef":
 			// Inject only when the key is present but null (user opted in)
 			if v == nil {
-				obj[k] = buildScaleTargetRef(deploymentName)
+				_ = unstructured.SetNestedMap(obj, buildScaleTargetRef(deploymentName), k)
 			}
 		case "matchLabels":
 			// Inject only when the key is present but null (user opted in)
 			if v == nil {
-				obj[k] = labelsAsInterface(selectorLabels)
+				_ = unstructured.SetNestedStringMap(obj, selectorLabels, k)
 			}
 		default:
 			autoInjectInValue(v, deploymentName, selectorLabels)
@@ -214,15 +209,6 @@ func buildScaleTargetRef(deploymentName string) map[string]interface{} {
 		"kind":       "Deployment",
 		"name":       deploymentName,
 	}
-}
-
-// labelsAsInterface converts a string→string label map to map[string]interface{} for JSON encoding.
-func labelsAsInterface(selectorLabels map[string]string) map[string]interface{} {
-	labels := make(map[string]interface{}, len(selectorLabels))
-	for k, v := range selectorLabels {
-		labels[k] = v
-	}
-	return labels
 }
 
 // autoInjectInValue recurses into v if it is a map or a slice of maps.
