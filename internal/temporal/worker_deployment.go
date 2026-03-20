@@ -165,7 +165,7 @@ func GetWorkerDeploymentState(
 			// orphaned resources rather than waiting for sunset delays.
 			if _, ok := k8sDeployments[version.DeploymentVersion.BuildId]; !ok {
 				versionInfo.Status = temporaliov1alpha1.VersionStatusNotRegistered
-			} else if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil {
+			} else if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil { //revive:disable-line:max-control-nesting
 				// Extract DrainedSince directly from the version summary's drainage info,
 				// avoiding a per-version DescribeVersion call.
 				drainedSince := version.DrainageInfo.LastChangedTime.AsTime()

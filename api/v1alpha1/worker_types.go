@@ -308,7 +308,7 @@ type DeprecatedWorkerDeploymentVersion struct {
 	// +optional
 	DrainedSince *metav1.Time `json:"drainedSince,omitempty"`
 
-	// A Version is eligible for deletion by the server if it is drained and has no
+	// A Version is considered eligible for deletion if it is drained and has no
 	// controller-managed workers with active replicas polling on its task queues.
 	// The server automatically deletes eligible versions when it needs to make room for new ones.
 	// +optional
