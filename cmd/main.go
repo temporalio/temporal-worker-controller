@@ -8,6 +8,7 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"strings"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
@@ -20,6 +21,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -41,8 +43,12 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var watchNamespace string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&watchNamespace,"watch-namespace","",
+		"Namespace(s) that the controller watches. Can be a single namespace or a comma-separated list. "+
+		"If empty, the controller watches all namespaces.",	)
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -52,10 +58,29 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	// If flag is not set, fall back to environment variable
+	if watchNamespace == "" {
+		watchNamespace = os.Getenv("WATCH_NAMESPACE")
+	}
+
+	// Parse comma-separated namespaces into []string, trimming whitespace and dropping empty entries
+	var watchNamespaces []string
+	if watchNamespace != "" {
+		parts := strings.Split(watchNamespace, ",")
+		watchNamespaces = make([]string, 0, len(parts))
+		for _, p := range parts {
+			ns := strings.TrimSpace(p)
+			if ns == "" {
+				continue
+			}
+			watchNamespaces = append(watchNamespaces, ns)
+		}
+	}
+
 	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	ctrl.SetLogger(zap.New(zap.JSONEncoder()))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	managerOptions := ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
@@ -74,7 +99,23 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
-	})
+	}
+
+	// Scope manager cache/watches to 0/1/N namespaces.
+	if len(watchNamespaces) > 0 {
+		setupLog.Info("running controller in namespace-scoped mode", "namespaces", watchNamespaces)
+
+		defaultNamespaces := map[string]cache.Config{}
+		for _, ns := range watchNamespaces {
+			defaultNamespaces[ns] = cache.Config{}
+		}
+
+		managerOptions.Cache = cache.Options{
+			DefaultNamespaces: defaultNamespaces,
+		}
+	}
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), managerOptions)
+
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
