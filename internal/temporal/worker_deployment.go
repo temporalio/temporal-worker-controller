@@ -62,7 +62,6 @@ type TemporalWorkerState struct {
 	// Versions indexed by build ID
 	Versions             map[string]*VersionInfo
 	LastModifierIdentity string
-	ManagerIdentity      string
 	IgnoreLastModifier   bool
 }
 
@@ -107,7 +106,6 @@ func GetWorkerDeploymentState(
 	}
 	state.RampPercentage = routingConfig.RampingVersionPercentage
 	state.LastModifierIdentity = workerDeploymentInfo.LastModifierIdentity
-	state.ManagerIdentity = workerDeploymentInfo.ManagerIdentity
 	state.VersionConflictToken = resp.ConflictToken
 
 	// Decide whether to ignore LastModifierIdentity
