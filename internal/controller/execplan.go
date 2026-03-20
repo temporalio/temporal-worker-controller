@@ -13,7 +13,6 @@ import (
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
-	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -257,21 +256,6 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 
 	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
 		return err
-	}
-
-	for _, buildId := range p.RemoveIgnoreLastModifierBuilds {
-		if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
-			Version: worker.WorkerDeploymentVersion{
-				DeploymentName: p.WorkerDeploymentName,
-				BuildID:        buildId,
-			},
-			MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
-				RemoveEntries: []string{temporal.IgnoreLastModifierKey},
-			},
-		}); err != nil {
-			l.Error(err, "unable to remove ignore-last-modifier metadata", "buildID", buildId)
-			return fmt.Errorf("unable to update metadata to remove %s deployment: %w", temporal.IgnoreLastModifierKey, err)
-		}
 	}
 
 	return nil

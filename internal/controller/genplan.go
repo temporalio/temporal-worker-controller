@@ -34,10 +34,6 @@ type plan struct {
 
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
-
-	// Build IDs of versions from which the controller should
-	// remove IgnoreLastModifierKey from the version metadata
-	RemoveIgnoreLastModifierBuilds []string
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -144,8 +140,6 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
-
-	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
