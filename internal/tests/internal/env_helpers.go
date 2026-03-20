@@ -115,7 +115,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	t.Log("bootstrapping test environment")
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			filepath.Join(getRepoRoot(t), "helm", "temporal-worker-controller", "crds"),
+			filepath.Join(getRepoRoot(t), "helm", "temporal-worker-controller-crds", "templates"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}
