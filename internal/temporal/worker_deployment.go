@@ -206,13 +206,13 @@ func toSDKRoutingConfig(rc *deploymentpb.RoutingConfig) temporalClient.WorkerDep
 	}
 	if rc.CurrentDeploymentVersion != nil {
 		sdkRC.CurrentVersion = &sdkworker.WorkerDeploymentVersion{
-			BuildID:        rc.CurrentDeploymentVersion.BuildId,
+			BuildId:        rc.CurrentDeploymentVersion.BuildId,
 			DeploymentName: rc.CurrentDeploymentVersion.DeploymentName,
 		}
 	}
 	if rc.RampingDeploymentVersion != nil {
 		sdkRC.RampingVersion = &sdkworker.WorkerDeploymentVersion{
-			BuildID:        rc.RampingDeploymentVersion.BuildId,
+			BuildId:        rc.RampingDeploymentVersion.BuildId,
 			DeploymentName: rc.RampingDeploymentVersion.DeploymentName,
 		}
 	}
@@ -363,14 +363,14 @@ func DeploymentShouldIgnoreLastModifier(
 	routingConfig temporalClient.WorkerDeploymentRoutingConfig,
 ) (shouldIgnore bool, err error) {
 	if routingConfig.CurrentVersion != nil {
-		shouldIgnore, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildID)
+		shouldIgnore, err = getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
 		if err != nil {
 			return false, err
 		}
 	}
 	if !shouldIgnore && // if someone has a non-nil Current Version, but only set the metadata in their Ramping Version, also count that
 		routingConfig.RampingVersion != nil {
-		return getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildID)
+		return getShouldIgnoreLastModifier(ctx, deploymentHandler, routingConfig.CurrentVersion.BuildId)
 	}
 	return shouldIgnore, nil
 }
