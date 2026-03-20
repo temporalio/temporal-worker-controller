@@ -261,9 +261,15 @@ func (cp *ClientPool) DialAndUpsertClient(clientOpts sdkclient.Options, clientPo
 		return nil, err
 	}
 
-	if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
-		c.Close()
-		return nil, fmt.Errorf("temporal server health check failed: %w", err)
+	// Skip health check for API key auth — CheckHealth is a system-level
+	// (non-namespace-scoped) RPC that fails with namespace-scoped API keys
+	// on Temporal Cloud. This is safe because client.Dial already calls
+	// GetSystemInfo internally, which is a superset of CheckHealth.
+	if clientAuth.mode != AuthModeAPIKey {
+		if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
+			c.Close()
+			return nil, fmt.Errorf("temporal server health check failed: %w", err)
+		}
 	}
 
 	cp.mux.Lock()
