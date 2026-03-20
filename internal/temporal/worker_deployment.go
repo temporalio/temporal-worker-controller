@@ -45,11 +45,6 @@ type VersionInfo struct {
 	//   - Strategy is Progressive, and
 	//   - Presence of unversioned pollers in all task queues of target version cannot be confirmed.
 	AllTaskQueuesHaveUnversionedPoller bool
-	// True if all task queues in this version have no versioned pollers.
-	// False could just mean unknown / not checked / not checked successfully.
-	// Only checked for Drained versions that don't have controller-managed Deployments.
-	// Used to compute status.VersionCountIneligibleForDeletion.
-	NoTaskQueuesHaveVersionedPoller bool
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
