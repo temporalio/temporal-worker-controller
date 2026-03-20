@@ -17,11 +17,13 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
+	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -285,68 +287,63 @@ func getPollers(ctx context.Context,
 	return resp.GetPollers(), nil
 }
 
-// setManagerIdentityToOther sets the Worker Deployment's ManagerIdentity to "some-other-cli-user"
-// using a client with that identity. After this call, the controller (which has a different identity)
-// will be blocked from making routing changes to this deployment.
-func setManagerIdentityToOther(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+func setUnversionedCurrent(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(tc.GetTWD())
-	c, err := temporalClient.Dial(temporalClient.Options{
-		HostPort:  env.Ts.GetFrontendHostPort(),
-		Namespace: env.Ts.GetDefaultNamespace(),
-		Identity:  "some-other-cli-user",
-	})
-	if err != nil {
-		t.Fatalf("failed to create temporal client with other identity: %v", err)
-	}
-	defer c.Close()
+	deploymentHandle := env.Ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
 
-	deploymentHandle := c.WorkerDeploymentClient().GetHandle(workerDeploymentName)
-	_, err = deploymentHandle.SetManagerIdentity(ctx, temporalClient.WorkerDeploymentSetManagerIdentityOptions{
-		Self: true,
+	_, err := deploymentHandle.SetCurrentVersion(ctx, temporalClient.WorkerDeploymentSetCurrentVersionOptions{
+		BuildID:                 "",
+		IgnoreMissingTaskQueues: true,
 	})
 	if err != nil {
-		t.Errorf("error setting manager identity to other: %v", err)
+		t.Errorf("error setting unversioned current version to spook controller into manual mode: %v", err)
 	}
-	t.Logf("set manager identity to 'some-other-cli-user'")
+	t.Logf("set current version to unversioned with non-controller identity")
+
 }
 
-// setManagerIdentityBlockThenUnblock sets the Worker Deployment's ManagerIdentity to "some-other-cli-user"
-// and then immediately clears it. This simulates a transient block: by the time the controller reconciles,
-// the ManagerIdentity is empty and the controller can claim it normally.
-func setManagerIdentityBlockThenUnblock(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+func setCurrentAndSetIgnoreModifierMetadata(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(tc.GetTWD())
-	c, err := temporalClient.Dial(temporalClient.Options{
-		HostPort:  env.Ts.GetFrontendHostPort(),
-		Namespace: env.Ts.GetDefaultNamespace(),
-		Identity:  "some-other-cli-user",
-	})
-	if err != nil {
-		t.Fatalf("failed to create temporal client with other identity: %v", err)
-	}
-	defer c.Close()
+	deploymentHandle := env.Ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
 
-	deploymentHandle := c.WorkerDeploymentClient().GetHandle(workerDeploymentName)
-	resp, err := deploymentHandle.SetManagerIdentity(ctx, temporalClient.WorkerDeploymentSetManagerIdentityOptions{
-		Self: true,
+	// change current version arbitrarily so we can be the last modifier
+	resp, err := deploymentHandle.SetCurrentVersion(ctx, temporalClient.WorkerDeploymentSetCurrentVersionOptions{
+		BuildID:                 "",
+		IgnoreMissingTaskQueues: true,
 	})
 	if err != nil {
-		t.Errorf("error setting manager identity to other: %v", err)
-		return
+		t.Errorf("error setting unversioned current version to spook controller into manual mode: %v", err)
 	}
-	t.Logf("set manager identity to 'some-other-cli-user'")
+	t.Logf("set current version to unversioned with non-controller identity")
 
-	_, err = deploymentHandle.SetManagerIdentity(ctx, temporalClient.WorkerDeploymentSetManagerIdentityOptions{
-		ManagerIdentity: "", // clear
-		ConflictToken:   resp.ConflictToken,
+	// set it back to what it was so that it's non-nil
+	_, err = deploymentHandle.SetCurrentVersion(ctx, temporalClient.WorkerDeploymentSetCurrentVersionOptions{
+		BuildID: resp.PreviousVersion.BuildID,
 	})
 	if err != nil {
-		t.Errorf("error clearing manager identity: %v", err)
+		t.Errorf("error restoring current version: %v", err)
 	}
-	t.Logf("cleared manager identity")
+	t.Logf("set current version to build %v with non-controller identity", resp.PreviousVersion.BuildID)
+
+	// set the IgnoreLastModifier metadata
+	_, err = deploymentHandle.UpdateVersionMetadata(ctx, temporalClient.WorkerDeploymentUpdateVersionMetadataOptions{
+		Version: worker.WorkerDeploymentVersion{
+			DeploymentName: workerDeploymentName,
+			BuildID:        resp.PreviousVersion.BuildID,
+		},
+		MetadataUpdate: temporalClient.WorkerDeploymentMetadataUpdate{
+			UpsertEntries: map[string]interface{}{
+				temporal.IgnoreLastModifierKey: "true",
+			},
+		},
+	})
+	if err != nil {
+		t.Errorf("error updating version metadata: %v", err)
+	}
+	t.Log("set current version's metadata to have \"temporal.io/ignore-last-modifier\"=\"true\"")
 }
 
-// validateManagerIdentity checks that the Worker Deployment's ManagerIdentity matches expected.
-func validateManagerIdentity(expected string) func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+func validateIgnoreLastModifierMetadata(expectShouldIgnore bool) func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 	return func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 		workerDeploymentName := k8s.ComputeWorkerDeploymentName(tc.GetTWD())
 		deploymentHandle := env.Ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
@@ -354,10 +351,14 @@ func validateManagerIdentity(expected string) func(t *testing.T, ctx context.Con
 		desc, err := deploymentHandle.Describe(ctx, temporalClient.WorkerDeploymentDescribeOptions{})
 		if err != nil {
 			t.Errorf("error describing worker deployment: %v", err)
-			return
 		}
-		if desc.Info.ManagerIdentity != expected {
-			t.Errorf("expected manager identity to be %q, got %q", expected, desc.Info.ManagerIdentity)
+
+		shouldIgnore, err := temporal.DeploymentShouldIgnoreLastModifier(ctx, deploymentHandle, desc.Info.RoutingConfig)
+		if err != nil {
+			t.Errorf("error checking ignore last modifier for worker deployment: %v", err)
+		}
+		if shouldIgnore != expectShouldIgnore {
+			t.Errorf("expected ignore last modifier to be %v, got %v", expectShouldIgnore, shouldIgnore)
 		}
 	}
 }

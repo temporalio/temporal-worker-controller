@@ -9,6 +9,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -225,7 +226,7 @@ func TestIntegration(t *testing.T) {
 				),
 		},
 		{
-			name: "manual-rollout-blocked-by-manager-identity",
+			name: "manual-rollout-blocked-by-modifier",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -241,19 +242,20 @@ func TestIntegration(t *testing.T) {
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
 				WithWaitTime(5 * time.Second).
-				WithSetupFunction(setManagerIdentityToOther).
+				WithSetupFunction(setUnversionedCurrent).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder().
 						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
-						WithCurrentVersion("v0", true, false),
+						WithCurrentVersion(worker_versioning.UnversionedVersionId, false, false).
+						WithDeprecatedVersions(testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true)),
 				).
 				WithExpectedDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
-				WithValidatorFunction(validateManagerIdentity("some-other-cli-user")),
+				WithValidatorFunction(validateIgnoreLastModifierMetadata(false)),
 		},
 		{
-			name: "manual-rollout-unblocked-after-manager-identity-cleared",
+			name: "manual-rollout-unblocked-by-modifier-with-ignore",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -268,15 +270,16 @@ func TestIntegration(t *testing.T) {
 				WithExistingDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
-				WithSetupFunction(setManagerIdentityBlockThenUnblock).
+				WithSetupFunction(setCurrentAndSetIgnoreModifierMetadata).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder().
-						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false). // manual strategy, so controller should not promote v1 to current
+						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false). // manual strategy, so controller should not promote v1 to current despite being unblocked
 						WithCurrentVersion("v0", true, false),
 				).
 				WithExpectedDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
-				),
+				).
+				WithValidatorFunction(validateIgnoreLastModifierMetadata(true)), // Since this is a manual strategy, the current version at the end of the test is v0 which has the ignore last modifier set to true
 		},
 	}
 
@@ -423,7 +426,7 @@ func TestIntegration(t *testing.T) {
 				),
 		},
 		{
-			name: "all-at-once-rollout-blocked-by-manager-identity",
+			name: "all-at-once-rollout-blocked-by-modifier",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -439,19 +442,20 @@ func TestIntegration(t *testing.T) {
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
 				WithWaitTime(5 * time.Second).
-				WithSetupFunction(setManagerIdentityToOther).
+				WithSetupFunction(setUnversionedCurrent).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder().
 						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
-						WithCurrentVersion("v0", true, false),
+						WithCurrentVersion(worker_versioning.UnversionedVersionId, false, false).
+						WithDeprecatedVersions(testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true)),
 				).
 				WithExpectedDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
-				WithValidatorFunction(validateManagerIdentity("some-other-cli-user")),
+				WithValidatorFunction(validateIgnoreLastModifierMetadata(false)),
 		},
 		{
-			name: "all-at-once-unblocked-after-manager-identity-cleared",
+			name: "all-at-once-unblocked-by-modifier-with-ignore",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -466,7 +470,7 @@ func TestIntegration(t *testing.T) {
 				WithExistingDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
-				WithSetupFunction(setManagerIdentityBlockThenUnblock).
+				WithSetupFunction(setCurrentAndSetIgnoreModifierMetadata).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder().
 						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
@@ -475,7 +479,8 @@ func TestIntegration(t *testing.T) {
 				).
 				WithExpectedDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
-				),
+				).
+				WithValidatorFunction(validateIgnoreLastModifierMetadata(false)),
 		},
 	}
 
@@ -648,7 +653,7 @@ func TestIntegration(t *testing.T) {
 				),
 		},
 		{
-			name: "progressive-rollout-blocked-by-manager-identity",
+			name: "progressive-rollout-blocked-by-modifier",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -664,19 +669,20 @@ func TestIntegration(t *testing.T) {
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
 				WithWaitTime(5 * time.Second).
-				WithSetupFunction(setManagerIdentityToOther).
+				WithSetupFunction(setUnversionedCurrent).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder().
 						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusInactive, -1, true, false).
-						WithCurrentVersion("v0", true, false),
+						WithCurrentVersion(worker_versioning.UnversionedVersionId, false, false).
+						WithDeprecatedVersions(testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true)),
 				).
 				WithExpectedDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
-				WithValidatorFunction(validateManagerIdentity("some-other-cli-user")),
+				WithValidatorFunction(validateIgnoreLastModifierMetadata(false)),
 		},
 		{
-			name: "progressive-rollout-unblocked-after-manager-identity-cleared",
+			name: "progressive-rollout-unblocked-by-modifier-with-ignore",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -691,7 +697,7 @@ func TestIntegration(t *testing.T) {
 				WithExistingDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
 				).
-				WithSetupFunction(setManagerIdentityBlockThenUnblock).
+				WithSetupFunction(setCurrentAndSetIgnoreModifierMetadata).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder().
 						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusRamping, 5, true, false).
@@ -699,7 +705,8 @@ func TestIntegration(t *testing.T) {
 				).
 				WithExpectedDeployments(
 					testhelpers.NewDeploymentInfo("v0", 1),
-				),
+				).
+				WithValidatorFunction(validateIgnoreLastModifierMetadata(false)),
 		},
 	}
 
