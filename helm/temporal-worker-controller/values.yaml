@@ -106,9 +106,14 @@ ownedResourceConfig:
       resources: ["horizontalpodautoscalers"]
 
 certmanager:
-  # enabled controls creation of the cert-manager Issuer and Certificate used for
-  # webhook TLS. cert-manager must be installed in the cluster.
+  # install controls whether cert-manager is installed as a Helm subchart.
+  # Set to true if cert-manager is not already installed in the cluster.
   # See https://cert-manager.io/docs/installation/
+  install: false
+
+  # enabled controls creation of the cert-manager Issuer and Certificate used for
+  # webhook TLS. cert-manager must be installed in the cluster (either via the
+  # subchart above or separately).
   # Set to false only if you are providing your own TLS certificate (see caBundle below).
   enabled: true
 
