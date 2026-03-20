@@ -196,12 +196,6 @@ type TemporalWorkerDeploymentStatus struct {
 	// +optional
 	LastModifierIdentity string `json:"lastModifierIdentity,omitempty"`
 
-	// ManagerIdentity is the identity that has exclusive rights to modify this Worker Deployment's routing config.
-	// When set, clients whose identity does not match will be blocked from making routing changes.
-	// Empty by default. Use `temporal worker deployment manager-identity set/unset` to change.
-	// +optional
-	ManagerIdentity string `json:"managerIdentity,omitempty"`
-
 	// VersionCount is the total number of versions currently known by the worker deployment.
 	// This includes current, target, ramping, and deprecated versions.
 	// +optional

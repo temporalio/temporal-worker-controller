@@ -106,19 +106,12 @@ func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client,
 // Set deployment status to `DeploymentAvailable` to simulate a healthy deployment
 // This is necessary because envtest doesn't actually start pods
 func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient client.Client, deployment appsv1.Deployment) {
-	// Refetch to get the latest resourceVersion before updating status, since the
-	// controller may have modified the Deployment (e.g. rolling update) while workers
-	// were starting up.
-	var fresh appsv1.Deployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: deployment.Name, Namespace: deployment.Namespace}, &fresh); err != nil {
-		t.Fatalf("failed to refetch deployment before status update: %v", err)
-	}
 	now := metav1.Now()
-	fresh.Status = appsv1.DeploymentStatus{
-		Replicas:            *fresh.Spec.Replicas,
-		UpdatedReplicas:     *fresh.Spec.Replicas,
-		ReadyReplicas:       *fresh.Spec.Replicas,
-		AvailableReplicas:   *fresh.Spec.Replicas,
+	deployment.Status = appsv1.DeploymentStatus{
+		Replicas:            *deployment.Spec.Replicas,
+		UpdatedReplicas:     *deployment.Spec.Replicas,
+		ReadyReplicas:       *deployment.Spec.Replicas,
+		AvailableReplicas:   *deployment.Spec.Replicas,
 		UnavailableReplicas: 0,
 		Conditions: []appsv1.DeploymentCondition{
 			{
@@ -139,8 +132,8 @@ func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient cli
 			},
 		},
 	}
-	t.Logf("started %d healthy workers, updating deployment status", *fresh.Spec.Replicas)
-	if err := k8sClient.Status().Update(ctx, &fresh); err != nil {
+	t.Logf("started %d healthy workers, updating deployment status", *deployment.Spec.Replicas)
+	if err := k8sClient.Status().Update(ctx, &deployment); err != nil {
 		t.Fatalf("failed to update deployment status: %v", err)
 	}
 }
