@@ -1,7 +1,3 @@
-// Unless explicitly stated otherwise all files in this repository are licensed under the MIT License.
-//
-// This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
-
 package v1alpha1
 
 import (
@@ -37,7 +33,7 @@ type WorkerResourceTemplateSpec struct {
 	//
 	// The controller also auto-injects two well-known fields. If your resource requires these fields,
 	// you must include them in the spec.template but leave them empty for the controller to fill in:
-	//   scaleTargetRef - set to point at the versioned Deployment (for HPA, KEDA, WPA, etc.)
+	//   scaleTargetRef - set to point at the versioned Deployment (for HPA, WPA, etc.)
 	//   matchLabels    - set to the versioned Deployment's selector labels (for PDB, WPA, etc.)
 	// +kubebuilder:validation:Required
 	// +kubebuilder:pruning:PreserveUnknownFields
