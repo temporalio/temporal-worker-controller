@@ -63,15 +63,6 @@ func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string 
 	return prefix + ResourceNameSeparator + hashSuffix
 }
 
-// ComputeSelectorLabels returns the selector labels used by a versioned Deployment.
-// These are the same labels set on the Deployment.Spec.Selector.MatchLabels.
-func ComputeSelectorLabels(twdName, buildID string) map[string]string {
-	return map[string]string{
-		twdNameLabel: TruncateString(CleanStringForDNS(twdName), 63),
-		BuildIDLabel: TruncateString(buildID, 63),
-	}
-}
-
 // TemplateData holds the variables available in Go template expressions within spec.template.
 type TemplateData struct {
 	// DeploymentName is the controller-generated versioned Deployment name.
