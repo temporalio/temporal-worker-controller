@@ -59,10 +59,10 @@ var _ = BeforeSuite(func() {
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			// config/crd/bases is not used in this project; CRDs live under helm/
-			filepath.Join("..", "..", "helm", "temporal-worker-controller", "crds"),
+			// CRDs live in the crds chart's templates directory
+			filepath.Join("..", "..", "helm", "temporal-worker-controller-crds", "templates"),
 		},
-		ErrorIfCRDPathMissing: false,
+		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			Paths: []string{filepath.Join("..", "..", "config", "webhook")},
 		},
