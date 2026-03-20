@@ -67,7 +67,7 @@ func runConditionsAndEventsTests(
 			// Verifies that ConditionReady=True is set after the controller promotes
 			// a version to current. Note: only a condition is set here — no
 			// separate k8s Event is emitted for RolloutComplete.
-			name: "conditions-rollout-complete",
+			name: "conditions-ready-reason-rollout-complete",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -85,30 +85,6 @@ func runConditionsAndEventsTests(
 						temporaliov1alpha1.ConditionReady,
 						metav1.ConditionTrue,
 						temporaliov1alpha1.ReasonRolloutComplete,
-						10*time.Second, time.Second)
-				}),
-		},
-		{
-			// Verifies that ConditionReady is set to True once both
-			// TemporalConnectionHealthy and RolloutComplete are True.
-			name: "conditions-ready",
-			builder: testhelpers.NewTestCase().
-				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
-						WithAllAtOnceStrategy().
-						WithTargetTemplate("v1.0"),
-				).
-				WithExpectedStatus(
-					testhelpers.NewStatusBuilder().
-						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
-						WithCurrentVersion("v1.0", true, false),
-				).
-				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
-					twd := tc.GetTWD()
-					waitForCondition(t, ctx, env.K8sClient, twd.Name, twd.Namespace,
-						temporaliov1alpha1.ConditionReady,
-						metav1.ConditionTrue,
-						temporaliov1alpha1.ReasonReady,
 						10*time.Second, time.Second)
 				}),
 		},
