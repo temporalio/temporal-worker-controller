@@ -18,15 +18,16 @@ import (
 // status API and may change between releases. Do not write alerting or automation
 // that depends on these strings.
 const (
-	ReasonPlanGenerationFailed    = "PlanGenerationFailed"
-	ReasonPlanExecutionFailed     = "PlanExecutionFailed"
-	ReasonDeploymentCreateFailed  = "DeploymentCreateFailed"
-	ReasonDeploymentDeleteFailed  = "DeploymentDeleteFailed"
-	ReasonDeploymentScaleFailed   = "DeploymentScaleFailed"
-	ReasonDeploymentUpdateFailed  = "DeploymentUpdateFailed"
-	ReasonTestWorkflowStartFailed = "TestWorkflowStartFailed"
-	ReasonVersionPromotionFailed  = "VersionPromotionFailed"
-	ReasonMetadataUpdateFailed    = "MetadataUpdateFailed"
+	ReasonPlanGenerationFailed       = "PlanGenerationFailed"
+	ReasonPlanExecutionFailed        = "PlanExecutionFailed"
+	ReasonDeploymentCreateFailed     = "DeploymentCreateFailed"
+	ReasonDeploymentDeleteFailed     = "DeploymentDeleteFailed"
+	ReasonDeploymentScaleFailed      = "DeploymentScaleFailed"
+	ReasonDeploymentUpdateFailed     = "DeploymentUpdateFailed"
+	ReasonTestWorkflowStartFailed    = "TestWorkflowStartFailed"
+	ReasonVersionPromotionFailed     = "VersionPromotionFailed"
+	ReasonMetadataUpdateFailed       = "MetadataUpdateFailed"
+	ReasonManagerIdentityClaimFailed = "ManagerIdentityClaimFailed"
 )
 
 const (

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
@@ -150,10 +151,44 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 	return nil
 }
 
+func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
+	return vcfg.ManagerIdentity == ""
+}
+
+func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	deploymentHandler sdkclient.WorkerDeploymentHandle,
+	vcfg *planner.VersionConfig,
+) error {
+	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
+		Self:          true,
+		ConflictToken: vcfg.ConflictToken,
+		Identity:      getControllerIdentity(),
+	})
+	if err != nil {
+		l.Error(err, "unable to claim manager identity")
+		r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonManagerIdentityClaimFailed,
+			"Failed to claim manager identity: %v", err)
+		return err
+	}
+	l.Info("claimed manager identity", "identity", getControllerIdentity())
+	// Use the updated conflict token for the subsequent routing config change.
+	vcfg.ConflictToken = resp.ConflictToken
+	return nil
+}
+
 func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, deploymentHandler sdkclient.WorkerDeploymentHandle, p *plan) error {
 	vcfg := p.UpdateVersionConfig
 	if vcfg == nil {
 		return nil
+	}
+
+	if r.shouldClaimManagerIdentity(vcfg) {
+		if err := r.claimManagerIdentity(ctx, l, workerDeploy, deploymentHandler, vcfg); err != nil {
+			return fmt.Errorf("unable to claim manager identity: %w", err)
+		}
 	}
 
 	if vcfg.SetCurrent {
