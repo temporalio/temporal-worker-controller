@@ -38,9 +38,10 @@ func TestGeneratePlan(t *testing.T) {
 		expectUpdate                     int
 		expectWorkflow                   int
 		expectConfig                     bool
-		expectConfigSetCurrent           *bool  // pointer so we can test nil
-		expectConfigRampPercent          *int32 // pointer so we can test nil, in percentage (0-100)
-		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
+		expectConfigSetCurrent           *bool   // pointer so we can test nil
+		expectConfigRampPercent          *int32  // pointer so we can test nil, in percentage (0-100)
+		expectManagerIdentity            *string // pointer so nil means "don't assert"
+		maxVersionsIneligibleForDeletion *int32  // set by env if non-nil, else default 75
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -390,6 +391,101 @@ func TestGeneratePlan(t *testing.T) {
 			},
 			expectUpdate: 1,
 		},
+		{
+			// VersionConfig is non-nil because a new healthy target needs to be promoted.
+			// With empty ManagerIdentity the controller should claim before promoting.
+			name: "claims manager identity when ManagerIdentity is empty and a version config change is pending",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"oldbuild": createDeploymentWithDefaultConnectionSpecHash(1),
+					"newbuild": createDeploymentWithDefaultConnectionSpecHash(1),
+				},
+				DeploymentRefs: map[string]*corev1.ObjectReference{
+					"oldbuild": {Name: "test-oldbuild"},
+					"newbuild": {Name: "test-newbuild"},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "newbuild",
+						Status:     temporaliov1alpha1.VersionStatusInactive,
+						Deployment: &corev1.ObjectReference{Name: "test-newbuild"},
+						HealthySince: &metav1.Time{
+							Time: time.Now().Add(-1 * time.Hour),
+						},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "oldbuild",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-oldbuild"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{
+				ManagerIdentity: "", // empty → controller should claim
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
+				},
+			},
+			expectConfig:           true,
+			expectConfigSetCurrent: func() *bool { b := true; return &b }(),
+			expectManagerIdentity:  func() *string { s := ""; return &s }(),
+		},
+		{
+			// Same routing change scenario but ManagerIdentity is already set — no claim.
+			name: "does not claim manager identity when ManagerIdentity is already set",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"oldbuild": createDeploymentWithDefaultConnectionSpecHash(1),
+					"newbuild": createDeploymentWithDefaultConnectionSpecHash(1),
+				},
+				DeploymentRefs: map[string]*corev1.ObjectReference{
+					"oldbuild": {Name: "test-oldbuild"},
+					"newbuild": {Name: "test-newbuild"},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "newbuild",
+						Status:     temporaliov1alpha1.VersionStatusInactive,
+						Deployment: &corev1.ObjectReference{Name: "test-newbuild"},
+						HealthySince: &metav1.Time{
+							Time: time.Now().Add(-1 * time.Hour),
+						},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "oldbuild",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-oldbuild"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{
+				ManagerIdentity: "some-other-client",
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
+				},
+			},
+			expectConfig:           true,
+			expectConfigSetCurrent: func() *bool { b := true; return &b }(),
+			expectManagerIdentity:  func() *string { s := "some-other-client"; return &s }(),
+		},
 	}
 
 	for _, tc := range testCases {
@@ -411,6 +507,10 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
+			if tc.expectManagerIdentity != nil {
+				require.NotNil(t, plan.VersionConfig, "expected VersionConfig to be non-nil when asserting ManagerIdentity")
+				assert.Equal(t, *tc.expectManagerIdentity, plan.VersionConfig.ManagerIdentity, "unexpected ManagerIdentity")
+			}
 
 			if tc.expectConfig {
 				assert.NotNil(t, plan.VersionConfig, "expected version config")

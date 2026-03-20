@@ -684,20 +684,20 @@ func TestUpdateVersionConfig_EmitsEventOnFailure(t *testing.T) {
 		{
 			name:           "SetCurrentFailed",
 			handle:         &stubWDHandle{setCurrentErr: errors.New("simulated SetCurrentVersion failure")},
-			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
+			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true, ManagerIdentity: "some-manager"},
 			expectedReason: ReasonVersionPromotionFailed,
 		},
 		{
 			name:           "SetRampingFailed",
 			handle:         &stubWDHandle{setRampingErr: errors.New("simulated SetRampingVersion failure")},
-			config:         &planner.VersionConfig{BuildID: "build-abc", RampPercentage: 25},
+			config:         &planner.VersionConfig{BuildID: "build-abc", RampPercentage: 25, ManagerIdentity: "some-manager"},
 			expectedReason: ReasonVersionPromotionFailed,
 		},
 		{
 			// SetCurrentVersion succeeds; UpdateVersionMetadata fails.
 			name:           "MetadataUpdateFailed",
 			handle:         &stubWDHandle{updateMetaErr: errors.New("simulated UpdateVersionMetadata failure")},
-			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true},
+			config:         &planner.VersionConfig{BuildID: "build-abc", SetCurrent: true, ManagerIdentity: "some-manager"},
 			expectedReason: ReasonMetadataUpdateFailed,
 		},
 	}
