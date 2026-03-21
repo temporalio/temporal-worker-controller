@@ -4098,6 +4098,8 @@ spec:
                 type: array
               lastModifierIdentity:
                 type: string
+              managerIdentity:
+                type: string
               targetVersion:
                 properties:
                   buildID:

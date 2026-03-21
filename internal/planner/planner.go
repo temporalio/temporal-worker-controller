@@ -39,9 +39,6 @@ type Plan struct {
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
 
-	// Build IDs of versions from which the controller should
-	// remove IgnoreLastModifierKey from the version metadata
-	RemoveIgnoreLastModifierBuilds []string
 	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []WorkerResourceApply
 	// EnsureWRTOwnerRefs holds (base, patched) pairs for WRTs that need a
@@ -138,17 +135,6 @@ func GeneratePlan(
 
 	// Determine version config changes
 	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
-
-	// Only remove the IgnoreLastModifier metadata after it's been used to make a version config change, which will
-	// make the controller the LastModifier again
-	if temporalState != nil && temporalState.IgnoreLastModifier && plan.VersionConfig != nil {
-		if temporalState.RampingBuildID != "" {
-			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.RampingBuildID)
-		}
-		if temporalState.CurrentBuildID != "" {
-			plan.RemoveIgnoreLastModifierBuilds = append(plan.RemoveIgnoreLastModifierBuilds, temporalState.CurrentBuildID)
-		}
-	}
 
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.

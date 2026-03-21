@@ -36,10 +36,6 @@ type plan struct {
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
 
-	// Build IDs of versions from which the controller should
-	// remove IgnoreLastModifierKey from the version metadata
-	RemoveIgnoreLastModifierBuilds []string
-
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []planner.WorkerResourceApply
 
@@ -166,7 +162,6 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
 
-	plan.RemoveIgnoreLastModifierBuilds = planResult.RemoveIgnoreLastModifierBuilds
 	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 
