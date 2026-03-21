@@ -142,6 +142,13 @@ rules:
       - patch
       - update
   - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
       - authorization.k8s.io
     resources:
       - subjectaccessreviews

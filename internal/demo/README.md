@@ -61,6 +61,11 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      TEMPORAL_API_KEY_SECRET_NAME=temporal-api-key
      TEMPORAL_MTLS_SECRET_NAME=""
      ```
+   - **Important**: When using API key authentication, you must use the regional endpoint instead of the namespace-specific endpoint. Set `TEMPORAL_ADDRESS` in `skaffold.env` to your region's endpoint, e.g.:
+     ```env
+     TEMPORAL_ADDRESS=us-east-1.aws.api.temporal.io:7233
+     ```
+     The namespace-specific endpoint (e.g. `<namespace>.tmprl.cloud:7233`) requires mTLS and will reject API key connections with a `tls: certificate required` error.
    - Note: Do not set both mTLS and API key for the same connection. If both present, the TemporalConnection Custom Resource
    Instance will not get installed in the k8s environment.
 
