@@ -54,10 +54,10 @@ type ClientInfo struct {
 }
 
 type ClientPool struct {
-	mux              sync.RWMutex
-	logger           log.Logger
-	clients          map[ClientPoolKey]ClientInfo
-	k8sClient        runtimeclient.Client
+	mux       sync.RWMutex
+	logger    log.Logger
+	clients   map[ClientPoolKey]ClientInfo
+	k8sClient runtimeclient.Client
 	// dialFn establishes a Temporal SDK connection from the given options. In production
 	// this is sdkclient.Dial; in tests it can be replaced with a function that returns a
 	// mock client without making any network calls.
