@@ -67,7 +67,7 @@ func generateSelfSignedCACert(t *testing.T, notBefore, notAfter time.Time) (*x50
 
 // generateLeafCert creates a leaf cert signed by the given CA, suitable for use as a client cert.
 // Returns the parsed cert, cert PEM, and key PEM.
-func generateLeafCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsName string, notBefore, notAfter time.Time) (*x509.Certificate, []byte, []byte) {
+func generateLeafCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsName string, notBefore, notAfter time.Time) (cert *x509.Certificate, certPEM []byte, keyPEM []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -80,12 +80,12 @@ func generateLeafCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.Priva
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &key.PublicKey, caKey)
 	require.NoError(t, err)
-	cert, err := x509.ParseCertificate(certDER)
+	cert, err = x509.ParseCertificate(certDER)
 	require.NoError(t, err)
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	require.NoError(t, err)
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	return cert, certPEM, keyPEM
 }
 
