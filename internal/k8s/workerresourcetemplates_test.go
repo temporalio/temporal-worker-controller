@@ -123,12 +123,12 @@ func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 		}
 		autoInjectFields(spec, "my-worker-abc123", selectorLabels)
 		_, hasKey := spec["scaleTargetRef"]
-		assert.False(t, hasKey, "scaleTargetRef should not be injected when absent (user must opt in with null)")
+		assert.False(t, hasKey, "scaleTargetRef should not be injected when absent (user must opt in with {})")
 	})
 
-	t.Run("injects scaleTargetRef when explicitly null (user opt-in)", func(t *testing.T) {
+	t.Run("injects scaleTargetRef when empty object (opt-in sentinel)", func(t *testing.T) {
 		spec := map[string]interface{}{
-			"scaleTargetRef": nil,
+			"scaleTargetRef": map[string]interface{}{},
 		}
 		autoInjectFields(spec, "my-worker-abc123", selectorLabels)
 		ref, ok := spec["scaleTargetRef"].(map[string]interface{})
@@ -164,13 +164,13 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 		autoInjectFields(spec, "my-worker-abc123", selectorLabels)
 		selector := spec["selector"].(map[string]interface{})
 		_, hasKey := selector["matchLabels"]
-		assert.False(t, hasKey, "matchLabels should not be injected when absent (user must opt in with null)")
+		assert.False(t, hasKey, "matchLabels should not be injected when absent (user must opt in with {})")
 	})
 
-	t.Run("injects matchLabels when explicitly null (user opt-in)", func(t *testing.T) {
+	t.Run("injects matchLabels when empty object (opt-in sentinel)", func(t *testing.T) {
 		spec := map[string]interface{}{
 			"selector": map[string]interface{}{
-				"matchLabels": nil,
+				"matchLabels": map[string]interface{}{},
 			},
 		}
 		autoInjectFields(spec, "my-worker-abc123", selectorLabels)
@@ -201,7 +201,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 		"apiVersion": "autoscaling/v2",
 		"kind":       "HorizontalPodAutoscaler",
 		"spec": map[string]interface{}{
-			"scaleTargetRef": nil, // opt in to auto-injection
+			"scaleTargetRef": map[string]interface{}{}, // opt in to auto-injection
 			"minReplicas":    float64(2),
 			"maxReplicas":    float64(10),
 		},

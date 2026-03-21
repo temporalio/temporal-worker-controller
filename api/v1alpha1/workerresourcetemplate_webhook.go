@@ -271,20 +271,24 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 			}
 		}
 
-		// 5. scaleTargetRef: if absent, no injection. If present and null, the controller injects it
-		// to point at the versioned Deployment. If present and non-null, reject — the controller
-		// owns this field when it is present and any hardcoded value would point at the wrong Deployment.
+		// 5. scaleTargetRef: if absent or empty ({}), the controller injects it to point at
+		// the versioned Deployment. If non-empty, reject — the controller owns this field and any
+		// hardcoded value would point at the wrong Deployment.
+		// Note: {} is the required opt-in sentinel. null is stripped by the k8s API server before
+		// storage, so the controller would never see it and injection would not occur.
 		checkScaleTargetRefNotSet(innerSpec, innerSpecPath, &allErrs)
 
-		// 6. selector.matchLabels: if absent, no injection. If present and null, the controller
-		// injects it with the versioned Deployment's selector labels. If present and non-null,
-		// reject — the controller owns this field when it is present.
+		// 6. selector.matchLabels: if absent or empty ({}), the controller injects it with
+		// the versioned Deployment's selector labels. If non-empty, reject — the controller owns
+		// this field when it is present.
+		// Note: {} is the required opt-in sentinel. null is stripped by the k8s API server before
+		// storage, so the controller would never see it and injection would not occur.
 		if selector, ok := innerSpec["selector"].(map[string]interface{}); ok {
-			if ml, exists := selector["matchLabels"]; exists && ml != nil {
+			if ml, exists := selector["matchLabels"]; exists && ml != nil && !isEmptyMap(ml) {
 				allErrs = append(allErrs, field.Forbidden(
 					innerSpecPath.Child("selector").Child("matchLabels"),
 					"if selector.matchLabels is present, the controller owns it and will set it to the "+
-						"versioned Deployment's selector labels; set it to null to opt in to auto-injection, "+
+						"versioned Deployment's selector labels; set it to {} to opt in to auto-injection, "+
 						"or remove it entirely if you do not need label-based selection",
 				))
 			}
@@ -295,27 +299,36 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 }
 
 // checkScaleTargetRefNotSet recursively traverses obj looking for any scaleTargetRef that is
-// non-null. If absent, no injection. If null, the controller injects it to point at the versioned
-// Deployment. If non-null, reject — the controller owns this field when present, and a hardcoded
-// value would point at the wrong (non-versioned) Deployment.
+// set to a non-empty value. If absent or empty ({}), the controller injects it to point
+// at the versioned Deployment. If non-empty, reject — the controller owns this field when present,
+// and a hardcoded value would point at the wrong (non-versioned) Deployment.
+//
+// Note: {} is the required opt-in sentinel. null is stripped by the Kubernetes API server before
+// storage, so the controller would never see it and injection would not occur.
 func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
 	for k, v := range obj {
 		if k == "scaleTargetRef" {
-			if v != nil {
+			if v != nil && !isEmptyMap(v) {
 				*allErrs = append(*allErrs, field.Forbidden(
 					path.Child("scaleTargetRef"),
 					"if scaleTargetRef is present, the controller owns it and will set it to point at the "+
-						"versioned Deployment; set it to null to opt in to auto-injection, "+
+						"versioned Deployment; set it to {} to opt in to auto-injection, "+
 						"or remove it entirely if you do not need the scaleTargetRef field",
 				))
 			}
-			// null is the correct opt-in sentinel — leave it alone
+			// {} is the opt-in sentinel — leave it alone
 			continue
 		}
 		if nested, ok := v.(map[string]interface{}); ok {
 			checkScaleTargetRefNotSet(nested, path.Child(k), allErrs)
 		}
 	}
+}
+
+// isEmptyMap returns true if v is a map[string]interface{} with no entries.
+func isEmptyMap(v interface{}) bool {
+	m, ok := v.(map[string]interface{})
+	return ok && len(m) == 0
 }
 
 // validateWithAPI performs API-dependent validation: RESTMapper scope check and

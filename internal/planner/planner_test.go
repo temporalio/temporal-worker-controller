@@ -3168,7 +3168,7 @@ func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.Work
 		"apiVersion": "autoscaling/v2",
 		"kind":       "HorizontalPodAutoscaler",
 		"spec": map[string]interface{}{
-			"scaleTargetRef": nil, // opt in to auto-injection
+			"scaleTargetRef": map[string]interface{}{}, // opt in to auto-injection
 			"minReplicas":    float64(1),
 			"maxReplicas":    float64(5),
 		},
@@ -3208,13 +3208,13 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 }
 
 func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
-	// PDB with matchLabels opted in for auto-injection via null sentinel.
+	// PDB with matchLabels opted in for auto-injection via empty-object sentinel.
 	pdbSpec := map[string]interface{}{
 		"apiVersion": "policy/v1",
 		"kind":       "PodDisruptionBudget",
 		"spec": map[string]interface{}{
 			"selector": map[string]interface{}{
-				"matchLabels": nil, // null = opt in to auto-injection
+				"matchLabels": map[string]interface{}{}, // {} = opt in to auto-injection
 			},
 			"minAvailable": float64(1),
 		},

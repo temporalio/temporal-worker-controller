@@ -34,10 +34,13 @@ spec:
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
     spec:
-      # Setting scaleTargetRef to null tells the controller to auto-inject the
+      # Setting scaleTargetRef to {} tells the controller to auto-inject the
       # correct versioned Deployment reference for each Build ID. Do not set this
       # to a real value — the webhook will reject it.
-      scaleTargetRef: null
+      # Note: {} (empty object) is required here. Writing null looks equivalent in
+      # YAML but the Kubernetes API server deletes null-valued keys before storage,
+      # so the controller would never see the field and injection would not occur.
+      scaleTargetRef: {}
       minReplicas: 1
       maxReplicas: 3
       metrics:

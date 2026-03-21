@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func wrtTestCases() []testCase {
 		},
 
 		// matchLabels auto-injection end-to-end.
-		// Verifies that a PDB WRT with selector.matchLabels: null gets the controller-managed
+		// Verifies that a PDB WRT with selector.matchLabels: {} gets the controller-managed
 		// selector labels injected before the resource is applied to the API server.
 		{
 			name: "wrt-matchlabels-injection",
@@ -91,7 +92,7 @@ func wrtTestCases() []testCase {
 						"spec": {
 							"minAvailable": 1,
 							"selector": {
-								"matchLabels": null
+								"matchLabels": {}
 							}
 						}
 					}`))
@@ -137,7 +138,7 @@ func wrtTestCases() []testCase {
 						"spec": {
 							"minAvailable": 1,
 							"selector": {
-								"matchLabels": null
+								"matchLabels": {}
 							}
 						}
 					}`))
@@ -187,7 +188,7 @@ func wrtTestCases() []testCase {
 							}
 						},
 						"spec": {
-							"scaleTargetRef": null,
+							"scaleTargetRef": {},
 							"minReplicas": 2,
 							"maxReplicas": 5,
 							"metrics": []
@@ -260,6 +261,80 @@ func wrtTestCases() []testCase {
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaNameV1, depNameV1, 30*time.Second)
 					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv0, 30*time.Second)
 					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv1, 30*time.Second)
+				}),
+		},
+
+		// scaleTargetRef injection survives the k8s API server round-trip.
+		//
+		// Regression test for: scaleTargetRef: null is silently stripped by the Kubernetes API
+		// server before storage, so null was never present in the stored WRT and the controller's
+		// nil-check never fired, causing the HPA to be applied with an empty scaleTargetRef.
+		//
+		// The fix: accept {} as the opt-in sentinel (non-null, survives storage). This test
+		// verifies the full path:
+		//   1. WRT with scaleTargetRef:{} is accepted by the webhook (was previously rejected)
+		//   2. {} survives the API server round-trip (null would have been stripped)
+		//   3. The controller injects the correct Deployment reference into the HPA
+		{
+			name: "wrt-scaletargetref-empty-object-sentinel",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+					wrtName := "empty-obj-sentinel-hpa"
+
+					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
+						"apiVersion": "autoscaling/v2",
+						"kind": "HorizontalPodAutoscaler",
+						"spec": {
+							"scaleTargetRef": {},
+							"minReplicas": 1,
+							"maxReplicas": 3,
+							"metrics": []
+						}
+					}`))
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("webhook rejected WRT with scaleTargetRef:{} (regression: {} must be accepted as opt-in sentinel): %v", err)
+					}
+
+					// Read back the stored WRT and verify scaleTargetRef:{} survived storage.
+					// This distinguishes {} (preserved) from null (stripped), and confirms the
+					// controller will see the empty-map sentinel and inject the correct value.
+					var storedWRT temporaliov1alpha1.WorkerResourceTemplate
+					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: wrtName, Namespace: twd.Namespace}, &storedWRT); err != nil {
+						t.Fatalf("failed to read back WRT: %v", err)
+					}
+					var tmpl map[string]interface{}
+					if err := json.Unmarshal(storedWRT.Spec.Template.Raw, &tmpl); err != nil {
+						t.Fatalf("failed to unmarshal stored template: %v", err)
+					}
+					spec, _ := tmpl["spec"].(map[string]interface{})
+					if spec == nil {
+						t.Fatal("stored template has no spec")
+					}
+					storedRef, exists := spec["scaleTargetRef"]
+					if !exists {
+						t.Fatal("scaleTargetRef was stripped from stored WRT template (null sentinel was used instead of {}; use {} to survive API server storage)")
+					}
+					if m, ok := storedRef.(map[string]interface{}); !ok || len(m) != 0 {
+						t.Fatalf("stored scaleTargetRef = %v, want empty map {}", storedRef)
+					}
+
+					hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildID, 30*time.Second)
+					t.Log("scaleTargetRef:{} survived API server round-trip and was correctly injected")
 				}),
 		},
 
@@ -386,13 +461,15 @@ func wrtTestCases() []testCase {
 }
 
 // makeHPAWRT constructs a WorkerResourceTemplate with an HPA spec where
-// scaleTargetRef is null (triggering auto-injection by the controller).
+// scaleTargetRef is {} (triggering auto-injection by the controller).
+// {} is used instead of null because the Kubernetes API server strips null values
+// before storage, which would silently prevent injection.
 func makeHPAWRT(name, namespace, workerDeploymentRefName string) *temporaliov1alpha1.WorkerResourceTemplate {
 	return makeWRTWithRaw(name, namespace, workerDeploymentRefName, []byte(`{
 		"apiVersion": "autoscaling/v2",
 		"kind": "HorizontalPodAutoscaler",
 		"spec": {
-			"scaleTargetRef": null,
+			"scaleTargetRef": {},
 			"minReplicas": 2,
 			"maxReplicas": 5,
 			"metrics": []

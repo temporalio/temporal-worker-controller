@@ -105,9 +105,9 @@ spec:
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
     spec:
-      # null tells the controller to auto-inject the versioned Deployment reference.
+      # {} tells the controller to auto-inject the versioned Deployment reference.
       # Do not set this to a real value — the webhook will reject it.
-      scaleTargetRef: null
+      scaleTargetRef: {}
       minReplicas: 2
       maxReplicas: 10
       metrics:
@@ -137,9 +137,9 @@ spec:
     kind: PodDisruptionBudget
     spec:
       minAvailable: 1
-      # null tells the controller to auto-inject {temporal.io/build-id, temporal.io/deployment-name}.
+      # {} tells the controller to auto-inject {temporal.io/build-id, temporal.io/deployment-name}.
       selector:
-        matchLabels: null
+        matchLabels: {}
 ```
 
 ## Checking status

@@ -154,26 +154,36 @@ func RenderWorkerResourceTemplate(
 }
 
 // autoInjectFields recursively traverses obj and injects scaleTargetRef and matchLabels
-// wherever the key is present with a null value. Users signal intent by writing
-// `scaleTargetRef: null` or `matchLabels: null` in their spec.template. This covers Layer 1
+// wherever the key is present with an empty-object value. Users signal intent by writing
+// `scaleTargetRef: {}` or `matchLabels: {}` in their spec.template. This covers Layer 1
 // auto-injection without the risk of adding unknown fields to resource types that don't use them.
+//
+// Note: {} (empty object) is the required opt-in sentinel. Writing null looks equivalent in
+// YAML but the Kubernetes API server deletes null-valued keys before storage, so null is
+// never present when the controller reads the object back and injection would not occur.
 func autoInjectFields(obj map[string]interface{}, deploymentName string, selectorLabels map[string]string) {
 	for k, v := range obj {
 		switch k {
 		case "scaleTargetRef":
-			// Inject only when the key is present but null (user opted in)
-			if v == nil {
+			// Inject when the key is present with an empty-object value (user opted in).
+			if isEmptyMap(v) {
 				_ = unstructured.SetNestedMap(obj, buildScaleTargetRef(deploymentName), k)
 			}
 		case "matchLabels":
-			// Inject only when the key is present but null (user opted in)
-			if v == nil {
+			// Inject when the key is present with an empty-object value (user opted in).
+			if isEmptyMap(v) {
 				_ = unstructured.SetNestedStringMap(obj, selectorLabels, k)
 			}
 		default:
 			autoInjectInValue(v, deploymentName, selectorLabels)
 		}
 	}
+}
+
+// isEmptyMap returns true if v is a map[string]interface{} with no entries.
+func isEmptyMap(v interface{}) bool {
+	m, ok := v.(map[string]interface{})
+	return ok && len(m) == 0
 }
 
 // buildScaleTargetRef constructs the scaleTargetRef map pointing at the versioned Deployment.

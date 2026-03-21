@@ -164,12 +164,12 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: "if scaleTargetRef is present, the controller owns it",
 		},
-		"null scaleTargetRef is valid (opt-in)": {
-			obj: newWRT("null-scale-ref", "my-worker", map[string]interface{}{
+		"empty scaleTargetRef is valid (opt-in)": {
+			obj: newWRT("empty-scale-ref", "my-worker", map[string]interface{}{
 				"apiVersion": "autoscaling/v2",
 				"kind":       "HorizontalPodAutoscaler",
 				"spec": map[string]interface{}{
-					"scaleTargetRef": nil, // null = opt-in sentinel
+					"scaleTargetRef": map[string]interface{}{}, // {} = opt-in sentinel
 					"minReplicas":    float64(2),
 					"maxReplicas":    float64(10),
 				},
@@ -190,14 +190,14 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: "if selector.matchLabels is present, the controller owns it",
 		},
-		"null selector.matchLabels is valid (opt-in)": {
-			obj: newWRT("null-match-labels", "my-worker", map[string]interface{}{
+		"empty selector.matchLabels is valid (opt-in)": {
+			obj: newWRT("empty-match-labels", "my-worker", map[string]interface{}{
 				"apiVersion": "policy/v1",
 				"kind":       "PodDisruptionBudget",
 				"spec": map[string]interface{}{
 					"minAvailable": float64(1),
 					"selector": map[string]interface{}{
-						"matchLabels": nil, // null = opt-in sentinel
+						"matchLabels": map[string]interface{}{}, // {} = opt-in sentinel
 					},
 				},
 			}),
