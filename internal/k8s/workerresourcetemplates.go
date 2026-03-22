@@ -15,6 +15,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+// RenderedHashLen is the number of hex characters used for rendered-object hashes stored in
+// WorkerResourceTemplateVersionStatus.LastAppliedHash. 16 hex chars = 8 bytes = 64 bits,
+// giving negligible collision probability across thousands of (WRT × BuildID) pairs.
+const RenderedHashLen = 16
+
 // WorkerResourceTemplateFieldManager is the SSA field manager name used when applying
 // WorkerResourceTemplate-rendered resources. A single constant per controller is the
 // standard Kubernetes pattern (see e.g. the ResourceClaim controller).
@@ -272,13 +277,33 @@ func containsTemplateMarker(s string) bool {
 	return false
 }
 
-// WorkerResourceTemplateVersionStatusForBuildID is a helper to build a status entry.
-func WorkerResourceTemplateVersionStatusForBuildID(buildID, resourceName string, applied bool, message string) temporaliov1alpha1.WorkerResourceTemplateVersionStatus {
+// ComputeRenderedObjectHash returns a stable, deterministic hash of a rendered Unstructured
+// object. The hash is computed from the JSON representation of the object; encoding/json
+// serialises map keys in sorted order, so the result is deterministic regardless of map
+// iteration order. Returns an empty string (not an error) if marshalling fails — callers
+// treat an empty hash as "always apply". When the returned hash is empty, the stored
+// LastAppliedHash remains "" in status after a successful apply, so the "always apply"
+// behaviour persists across reconcile cycles until marshalling succeeds.
+func ComputeRenderedObjectHash(resource *unstructured.Unstructured) string {
+	b, err := json.Marshal(resource.Object)
+	if err != nil {
+		return ""
+	}
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:RenderedHashLen/2]) // 8 bytes → 16 hex chars
+}
+
+// WorkerResourceTemplateVersionStatusForBuildID builds a per-Build-ID status entry.
+// generation is the WRT metadata.generation at the time of the apply; pass 0 on error
+// to preserve the last-known-good generation. hash is the controller-internal rendered-object
+// hash used for the SSA skip optimisation (pass "" on error).
+func WorkerResourceTemplateVersionStatusForBuildID(buildID, resourceName string, generation int64, hash, message string) temporaliov1alpha1.WorkerResourceTemplateVersionStatus {
 	return temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		BuildID:            buildID,
-		Applied:            applied,
-		ResourceName:       resourceName,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
+		BuildID:               buildID,
+		ResourceName:          resourceName,
+		LastAppliedGeneration: generation,
+		Message:               message,
+		LastAppliedHash:       hash,
+		LastTransitionTime:    metav1.Now(),
 	}
 }

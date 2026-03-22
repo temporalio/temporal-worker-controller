@@ -929,7 +929,7 @@ func TestIntegration(t *testing.T) {
 		// Poll until the HPA appears and verify scaleTargetRef was auto-injected.
 		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaName, expectedDeploymentName, 30*time.Second)
 
-		// Poll until WRT.Status.Versions shows Applied: true for the build ID.
+		// Poll until WRT.Status.Versions shows a successful apply for the build ID.
 		waitForWRTStatusApplied(t, ctx, k8sClient, testNamespace.Name, wrtName, buildID, 30*time.Second)
 
 		// Assert that the WRT has the TWD as a controller owner reference.

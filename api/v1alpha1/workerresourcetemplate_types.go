@@ -40,31 +40,73 @@ type WorkerResourceTemplateSpec struct {
 	Template runtime.RawExtension `json:"template"`
 }
 
-// WorkerResourceTemplateVersionStatus describes the status of a worker resource template for a single Build ID.
-type WorkerResourceTemplateVersionStatus struct {
-	// BuildID is the Build ID of the versioned Deployment this status entry refers to.
-	BuildID string `json:"buildID"`
+const (
+	// ConditionTypeWRTReady is the condition type that reports whether all active
+	// Build ID instances of this WorkerResourceTemplate have been successfully applied.
+	// Using the standard "Ready" type makes this condition visible to helm install --wait
+	// and kubectl apply --wait.
+	//
+	// True:    all active Build ID instances applied successfully at the current template generation.
+	// False:   one or more instances failed to apply (see Message for the error).
+	// Unknown: no apply has been attempted yet (e.g. the WRT was just created).
+	ConditionTypeWRTReady = "Ready"
 
-	// Applied is true if the resource was successfully applied for this Build ID.
-	Applied bool `json:"applied"`
+	// ReasonWRTAllVersionsApplied is the condition reason when all instances are successfully applied.
+	ReasonWRTAllVersionsApplied = "AllVersionsApplied"
+	// ReasonWRTApplyFailed is the condition reason when one or more instances failed to apply.
+	ReasonWRTApplyFailed = "ApplyFailed"
+	// ReasonWRTPending is the condition reason when no apply has been attempted yet.
+	ReasonWRTPending = "Pending"
+)
+
+// WorkerResourceTemplateVersionStatus describes the per-Build-ID apply status of a WorkerResourceTemplate.
+type WorkerResourceTemplateVersionStatus struct {
+	// BuildID is the Build ID of the versioned Deployment this entry refers to.
+	BuildID string `json:"buildID"`
 
 	// ResourceName is the name of the applied Kubernetes resource.
 	// +optional
 	ResourceName string `json:"resourceName,omitempty"`
 
-	// Message describes any error if Applied is false.
+	// LastAppliedGeneration is the WorkerResourceTemplate metadata.generation at the time
+	// of the last **successful** apply for this Build ID. A value of 0 means no successful
+	// apply has occurred yet.
+	//
+	// Reading the status:
+	//   - 0                                  → never applied
+	//   - 0 < lastAppliedGeneration < .metadata.generation → older spec applied; current spec pending or failing (see Message)
+	//   - lastAppliedGeneration == .metadata.generation    → healthy, up-to-date
+	//   - lastAppliedGeneration > 0 && message != ""       → previously applied at that generation; current apply failing
+	// +optional
+	LastAppliedGeneration int64 `json:"lastAppliedGeneration,omitempty"`
+
+	// Message is non-empty when the most recent apply attempt failed.
 	// +optional
 	Message string `json:"message,omitempty"`
 
-	// LastTransitionTime is the last time this status entry was updated.
+	// LastAppliedHash is a hash of the rendered resource as of the last successful apply.
+	// The controller uses this internally to skip redundant SSA apply calls when the
+	// rendered output has not changed. Users can treat this as an opaque value.
+	// +optional
+	LastAppliedHash string `json:"lastAppliedHash,omitempty"`
+
+	// LastTransitionTime is the last time this status entry changed.
 	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
 }
 
 // WorkerResourceTemplateStatus defines the observed state of WorkerResourceTemplate.
 type WorkerResourceTemplateStatus struct {
-	// Versions describes the per-Build-ID status of worker resource templates.
+	// Versions describes the per-Build-ID status of worker resource template instances.
 	// +optional
 	Versions []WorkerResourceTemplateVersionStatus `json:"versions,omitempty"`
+
+	// Conditions describe the current state of the WorkerResourceTemplate.
+	// The Ready condition is True when all active Build ID instances have been
+	// successfully applied with the current template generation.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true

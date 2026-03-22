@@ -27,6 +27,13 @@ type WorkerResourceApply struct {
 	WRTName      string
 	WRTNamespace string
 	BuildID      string
+	// RenderedHash is the hash of the rendered Resource object (see k8s.ComputeRenderedObjectHash).
+	// Empty string means hashing failed; the apply will proceed unconditionally.
+	RenderedHash string
+	// LastAppliedHash is the hash recorded in the WRT status from the last successful apply.
+	// If RenderedHash == LastAppliedHash (and both are non-empty), the controller skips the
+	// SSA apply because the rendered output is identical to what is already on the cluster.
+	LastAppliedHash string
 }
 
 // Plan holds the actions to execute during reconciliation
@@ -160,6 +167,12 @@ func getWorkerResourceApplies(
 			l.Info("skipping WorkerResourceTemplate with empty spec.template", "name", wrt.Name)
 			continue
 		}
+		// Build a map of existing status entries for O(1) lookup by BuildID.
+		existingStatus := make(map[string]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
+		for _, v := range wrt.Status.Versions {
+			existingStatus[v.BuildID] = v
+		}
+
 		for buildID, deployment := range k8sState.Deployments {
 			rendered, err := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
 			if err != nil {
@@ -169,12 +182,25 @@ func getWorkerResourceApplies(
 				)
 				continue
 			}
+
+			renderedHash := k8s.ComputeRenderedObjectHash(rendered)
+
+			// Look up the hash recorded by the last successful apply for this BuildID.
+			// A non-empty LastAppliedHash implies the previous apply succeeded;
+			// on error the controller records an empty hash so the next cycle retries.
+			var lastAppliedHash string
+			if prev, ok := existingStatus[buildID]; ok {
+				lastAppliedHash = prev.LastAppliedHash
+			}
+
 			applies = append(applies, WorkerResourceApply{
-				Resource:     rendered,
-				FieldManager: k8s.WorkerResourceTemplateFieldManager,
-				WRTName:      wrt.Name,
-				WRTNamespace: wrt.Namespace,
-				BuildID:      buildID,
+				Resource:        rendered,
+				FieldManager:    k8s.WorkerResourceTemplateFieldManager,
+				WRTName:         wrt.Name,
+				WRTNamespace:    wrt.Namespace,
+				BuildID:         buildID,
+				RenderedHash:    renderedHash,
+				LastAppliedHash: lastAppliedHash,
 			})
 		}
 	}

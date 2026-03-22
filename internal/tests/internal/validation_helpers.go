@@ -523,7 +523,8 @@ func waitForOwnedHPAWithInjectedScaleTargetRef(
 		hpa.Spec.ScaleTargetRef.APIVersion, hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
 }
 
-// waitForWRTStatusApplied polls until WRT.Status.Versions contains an entry for buildID with Applied: true.
+// waitForWRTStatusApplied polls until WRT.Status.Versions contains an entry for buildID
+// with a non-zero LastAppliedGeneration (meaning at least one successful apply has occurred).
 func waitForWRTStatusApplied(
 	t *testing.T,
 	ctx context.Context,
@@ -538,13 +539,13 @@ func waitForWRTStatusApplied(
 			return err
 		}
 		for _, v := range wrt.Status.Versions {
-			if v.BuildID == buildID && v.Applied {
+			if v.BuildID == buildID && v.LastAppliedGeneration > 0 {
 				return nil
 			}
 		}
 		return fmt.Errorf("WRT status not yet updated for build ID %q (current versions: %+v)", buildID, wrt.Status.Versions)
 	})
-	t.Log("WRT status shows Applied: true for build ID")
+	t.Log("WRT status shows LastAppliedGeneration > 0 for build ID")
 }
 
 // assertWRTControllerOwnerRef asserts that the named WRT has a controller owner reference

@@ -338,9 +338,9 @@ func wrtTestCases() []testCase {
 				}),
 		},
 
-		// Apply failure → status.Applied:false.
+		// Apply failure → status entry with non-empty Message and LastAppliedGeneration == 0.
 		// Uses an unknown GVK that the API server cannot recognise. The controller's SSA apply
-		// fails and the WRT status must reflect Applied:false for that Build ID.
+		// fails and the WRT status must reflect the failure for that Build ID.
 		{
 			name: "wrt-apply-failure",
 			builder: testhelpers.NewTestCase().
@@ -546,7 +546,8 @@ func waitForPDBWithInjectedMatchLabels(
 }
 
 // waitForWRTStatusNotApplied polls until the WRT status contains an entry for buildID
-// with Applied:false (indicating the SSA apply failed).
+// with a non-empty Message and LastAppliedGeneration == 0 (indicating the SSA apply
+// failed and no successful apply has ever occurred for this Build ID).
 func waitForWRTStatusNotApplied(
 	t *testing.T,
 	ctx context.Context,
@@ -562,11 +563,11 @@ func waitForWRTStatusNotApplied(
 		}
 		for _, v := range wrt.Status.Versions {
 			if v.BuildID == buildID {
-				if !v.Applied {
-					t.Logf("WRT status correctly shows Applied:false for build ID %q, message: %s", buildID, v.Message)
+				if v.Message != "" && v.LastAppliedGeneration == 0 {
+					t.Logf("WRT status correctly shows apply failure for build ID %q, message: %s", buildID, v.Message)
 					return nil
 				}
-				return fmt.Errorf("WRT status shows Applied:true for build ID %q, expected false", buildID)
+				return fmt.Errorf("WRT status for build ID %q: lastAppliedGeneration=%d message=%q (want failure with gen=0)", buildID, v.LastAppliedGeneration, v.Message)
 			}
 		}
 		return fmt.Errorf("WRT status has no entry for build ID %q (current: %+v)", buildID, wrt.Status.Versions)
