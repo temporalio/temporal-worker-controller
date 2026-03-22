@@ -369,6 +369,10 @@ func validateTemplateExpressions(v interface{}, path *field.Path, errs *field.Er
 							"{{ .DeploymentName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", n)))
 				}
 			default:
+				// Catches control structures and other non-action top-level nodes:
+				// *parse.IfNode ({{ if }}), *parse.RangeNode ({{ range }}),
+				// *parse.WithNode ({{ with }}), *parse.TemplateNode ({{ template }}),
+				// *parse.CommentNode ({{/* */}}), and any future node types.
 				*errs = append(*errs, field.Invalid(path, typed,
 					fmt.Sprintf("template construct %q is not allowed; only simple field references "+
 						"{{ .DeploymentName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", node)))
