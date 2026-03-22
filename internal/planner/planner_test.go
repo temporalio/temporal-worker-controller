@@ -3177,9 +3177,6 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 
 	apply := applies[0]
 
-	// Field manager must be the stable WRT-scoped identifier
-	assert.Equal(t, k8s.WorkerResourceTemplateFieldManager, apply.FieldManager)
-
 	// Resource kind and apiVersion must come from the template
 	assert.Equal(t, "HorizontalPodAutoscaler", apply.Resource.GetKind())
 	assert.Equal(t, "autoscaling/v2", apply.Resource.GetAPIVersion())
@@ -3195,22 +3192,6 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
 }
 
-func TestGetWorkerResourceApplies_FieldManagerConstant(t *testing.T) {
-	twor1 := createTestWRT("my-hpa", "my-worker")
-	twor2 := createTestWRT("my-pdb", "my-worker")
-	k8sState := &k8s.DeploymentState{
-		Deployments: map[string]*appsv1.Deployment{
-			"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
-		},
-	}
-
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{twor1, twor2}, k8sState, "test-temporal-ns", nil)
-	require.Len(t, applies, 2)
-
-	for _, a := range applies {
-		assert.Equal(t, k8s.WorkerResourceTemplateFieldManager, a.FieldManager, "all applies must use the controller's constant field manager")
-	}
-}
 
 // createTestWRT builds a minimal valid WorkerResourceTemplate for use in tests.
 // The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.

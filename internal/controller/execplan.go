@@ -323,7 +323,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		l.Info("applying owned resource",
 			"name", apply.Resource.GetName(),
 			"kind", apply.Resource.GetKind(),
-			"fieldManager", apply.FieldManager,
+			"fieldManager", k8s.WorkerResourceTemplateFieldManager,
 		)
 		// client.Apply uses Server-Side Apply, which is a create-or-update operation:
 		// if the resource does not yet exist the API server creates it; if it already
@@ -340,7 +340,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			apply.Resource,
 			client.Apply,
 			client.ForceOwnership,
-			client.FieldOwner(apply.FieldManager),
+			client.FieldOwner(k8s.WorkerResourceTemplateFieldManager),
 		)
 		if applyErr != nil {
 			l.Error(applyErr, "unable to apply owned resource",

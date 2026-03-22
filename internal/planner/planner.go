@@ -25,7 +25,6 @@ import (
 // surfaced in the WRT status and Ready condition just like an SSA apply failure.
 type WorkerResourceApply struct {
 	Resource     *unstructured.Unstructured
-	FieldManager string
 	WRTName      string
 	WRTNamespace string
 	BuildID      string
@@ -222,7 +221,6 @@ func getWorkerResourceApplies(
 
 			applies = append(applies, WorkerResourceApply{
 				Resource:        rendered,
-				FieldManager:    k8s.WorkerResourceTemplateFieldManager,
 				WRTName:         wrt.Name,
 				WRTNamespace:    wrt.Namespace,
 				BuildID:         buildID,
