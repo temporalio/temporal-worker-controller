@@ -422,13 +422,15 @@ func isEmptyMap(v interface{}) bool {
 // validateWithAPI performs API-dependent validation: RESTMapper scope check and
 // SubjectAccessReview for both the requesting user and the controller service account.
 // verb is the RBAC verb to check ("create" on create/update, "delete" on delete).
-// It is a no-op when Client or RESTMapper is nil (e.g., in unit tests).
 func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, wrt *WorkerResourceTemplate, verb string) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
 
 	if v.Client == nil || v.RESTMapper == nil {
-		return warnings, allErrs
+		return warnings, field.ErrorList{field.InternalError(
+			field.NewPath("spec").Child("template"),
+			fmt.Errorf("validator is not fully initialized: Client and RESTMapper must be set"),
+		)}
 	}
 
 	var obj map[string]interface{}

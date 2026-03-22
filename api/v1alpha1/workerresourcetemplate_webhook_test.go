@@ -9,8 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // newWRT builds a WorkerResourceTemplate with an arbitrary embedded object spec.
@@ -42,11 +45,34 @@ func validHPAObject() map[string]interface{} {
 	}
 }
 
-// newValidatorNoAPI creates a validator with no API client (API checks skipped).
-// AllowedKinds mirrors the default Helm values (HPA + PDB) so that most tests
-// use realistic allowed kinds while kinds like Deployment remain disallowed.
+// namespacedScope implements meta.RESTScope for namespace-scoped resources.
+type namespacedScope struct{}
+
+func (namespacedScope) Name() meta.RESTScopeName { return meta.RESTScopeNameNamespace }
+
+// newFakeRESTMapper returns a DefaultRESTMapper with the given GroupVersionKinds registered as namespace-scoped.
+func newFakeRESTMapper(gvks ...schema.GroupVersionKind) meta.RESTMapper {
+	mapper := meta.NewDefaultRESTMapper(nil)
+	for _, gvk := range gvks {
+		mapper.Add(gvk, namespacedScope{})
+	}
+	return mapper
+}
+
+// newValidatorNoAPI creates a validator with a fake API client and a fake RESTMapper that
+// recognises HPA (autoscaling/v2) and PDB (policy/v1) as namespace-scoped resources.
+// AllowedKinds mirrors the default Helm values (HPA + PDB) so that most tests use realistic
+// allowed kinds while kinds like Deployment remain disallowed.
+// No admission request is present in unit-test contexts, so SubjectAccessReview calls are never
+// reached; only the RESTMapper namespace-scope check exercises the fake mapper.
+// Note: SubjectAccessReview calls are tested in workerresourcetemplate_webhook_integration_test.go.
 func newValidatorNoAPI() *temporaliov1alpha1.WorkerResourceTemplateValidator {
 	return &temporaliov1alpha1.WorkerResourceTemplateValidator{
+		Client: fake.NewClientBuilder().Build(),
+		RESTMapper: newFakeRESTMapper(
+			schema.GroupVersionKind{Group: "autoscaling", Version: "v2", Kind: "HorizontalPodAutoscaler"},
+			schema.GroupVersionKind{Group: "policy", Version: "v1", Kind: "PodDisruptionBudget"},
+		),
 		AllowedKinds: []string{"HorizontalPodAutoscaler", "PodDisruptionBudget"},
 	}
 }
@@ -425,7 +451,8 @@ func TestWorkerResourceTemplate_ValidateDelete(t *testing.T) {
 	ctx := context.Background()
 	v := newValidatorNoAPI()
 
-	// When API client is nil, delete permission checks are skipped
+	// No admission request is present in the context and no controller SA name is set,
+	// so SubjectAccessReview calls are skipped — only the RESTMapper scope check runs.
 	wrt := newWRT("my-hpa", "my-worker", validHPAObject())
 	warnings, err := v.ValidateDelete(ctx, wrt)
 	assert.NoError(t, err)
@@ -484,10 +511,14 @@ func TestWorkerResourceTemplate_AllowedKinds(t *testing.T) {
 
 	// Validator with an explicit allow list: only MyScaler is permitted.
 	v := &temporaliov1alpha1.WorkerResourceTemplateValidator{
+		Client: fake.NewClientBuilder().Build(),
+		RESTMapper: newFakeRESTMapper(
+			schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "MyScaler"},
+		),
 		AllowedKinds: []string{"MyScaler"},
 	}
 
-	// MyScaler is in the allowed list — passes kind check (API checks skipped).
+	// MyScaler is in the allowed list — passes kind check and namespace-scope check.
 	_, err := v.ValidateCreate(ctx, newWRT("ok", "my-worker", map[string]interface{}{
 		"apiVersion": "example.com/v1",
 		"kind":       "MyScaler",
@@ -495,13 +526,16 @@ func TestWorkerResourceTemplate_AllowedKinds(t *testing.T) {
 	}))
 	require.NoError(t, err, "MyScaler should be allowed when it is in the AllowedKinds list")
 
-	// HPA is NOT in this allow list — should be rejected.
+	// HPA is NOT in this allow list — rejected before reaching the API checks.
 	_, err = v.ValidateCreate(ctx, newWRT("hpa", "my-worker", validHPAObject()))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `kind "HorizontalPodAutoscaler" is not in the allowed list`)
 
-	// Validator with empty AllowedKinds: all kinds are rejected (deny-all).
-	vEmpty := &temporaliov1alpha1.WorkerResourceTemplateValidator{}
+	// Validator with empty AllowedKinds: all kinds are rejected (deny-all) before API checks.
+	vEmpty := &temporaliov1alpha1.WorkerResourceTemplateValidator{
+		Client:     fake.NewClientBuilder().Build(),
+		RESTMapper: newFakeRESTMapper(),
+	}
 	_, err = vEmpty.ValidateCreate(ctx, newWRT("deploy", "my-worker", map[string]interface{}{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
