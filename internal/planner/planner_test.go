@@ -2993,10 +2993,11 @@ func TestResolveGateInput(t *testing.T) {
 
 func TestGetWorkerResourceApplies(t *testing.T) {
 	testCases := []struct {
-		name        string
-		wrts        []temporaliov1alpha1.WorkerResourceTemplate
-		k8sState    *k8s.DeploymentState
-		expectCount int
+		name              string
+		wrts              []temporaliov1alpha1.WorkerResourceTemplate
+		k8sState          *k8s.DeploymentState
+		deleteDeployments []*appsv1.Deployment
+		expectCount       int
 	}{
 		{
 			name: "no WRTs produces no applies",
@@ -3102,11 +3103,27 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 			},
 			expectCount: 1, // only the valid WRT
 		},
+		{
+			name: "deployments in delete list are skipped",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+			},
+			deleteDeployments: []*appsv1.Deployment{
+				createDeploymentWithUID("worker-build-b", "uid-b"),
+			},
+			expectCount: 1, // only build-a; build-b is being deleted
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns")
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments)
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of owned resource applies")
 		})
 	}
@@ -3121,7 +3138,7 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil)
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -3153,7 +3170,7 @@ func TestGetWorkerResourceApplies_FieldManagerConstant(t *testing.T) {
 		},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{twor1, twor2}, k8sState, "test-temporal-ns")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{twor1, twor2}, k8sState, "test-temporal-ns", nil)
 	require.Len(t, applies, 2)
 
 	for _, a := range applies {
@@ -3233,7 +3250,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil)
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -3276,7 +3293,7 @@ func TestGetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "temporal-production")
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "temporal-production", nil)
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})

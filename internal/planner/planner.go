@@ -146,7 +146,7 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace)
+	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
 	return plan, nil
@@ -159,7 +159,17 @@ func getWorkerResourceApplies(
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	k8sState *k8s.DeploymentState,
 	temporalNamespace string,
+	deleteDeployments []*appsv1.Deployment,
 ) []WorkerResourceApply {
+	// Build a set of deployment names that are scheduled for deletion so we can
+	// skip rendering WRTs for them. Their owner references already point at the
+	// versioned Deployment, so k8s GC will clean up the rendered resources once
+	// the Deployment is deleted — no SSA apply needed.
+	deletingDeployments := make(map[string]struct{}, len(deleteDeployments))
+	for _, d := range deleteDeployments {
+		deletingDeployments[d.Name] = struct{}{}
+	}
+
 	var applies []WorkerResourceApply
 	for i := range wrts {
 		wrt := &wrts[i]
@@ -174,6 +184,9 @@ func getWorkerResourceApplies(
 		}
 
 		for buildID, deployment := range k8sState.Deployments {
+			if _, deleting := deletingDeployments[deployment.Name]; deleting {
+				continue
+			}
 			rendered, err := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
 			if err != nil {
 				l.Error(err, "failed to render WorkerResourceTemplate",
