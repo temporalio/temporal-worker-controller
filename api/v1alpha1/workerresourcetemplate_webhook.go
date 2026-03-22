@@ -92,7 +92,7 @@ func (v *WorkerResourceTemplateValidator) ValidateCreate(ctx context.Context, ob
 
 // ValidateUpdate validates an updated WorkerResourceTemplate.
 func (v *WorkerResourceTemplateValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	old, ok := oldObj.(*WorkerResourceTemplate)
+	oldWRT, ok := oldObj.(*WorkerResourceTemplate)
 	if !ok {
 		return nil, apierrors.NewBadRequest("expected a WorkerResourceTemplate for old object")
 	}
@@ -100,7 +100,7 @@ func (v *WorkerResourceTemplateValidator) ValidateUpdate(ctx context.Context, ol
 	if !ok {
 		return nil, apierrors.NewBadRequest("expected a WorkerResourceTemplate for new object")
 	}
-	return v.validate(ctx, old, newWRT, "update")
+	return v.validate(ctx, oldWRT, newWRT, "update")
 }
 
 // ValidateDelete checks that the requesting user and the controller service account
@@ -130,17 +130,17 @@ func (v *WorkerResourceTemplateValidator) ValidateDelete(ctx context.Context, ob
 
 // validate runs all validation checks (pure spec + API-dependent).
 // verb is the RBAC verb to check for the underlying resource ("create" on create, "update" on update).
-func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, old, new *WorkerResourceTemplate, verb string) (admission.Warnings, error) {
+func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, newWRT *WorkerResourceTemplate, verb string) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
 
 	// Pure spec validation (no API calls needed)
-	specWarnings, specErrs := validateWorkerResourceTemplateSpec(new.Spec, v.AllowedKinds)
+	specWarnings, specErrs := validateWorkerResourceTemplateSpec(newWRT.Spec, v.AllowedKinds)
 	warnings = append(warnings, specWarnings...)
 	allErrs = append(allErrs, specErrs...)
 
 	// Immutability: temporalWorkerDeploymentRef.name must not change on update
-	if old != nil && old.Spec.TemporalWorkerDeploymentRef.Name != new.Spec.TemporalWorkerDeploymentRef.Name {
+	if oldWRT != nil && oldWRT.Spec.TemporalWorkerDeploymentRef.Name != newWRT.Spec.TemporalWorkerDeploymentRef.Name {
 		allErrs = append(allErrs, field.Forbidden(
 			field.NewPath("spec").Child("temporalWorkerDeploymentRef").Child("name"),
 			"temporalWorkerDeploymentRef.name is immutable and cannot be changed after creation",
@@ -150,21 +150,21 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, old, new
 	// Return early if pure validation failed (API checks won't help)
 	if len(allErrs) > 0 {
 		return warnings, apierrors.NewInvalid(
-			new.GroupVersionKind().GroupKind(),
-			new.GetName(),
+			newWRT.GroupVersionKind().GroupKind(),
+			newWRT.GetName(),
 			allErrs,
 		)
 	}
 
 	// API-dependent checks (RESTMapper scope + SubjectAccessReview)
-	apiWarnings, apiErrs := v.validateWithAPI(ctx, new, verb)
+	apiWarnings, apiErrs := v.validateWithAPI(ctx, newWRT, verb)
 	warnings = append(warnings, apiWarnings...)
 	allErrs = append(allErrs, apiErrs...)
 
 	if len(allErrs) > 0 {
 		return warnings, apierrors.NewInvalid(
-			new.GroupVersionKind().GroupKind(),
-			new.GetName(),
+			newWRT.GroupVersionKind().GroupKind(),
+			newWRT.GetName(),
 			allErrs,
 		)
 	}
