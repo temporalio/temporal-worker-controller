@@ -212,6 +212,141 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 				},
 			}),
 		},
+
+		// --- Template expression validation ---
+		"valid template: {{ .DeploymentName }}": {
+			obj: newWRT("tmpl-deployment", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "prefix-{{ .DeploymentName }}-suffix",
+				},
+			}),
+		},
+		"valid template: {{ .TemporalNamespace }}": {
+			obj: newWRT("tmpl-ns", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ .TemporalNamespace }}",
+				},
+			}),
+		},
+		"valid template: {{ .BuildID }}": {
+			obj: newWRT("tmpl-buildid", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ .BuildID }}",
+				},
+			}),
+		},
+		"invalid template syntax": {
+			obj: newWRT("tmpl-bad-syntax", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ .Unclosed",
+				},
+			}),
+			errorMsg: "invalid Go template syntax",
+		},
+		"unknown template field": {
+			obj: newWRT("tmpl-unknown-field", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ .DeploymentNme }}", // typo
+				},
+			}),
+			errorMsg: "is not allowed",
+		},
+		"template pipeline rejected": {
+			obj: newWRT("tmpl-pipeline", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ .DeploymentName | printf \"%s\" }}",
+				},
+			}),
+			errorMsg: "is not allowed",
+		},
+		"template range rejected": {
+			obj: newWRT("tmpl-range", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ range $i, $c := .BuildID }}x{{ end }}",
+				},
+			}),
+			errorMsg: "is not allowed",
+		},
+		"template if rejected": {
+			obj: newWRT("tmpl-if", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   `{{ if eq .BuildID "abc" }}hack{{ end }}`,
+				},
+			}),
+			errorMsg: "is not allowed",
+		},
+		"template variable declaration rejected": {
+			obj: newWRT("tmpl-var-decl", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ $x := .DeploymentName }}{{ $x }}",
+				},
+			}),
+			errorMsg: "is not allowed",
+		},
+		"template nested field rejected": {
+			obj: newWRT("tmpl-nested", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"someField":   "{{ .DeploymentName.Nested }}",
+				},
+			}),
+			errorMsg: "is not allowed",
+		},
+		"template validated in nested spec fields": {
+			obj: newWRT("tmpl-nested-spec", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"deep": map[string]interface{}{
+						"nested": map[string]interface{}{
+							"field": "{{ .BadField }}",
+						},
+					},
+				},
+			}),
+			errorMsg: "is not allowed",
+		},
 	}
 
 	for name, tc := range tests {

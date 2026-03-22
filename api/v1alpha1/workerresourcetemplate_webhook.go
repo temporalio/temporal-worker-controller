@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"text/template"
+	"text/template/parse"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -295,6 +297,11 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		}
 	}
 
+	// 7. Validate Go template expressions in all string values.
+	// Only simple {{ .FieldName }} references to the three TemplateData fields are allowed.
+	templatePath := field.NewPath("spec").Child("template")
+	validateTemplateExpressions(obj, templatePath, &allErrs)
+
 	return warnings, allErrs
 }
 
@@ -323,6 +330,83 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 			checkScaleTargetRefNotSet(nested, path.Child(k), allErrs)
 		}
 	}
+}
+
+// allowedTemplateFields is the set of TemplateData field names that may appear in
+// {{ .FieldName }} expressions inside spec.template string values.
+var allowedTemplateFields = map[string]bool{
+	"DeploymentName":    true,
+	"TemporalNamespace": true,
+	"BuildID":           true,
+}
+
+// validateTemplateExpressions recursively walks a JSON value tree. For each string
+// value containing "{{", it parses the Go template and rejects any expression that is
+// not a simple {{ .FieldName }} reference to one of the three allowed TemplateData fields.
+func validateTemplateExpressions(v interface{}, path *field.Path, errs *field.ErrorList) {
+	switch typed := v.(type) {
+	case string:
+		if !strings.Contains(typed, "{{") {
+			return
+		}
+		tmpl, err := template.New("").Parse(typed)
+		if err != nil {
+			*errs = append(*errs, field.Invalid(path, typed,
+				fmt.Sprintf("invalid Go template syntax: %v", err)))
+			return
+		}
+		if tmpl.Tree == nil || tmpl.Tree.Root == nil {
+			return
+		}
+		for _, node := range tmpl.Tree.Root.Nodes {
+			switch n := node.(type) {
+			case *parse.TextNode:
+				// Literal text — always OK.
+			case *parse.ActionNode:
+				if !isAllowedFieldAction(n) {
+					*errs = append(*errs, field.Invalid(path, typed,
+						fmt.Sprintf("template expression %q is not allowed; only simple field references "+
+							"{{ .DeploymentName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", n)))
+				}
+			default:
+				*errs = append(*errs, field.Invalid(path, typed,
+					fmt.Sprintf("template construct %q is not allowed; only simple field references "+
+						"{{ .DeploymentName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", node)))
+			}
+		}
+	case map[string]interface{}:
+		for k, val := range typed {
+			validateTemplateExpressions(val, path.Child(k), errs)
+		}
+	case []interface{}:
+		for i, item := range typed {
+			validateTemplateExpressions(item, path.Index(i), errs)
+		}
+	}
+}
+
+// isAllowedFieldAction returns true if n is a simple {{ .FieldName }} action
+// with no pipelines, variable declarations, or function calls.
+func isAllowedFieldAction(n *parse.ActionNode) bool {
+	// Reject variable declarations like {{ $x := .DeploymentName }}.
+	if len(n.Pipe.Decl) != 0 {
+		return false
+	}
+	// Reject pipelines like {{ .DeploymentName | upper }}.
+	if len(n.Pipe.Cmds) != 1 {
+		return false
+	}
+	cmd := n.Pipe.Cmds[0]
+	// Reject function calls or multi-argument expressions.
+	if len(cmd.Args) != 1 {
+		return false
+	}
+	fieldNode, ok := cmd.Args[0].(*parse.FieldNode)
+	// Reject nested field access like {{ .Foo.Bar }}.
+	if !ok || len(fieldNode.Ident) != 1 {
+		return false
+	}
+	return allowedTemplateFields[fieldNode.Ident[0]]
 }
 
 // isEmptyMap returns true if v is a map[string]interface{} with no entries.
