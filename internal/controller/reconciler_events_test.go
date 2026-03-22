@@ -285,10 +285,10 @@ func TestSetCondition(t *testing.T) {
 
 	t.Run("SetsNewCondition", func(t *testing.T) {
 		twd := makeTWD("test-worker", "default", "my-connection")
-		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, "TestReason", "Test message")
+		r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "TestReason", "Test message")
 
 		require.Len(t, twd.Status.Conditions, 1)
-		assert.Equal(t, temporaliov1alpha1.ConditionRolloutComplete, twd.Status.Conditions[0].Type)
+		assert.Equal(t, temporaliov1alpha1.ConditionReady, twd.Status.Conditions[0].Type)
 		assert.Equal(t, metav1.ConditionTrue, twd.Status.Conditions[0].Status)
 		assert.Equal(t, "TestReason", twd.Status.Conditions[0].Reason)
 		assert.Equal(t, "Test message", twd.Status.Conditions[0].Message)
@@ -297,10 +297,10 @@ func TestSetCondition(t *testing.T) {
 
 	t.Run("UpdatesExistingCondition", func(t *testing.T) {
 		twd := makeTWD("test-worker", "default", "my-connection")
-		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, "InitialReason", "Initial message")
+		r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "InitialReason", "Initial message")
 		require.Len(t, twd.Status.Conditions, 1)
 
-		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionFalse, "UpdatedReason", "Updated message")
+		r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, "UpdatedReason", "Updated message")
 
 		require.Len(t, twd.Status.Conditions, 1, "update should not add a duplicate")
 		assert.Equal(t, metav1.ConditionFalse, twd.Status.Conditions[0].Status)
@@ -310,18 +310,70 @@ func TestSetCondition(t *testing.T) {
 
 	t.Run("MultipleDifferentConditions", func(t *testing.T) {
 		twd := makeTWD("test-worker", "default", "my-connection")
-		r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, "Healthy", "Connection is healthy")
-		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, "Ready", "All good")
+		r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "TestReason", "All good")
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, "TestReason", "Not progressing")
 
 		require.Len(t, twd.Status.Conditions, 2)
 
-		connCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
-		require.NotNil(t, connCond)
-		assert.Equal(t, metav1.ConditionTrue, connCond.Status)
-
-		readyCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionRolloutComplete)
+		readyCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionReady)
 		require.NotNil(t, readyCond)
 		assert.Equal(t, metav1.ConditionTrue, readyCond.Status)
+
+		progressingCond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
+		require.NotNil(t, progressingCond)
+		assert.Equal(t, metav1.ConditionFalse, progressingCond.Status)
+	})
+}
+
+func TestSyncConditions(t *testing.T) {
+	r, _ := newTestReconciler(nil)
+
+	assertCondition := func(t *testing.T, twd *temporaliov1alpha1.TemporalWorkerDeployment, condType string, status metav1.ConditionStatus, reason string) {
+		t.Helper()
+		cond := meta.FindStatusCondition(twd.Status.Conditions, condType)
+		require.NotNil(t, cond, "condition %s should be set", condType)
+		assert.Equal(t, status, cond.Status, "condition %s status", condType)
+		assert.Equal(t, reason, cond.Reason, "condition %s reason", condType)
+	}
+
+	t.Run("ReadyWhenVersionIsCurrent", func(t *testing.T) {
+		twd := makeTWD("test-worker", "default", "my-connection")
+		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
+		r.syncConditions(twd)
+
+		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
+	})
+
+	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
+		twd := makeTWD("test-worker", "default", "my-connection")
+		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
+		r.syncConditions(twd)
+
+		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
+	})
+
+	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
+		twd := makeTWD("test-worker", "default", "my-connection")
+		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
+		r.syncConditions(twd)
+
+		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
+	})
+
+	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
+		twd := makeTWD("test-worker", "default", "my-connection")
+		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusNotRegistered
+		r.syncConditions(twd)
+
+		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
 	})
 }
 
@@ -383,9 +435,9 @@ func TestReconcile_TemporalConnectionNotFound(t *testing.T) {
 
 	var updated temporaliov1alpha1.TemporalWorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
-	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
-	require.NotNil(t, cond, "TemporalConnectionHealthy condition should be set")
-	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionDegraded)
+	require.NotNil(t, cond, "Degraded condition should be set")
+	assert.Equal(t, metav1.ConditionTrue, cond.Status)
 	assert.Equal(t, temporaliov1alpha1.ReasonTemporalConnectionNotFound, cond.Reason)
 	assert.Contains(t, cond.Message, connName)
 }
@@ -464,9 +516,9 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 
 			var updated temporaliov1alpha1.TemporalWorkerDeployment
 			require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
-			cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
+			cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionDegraded)
 			require.NotNil(t, cond)
-			assert.Equal(t, metav1.ConditionFalse, cond.Status)
+			assert.Equal(t, metav1.ConditionTrue, cond.Status)
 			assert.Equal(t, tc.expectedReason, cond.Reason)
 		})
 	}
