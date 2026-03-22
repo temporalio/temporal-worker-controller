@@ -180,7 +180,16 @@ func autoInjectFields(obj map[string]interface{}, deploymentName string, selecto
 				_ = unstructured.SetNestedStringMap(obj, selectorLabels, k)
 			}
 		default:
-			autoInjectInValue(v, deploymentName, selectorLabels)
+			// Recurse into nested maps and slices of maps.
+			if nested, ok := v.(map[string]interface{}); ok {
+				autoInjectFields(nested, deploymentName, selectorLabels)
+			} else if arr, ok := v.([]interface{}); ok {
+				for _, item := range arr {
+					if nestedItem, ok := item.(map[string]interface{}); ok {
+						autoInjectFields(nestedItem, deploymentName, selectorLabels)
+					}
+				}
+			}
 		}
 	}
 }
@@ -197,21 +206,6 @@ func buildScaleTargetRef(deploymentName string) map[string]interface{} {
 		"apiVersion": appsv1.SchemeGroupVersion.String(),
 		"kind":       "Deployment",
 		"name":       deploymentName,
-	}
-}
-
-// autoInjectInValue recurses into v if it is a map or a slice of maps.
-func autoInjectInValue(v interface{}, deploymentName string, selectorLabels map[string]string) {
-	if nested, ok := v.(map[string]interface{}); ok {
-		autoInjectFields(nested, deploymentName, selectorLabels)
-		return
-	}
-	if arr, ok := v.([]interface{}); ok {
-		for _, item := range arr {
-			if nestedItem, ok := item.(map[string]interface{}); ok {
-				autoInjectFields(nestedItem, deploymentName, selectorLabels)
-			}
-		}
 	}
 }
 
