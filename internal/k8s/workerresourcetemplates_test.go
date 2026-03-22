@@ -79,11 +79,6 @@ func TestComputeSelectorLabels(t *testing.T) {
 	assert.Equal(t, "abc-123", labels[BuildIDLabel])
 }
 
-func TestContainsTemplateMarker(t *testing.T) {
-	assert.True(t, containsTemplateMarker("hello {{ .DeploymentName }}"))
-	assert.False(t, containsTemplateMarker("hello world"))
-	assert.False(t, containsTemplateMarker("{ single brace }"))
-}
 
 func TestRenderString(t *testing.T) {
 	data := TemplateData{

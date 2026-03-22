@@ -250,10 +250,10 @@ func renderTemplateValues(v interface{}, data TemplateData) (interface{}, error)
 }
 
 // renderString renders a single string as a Go template with the given data.
-// Strings without template expressions are returned unchanged.
+// Strings without template expressions are returned unchanged with zero allocations,
+// avoiding the template library's buffer copy for the common case of plain strings.
 func renderString(s string, data TemplateData) (string, error) {
-	// Fast path: skip parsing if no template markers
-	if !containsTemplateMarker(s) {
+	if !strings.Contains(s, "{{") {
 		return s, nil
 	}
 	tmpl, err := template.New("").Option("missingkey=error").Parse(s)
@@ -265,16 +265,6 @@ func renderString(s string, data TemplateData) (string, error) {
 		return "", fmt.Errorf("template execution failed for %q: %w", s, err)
 	}
 	return buf.String(), nil
-}
-
-// containsTemplateMarker returns true if s contains "{{" indicating a Go template expression.
-func containsTemplateMarker(s string) bool {
-	for i := 0; i < len(s)-1; i++ {
-		if s[i] == '{' && s[i+1] == '{' {
-			return true
-		}
-	}
-	return false
 }
 
 // ComputeRenderedObjectHash returns a stable, deterministic hash of a rendered Unstructured
