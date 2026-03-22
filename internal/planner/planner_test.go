@@ -6,6 +6,7 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -22,6 +23,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -42,6 +45,8 @@ func TestGeneratePlan(t *testing.T) {
 		expectConfigRampPercent          *int32  // pointer so we can test nil, in percentage (0-100)
 		expectManagerIdentity            *string // pointer so nil means "don't assert"
 		maxVersionsIneligibleForDeletion *int32  // set by env if non-nil, else default 75
+		wrts                             []temporaliov1alpha1.WorkerResourceTemplate
+		expectWorkerResourceApplies      int
 	}{
 		{
 			name: "empty state creates new deployment",
@@ -392,6 +397,65 @@ func TestGeneratePlan(t *testing.T) {
 			expectUpdate: 1,
 		},
 		{
+			name: "one WRT with two deployments produces two owned resource applies",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*corev1.ObjectReference{},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "build-a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "worker-build-a"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			expectScale:                 1,
+			expectWorkerResourceApplies: 2,
+		},
+		{
+			name: "no WRTs produces no owned resource applies",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+				DeploymentsByTime: []*appsv1.Deployment{},
+				DeploymentRefs:    map[string]*corev1.ObjectReference{},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "build-a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "worker-build-a"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state:                       &temporal.TemporalWorkerState{},
+			config:                      &Config{RolloutStrategy: temporaliov1alpha1.RolloutStrategy{}},
+			wrts:                        nil,
+			expectScale:                 1,
+			expectWorkerResourceApplies: 0,
+		},
+		{
 			// VersionConfig is non-nil because a new healthy target needs to be promoted.
 			// With empty ManagerIdentity the controller should claim before promoting.
 			name: "claims manager identity when ManagerIdentity is empty and a version config change is pending",
@@ -498,7 +562,7 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -507,6 +571,7 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
+			assert.Equal(t, tc.expectWorkerResourceApplies, len(plan.ApplyWorkerResources), "unexpected number of owned resource applies")
 			if tc.expectManagerIdentity != nil {
 				require.NotNil(t, plan.VersionConfig, "expected VersionConfig to be non-nil when asserting ManagerIdentity")
 				assert.Equal(t, *tc.expectManagerIdentity, plan.VersionConfig.ManagerIdentity, "unexpected ManagerIdentity")
@@ -2028,7 +2093,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false)
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false, nil, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
@@ -2924,4 +2989,431 @@ func TestResolveGateInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetWorkerResourceApplies(t *testing.T) {
+	testCases := []struct {
+		name              string
+		wrts              []temporaliov1alpha1.WorkerResourceTemplate
+		k8sState          *k8s.DeploymentState
+		deleteDeployments []*appsv1.Deployment
+		expectCount       int
+	}{
+		{
+			name: "no WRTs produces no applies",
+			wrts: nil,
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 0,
+		},
+		{
+			name: "no deployments produces no applies",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{},
+			},
+			expectCount: 0,
+		},
+		{
+			name: "1 WRT × 1 deployment produces 1 apply",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 1,
+		},
+		{
+			name: "1 WRT × 2 deployments produces 2 applies",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+			},
+			expectCount: 2,
+		},
+		{
+			name: "2 WRTs × 1 deployment produces 2 applies",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+				createTestWRT("my-pdb", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 2,
+		},
+		{
+			name: "2 WRTs × 2 deployments produces 4 applies",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+				createTestWRT("my-pdb", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+			},
+			expectCount: 4,
+		},
+		{
+			name: "WRT with nil Raw is skipped without blocking others",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "nil-raw", Namespace: "default"},
+					Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+						TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+						Template:                    runtime.RawExtension{Raw: nil},
+					},
+				},
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 1, // only the valid WRT
+		},
+		{
+			name: "WRT with invalid template produces a RenderError entry without blocking others",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRTWithInvalidTemplate("bad-template", "my-worker"),
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+				},
+			},
+			expectCount: 2, // 1 render-error entry + 1 valid apply
+		},
+		{
+			name: "deployments in delete list are skipped",
+			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
+				createTestWRT("my-hpa", "my-worker"),
+			},
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+					"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+				},
+			},
+			deleteDeployments: []*appsv1.Deployment{
+				createDeploymentWithUID("worker-build-b", "uid-b"),
+			},
+			expectCount: 1, // only build-a; build-b is being deleted
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments)
+			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of owned resource applies")
+		})
+	}
+}
+
+func TestGetWorkerResourceApplies_RenderError(t *testing.T) {
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+		},
+	}
+	wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+		createTestWRTWithInvalidTemplate("bad-template", "my-worker"),
+		createTestWRT("my-hpa", "my-worker"),
+	}
+
+	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil)
+	require.Len(t, applies, 2)
+
+	var errEntry, okEntry *WorkerResourceApply
+	for i := range applies {
+		if applies[i].RenderError != nil {
+			errEntry = &applies[i]
+		} else {
+			okEntry = &applies[i]
+		}
+	}
+	require.NotNil(t, errEntry, "expected an entry with RenderError set")
+	assert.Equal(t, "build-a", errEntry.BuildID)
+	assert.Equal(t, "bad-template", errEntry.WRTName)
+	assert.Nil(t, errEntry.Resource)
+
+	require.NotNil(t, okEntry, "expected a valid apply entry")
+	assert.Equal(t, "build-a", okEntry.BuildID)
+	assert.Equal(t, "my-hpa", okEntry.WRTName)
+	assert.NotNil(t, okEntry.Resource)
+	assert.Nil(t, okEntry.RenderError)
+}
+
+func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
+	wrt := createTestWRT("my-hpa", "my-worker")
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-abc": deployment,
+		},
+	}
+
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil)
+	require.Len(t, applies, 1)
+
+	apply := applies[0]
+
+	// Resource kind and apiVersion must come from the template
+	assert.Equal(t, "HorizontalPodAutoscaler", apply.Resource.GetKind())
+	assert.Equal(t, "autoscaling/v2", apply.Resource.GetAPIVersion())
+
+	// Resource must be owned by the versioned Deployment
+	ownerRefs := apply.Resource.GetOwnerReferences()
+	require.Len(t, ownerRefs, 1)
+	assert.Equal(t, deployment.Name, ownerRefs[0].Name)
+	assert.Equal(t, "Deployment", ownerRefs[0].Kind)
+	assert.Equal(t, types.UID("uid-abc"), ownerRefs[0].UID)
+
+	// Resource name must be deterministic
+	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
+}
+
+// createTestWRT builds a minimal valid WorkerResourceTemplate for use in tests.
+// The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.
+func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.WorkerResourceTemplate {
+	hpaSpec := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"scaleTargetRef": map[string]interface{}{}, // opt in to auto-injection
+			"minReplicas":    float64(1),
+			"maxReplicas":    float64(5),
+		},
+	}
+	raw, _ := json.Marshal(hpaSpec)
+	return temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+}
+
+// createDeploymentWithUID builds a Deployment with the given name and UID, with the default
+// connection spec hash annotation pre-set so it does not trigger an update during plan generation.
+func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			UID:       types.UID(uid),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						k8s.ConnectionSpecHashAnnotation: k8s.ComputeConnectionSpecHash(createDefaultConnectionSpec()),
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
+	// PDB with matchLabels opted in for auto-injection via empty-object sentinel.
+	pdbSpec := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{}, // {} = opt in to auto-injection
+			},
+			"minAvailable": float64(1),
+		},
+	}
+	raw, _ := json.Marshal(pdbSpec)
+	wrt := temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
+	}
+
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil)
+	require.Len(t, applies, 1)
+
+	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	selector, ok := spec["selector"].(map[string]interface{})
+	require.True(t, ok)
+	matchLabels, ok := selector["matchLabels"].(map[string]interface{})
+	require.True(t, ok, "matchLabels should have been auto-injected")
+
+	// The injected labels must equal ComputeSelectorLabels(temporalWorkerDeploymentRef, buildID).
+	expected := k8s.ComputeSelectorLabels("my-worker", "build-abc")
+	for k, v := range expected {
+		assert.Equal(t, v, matchLabels[k], "injected matchLabels[%q]", k)
+	}
+	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
+}
+
+func TestGetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
+	// Arbitrary CRD that uses all three template variables.
+	objSpec := map[string]interface{}{
+		"apiVersion": "monitoring.example.com/v1",
+		"kind":       "WorkloadMonitor",
+		"spec": map[string]interface{}{
+			"targetWorkload":    "{{ .DeploymentName }}",
+			"versionLabel":      "build-{{ .BuildID }}",
+			"temporalNamespace": "{{ .TemporalNamespace }}",
+		},
+	}
+	raw, _ := json.Marshal(objSpec)
+	wrt := temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-monitor", Namespace: "k8s-production"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
+	}
+
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "temporal-production", nil)
+	require.Len(t, applies, 1)
+
+	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "my-worker-build-abc", spec["targetWorkload"], ".DeploymentName not rendered")
+	assert.Equal(t, "build-build-abc", spec["versionLabel"], ".BuildID not rendered")
+	assert.Equal(t, "temporal-production", spec["temporalNamespace"], ".TemporalNamespace not rendered")
+}
+
+// createTestWRTWithInvalidTemplate builds a WRT whose spec.template contains a broken Go
+// template expression, causing RenderWorkerResourceTemplate to return an error.
+func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temporaliov1alpha1.WorkerResourceTemplate {
+	badSpec := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"description": "{{ .NonExistentField }}", // will fail with missingkey=error
+		},
+	}
+	raw, _ := json.Marshal(badSpec)
+	return temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+}
+
+func TestGetWRTOwnerRefPatches(t *testing.T) {
+	const twdName = "my-worker"
+	const twdUID = types.UID("twd-uid-123")
+
+	newWRT := func(name string, ownerRefs ...metav1.OwnerReference) temporaliov1alpha1.WorkerResourceTemplate {
+		return temporaliov1alpha1.WorkerResourceTemplate{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            name,
+				Namespace:       "default",
+				OwnerReferences: ownerRefs,
+			},
+		}
+	}
+
+	t.Run("all WRTs need owner ref", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+			newWRT("wrt-a"),
+			newWRT("wrt-b"),
+		}
+		patches := getWRTOwnerRefPatches(wrts, twdName, twdUID)
+		require.Len(t, patches, 2)
+
+		// Base should be unchanged
+		assert.Empty(t, patches[0].Base.OwnerReferences)
+		assert.Empty(t, patches[1].Base.OwnerReferences)
+
+		// Patched should have the owner ref appended
+		require.Len(t, patches[0].Patched.OwnerReferences, 1)
+		assert.Equal(t, twdUID, patches[0].Patched.OwnerReferences[0].UID)
+		assert.Equal(t, true, *patches[0].Patched.OwnerReferences[0].Controller)
+	})
+
+	t.Run("WRT already owned by this TWD is skipped", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+			newWRT("already-owned", metav1.OwnerReference{
+				APIVersion: "temporal.io/v1alpha1", Kind: "TemporalWorkerDeployment",
+				Name: twdName, UID: twdUID, Controller: func() *bool { b := true; return &b }(),
+			}),
+			newWRT("needs-ref"),
+		}
+		patches := getWRTOwnerRefPatches(wrts, twdName, twdUID)
+		require.Len(t, patches, 1)
+		assert.Equal(t, "needs-ref", patches[0].Patched.Name)
+	})
+
+	t.Run("WRT with different controller owner still gets patched", func(t *testing.T) {
+		otherUID := types.UID("other-uid")
+		otherController := true
+		otherRef := metav1.OwnerReference{UID: otherUID, Controller: &otherController}
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+			newWRT("other-owner", otherRef),
+		}
+		patches := getWRTOwnerRefPatches(wrts, twdName, twdUID)
+		// The other controller has a different UID so we still add our ref
+		require.Len(t, patches, 1)
+		require.Len(t, patches[0].Patched.OwnerReferences, 2)
+	})
+
+	t.Run("empty WRT list returns nil", func(t *testing.T) {
+		patches := getWRTOwnerRefPatches(nil, twdName, twdUID)
+		assert.Nil(t, patches)
+	})
+
+	t.Run("non-controller owner ref with same UID does not skip", func(t *testing.T) {
+		notController := false
+		nonControllerRef := metav1.OwnerReference{
+			UID:        twdUID,
+			Controller: &notController,
+		}
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+			newWRT("non-controller-ref", nonControllerRef),
+		}
+		patches := getWRTOwnerRefPatches(wrts, twdName, twdUID)
+		// controller=false with matching UID should still get the controller ref added
+		require.Len(t, patches, 1)
+	})
 }

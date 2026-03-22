@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,6 +17,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	admissionv1 "k8s.io/api/admission/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	//+kubebuilder:scaffold:imports
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -44,14 +48,21 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		Skip("Skipping webhook integration tests: KUBEBUILDER_ASSETS not set")
+	}
+
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-		ErrorIfCRDPathMissing: false,
+		CRDDirectoryPaths: []string{
+			// CRDs live in the crds chart's templates directory
+			filepath.Join("..", "..", "helm", "temporal-worker-controller-crds", "templates"),
+		},
+		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			Paths: []string{filepath.Join("..", "..", "config", "webhook")},
 		},
@@ -68,6 +79,19 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = admissionv1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	// corev1, rbacv1, and authorizationv1 are needed by the integration tests.
+	// corev1: create Namespaces
+	// rbacv1: create Roles and RoleBindings for RBAC setup
+	// authorizationv1: create SubjectAccessReview objects inside the webhook validator
+	err = corev1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = rbacv1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = authorizationv1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
@@ -93,6 +117,17 @@ var _ = BeforeSuite(func() {
 	err = (&TemporalWorkerDeployment{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	// Set env vars consumed by NewWorkerResourceTemplateValidator before constructing it.
+	// POD_NAMESPACE and SERVICE_ACCOUNT_NAME identify the controller SA for the SAR checks.
+	// "test-system" / "test-controller" are the values used in the integration tests.
+	// ALLOWED_KINDS mirrors the default Helm values so integration tests can create HPAs.
+	Expect(os.Setenv("POD_NAMESPACE", "test-system")).To(Succeed())
+	Expect(os.Setenv("SERVICE_ACCOUNT_NAME", "test-controller")).To(Succeed())
+	Expect(os.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler")).To(Succeed())
+
+	err = NewWorkerResourceTemplateValidator(mgr).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	//+kubebuilder:scaffold:webhook
 
 	go func() {
@@ -116,6 +151,9 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
+	if testEnv == nil {
+		return // BeforeSuite was skipped; nothing to tear down
+	}
 	cancel()
 	By("tearing down the test environment")
 	err := testEnv.Stop()

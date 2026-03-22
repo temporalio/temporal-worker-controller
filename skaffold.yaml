@@ -22,6 +22,19 @@ profiles:
     manifests:
       helm:
         releases:
+          - name: cert-manager
+            remoteChart: cert-manager
+            repo: https://charts.jetstack.io
+            version: v1.20.0
+            namespace: cert-manager
+            createNamespace: true
+            wait: true
+            setValues:
+              crds.enabled: true
+          - name: temporal-worker-controller-crds
+            chartPath: helm/temporal-worker-controller-crds
+            namespace: temporal-system
+            createNamespace: true
           - name: temporal-worker-controller
             chartPath: helm/temporal-worker-controller
             namespace: temporal-system
@@ -31,6 +44,7 @@ profiles:
               image.tag: latest
               image.pullPolicy: IfNotPresent
               namespace.create: true
+              certmanager.install: false
             valuesFiles:
               - helm/temporal-worker-controller/values.yaml
 
@@ -68,6 +82,20 @@ deploy:
       before:
         - host:
             command: ["./internal/demo/scripts/update_chart_version.sh"]
+        # Adopt any existing temporal CRDs into the temporal-worker-controller-crds Helm release.
+        # This is a no-op on a fresh cluster (CRDs not found → silently ignored).
+        # On a cluster with pre-existing CRDs (e.g. installed via kubectl or an older chart),
+        # this sets the Helm ownership labels/annotations so that `helm install` can proceed.
+        - host:
+            command:
+              - sh
+              - -c
+              - "kubectl label crd temporalconnections.temporal.io temporalworkerdeployments.temporal.io workerresourcetemplates.temporal.io app.kubernetes.io/managed-by=Helm --overwrite 2>/dev/null || true"
+        - host:
+            command:
+              - sh
+              - -c
+              - "kubectl annotate crd temporalconnections.temporal.io temporalworkerdeployments.temporal.io workerresourcetemplates.temporal.io meta.helm.sh/release-name=temporal-worker-controller-crds meta.helm.sh/release-namespace=temporal-system --overwrite 2>/dev/null || true"
       after:
         - host:
             command: ["sh", "-c", "sed -i '' 's/appVersion: .*/appVersion: \"automated\"/' internal/demo/helloworld/helm/helloworld/Chart.yaml"]

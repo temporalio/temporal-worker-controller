@@ -16,7 +16,29 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 )
+
+// WorkerResourceApply holds a rendered worker resource template to apply via Server-Side Apply.
+// If RenderError is non-nil, Resource is nil and the apply must be skipped; the error is
+// surfaced in the WRT status and Ready condition just like an SSA apply failure.
+type WorkerResourceApply struct {
+	Resource     *unstructured.Unstructured
+	WRTName      string
+	WRTNamespace string
+	BuildID      string
+	// RenderError is set when rendering spec.template failed. No SSA apply is attempted;
+	// the error is recorded in the per-BuildID status entry and reflected in the Ready condition.
+	RenderError error
+	// RenderedHash is the hash of the rendered Resource object (see k8s.ComputeRenderedObjectHash).
+	// Empty string means hashing failed; the apply will proceed unconditionally.
+	RenderedHash string
+	// LastAppliedHash is the hash recorded in the WRT status from the last successful apply.
+	// If RenderedHash == LastAppliedHash (and both are non-empty), the controller skips the
+	// SSA apply because the rendered output is identical to what is already on the cluster.
+	LastAppliedHash string
+}
 
 // Plan holds the actions to execute during reconciliation
 type Plan struct {
@@ -27,6 +49,26 @@ type Plan struct {
 	ShouldCreateDeployment bool
 	VersionConfig          *VersionConfig
 	TestWorkflows          []WorkflowConfig
+
+	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
+	ApplyWorkerResources []WorkerResourceApply
+	// EnsureWRTOwnerRefs holds (base, patched) pairs for WRTs that need a
+	// controller owner reference added, ready for client.MergeFrom patching.
+	// This is distinct from the owner refs set on the rendered resource copies
+	// (e.g. per-version HPAs): those point from each rendered copy → its versioned
+	// Deployment, so they are GC'd when a version sunsets. These point from the
+	// WRT itself → the TWD, so the WRT is GC'd when the TWD is deleted. The
+	// controller sets this (rather than the webhook) because the owner ref requires
+	// the TWD's UID, which the controller resolves from spec.temporalWorkerDeploymentRef.
+	EnsureWRTOwnerRefs []WRTOwnerRefPatch
+}
+
+// WRTOwnerRefPatch holds a WRT pair for a single merge-patch:
+// Base is the unmodified object (used as the patch base), Patched has the
+// controller owner reference already appended.
+type WRTOwnerRefPatch struct {
+	Base    *temporaliov1alpha1.WorkerResourceTemplate
+	Patched *temporaliov1alpha1.WorkerResourceTemplate
 }
 
 // VersionConfig defines version configuration for Temporal
@@ -80,6 +122,9 @@ func GeneratePlan(
 	maxVersionsIneligibleForDeletion int32,
 	gateInput []byte,
 	isGateInputSecret bool,
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
+	twdName string,
+	twdUID types.UID,
 ) (*Plan, error) {
 	plan := &Plan{
 		ScaleDeployments: make(map[*corev1.ObjectReference]uint32),
@@ -105,7 +150,126 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
+	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments)
+	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
+
 	return plan, nil
+}
+
+// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID) pair.
+// Pairs that fail to render are included with RenderError set so the failure is surfaced in the
+// WRT status and Ready condition; they do not block the rest.
+func getWorkerResourceApplies(
+	l logr.Logger,
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
+	k8sState *k8s.DeploymentState,
+	temporalNamespace string,
+	deleteDeployments []*appsv1.Deployment,
+) []WorkerResourceApply {
+	// Build a set of deployment names that are scheduled for deletion so we can
+	// skip rendering WRTs for them. Their owner references already point at the
+	// versioned Deployment, so k8s GC will clean up the rendered resources once
+	// the Deployment is deleted — no SSA apply needed.
+	deletingDeployments := make(map[string]struct{}, len(deleteDeployments))
+	for _, d := range deleteDeployments {
+		deletingDeployments[d.Name] = struct{}{}
+	}
+
+	var applies []WorkerResourceApply
+	for i := range wrts {
+		wrt := &wrts[i]
+		if wrt.Spec.Template.Raw == nil {
+			l.Info("skipping WorkerResourceTemplate with empty spec.template", "name", wrt.Name)
+			continue
+		}
+		// Build a map of existing status entries for O(1) lookup by BuildID.
+		existingStatus := make(map[string]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
+		for _, v := range wrt.Status.Versions {
+			existingStatus[v.BuildID] = v
+		}
+
+		for buildID, deployment := range k8sState.Deployments {
+			if _, deleting := deletingDeployments[deployment.Name]; deleting {
+				continue
+			}
+			rendered, renderErr := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
+			if renderErr != nil {
+				l.Error(renderErr, "failed to render WorkerResourceTemplate",
+					"wrt", wrt.Name,
+					"buildID", buildID,
+				)
+				// Record the failure so execplan surfaces it in the WRT status and
+				// Ready condition instead of silently dropping it.
+				applies = append(applies, WorkerResourceApply{
+					RenderError:  renderErr,
+					WRTName:      wrt.Name,
+					WRTNamespace: wrt.Namespace,
+					BuildID:      buildID,
+				})
+				continue
+			}
+
+			renderedHash := k8s.ComputeRenderedObjectHash(rendered)
+
+			// Look up the hash recorded by the last successful apply for this BuildID.
+			// A non-empty LastAppliedHash implies the previous apply succeeded;
+			// on error the controller records an empty hash so the next cycle retries.
+			var lastAppliedHash string
+			if prev, ok := existingStatus[buildID]; ok {
+				lastAppliedHash = prev.LastAppliedHash
+			}
+
+			applies = append(applies, WorkerResourceApply{
+				Resource:        rendered,
+				WRTName:         wrt.Name,
+				WRTNamespace:    wrt.Namespace,
+				BuildID:         buildID,
+				RenderedHash:    renderedHash,
+				LastAppliedHash: lastAppliedHash,
+			})
+		}
+	}
+	return applies
+}
+
+// getWRTOwnerRefPatches returns (base, patched) pairs for each WRT that does not
+// yet have a controller owner reference pointing to the given TWD. The patched copy
+// has the owner reference appended so that executePlan can apply a merge-patch to
+// add it without a full Update.
+func getWRTOwnerRefPatches(
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
+	twdName string,
+	twdUID types.UID,
+) []WRTOwnerRefPatch {
+	isController := true
+	blockOwnerDeletion := true
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         temporaliov1alpha1.GroupVersion.String(),
+		Kind:               "TemporalWorkerDeployment",
+		Name:               twdName,
+		UID:                twdUID,
+		Controller:         &isController,
+		BlockOwnerDeletion: &blockOwnerDeletion,
+	}
+	var patches []WRTOwnerRefPatch
+	for i := range wrts {
+		wrt := &wrts[i]
+		// Skip if this TWD is already the controller owner.
+		alreadyOwned := false
+		for _, ref := range wrt.OwnerReferences {
+			if ref.Controller != nil && *ref.Controller && ref.UID == twdUID {
+				alreadyOwned = true
+				break
+			}
+		}
+		if alreadyOwned {
+			continue
+		}
+		patched := wrt.DeepCopy()
+		patched.OwnerReferences = append(patched.OwnerReferences, ownerRef)
+		patches = append(patches, WRTOwnerRefPatch{Base: wrt, Patched: patched})
+	}
+	return patches
 }
 
 // checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is

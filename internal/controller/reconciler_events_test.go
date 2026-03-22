@@ -70,6 +70,10 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 			}
 			return []string{owner.Name}
 		}).
+		WithIndex(&temporaliov1alpha1.WorkerResourceTemplate{}, wrtWorkerRefKey, func(rawObj client.Object) []string {
+			wrt := rawObj.(*temporaliov1alpha1.WorkerResourceTemplate)
+			return []string{wrt.Spec.TemporalWorkerDeploymentRef.Name}
+		}).
 		WithInterceptorFuncs(funcs).
 		Build()
 

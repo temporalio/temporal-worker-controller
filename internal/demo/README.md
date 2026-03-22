@@ -10,6 +10,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - Temporal Cloud account with API key or mTLS certificates
 - Understanding of [Worker Versioning concepts](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) (Pinned and Auto-Upgrade versioning behaviors)
+- cert-manager is required for the `WorkerResourceTemplate` validating webhook (TLS). The controller Helm chart installs it automatically as a subchart (`certmanager.install: true` is set in the Skaffold profile).
 
 > **Note**: This demo specifically showcases **Pinned** workflow behavior. All workflows in the demo will remain on the worker version where they started, demonstrating how the controller safely manages multiple worker versions simultaneously during deployments.
 
@@ -60,10 +61,15 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      TEMPORAL_API_KEY_SECRET_NAME=temporal-api-key
      TEMPORAL_MTLS_SECRET_NAME=""
      ```
+   - **Important**: When using API key authentication, you must use the regional endpoint instead of the namespace-specific endpoint. Set `TEMPORAL_ADDRESS` in `skaffold.env` to your region's endpoint, e.g.:
+     ```env
+     TEMPORAL_ADDRESS=us-east-1.aws.api.temporal.io:7233
+     ```
+     The namespace-specific endpoint (e.g. `<namespace>.tmprl.cloud:7233`) requires mTLS and will reject API key connections with a `tls: certificate required` error.
    - Note: Do not set both mTLS and API key for the same connection. If both present, the TemporalConnection Custom Resource
    Instance will not get installed in the k8s environment.
 
-4. Build and deploy the Controller image to the local k8s cluster:
+3. Build and deploy the Controller image to the local k8s cluster:
    ```bash
    skaffold run --profile worker-controller
    ```
@@ -112,6 +118,34 @@ kubectl logs -n temporal-system deployments/temporal-worker-controller-manager -
 # View TemporalWorkerDeployment status
 kubectl get twd
 ```
+
+### Testing WorkerResourceTemplate (per-version HPA)
+
+`WorkerResourceTemplate` lets you attach Kubernetes resources — HPAs, PodDisruptionBudgets, etc. — to each worker version with running workers. The controller creates one copy per worker version with a running Deployment and wires it to the correct Deployment automatically.
+
+The `WorkerResourceTemplate` validating webhook enforces that you have permission to create the embedded resource type yourself, and it requires TLS (provided by cert-manager, installed in step 3 above).
+
+After deploying the helloworld worker (step 5), apply the example HPA:
+
+```bash
+kubectl apply -f examples/wrt-hpa.yaml
+```
+
+Watch the controller create an HPA for each worker version with running workers:
+
+```bash
+# See WorkerResourceTemplate status (Applied: true once the controller reconciles)
+kubectl get WorkerResourceTemplate
+
+# See the per-Build-ID HPAs
+kubectl get hpa
+```
+
+You should see one HPA per worker version with running workers, with `scaleTargetRef` automatically pointing at the correct versioned Deployment.
+
+When you deploy a new worker version (e.g., step 8), the controller creates a new HPA for the new Build ID and keeps the old one until that versioned Deployment is deleted during the sunset process.
+
+See [docs/owned-resources.md](../../docs/worker-resource-templates.md) for full documentation.
 
 ### Cleanup
 

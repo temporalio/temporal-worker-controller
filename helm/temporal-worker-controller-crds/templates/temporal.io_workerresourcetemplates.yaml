@@ -1,0 +1,130 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: workerresourcetemplates.temporal.io
+spec:
+  group: temporal.io
+  names:
+    kind: WorkerResourceTemplate
+    listKind: WorkerResourceTemplateList
+    plural: workerresourcetemplates
+    shortNames:
+    - wrt
+    singular: workerresourcetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Referenced TemporalWorkerDeployment
+      jsonPath: .spec.temporalWorkerDeploymentRef.name
+      name: Worker
+      type: string
+    - description: Kind of owned resource
+      jsonPath: .spec.template.kind
+      name: Kind
+      type: string
+    - description: Age
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              template:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              temporalWorkerDeploymentRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - template
+            - temporalWorkerDeploymentRef
+            type: object
+          status:
+            properties:
+              conditions:
+                description: Conditions describe the current state of the WorkerResourceTemplate.
+                  The Ready condition is True when all active Build ID instances have
+                  been successfully applied with the current template generation.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              versions:
+                description: Versions describes the per-Build-ID apply status of worker
+                  resource template instances.
+                items:
+                  properties:
+                    buildID:
+                      type: string
+                    lastAppliedGeneration:
+                      description: LastAppliedGeneration is the WorkerResourceTemplate
+                        metadata.generation at the time of the last successful apply
+                        for this Build ID. 0 means no successful apply has occurred
+                        yet.
+                      format: int64
+                      type: integer
+                    lastAppliedHash:
+                      description: Hash of the rendered resource as of the last successful
+                        apply. Used internally by the controller to skip redundant SSA
+                        calls.
+                      type: string
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is non-empty when the most recent apply
+                        attempt failed.
+                      type: string
+                    resourceName:
+                      type: string
+                  required:
+                  - buildID
+                  - lastTransitionTime
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

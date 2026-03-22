@@ -15,6 +15,7 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/server/temporaltest"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -492,4 +493,80 @@ func eventually(t *testing.T, timeout, interval time.Duration, check func() erro
 	if lastErr != nil {
 		t.Fatalf("eventually failed after %s: %v", timeout, lastErr)
 	}
+}
+
+// waitForOwnedHPAWithInjectedScaleTargetRef polls until the named HPA exists in namespace and
+// verifies that the controller auto-injected scaleTargetRef to point at expectedDeploymentName.
+func waitForOwnedHPAWithInjectedScaleTargetRef(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace, hpaName, expectedDeploymentName string,
+	timeout time.Duration,
+) {
+	t.Helper()
+	t.Logf("Waiting for HPA %q to be created in namespace %q", hpaName, namespace)
+	var hpa autoscalingv2.HorizontalPodAutoscaler
+	eventually(t, timeout, time.Second, func() error {
+		return k8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: namespace}, &hpa)
+	})
+	if hpa.Spec.ScaleTargetRef.Name != expectedDeploymentName {
+		t.Errorf("HPA scaleTargetRef.name = %q, want %q", hpa.Spec.ScaleTargetRef.Name, expectedDeploymentName)
+	}
+	if hpa.Spec.ScaleTargetRef.Kind != "Deployment" {
+		t.Errorf("HPA scaleTargetRef.kind = %q, want %q", hpa.Spec.ScaleTargetRef.Kind, "Deployment")
+	}
+	if hpa.Spec.ScaleTargetRef.APIVersion != "apps/v1" {
+		t.Errorf("HPA scaleTargetRef.apiVersion = %q, want %q", hpa.Spec.ScaleTargetRef.APIVersion, "apps/v1")
+	}
+	t.Logf("HPA scaleTargetRef correctly injected: %s/%s %s",
+		hpa.Spec.ScaleTargetRef.APIVersion, hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
+}
+
+// waitForWRTStatusApplied polls until WRT.Status.Versions contains an entry for buildID
+// with a non-zero LastAppliedGeneration (meaning at least one successful apply has occurred).
+func waitForWRTStatusApplied(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace, wrtName, buildID string,
+	timeout time.Duration,
+) {
+	t.Helper()
+	eventually(t, timeout, time.Second, func() error {
+		var wrt temporaliov1alpha1.WorkerResourceTemplate
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: wrtName, Namespace: namespace}, &wrt); err != nil {
+			return err
+		}
+		for _, v := range wrt.Status.Versions {
+			if v.BuildID == buildID && v.LastAppliedGeneration > 0 {
+				return nil
+			}
+		}
+		return fmt.Errorf("WRT status not yet updated for build ID %q (current versions: %+v)", buildID, wrt.Status.Versions)
+	})
+	t.Log("WRT status shows LastAppliedGeneration > 0 for build ID")
+}
+
+// assertWRTControllerOwnerRef asserts that the named WRT has a controller owner reference
+// pointing to the TemporalWorkerDeployment named twdName.
+func assertWRTControllerOwnerRef(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace, wrtName, twdName string,
+) {
+	t.Helper()
+	var wrt temporaliov1alpha1.WorkerResourceTemplate
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wrtName, Namespace: namespace}, &wrt); err != nil {
+		t.Fatalf("failed to re-fetch WRT: %v", err)
+	}
+	for _, ref := range wrt.OwnerReferences {
+		if ref.Kind == "TemporalWorkerDeployment" && ref.Name == twdName && ref.Controller != nil && *ref.Controller {
+			t.Logf("WRT correctly has controller owner reference to TWD %q", twdName)
+			return
+		}
+	}
+	t.Errorf("WRT %s/%s missing controller owner reference to TWD %s (refs: %+v)",
+		namespace, wrtName, twdName, wrt.OwnerReferences)
 }
