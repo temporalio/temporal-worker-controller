@@ -293,6 +293,19 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 	for _, apply := range p.ApplyWorkerResources {
 		key := wrtKey{apply.WRTNamespace, apply.WRTName}
 
+		// Render failure: record the error in status without attempting an SSA apply.
+		if apply.RenderError != nil {
+			l.Error(apply.RenderError, "skipping SSA apply due to render failure",
+				"wrt", apply.WRTName,
+				"buildID", apply.BuildID,
+			)
+			wrtResults[key] = append(wrtResults[key], applyResult{
+				buildID: apply.BuildID,
+				err:     apply.RenderError,
+			})
+			continue
+		}
+
 		// Skip the SSA apply if the rendered object is identical to what was last
 		// successfully applied. This avoids unnecessary API server load at scale
 		// (hundreds of TWDs × hundreds of versions × multiple WRTs).

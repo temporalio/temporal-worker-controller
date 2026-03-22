@@ -21,12 +21,17 @@ import (
 )
 
 // WorkerResourceApply holds a rendered worker resource template to apply via Server-Side Apply.
+// If RenderError is non-nil, Resource is nil and the apply must be skipped; the error is
+// surfaced in the WRT status and Ready condition just like an SSA apply failure.
 type WorkerResourceApply struct {
 	Resource     *unstructured.Unstructured
 	FieldManager string
 	WRTName      string
 	WRTNamespace string
 	BuildID      string
+	// RenderError is set when rendering spec.template failed. No SSA apply is attempted;
+	// the error is recorded in the per-BuildID status entry and reflected in the Ready condition.
+	RenderError error
 	// RenderedHash is the hash of the rendered Resource object (see k8s.ComputeRenderedObjectHash).
 	// Empty string means hashing failed; the apply will proceed unconditionally.
 	RenderedHash string
@@ -153,7 +158,8 @@ func GeneratePlan(
 }
 
 // getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID) pair.
-// Pairs that fail to render are logged and skipped; they do not block the rest.
+// Pairs that fail to render are included with RenderError set so the failure is surfaced in the
+// WRT status and Ready condition; they do not block the rest.
 func getWorkerResourceApplies(
 	l logr.Logger,
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
@@ -187,12 +193,20 @@ func getWorkerResourceApplies(
 			if _, deleting := deletingDeployments[deployment.Name]; deleting {
 				continue
 			}
-			rendered, err := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
-			if err != nil {
-				l.Error(err, "failed to render WorkerResourceTemplate",
+			rendered, renderErr := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
+			if renderErr != nil {
+				l.Error(renderErr, "failed to render WorkerResourceTemplate",
 					"wrt", wrt.Name,
 					"buildID", buildID,
 				)
+				// Record the failure so execplan surfaces it in the WRT status and
+				// Ready condition instead of silently dropping it.
+				applies = append(applies, WorkerResourceApply{
+					RenderError:  renderErr,
+					WRTName:      wrt.Name,
+					WRTNamespace: wrt.Namespace,
+					BuildID:      buildID,
+				})
 				continue
 			}
 

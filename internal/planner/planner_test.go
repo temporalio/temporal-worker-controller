@@ -3091,7 +3091,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 			expectCount: 1, // only the valid WRT
 		},
 		{
-			name: "WRT with invalid template is skipped without blocking others",
+			name: "WRT with invalid template produces a RenderError entry without blocking others",
 			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
 				createTestWRTWithInvalidTemplate("bad-template", "my-worker"),
 				createTestWRT("my-hpa", "my-worker"),
@@ -3101,7 +3101,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
 				},
 			},
-			expectCount: 1, // only the valid WRT
+			expectCount: 2, // 1 render-error entry + 1 valid apply
 		},
 		{
 			name: "deployments in delete list are skipped",
@@ -3127,6 +3127,40 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of owned resource applies")
 		})
 	}
+}
+
+func TestGetWorkerResourceApplies_RenderError(t *testing.T) {
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+		},
+	}
+	wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+		createTestWRTWithInvalidTemplate("bad-template", "my-worker"),
+		createTestWRT("my-hpa", "my-worker"),
+	}
+
+	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil)
+	require.Len(t, applies, 2)
+
+	var errEntry, okEntry *WorkerResourceApply
+	for i := range applies {
+		if applies[i].RenderError != nil {
+			errEntry = &applies[i]
+		} else {
+			okEntry = &applies[i]
+		}
+	}
+	require.NotNil(t, errEntry, "expected an entry with RenderError set")
+	assert.Equal(t, "build-a", errEntry.BuildID)
+	assert.Equal(t, "bad-template", errEntry.WRTName)
+	assert.Nil(t, errEntry.Resource)
+
+	require.NotNil(t, okEntry, "expected a valid apply entry")
+	assert.Equal(t, "build-a", okEntry.BuildID)
+	assert.Equal(t, "my-hpa", okEntry.WRTName)
+	assert.NotNil(t, okEntry.Resource)
+	assert.Nil(t, okEntry.RenderError)
 }
 
 func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
