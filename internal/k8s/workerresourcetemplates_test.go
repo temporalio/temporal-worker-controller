@@ -79,7 +79,6 @@ func TestComputeSelectorLabels(t *testing.T) {
 	assert.Equal(t, "abc-123", labels[BuildIDLabel])
 }
 
-
 func TestRenderString(t *testing.T) {
 	data := TemplateData{
 		DeploymentName:    "my-worker-abc123",

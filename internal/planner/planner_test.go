@@ -3192,7 +3192,6 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
 }
 
-
 // createTestWRT builds a minimal valid WorkerResourceTemplate for use in tests.
 // The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.
 func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.WorkerResourceTemplate {
