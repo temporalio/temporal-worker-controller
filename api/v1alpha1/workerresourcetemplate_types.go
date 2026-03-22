@@ -58,7 +58,7 @@ const (
 	// ReasonWRTPending is the condition reason when no apply has been attempted yet.
 	ReasonWRTPending = "Pending"
 	// ReasonWRTTWDNotFound is the condition reason when the referenced TemporalWorkerDeployment does not exist.
-	ReasonWRTTWDNotFound = "TWDNotFound"
+	ReasonWRTTWDNotFound = "TemporalWorkerDeploymentNotFound"
 )
 
 // WorkerResourceTemplateVersionStatus describes the per-Build-ID apply status of a WorkerResourceTemplate.
