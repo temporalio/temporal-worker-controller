@@ -19,7 +19,7 @@ import (
 	"go.temporal.io/sdk/log"
 )
 
-func configureObservability(buildID string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
+func configureObservability(deploymentName, buildID string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
 	slogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource:   false,
 		Level:       slog.LevelDebug,
@@ -33,7 +33,7 @@ func configureObservability(buildID string, metricsPort int) (l log.Logger, m op
 	}
 	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
 		Meter:             metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
-		InitialAttributes: attribute.NewSet(attribute.String("version", buildID)),
+		InitialAttributes: attribute.NewSet(attribute.String("version", deploymentName+":"+buildID)),
 	})
 
 	go func() {

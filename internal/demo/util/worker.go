@@ -35,7 +35,11 @@ func NewVersionedWorker(opts worker.Options) (w worker.Worker, stopFunc func()) 
 		DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 	}
 
-	c, stopClient := NewClient(mustGetEnv("TEMPORAL_WORKER_BUILD_ID"), 9090)
+	c, stopClient := NewClient(
+		mustGetEnv("TEMPORAL_DEPLOYMENT_NAME"),
+		mustGetEnv("TEMPORAL_WORKER_BUILD_ID"),
+		9090,
+	)
 
 	w = worker.New(c, temporalTaskQueue, opts)
 

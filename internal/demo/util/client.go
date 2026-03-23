@@ -13,12 +13,12 @@ import (
 	"go.temporal.io/sdk/contrib/envconfig"
 )
 
-func NewClient(buildID string, metricsPort int) (c client.Client, stopFunc func()) {
-	return newClient(buildID, metricsPort)
+func NewClient(deploymentName, buildID string, metricsPort int) (c client.Client, stopFunc func()) {
+	return newClient(deploymentName, buildID, metricsPort)
 }
 
-func newClient(buildID string, metricsPort int) (c client.Client, stopFunc func()) {
-	l, m, stopFunc := configureObservability(buildID, metricsPort)
+func newClient(deploymentName, buildID string, metricsPort int) (c client.Client, stopFunc func()) {
+	l, m, stopFunc := configureObservability(deploymentName, buildID, metricsPort)
 
 	// Load client options from environment variables using envconfig
 	opts, err := envconfig.LoadDefaultClientOptions()
