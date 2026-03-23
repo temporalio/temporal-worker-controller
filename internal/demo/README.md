@@ -147,6 +147,145 @@ When you deploy a new worker version (e.g., step 8), the controller creates a ne
 
 See [docs/owned-resources.md](../../docs/worker-resource-templates.md) for full documentation.
 
+---
+
+### Metric-Based HPA Scaling Demo
+
+This section demonstrates **per-version autoscaling** on real Temporal metrics: worker slot utilization (emitted by the worker pods) and approximate backlog count (from Temporal Cloud). The goal is a steady state of ~10 replicas per version, with each version's HPA responding independently during a progressive rollout.
+
+The demo is structured in two phases so you can verify each layer before building on it.
+
+> **Why the worker has only 5 activity slots per pod in this demo:** The Go SDK default is 1,000 slots per pod, which would require an impractically high workflow rate to saturate. The demo worker is configured with `MaxConcurrentActivityExecutionSize: 5` so that ~2 workflows/second drives 10 replicas at 70% utilization. Remove this limit in production.
+
+#### Prerequisites
+
+In addition to the main demo prerequisites, you need `kube-prometheus-stack` with `prometheus-adapter` as a subchart. This provides Prometheus (to scrape worker metrics and Temporal Cloud), a recording rule (to compute the utilization ratio), and the External Metrics API bridge that HPAs use.
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm install prometheus prometheus-community/kube-prometheus-stack \
+  -n monitoring --create-namespace \
+  -f internal/demo/k8s/prometheus-stack-values.yaml
+```
+
+Wait for the stack to be ready:
+```bash
+kubectl -n monitoring rollout status deployment/prometheus-prometheus-adapter
+```
+
+#### Phase 1: Scale on slot utilization
+
+Slot utilization measures what fraction of each pod's activity task slots are in use. When workers are busy, the HPA adds replicas; when they drain, it removes them.
+
+**Step 1 — Verify metrics are flowing.**
+
+Port-forward Prometheus and confirm the recording rule is producing values:
+```bash
+kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9090 &
+# In a browser or with curl:
+# http://localhost:9090/graph?g0.expr=temporal_slot_utilization
+```
+
+If `temporal_slot_utilization` returns no data, check the metric names on a running pod:
+```bash
+kubectl exec -n default \
+  $(kubectl get pods -n default -l temporal.io/deployment-name=helloworld -o name | head -1) \
+  -- curl -s localhost:9090/metrics | grep -i slot
+```
+
+Update the recording rule `expr` in `internal/demo/k8s/prometheus-stack-values.yaml` if the metric names differ, then run `helm upgrade prometheus ... -f internal/demo/k8s/prometheus-stack-values.yaml`.
+
+**Step 2 — Apply the slot-utilization WRT.**
+```bash
+kubectl apply -f examples/wrt-hpa-slot-utilization.yaml
+```
+
+Confirm the HPA is reading the metric (not showing `<unknown>`):
+```bash
+kubectl get hpa -w
+# TARGETS column should show e.g. "0/700m" within ~60 seconds
+```
+
+**Step 3 — Generate load.**
+```bash
+make apply-hpa-load   # starts ~2 workflows/sec; Ctrl-C to stop
+```
+
+Watch the pods scale up to ~10 replicas over the next few minutes:
+```bash
+kubectl get pods -l temporal.io/deployment-name=helloworld -w
+```
+
+Stop the load generator (`Ctrl-C`) and watch the HPA scale back down as in-flight activities complete.
+
+#### Phase 2: Add approximate backlog count
+
+`approximate_backlog_count` measures tasks queued in Temporal but not yet started on a worker. Adding it as a second HPA metric means the HPA scales up on *arriving* work even before slots are full — important for bursty traffic.
+
+**Step 1 — Configure Temporal Cloud scrape.**
+
+1. Find your Temporal Cloud account ID and metrics endpoint (Cloud UI → Settings → Integrations → Metrics).
+2. Create the credentials Secret:
+   ```bash
+   kubectl create secret generic temporal-cloud-metrics-token \
+     -n monitoring \
+     --from-literal=api-key=<YOUR_TEMPORAL_CLOUD_API_KEY>
+   ```
+3. Verify what labels Temporal Cloud uses for versioned-worker metrics:
+   ```bash
+   curl -s -H "Authorization: Bearer <YOUR_API_KEY>" \
+     "https://<account-id>.tmprl.cloud/prometheus/api/v1/query?query=temporal_approximate_backlog_count" \
+     | jq '.data.result[].metric'
+   ```
+   Note the label name that identifies the Build ID and deployment name. Common names: `build_id`, `deployment_series_name`, `worker_deployment_version`.
+
+4. Edit `internal/demo/k8s/prometheus-stack-values.yaml`:
+   - Fill in `<account-id>` in the scrape target
+   - Uncomment the `prometheus:` scrape config block and the `prometheus-adapter` rule for `temporal_approximate_backlog_count`
+
+5. Upgrade Prometheus:
+   ```bash
+   helm upgrade prometheus prometheus-community/kube-prometheus-stack \
+     -n monitoring \
+     -f internal/demo/k8s/prometheus-stack-values.yaml
+   ```
+
+6. Verify the metric is flowing in the Prometheus UI: query `temporal_approximate_backlog_count`.
+
+**Step 2 — Update the WRT label selector.**
+
+Open `examples/wrt-hpa-backlog.yaml` and update the `matchLabels` key under `approximate_backlog_count` to match the actual label name from step 1 above.
+
+**Step 3 — Apply the combined WRT.**
+```bash
+# Remove the Phase 1 WRT first to avoid two HPAs targeting the same Deployment
+kubectl delete -f examples/wrt-hpa-slot-utilization.yaml
+kubectl apply -f examples/wrt-hpa-backlog.yaml
+```
+
+#### Full progressive rollout demo
+
+With load running, this demonstrates the core value proposition: v1 and v2 scale independently.
+
+```bash
+# Terminal 1: keep load running
+make apply-hpa-load
+
+# Terminal 2: deploy v2 while v1 is under load
+skaffold run --profile helloworld-worker
+
+# Terminal 3: watch the two HPAs
+kubectl get hpa -w
+# v1 HPA: replicas stay high while pinned workflows are running, then drop as they drain
+# v2 HPA: replicas rise as new workflows are routed to v2 and its slots fill up
+```
+
+The progressive rollout steps (1% → 10% → 50% → 100%) gradually shift new workflow traffic to v2. The per-version HPAs respond to each version's actual load, not the aggregate — this is what makes the scaling correct during a deployment.
+
+---
+
 ### Cleanup
 
 To clean up the demo:

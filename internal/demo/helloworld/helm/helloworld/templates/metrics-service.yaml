@@ -1,0 +1,30 @@
+# Service that exposes the Prometheus metrics endpoint (port 9090) on all
+# versioned worker pods managed by this TemporalWorkerDeployment.
+#
+# The controller labels each versioned Deployment's pods with:
+#   temporal.io/deployment-name: <twd-name>
+#   temporal.io/build-id: <buildID>
+#
+# This Service selects all of them so Prometheus (via ServiceMonitor) can
+# scrape every pod. Each pod emits metrics tagged with its own `version`
+# (buildID) attribute, so per-version aggregation happens in Prometheus.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-worker-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{ include "helloworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-metrics
+spec:
+  # Select all versioned worker pods for this TemporalWorkerDeployment.
+  # The controller sets this label on every pod it manages.
+  selector:
+    temporal.io/deployment-name: {{ .Release.Name }}
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+  # ClusterIP: headless so Prometheus discovers individual pod endpoints
+  # rather than load-balancing across them (needed for per-pod scraping).
+  clusterIP: None

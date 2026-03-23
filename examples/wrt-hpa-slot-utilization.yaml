@@ -1,0 +1,72 @@
+# WorkerResourceTemplate — per-version HPA scaling on slot utilization (Phase 1)
+#
+# This example attaches an HPA to each active versioned Deployment of the
+# "helloworld" TemporalWorkerDeployment. The HPA scales on temporal_slot_utilization,
+# a custom metric computed from the Temporal Go SDK's worker task slot gauges by a
+# Prometheus recording rule.
+#
+# Prerequisites:
+#   1. The helloworld demo is running (skaffold run --profile helloworld-worker)
+#   2. kube-prometheus-stack + prometheus-adapter installed:
+#        helm install prometheus prometheus-community/kube-prometheus-stack \
+#          -n monitoring --create-namespace \
+#          -f internal/demo/k8s/prometheus-stack-values.yaml
+#   3. Verify metric names and recording rule are working:
+#        kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9090 &
+#        # Query: temporal_slot_utilization — should return values between 0 and 1
+#
+# Apply:
+#   kubectl apply -f examples/wrt-hpa-slot-utilization.yaml
+#
+# Verify:
+#   kubectl get wrt              # shows Ready status per Build ID
+#   kubectl get hpa -w           # shows current metric value; should show <target> not <unknown>
+#
+# Generate load to trigger scaling:
+#   make apply-hpa-load          # starts ~2 workflows/sec; let it run for a few minutes
+#   kubectl get pods -l temporal.io/deployment-name=helloworld -w
+#
+# See docs/worker-resource-templates.md for full WRT documentation.
+# See internal/demo/README.md (HPA Scaling Demo section) for the full demo walkthrough.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-hpa-slot
+  namespace: default
+spec:
+  temporalWorkerDeploymentRef:
+    name: helloworld
+
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      scaleTargetRef: {}   # auto-injected: points at the versioned Deployment for this Build ID
+      minReplicas: 1
+      maxReplicas: 15
+      metrics:
+        # Scale based on the fraction of activity task slots in use across all pods
+        # of this Build ID. The metric is computed by a Prometheus recording rule
+        # (temporal_slot_utilization) and exposed via prometheus-adapter.
+        #
+        # The selector version: "{{ .BuildID }}" is rendered per-version by the controller,
+        # so each HPA targets only the metric for its own Build ID.
+        #
+        # Target: maintain ~70% slot utilization (averageValue 700m = 0.70 out of 1.0).
+        # The HPA adds replicas until:
+        #   current_replicas × averageValue ≥ total observed utilization
+        - type: External
+          external:
+            metric:
+              name: temporal_slot_utilization
+              selector:
+                matchLabels:
+                  version: "{{ .BuildID }}"
+            target:
+              type: AverageValue
+              averageValue: "700m"   # 700 milli-units = 0.70 = 70% utilization
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30   # react quickly to rising load
+        scaleDown:
+          stabilizationWindowSeconds: 120  # drain slowly so in-flight workflows finish

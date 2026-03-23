@@ -1,0 +1,92 @@
+# WorkerResourceTemplate — per-version HPA scaling on slot utilization + backlog count (Phase 2)
+#
+# Extends wrt-hpa-slot-utilization.yaml by adding approximate_backlog_count from
+# Temporal Cloud as a second scaling metric. Having both metrics means the HPA scales up
+# when workers are busy (slot_utilization) AND when tasks are queued but not yet picked
+# up (backlog_count). During a progressive rollout, each version's HPA responds
+# independently: v2 scales up as its backlog grows; v1 scales down as its pinned
+# workflows drain.
+#
+# Prerequisites (in addition to Phase 1 prerequisites):
+#   1. Complete the Temporal Cloud scrape config in internal/demo/k8s/prometheus-stack-values.yaml:
+#      - Set your account ID in the scrape target
+#      - Create the temporal-cloud-metrics-token Secret
+#      - Uncomment the scrape config and prometheus-adapter rule
+#      - Upgrade the Helm release: helm upgrade prometheus ... -f prometheus-stack-values.yaml
+#   2. Verify the approximate_backlog_count metric is flowing:
+#        kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9090 &
+#        # Query: temporal_approximate_backlog_count — check which labels are present
+#   3. Update the matchLabels selector below to match the actual label names emitted by
+#      Temporal Cloud for your versioned workers (see prometheus-stack-values.yaml Phase 2 notes).
+#
+# ⚠️  The worker_deployment_version label value below uses Go template expressions
+#     rendered per-version by the WRT controller. Update the label key if Temporal Cloud
+#     uses a different label name (e.g., build_id / deployment_series_name).
+#
+# Apply (after completing the prerequisites above):
+#   kubectl apply -f examples/wrt-hpa-backlog.yaml
+#
+# Watch the full demo:
+#   make apply-hpa-load
+#   # In another terminal: skaffold run --profile helloworld-worker (to deploy v2)
+#   kubectl get hpa -w
+#   # Observe v1 scaling down as its workflows drain; v2 scaling up as backlog grows
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-hpa-backlog
+  namespace: default
+spec:
+  temporalWorkerDeploymentRef:
+    name: helloworld
+
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      scaleTargetRef: {}
+      minReplicas: 1
+      maxReplicas: 15
+      metrics:
+        # Metric 1: slot utilization — scale up when workers are busy.
+        # Same as wrt-hpa-slot-utilization.yaml.
+        - type: External
+          external:
+            metric:
+              name: temporal_slot_utilization
+              selector:
+                matchLabels:
+                  version: "{{ .BuildID }}"
+            target:
+              type: AverageValue
+              averageValue: "700m"
+
+        # Metric 2: approximate backlog count — scale up when tasks are queued.
+        # The HPA uses whichever metric demands more replicas (max of the two).
+        #
+        # ⚠️  The label key (worker_deployment_version) and value format
+        #     ({{ .DeploymentName }}:{{ .BuildID }}) must match what Temporal Cloud
+        #     actually emits. Verify with:
+        #       curl -H "Authorization: Bearer <api-key>" \
+        #         "https://<account-id>.tmprl.cloud/prometheus/api/v1/query?\
+        #          query=temporal_approximate_backlog_count" | jq '.data.result[].metric'
+        - type: External
+          external:
+            metric:
+              name: temporal_approximate_backlog_count
+              selector:
+                matchLabels:
+                  # Update this label key/value to match your Temporal Cloud output.
+                  worker_deployment_version: "{{ .DeploymentName }}:{{ .BuildID }}"
+            target:
+              # Scale up if more than 5 tasks are queued per current replica.
+              # Tune this based on your workflow latency requirements.
+              type: AverageValue
+              averageValue: "5"
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+        scaleDown:
+          # Use a longer stabilization window on scale-down to avoid scaling v1 down
+          # too aggressively while pinned workflows are still running.
+          stabilizationWindowSeconds: 300

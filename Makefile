@@ -188,6 +188,15 @@ apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
 		sleep 15; \
 	done
 
+.PHONY: apply-hpa-load
+.SILENT: apply-hpa-load
+apply-hpa-load: ## Start ~2 workflows/sec to build a backlog and drive HPA scaling to ~10 replicas
+	@echo "Starting load at ~2 workflows/sec. Press Ctrl-C to stop."
+	@while true; do \
+		$(MAKE) -s start-sample-workflow; \
+		sleep 0.5; \
+	done
+
 .PHONY: list-workflow-build-ids
 list-workflow-build-ids: ## List workflow executions and their build IDs.
 	@$(TEMPORAL) workflow list --limit 20 --fields SearchAttributes -o json | \

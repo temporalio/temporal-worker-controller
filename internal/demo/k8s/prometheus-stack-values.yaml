@@ -1,0 +1,149 @@
+# kube-prometheus-stack Helm values for the temporal-worker-controller HPA demo.
+#
+# Install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   helm install prometheus prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace \
+#     -f internal/demo/k8s/prometheus-stack-values.yaml
+#
+# This file configures three things:
+#   1. ServiceMonitor — scrapes worker pod metrics (slot gauges) from port 9090
+#   2. Recording rule — computes per-version slot_utilization ratio
+#   3. prometheus-adapter — exposes the computed metric as a Kubernetes External Metric
+#      so HPAs can scale on it
+#
+# Phase 2 additions (approximate_backlog_count from Temporal Cloud) are in the
+# commented-out sections below. Complete them after verifying the exact Prometheus
+# label names emitted by your Temporal Cloud account (see README for instructions).
+
+# ─── 1. ServiceMonitor ──────────────────────────────────────────────────────
+
+additionalServiceMonitors:
+  - name: temporal-helloworld-worker
+    # Select the headless Service created by the helloworld Helm chart
+    # (internal/demo/helloworld/helm/helloworld/templates/metrics-service.yaml).
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: helloworld
+        app.kubernetes.io/component: worker-metrics
+    namespaceSelector:
+      matchNames:
+        - default
+    endpoints:
+      - port: metrics
+        path: /metrics
+        interval: 15s
+
+# ─── 2. Recording Rule ──────────────────────────────────────────────────────
+#
+# ⚠️  VERIFY METRIC NAMES before applying.
+# On a running worker pod:
+#   kubectl exec -n default <worker-pod> -- curl -s localhost:9090/metrics | grep -i slot
+#
+# Expected metric names from the Temporal Go SDK via OTel Prometheus exporter:
+#   worker_task_slots_available{task_queue="default/helloworld", worker_type="ActivityWorker", version="<buildID>"}
+#   worker_task_slots_used{...}
+# They may also appear with a "temporal_" prefix — grep output will confirm.
+
+additionalPrometheusRulesMap:
+  temporal-worker-scaling:
+    groups:
+      - name: temporal_worker_slots
+        interval: 15s
+        rules:
+          # Slot utilization ratio per version, filtered to activity workers only.
+          # Range: 0.0 (idle) to 1.0 (fully saturated).
+          # Replace metric name prefix if the grep above shows a different prefix.
+          - record: temporal_slot_utilization
+            labels:
+              task_queue: "default/helloworld"
+            expr: |
+              sum by (version) (
+                worker_task_slots_used{
+                  task_queue="default/helloworld",
+                  worker_type="ActivityWorker"
+                }
+              )
+              /
+              (
+                sum by (version) (
+                  worker_task_slots_used{
+                    task_queue="default/helloworld",
+                    worker_type="ActivityWorker"
+                  }
+                )
+                +
+                sum by (version) (
+                  worker_task_slots_available{
+                    task_queue="default/helloworld",
+                    worker_type="ActivityWorker"
+                  }
+                )
+              )
+
+# ─── 3. prometheus-adapter ──────────────────────────────────────────────────
+#
+# Exposes temporal_slot_utilization (and, in Phase 2, temporal_approximate_backlog_count)
+# as Kubernetes External Metrics so HPAs can reference them via type: External.
+
+prometheus-adapter:
+  prometheus:
+    url: http://prometheus-kube-prometheus-prometheus.monitoring.svc
+    port: 9090
+
+  rules:
+    external:
+      # Phase 1: slot utilization per version
+      # HPA uses: metric.name=temporal_slot_utilization, selector.matchLabels.version=<buildID>
+      - seriesQuery: 'temporal_slot_utilization{}'
+        metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+        name:
+          as: "temporal_slot_utilization"
+
+      # Phase 2: approximate backlog count per version (from Temporal Cloud)
+      # Uncomment after completing the Temporal Cloud scrape config below and
+      # verifying the exact label name for the versioned worker (see README).
+      #
+      # - seriesQuery: 'temporal_approximate_backlog_count{}'
+      #   metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'
+      #   name:
+      #     as: "temporal_approximate_backlog_count"
+
+# ─── Phase 2: Temporal Cloud Scrape Config ──────────────────────────────────
+#
+# Prerequisites:
+#   1. Find your Temporal Cloud account ID and metrics endpoint:
+#      - Log into Temporal Cloud → Settings → Integrations → Metrics
+#      - Note the endpoint URL (format: https://<account-id>.tmprl.cloud/prometheus)
+#   2. Create a Kubernetes Secret with your API key:
+#        kubectl create secret generic temporal-cloud-metrics-token \
+#          -n monitoring \
+#          --from-literal=api-key=<YOUR_API_KEY>
+#   3. Verify what labels Temporal Cloud uses for versioned worker metrics:
+#        curl -s -H "Authorization: Bearer <api-key>" \
+#          "https://<account-id>.tmprl.cloud/prometheus/api/v1/query?\
+#           query=temporal_approximate_backlog_count" | jq '.data.result[].metric'
+#      Look for labels identifying the Build ID and deployment name.
+#      Common label names: build_id, deployment_series_name, worker_deployment_version.
+#   4. Update the prometheus-adapter rule and wrt-hpa-backlog.yaml with the
+#      correct label names, then uncomment this section.
+#
+# prometheus:
+#   prometheusSpec:
+#     secrets:
+#       - temporal-cloud-metrics-token
+#     additionalScrapeConfigs:
+#       - job_name: temporal_cloud
+#         scheme: https
+#         authorization:
+#           type: Bearer
+#           credentials_file: /etc/prometheus/secrets/temporal-cloud-metrics-token/api-key
+#         static_configs:
+#           - targets:
+#               - "<account-id>.tmprl.cloud"   # ← replace with your account ID
+#         metrics_path: /prometheus
+#         params:
+#           # Filter to your Temporal namespace to reduce metric cardinality
+#           # (Temporal Cloud may support this query param — check their docs)
+#           # namespace: ["<YOUR_TEMPORAL_NAMESPACE>"]
