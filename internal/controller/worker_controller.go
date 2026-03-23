@@ -375,8 +375,16 @@ func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetDegraded(
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionDegraded, metav1.ConditionTrue, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, reason, conditionMessage)
-	// Deprecated: set TemporalConnectionHealthy=False for v1.3.x compat.
-	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage)
+	// Deprecated: set TemporalConnectionHealthy=False for v1.3.x compat, but only for
+	// reasons that actually indicate connection/auth issues. Plan generation and execution
+	// failures are unrelated to connection health and should not trigger this condition.
+	switch reason {
+	case temporaliov1alpha1.ReasonTemporalConnectionNotFound,
+		temporaliov1alpha1.ReasonAuthSecretInvalid,
+		temporaliov1alpha1.ReasonTemporalClientCreationFailed,
+		temporaliov1alpha1.ReasonTemporalStateFetchFailed:
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage)
+	}
 	_ = r.Status().Update(ctx, workerDeploy)
 }
 

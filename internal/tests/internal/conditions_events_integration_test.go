@@ -97,8 +97,8 @@ func runConditionsAndEventsTests(
 		})
 	}
 
-	// The following three tests each trigger a different ConditionTemporalConnectionHealthy=False
-	// reason. They all run standalone (not through testTemporalWorkerDeploymentCreation) because
+	// The following three tests each trigger a different ConditionDegraded=True reason.
+	// They all run standalone (not through testTemporalWorkerDeploymentCreation) because
 	// the controller fails before creating any k8s Deployments, so the normal status-validation
 	// and deployment-wait machinery in testTemporalWorkerDeploymentCreation would time out.
 	//
@@ -110,7 +110,7 @@ func runConditionsAndEventsTests(
 	// All three share the same skeleton, extracted into testUnhealthyConnectionCondition below.
 	t.Run("conditions-missing-connection", func(t *testing.T) {
 		// No TemporalConnection is created; the controller cannot find the one referenced by
-		// the TWD and immediately sets the condition to False.
+		// the TWD and immediately sets Degraded=True.
 		testUnhealthyConnectionCondition(t, k8sClient,
 			"conditions-missing-connection", testNamespace, ts.GetDefaultNamespace(),
 			nil,
@@ -136,8 +136,8 @@ func runConditionsAndEventsTests(
 // testUnhealthyConnectionCondition is shared by the four error-path condition tests.
 // It optionally creates a TemporalConnection (nil connectionSpec = missing connection),
 // creates a TWD pointing to that connection with the given temporalNamespace, then asserts
-// that ConditionTemporalConnectionHealthy becomes False with the expected reason and that a
-// matching Warning event is emitted.
+// that ConditionDegraded becomes True with the expected reason and that a matching Warning
+// event is emitted.
 func testUnhealthyConnectionCondition(
 	t *testing.T,
 	k8sClient client.Client,
