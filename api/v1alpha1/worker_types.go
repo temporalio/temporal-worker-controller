@@ -102,6 +102,17 @@ const (
 	ConditionDegraded = "Degraded"
 )
 
+// Deprecated condition type constants. Maintained for backward compatibility with
+// monitoring and automation built against v1.3.x. Use Ready, Progressing, and Degraded
+// instead. These will be removed in the next major version.
+const (
+	// Deprecated: Use ConditionReady and ConditionDegraded instead.
+	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
+
+	// Deprecated: Use ConditionReady instead.
+	ConditionRolloutComplete = "RolloutComplete"
+)
+
 // Condition reason constants for TemporalWorkerDeployment.
 //
 // These strings appear in status.conditions[].reason and are part of the CRD's
@@ -150,6 +161,9 @@ const (
 	// ReasonTemporalStateFetchFailed is set on ConditionDegraded=True when the
 	// controller cannot query the current worker deployment state from Temporal.
 	ReasonTemporalStateFetchFailed = "TemporalStateFetchFailed"
+
+	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
+	ReasonTemporalConnectionHealthy = "TemporalConnectionHealthy"
 )
 
 // VersionStatus indicates the status of a version.

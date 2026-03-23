@@ -321,6 +321,11 @@ func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alp
 	r.setCondition(twd, temporaliov1alpha1.ConditionDegraded,
 		metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected, "No reconciliation errors")
 
+	// Deprecated: set TemporalConnectionHealthy=True on all successful reconciles for v1.3.x compat.
+	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+		metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy,
+		"TemporalConnection is healthy and auth secret is resolved")
+
 	switch twd.Status.TargetVersion.Status {
 	case temporaliov1alpha1.VersionStatusCurrent:
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
@@ -329,6 +334,10 @@ func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alp
 		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
+		// Deprecated: set RolloutComplete=True for v1.3.x compat.
+		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete,
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
+			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
 	case temporaliov1alpha1.VersionStatusRamping:
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping,
@@ -366,6 +375,8 @@ func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetDegraded(
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionDegraded, metav1.ConditionTrue, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, reason, conditionMessage)
+	// Deprecated: set TemporalConnectionHealthy=False for v1.3.x compat.
+	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage)
 	_ = r.Status().Update(ctx, workerDeploy)
 }
 

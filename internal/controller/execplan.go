@@ -202,6 +202,7 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 				"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
 			return fmt.Errorf("unable to set current deployment version: %w", err)
 		}
+		workerDeploy.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
 	} else {
 		if vcfg.RampPercentage > 0 {
 			l.Info("applying ramp", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
@@ -220,6 +221,12 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 				"Failed to set buildID %q as ramping version (%d%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
 			return fmt.Errorf("unable to set ramping deployment version: %w", err)
 		}
+		if vcfg.RampPercentage > 0 {
+			workerDeploy.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
+		}
+		// When RampPercentage == 0 we are clearing a stale ramp on a different build ID
+		// (see planner: "Reset ramp if needed"). The target version is already Current,
+		// so no in-memory status update is needed here.
 	}
 
 	if _, err := deploymentHandler.UpdateVersionMetadata(ctx, sdkclient.WorkerDeploymentUpdateVersionMetadataOptions{
