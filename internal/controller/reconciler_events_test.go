@@ -346,7 +346,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
 		// Deprecated conditions
 		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
-		assertCondition(t, twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete) //nolint:staticcheck // backward compat
+		assertCondition(t, twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)                     //nolint:staticcheck // backward compat
 	})
 
 	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
