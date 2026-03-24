@@ -114,7 +114,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	defer cancel()
 
 	l := log.FromContext(ctx)
-	l.Info("Running Reconcile loop")
+	l.V(1).Info("Running Reconcile loop")
 
 	// Fetch the worker deployment
 	var workerDeploy temporaliov1alpha1.TemporalWorkerDeployment
