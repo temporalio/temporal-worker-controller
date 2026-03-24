@@ -70,8 +70,16 @@ func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string 
 
 // TemplateData holds the variables available in Go template expressions within spec.template.
 type TemplateData struct {
-	// DeploymentName is the controller-generated versioned Deployment name.
+	// DeploymentName is the Temporal-side deployment name (format: "k8s-namespace/twd-name",
+	// e.g. "default/helloworld"). This matches the deployment name the worker registers under.
 	DeploymentName string
+	// Namespace is the Kubernetes namespace of the TemporalWorkerDeployment (e.g. "default").
+	// Valid as a Kubernetes label value. Use with TWDName and BuildID to construct the
+	// Temporal Cloud worker_version label value: "{{ .Namespace }}_{{ .TWDName }}_{{ .BuildID }}"
+	Namespace string
+	// TWDName is the name of the TemporalWorkerDeployment (e.g. "helloworld").
+	// Valid as a Kubernetes label value (≤63 chars, no special characters).
+	TWDName string
 	// TemporalNamespace is the Temporal namespace the worker connects to.
 	TemporalNamespace string
 	// BuildID is the Build ID for this version.
@@ -98,19 +106,22 @@ func RenderWorkerResourceTemplate(
 		return nil, fmt.Errorf("failed to unmarshal spec.template: %w", err)
 	}
 
+	twdName := wrt.Spec.TemporalWorkerDeploymentRef.Name
 	data := TemplateData{
-		DeploymentName:    deployment.Name,
+		DeploymentName:    wrt.Namespace + "/" + twdName,
+		Namespace:         wrt.Namespace,
+		TWDName:           twdName,
 		TemporalNamespace: temporalNamespace,
 		BuildID:           buildID,
 	}
 
-	selectorLabels := ComputeSelectorLabels(wrt.Spec.TemporalWorkerDeploymentRef.Name, buildID)
+	selectorLabels := ComputeSelectorLabels(twdName, buildID)
 
 	// Step 2: auto-inject scaleTargetRef and matchLabels into spec subtree.
 	// NestedFieldNoCopy returns a live reference so mutations are reflected in obj.Object directly.
 	if specRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec"); ok {
 		if spec, ok := specRaw.(map[string]interface{}); ok {
-			autoInjectFields(spec, data.DeploymentName, selectorLabels)
+			autoInjectFields(spec, deployment.Name, selectorLabels)
 		}
 	}
 

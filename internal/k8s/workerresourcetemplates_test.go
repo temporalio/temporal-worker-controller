@@ -290,6 +290,6 @@ func TestRenderWorkerResourceTemplate_WithTemplates(t *testing.T) {
 
 	spec, ok := obj.Object["spec"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "my-worker-abc123", spec["targetWorkload"])
+	assert.Equal(t, "production/my-worker", spec["targetWorkload"])
 	assert.Equal(t, "Monitor for build abc123 in my-temporal-ns", spec["description"])
 }
