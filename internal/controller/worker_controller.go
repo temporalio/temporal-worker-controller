@@ -322,8 +322,8 @@ func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alp
 		metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected, "No reconciliation errors")
 
 	// Deprecated: set TemporalConnectionHealthy=True on all successful reconciles for v1.3.x compat.
-	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy,
-		metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy,
+	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, //nolint:staticcheck // backward compat
+		metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy, //nolint:staticcheck // backward compat
 		"TemporalConnection is healthy and auth secret is resolved")
 
 	switch twd.Status.TargetVersion.Status {
@@ -335,7 +335,7 @@ func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alp
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
 		// Deprecated: set RolloutComplete=True for v1.3.x compat.
-		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete,
+		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, //nolint:staticcheck // backward compat
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
 	case temporaliov1alpha1.VersionStatusRamping:
@@ -383,7 +383,7 @@ func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetDegraded(
 		temporaliov1alpha1.ReasonAuthSecretInvalid,
 		temporaliov1alpha1.ReasonTemporalClientCreationFailed,
 		temporaliov1alpha1.ReasonTemporalStateFetchFailed:
-		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage)
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage) //nolint:staticcheck // backward compat
 	}
 	_ = r.Status().Update(ctx, workerDeploy)
 }

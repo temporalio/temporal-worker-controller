@@ -345,8 +345,8 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy)
-		assertCondition(t, twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
+		assertCondition(t, twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete) //nolint:staticcheck // backward compat
 	})
 
 	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
@@ -358,7 +358,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
 	})
 
 	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
@@ -370,7 +370,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
 	})
 
 	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
@@ -382,7 +382,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionDegraded, metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
 	})
 }
 
@@ -450,7 +450,7 @@ func TestReconcile_TemporalConnectionNotFound(t *testing.T) {
 	assert.Equal(t, temporaliov1alpha1.ReasonTemporalConnectionNotFound, cond.Reason)
 	assert.Contains(t, cond.Message, connName)
 	// Deprecated condition
-	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
+	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
 	require.NotNil(t, connHealthy, "deprecated TemporalConnectionHealthy condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, connHealthy.Status)
 }
@@ -534,7 +534,7 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 			assert.Equal(t, metav1.ConditionTrue, cond.Status)
 			assert.Equal(t, tc.expectedReason, cond.Reason)
 			// Deprecated condition
-			connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy)
+			connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
 			require.NotNil(t, connHealthy, "deprecated TemporalConnectionHealthy condition should be set")
 			assert.Equal(t, metav1.ConditionFalse, connHealthy.Status)
 		})
