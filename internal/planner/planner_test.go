@@ -952,7 +952,7 @@ func TestGetScaleDeployments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec)
+			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec, nil)
 			assert.Equal(t, len(tc.expectScales), len(scales), "unexpected number of scales")
 			actualScaleDeploymentNames := make([]string, 0)
 			for deploymentRef, actualReplicas := range scales {
@@ -3312,7 +3312,7 @@ func TestGetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "my-worker-build-abc", spec["targetWorkload"], ".DeploymentName not rendered")
+	assert.Equal(t, "k8s-production/my-worker", spec["targetWorkload"], ".DeploymentName not rendered")
 	assert.Equal(t, "build-build-abc", spec["versionLabel"], ".BuildID not rendered")
 	assert.Equal(t, "temporal-production", spec["temporalNamespace"], ".TemporalNamespace not rendered")
 }
