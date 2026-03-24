@@ -1,0 +1,30 @@
+# ServiceMonitor — tells Prometheus to scrape worker pod metrics.
+#
+# Selects the headless Service created by the helloworld Helm chart
+# (internal/demo/helloworld/helm/helloworld/templates/metrics-service.yaml),
+# which exposes port 9090 (/metrics) on all versioned worker pods.
+#
+# The release: prometheus label is required so the Prometheus instance
+# (installed via kube-prometheus-stack as "prometheus") picks up this monitor.
+#
+# Apply after helm install/upgrade:
+#   kubectl apply -f internal/demo/k8s/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: temporal-helloworld-worker
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - default
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: helloworld
+      app.kubernetes.io/component: worker-metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s

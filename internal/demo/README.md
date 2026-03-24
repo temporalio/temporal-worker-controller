@@ -147,6 +147,33 @@ When you deploy a new worker version (e.g., step 8), the controller creates a ne
 
 See [docs/owned-resources.md](../../docs/worker-resource-templates.md) for full documentation.
 
+> **Note**: If you plan to continue to the Metric-Based HPA Scaling Demo below, delete this WRT before proceeding. Two WRTs targeting the same TemporalWorkerDeployment with the same resource kind will create conflicting HPAs.
+> ```bash
+> kubectl delete -f examples/wrt-hpa.yaml
+> ```
+
+---
+
+### Grafana Dashboard
+
+A pre-built Grafana dashboard is included at `internal/demo/k8s/grafana-dashboard.json`. It shows:
+- HPA current vs desired replicas per version
+- Activity slot utilization per version
+- Workflow and activity task backlog per version
+- Raw per-pod slot gauges (used vs available)
+
+**Import the dashboard:**
+
+1. Port-forward Grafana:
+   ```bash
+   kubectl -n monitoring port-forward svc/prometheus-grafana 3000:80 &
+   ```
+2. Open http://localhost:3000 (default credentials: `admin` / `prom-operator`)
+3. Go to **Dashboards → Import** → **Upload JSON file**
+4. Select `internal/demo/k8s/grafana-dashboard.json`
+
+The dashboard auto-refreshes every 10s and defaults to a 30-minute time window. Use it to tune HPA targets and observe per-version scaling behaviour during progressive rollouts.
+
 ---
 
 ### Metric-Based HPA Scaling Demo
@@ -168,11 +195,17 @@ helm repo update
 helm install prometheus prometheus-community/kube-prometheus-stack \
   -n monitoring --create-namespace \
   -f internal/demo/k8s/prometheus-stack-values.yaml
+
+helm install prometheus-adapter prometheus-community/prometheus-adapter \
+  -n monitoring \
+  -f internal/demo/k8s/prometheus-adapter-values.yaml
+
+kubectl apply -f internal/demo/k8s/servicemonitor.yaml
 ```
 
 Wait for the stack to be ready:
 ```bash
-kubectl -n monitoring rollout status deployment/prometheus-prometheus-adapter
+kubectl -n monitoring rollout status deployment/prometheus-adapter
 ```
 
 #### Phase 1: Scale on slot utilization
@@ -224,41 +257,44 @@ Stop the load generator (`Ctrl-C`) and watch the HPA scale back down as in-fligh
 
 `approximate_backlog_count` measures tasks queued in Temporal but not yet started on a worker. Adding it as a second HPA metric means the HPA scales up on *arriving* work even before slots are full — important for bursty traffic.
 
-**Step 1 — Configure Temporal Cloud scrape.**
+> **Note:** Temporal Cloud emits `temporal_approximate_backlog_count` with a combined
+> `version="namespace/twd-name:build-id"` label that contains characters invalid in
+> Kubernetes label values (`/` and `:`). The recording rule in
+> `prometheus-stack-values.yaml` uses `label_replace` to extract `twd_name` and
+> `build_id` as separate k8s-compatible labels, producing `temporal_backlog_count_by_version`.
+> The HPA then selects on those labels — the same pair used by Phase 1.
 
-1. Find your Temporal Cloud account ID and metrics endpoint (Cloud UI → Settings → Integrations → Metrics).
-2. Create the credentials Secret:
-   ```bash
-   kubectl create secret generic temporal-cloud-metrics-token \
-     -n monitoring \
-     --from-literal=api-key=<YOUR_TEMPORAL_CLOUD_API_KEY>
-   ```
-3. Verify what labels Temporal Cloud uses for versioned-worker metrics:
-   ```bash
-   curl -s -H "Authorization: Bearer <YOUR_API_KEY>" \
-     "https://<account-id>.tmprl.cloud/prometheus/api/v1/query?query=temporal_approximate_backlog_count" \
-     | jq '.data.result[].metric'
-   ```
-   Note the label name that identifies the Build ID and deployment name. Common names: `build_id`, `deployment_series_name`, `worker_deployment_version`.
+**Step 1 — Create the Temporal Cloud credentials secret.**
 
-4. Edit `internal/demo/k8s/prometheus-stack-values.yaml`:
-   - Fill in `<account-id>` in the scrape target
-   - Uncomment the `prometheus:` scrape config block and the `prometheus-adapter` rule for `temporal_approximate_backlog_count`
+Create a Temporal Cloud metrics API key (separate from the namespace API key) at Cloud UI → Settings → Observability → Generate API Key. Save it to `certs/metrics-api-key.txt`, then create the secret in the `monitoring` namespace:
+```bash
+kubectl create secret generic temporal-cloud-api-key \
+  -n monitoring \
+  --from-file=api-key=certs/metrics-api-key.txt
+```
 
-5. Upgrade Prometheus:
-   ```bash
-   helm upgrade prometheus prometheus-community/kube-prometheus-stack \
-     -n monitoring \
-     -f internal/demo/k8s/prometheus-stack-values.yaml
-   ```
+**Step 2 — Upgrade Prometheus and prometheus-adapter.**
 
-6. Verify the metric is flowing in the Prometheus UI: query `temporal_approximate_backlog_count`.
+The scrape config and recording rule are already configured in `prometheus-stack-values.yaml`:
+```bash
+helm upgrade prometheus prometheus-community/kube-prometheus-stack \
+  -n monitoring -f internal/demo/k8s/prometheus-stack-values.yaml
 
-**Step 2 — Update the WRT label selector.**
+helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
+  -n monitoring -f internal/demo/k8s/prometheus-adapter-values.yaml
+```
 
-Open `examples/wrt-hpa-backlog.yaml` and update the `matchLabels` key under `approximate_backlog_count` to match the actual label name from step 1 above.
+**Step 3 — Verify the backlog metric is flowing.**
 
-**Step 3 — Apply the combined WRT.**
+```bash
+kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9092:9090 &
+curl -s 'http://localhost:9092/api/v1/query?query=temporal_backlog_count_by_version' \
+  | jq '.data.result'
+```
+
+You should see a result with `twd_name` and `build_id` labels. If the result is empty, wait 15–30s for the recording rule to evaluate.
+
+**Step 4 — Apply the combined WRT.**
 ```bash
 # Remove the Phase 1 WRT first to avoid two HPAs targeting the same Deployment
 kubectl delete -f examples/wrt-hpa-slot-utilization.yaml

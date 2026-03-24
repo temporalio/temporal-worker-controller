@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -31,9 +32,17 @@ func configureObservability(deploymentName, buildID string, metricsPort int) (l 
 	if err != nil {
 		panic(err)
 	}
+	// Extract the TWD name from the Temporal deployment name ("namespace/name").
+	twdName := deploymentName
+	if idx := strings.LastIndex(deploymentName, "/"); idx >= 0 {
+		twdName = deploymentName[idx+1:]
+	}
 	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
-		Meter:             metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
-		InitialAttributes: attribute.NewSet(attribute.String("version", deploymentName+":"+buildID)),
+		Meter: metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
+		InitialAttributes: attribute.NewSet(
+			attribute.String("twd_name", twdName),
+			attribute.String("build_id", buildID),
+		),
 	})
 
 	go func() {
