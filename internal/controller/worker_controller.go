@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	"go.temporal.io/api/serviceerror"
+	sdkclient "go.temporal.io/sdk/client"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 	appsv1 "k8s.io/api/apps/v1"
@@ -28,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -44,6 +47,10 @@ const (
 
 	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by temporalWorkerDeploymentRef.name.
 	wrtWorkerRefKey = ".spec.temporalWorkerDeploymentRef.name"
+
+	// twdFinalizerName is the finalizer added to TemporalWorkerDeployment resources
+	// to ensure Temporal server-side versioning data is cleaned up before the CRD is deleted.
+	twdFinalizerName = "temporal.io/worker-deployment-cleanup"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -137,6 +144,35 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		// the next reconcile fires naturally when the TWD is created. If the List or
 		// status updates fail (transient API errors), return the error to requeue with backoff.
 		return ctrl.Result{}, r.markWRTsTWDNotFound(ctx, req.NamespacedName)
+	}
+
+	// Handle deletion: clean up Temporal server-side versioning data before allowing
+	// the CRD to be deleted. Without this, stale build ID routing persists in Temporal
+	// and prevents unversioned workers from picking up tasks on the same task queue.
+	if !workerDeploy.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(&workerDeploy, twdFinalizerName) {
+			l.Info("TemporalWorkerDeployment is being deleted, running cleanup")
+			if err := r.handleDeletion(ctx, l, &workerDeploy); err != nil {
+				l.Error(err, "failed to clean up Temporal server-side deployment data")
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+
+			// Cleanup succeeded, remove the finalizer so K8s can delete the resource
+			controllerutil.RemoveFinalizer(&workerDeploy, twdFinalizerName)
+			if err := r.Update(ctx, &workerDeploy); err != nil {
+				return ctrl.Result{}, err
+			}
+			l.Info("Temporal server-side cleanup complete, finalizer removed")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Ensure finalizer is present on non-deleted resources
+	if !controllerutil.ContainsFinalizer(&workerDeploy, twdFinalizerName) {
+		controllerutil.AddFinalizer(&workerDeploy, twdFinalizerName)
+		if err := r.Update(ctx, &workerDeploy); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
@@ -357,6 +393,136 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// handleDeletion cleans up Temporal server-side deployment versioning data when
+// a TemporalWorkerDeployment CRD is deleted. This prevents stale build ID routing
+// from blocking unversioned workers on the same task queue.
+//
+// The cleanup sequence:
+//  1. Set the current version to "unversioned" (empty BuildID) so new tasks route to unversioned workers
+//  2. Delete all non-current/non-ramping versions (drained/inactive ones)
+//  3. The deployment itself will be garbage collected by Temporal once all versions are removed
+func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+) error {
+	// Resolve Temporal connection
+	var temporalConnection temporaliov1alpha1.TemporalConnection
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name,
+		Namespace: workerDeploy.Namespace,
+	}, &temporalConnection); err != nil {
+		if apierrors.IsNotFound(err) {
+			// TemporalConnection already deleted; we can't talk to Temporal.
+			// Log a warning and allow deletion to proceed to avoid blocking forever.
+			l.Info("TemporalConnection not found, skipping Temporal server-side cleanup")
+			return nil
+		}
+		return fmt.Errorf("unable to fetch TemporalConnection: %w", err)
+	}
+
+	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
+	if err != nil {
+		return fmt.Errorf("unable to resolve auth secret name: %w", err)
+	}
+
+	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
+		HostPort:   temporalConnection.Spec.HostPort,
+		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		SecretName: secretName,
+		AuthMode:   authMode,
+	})
+	if !ok {
+		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
+			K8sNamespace:      workerDeploy.Namespace,
+			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+			Spec:              temporalConnection.Spec,
+			Identity:          getControllerIdentity(),
+		})
+		if err != nil {
+			return fmt.Errorf("unable to parse Temporal auth secret: %w", err)
+		}
+		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
+		if err != nil {
+			return fmt.Errorf("unable to create TemporalClient: %w", err)
+		}
+		temporalClient = c
+	}
+
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(workerDeploymentName)
+
+	// Describe the deployment to get current state
+	resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+	if err != nil {
+		var notFound *serviceerror.NotFound
+		if errors.As(err, &notFound) {
+			l.Info("Worker Deployment not found on Temporal server, nothing to clean up")
+			return nil
+		}
+		return fmt.Errorf("unable to describe worker deployment: %w", err)
+	}
+
+	routingConfig := resp.Info.RoutingConfig
+
+	// Step 1: Set current version to unversioned (empty BuildID) so tasks route to unversioned workers.
+	// This is the critical step that unblocks task dispatch.
+	if routingConfig.CurrentVersion != nil {
+		l.Info("Setting current version to unversioned", "previousBuildID", routingConfig.CurrentVersion.BuildID)
+		if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
+			BuildID:                 "", // empty = unversioned
+			ConflictToken:           resp.ConflictToken,
+			Identity:                getControllerIdentity(),
+			IgnoreMissingTaskQueues: true,
+		}); err != nil {
+			return fmt.Errorf("unable to set current version to unversioned: %w", err)
+		}
+		l.Info("Successfully set current version to unversioned")
+	} else {
+		l.Info("No current version set, skipping unversioned redirect")
+	}
+
+	// Step 2: If there's a ramping version, clear it.
+	if routingConfig.RampingVersion != nil {
+		l.Info("Clearing ramping version", "buildID", routingConfig.RampingVersion.BuildID)
+		if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+			BuildID:    "",
+			Percentage: 0,
+			Identity:   getControllerIdentity(),
+		}); err != nil {
+			l.Info("Failed to clear ramping version (may have been cleared by SetCurrentVersion)", "error", err)
+		}
+	}
+
+	// Step 3: Delete versions that are eligible. Versions that are still draining
+	// are force-deleted with SkipDrainage since the TWD is being removed entirely.
+	for _, version := range resp.Info.VersionSummaries {
+		buildID := version.Version.BuildID
+		l.Info("Deleting worker deployment version", "buildID", buildID)
+		if _, err := deploymentHandler.DeleteVersion(ctx, sdkclient.WorkerDeploymentDeleteVersionOptions{
+			BuildID:      buildID,
+			SkipDrainage: true,
+			Identity:     getControllerIdentity(),
+		}); err != nil {
+			// Log but don't fail -- the version may still have pollers or be current.
+			// Temporal will garbage collect it eventually.
+			l.Info("Could not delete version (will be garbage collected)", "buildID", buildID, "error", err)
+		}
+	}
+
+	// Step 4: Attempt to delete the deployment itself. This only succeeds if all versions are gone.
+	l.Info("Attempting to delete worker deployment from Temporal server", "name", workerDeploymentName)
+	if _, err := temporalClient.WorkerDeploymentClient().Delete(ctx, sdkclient.WorkerDeploymentDeleteOptions{
+		Name:     workerDeploymentName,
+		Identity: getControllerIdentity(),
+	}); err != nil {
+		// Non-fatal: deployment will be garbage collected once all versions drain.
+		l.Info("Could not delete worker deployment (will be garbage collected)", "name", workerDeploymentName, "error", err)
+	}
+
+	return nil
 }
 
 // setCondition sets a condition on the TemporalWorkerDeployment status.
