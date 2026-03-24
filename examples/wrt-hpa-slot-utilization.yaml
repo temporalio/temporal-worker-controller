@@ -49,8 +49,9 @@ spec:
         # of this Build ID. The metric is computed by a Prometheus recording rule
         # (temporal_slot_utilization) and exposed via prometheus-adapter.
         #
-        # The selector version: "{{ .BuildID }}" is rendered per-version by the controller,
-        # so each HPA targets only the metric for its own Build ID.
+        # twd_name and build_id are emitted directly by the worker as separate labels
+        # (both valid Kubernetes label values: ≤63 chars, alphanumeric with - and _).
+        # Together they uniquely identify a single versioned Deployment across all TWDs.
         #
         # Target: maintain ~70% slot utilization (averageValue 700m = 0.70 out of 1.0).
         # The HPA adds replicas until:
@@ -61,12 +62,13 @@ spec:
               name: temporal_slot_utilization
               selector:
                 matchLabels:
-                  version: "{{ .BuildID }}"
+                  twd_name: "{{ .TWDName }}" # < 63 chars
+                  build_id: "{{ .BuildID }}"
             target:
               type: AverageValue
-              averageValue: "700m"   # 700 milli-units = 0.70 = 70% utilization
+              averageValue: "50m"   # 400 milli-units = 0.40 = 40% utilization target
       behavior:
         scaleUp:
-          stabilizationWindowSeconds: 30   # react quickly to rising load
+          stabilizationWindowSeconds: 0    # scale up immediately (set to 30 in production)
         scaleDown:
           stabilizationWindowSeconds: 120  # drain slowly so in-flight workflows finish

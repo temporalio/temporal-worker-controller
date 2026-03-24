@@ -193,7 +193,7 @@ apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
 apply-hpa-load: ## Start ~2 workflows/sec to build a backlog and drive HPA scaling to ~10 replicas
 	@echo "Starting load at ~2 workflows/sec. Press Ctrl-C to stop."
 	@while true; do \
-		$(MAKE) -s start-sample-workflow; \
+		$(MAKE) -s start-sample-workflow & \
 		sleep 0.5; \
 	done
 

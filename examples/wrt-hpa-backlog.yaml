@@ -8,22 +8,19 @@
 # workflows drain.
 #
 # Prerequisites (in addition to Phase 1 prerequisites):
-#   1. Complete the Temporal Cloud scrape config in internal/demo/k8s/prometheus-stack-values.yaml:
-#      - Set your account ID in the scrape target
-#      - Create the temporal-cloud-metrics-token Secret
-#      - Uncomment the scrape config and prometheus-adapter rule
-#      - Upgrade the Helm release: helm upgrade prometheus ... -f prometheus-stack-values.yaml
-#   2. Verify the approximate_backlog_count metric is flowing:
-#        kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9090 &
-#        # Query: temporal_approximate_backlog_count — check which labels are present
-#   3. Update the matchLabels selector below to match the actual label names emitted by
-#      Temporal Cloud for your versioned workers (see prometheus-stack-values.yaml Phase 2 notes).
+#   1. Create the Temporal Cloud API key secret:
+#        kubectl create secret generic temporal-cloud-metrics-token \
+#          -n monitoring \
+#          --from-file=api-key=certs/api-key.txt
+#   2. Apply the updated prometheus-stack and adapter configs:
+#        helm upgrade prometheus prometheus-community/kube-prometheus-stack \
+#          -n monitoring -f internal/demo/k8s/prometheus-stack-values.yaml
+#        helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
+#          -n monitoring -f internal/demo/k8s/prometheus-adapter-values.yaml
+#   3. Verify the backlog metric is flowing:
+#        # Port-forward Prometheus and query: temporal_backlog_count_by_version
 #
-# ⚠️  The worker_deployment_version label value below uses Go template expressions
-#     rendered per-version by the WRT controller. Update the label key if Temporal Cloud
-#     uses a different label name (e.g., build_id / deployment_series_name).
-#
-# Apply (after completing the prerequisites above):
+# Apply:
 #   kubectl apply -f examples/wrt-hpa-backlog.yaml
 #
 # Watch the full demo:
@@ -48,45 +45,46 @@ spec:
       minReplicas: 1
       maxReplicas: 15
       metrics:
-        # Metric 1: slot utilization — scale up when workers are busy.
-        # Same as wrt-hpa-slot-utilization.yaml.
-        - type: External
-          external:
-            metric:
-              name: temporal_slot_utilization
-              selector:
-                matchLabels:
-                  version: "{{ .BuildID }}"
-            target:
-              type: AverageValue
-              averageValue: "700m"
+#        # Metric 1: slot utilization — scale up when workers are busy.
+#        - type: External
+#          external:
+#            metric:
+#              name: temporal_slot_utilization
+#              selector:
+#                matchLabels:
+#                  twd_name: "{{ .TWDName }}"
+#                  build_id: "{{ .BuildID }}"
+#            target:
+#              type: AverageValue
+#              averageValue: "400m"
 
-        # Metric 2: approximate backlog count — scale up when tasks are queued.
-        # The HPA uses whichever metric demands more replicas (max of the two).
-        #
-        # ⚠️  The label key (worker_deployment_version) and value format
-        #     ({{ .DeploymentName }}:{{ .BuildID }}) must match what Temporal Cloud
-        #     actually emits. Verify with:
-        #       curl -H "Authorization: Bearer <api-key>" \
-        #         "https://<account-id>.tmprl.cloud/prometheus/api/v1/query?\
-        #          query=temporal_approximate_backlog_count" | jq '.data.result[].metric'
+        # Metric 2: backlog count — scale up when tasks are queued but not yet picked up.
+        # Temporal Cloud's worker_version label ("{namespace}_{twd-name}_{build-id}") is
+        # parsed by the recording rule in prometheus-stack-values.yaml into separate
+        # namespace, twd_name, and build_id labels. Both twd_name and build_id are needed:
+        # build_id is only unique within a single TWD, not across all TWDs in a namespace.
+        # The HPA uses whichever metric demands more replicas.
         - type: External
           external:
             metric:
-              name: temporal_approximate_backlog_count
+              name: temporal_backlog_count_by_version
               selector:
                 matchLabels:
-                  # Update this label key/value to match your Temporal Cloud output.
-                  worker_deployment_version: "{{ .DeploymentName }}:{{ .BuildID }}"
+                  # twd_name and build_id are extracted from Temporal Cloud's worker_version
+                  # label by the recording rule in prometheus-stack-values.yaml.
+                  # build_id alone is not enough — it is only unique within one TWD.
+                  twd_name: "{{ .TWDName }}"
+                  build_id: "{{ .BuildID }}"
+                  task_type: "Activity"
             target:
               # Scale up if more than 5 tasks are queued per current replica.
-              # Tune this based on your workflow latency requirements.
+              # Tune based on your workflow latency requirements.
               type: AverageValue
               averageValue: "5"
       behavior:
         scaleUp:
-          stabilizationWindowSeconds: 30
+          stabilizationWindowSeconds: 0
         scaleDown:
-          # Use a longer stabilization window on scale-down to avoid scaling v1 down
-          # too aggressively while pinned workflows are still running.
+          # Longer window on scale-down so pinned v1 workflows finish draining
+          # before replicas are removed.
           stabilizationWindowSeconds: 300
