@@ -202,6 +202,10 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 				"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
 			return fmt.Errorf("unable to set current deployment version: %w", err)
 		}
+		// Update the in-memory status to reflect the promotion. The status was mapped
+		// from Temporal state before plan execution, so it is stale at this point.
+		// syncConditions (called at end of reconcile) derives Ready/Progressing from
+		// TargetVersion.Status, so it must be current to avoid a one-cycle lag.
 		workerDeploy.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
 	} else {
 		if vcfg.RampPercentage > 0 {
@@ -221,6 +225,8 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 				"Failed to set buildID %q as ramping version (%d%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
 			return fmt.Errorf("unable to set ramping deployment version: %w", err)
 		}
+		// Same reasoning as the SetCurrent path above: update the in-memory status
+		// so syncConditions sees the correct state on this reconcile cycle.
 		if vcfg.RampPercentage > 0 {
 			workerDeploy.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
 		}
