@@ -110,7 +110,15 @@ rules:
     verbs:
       - get
       - list
+      - patch
+      - update
       - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - temporalconnections/finalizers
+    verbs:
+      - update
   - apiGroups:
       - temporal.io
     resources:

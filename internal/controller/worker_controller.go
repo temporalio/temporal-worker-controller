@@ -51,6 +51,11 @@ const (
 	// twdFinalizerName is the finalizer added to TemporalWorkerDeployment resources
 	// to ensure Temporal server-side versioning data is cleaned up before the CRD is deleted.
 	twdFinalizerName = "temporal.io/worker-deployment-cleanup"
+
+	// tcFinalizerName is the finalizer added to TemporalConnection resources to prevent
+	// them from being deleted while any TemporalWorkerDeployment still references them.
+	// This ensures the connection is available during TWD deletion cleanup.
+	tcFinalizerName = "temporal.io/connection-in-use"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -108,7 +113,8 @@ type TemporalWorkerDeploymentReconciler struct {
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
@@ -155,6 +161,12 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 			if err := r.handleDeletion(ctx, l, &workerDeploy); err != nil {
 				l.Error(err, "failed to clean up Temporal server-side deployment data")
 				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+
+			// Remove our finalizer from the TemporalConnection if no other TWDs reference it.
+			if err := r.removeConnectionFinalizerIfUnused(ctx, l, &workerDeploy); err != nil {
+				l.Error(err, "failed to remove finalizer from TemporalConnection")
+				return ctrl.Result{}, err
 			}
 
 			// Cleanup succeeded, remove the finalizer so K8s can delete the resource
@@ -205,6 +217,13 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 			temporaliov1alpha1.ReasonTemporalConnectionNotFound,
 			fmt.Sprintf("Unable to fetch TemporalConnection %q: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err),
 			fmt.Sprintf("TemporalConnection %q not found: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err))
+		return ctrl.Result{}, err
+	}
+
+	// Ensure our finalizer is on the TemporalConnection so it cannot be deleted
+	// while this TWD still references it. This guarantees the connection is available
+	// during TWD deletion cleanup.
+	if err := r.ensureConnectionFinalizer(ctx, l, &temporalConnection); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -408,18 +427,14 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
 	l logr.Logger,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
 ) error {
-	// Resolve Temporal connection
+	// Resolve Temporal connection.
+	// The TemporalConnection is guaranteed to exist because we hold a finalizer on it
+	// that prevents deletion while any TWD references it.
 	var temporalConnection temporaliov1alpha1.TemporalConnection
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name,
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
-		if apierrors.IsNotFound(err) {
-			// TemporalConnection already deleted; we can't talk to Temporal.
-			// Log a warning and allow deletion to proceed to avoid blocking forever.
-			l.Info("TemporalConnection not found, skipping Temporal server-side cleanup")
-			return nil
-		}
 		return fmt.Errorf("unable to fetch TemporalConnection: %w", err)
 	}
 
@@ -610,6 +625,74 @@ func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetBlocked(
 		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage) //nolint:staticcheck // backward compat
 	}
 	_ = r.Status().Update(ctx, workerDeploy)
+}
+
+// ensureConnectionFinalizer adds our finalizer to the TemporalConnection so it
+// cannot be deleted while this TWD still needs it for cleanup.
+func (r *TemporalWorkerDeploymentReconciler) ensureConnectionFinalizer(
+	ctx context.Context,
+	l logr.Logger,
+	tc *temporaliov1alpha1.TemporalConnection,
+) error {
+	if !controllerutil.ContainsFinalizer(tc, tcFinalizerName) {
+		l.Info("Adding finalizer to TemporalConnection", "connection", tc.Name)
+		controllerutil.AddFinalizer(tc, tcFinalizerName)
+		if err := r.Update(ctx, tc); err != nil {
+			return fmt.Errorf("unable to add finalizer to TemporalConnection %q: %w", tc.Name, err)
+		}
+	}
+	return nil
+}
+
+// removeConnectionFinalizerIfUnused removes our finalizer from the TemporalConnection
+// if no other TWDs (besides the one being deleted) still reference it.
+func (r *TemporalWorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
+	ctx context.Context,
+	l logr.Logger,
+	deletingTWD *temporaliov1alpha1.TemporalWorkerDeployment,
+) error {
+	connectionName := deletingTWD.Spec.WorkerOptions.TemporalConnectionRef.Name
+
+	// List all TWDs in the same namespace
+	var twds temporaliov1alpha1.TemporalWorkerDeploymentList
+	if err := r.List(ctx, &twds, client.InNamespace(deletingTWD.Namespace)); err != nil {
+		return fmt.Errorf("unable to list TWDs: %w", err)
+	}
+
+	// Check if any other TWD (not the one being deleted) references this connection
+	for i := range twds.Items {
+		twd := &twds.Items[i]
+		if twd.Name == deletingTWD.Name {
+			continue
+		}
+		if twd.Spec.WorkerOptions.TemporalConnectionRef.Name == connectionName {
+			l.Info("TemporalConnection still referenced by another TWD, keeping finalizer",
+				"connection", connectionName, "referencedBy", twd.Name)
+			return nil
+		}
+	}
+
+	// No other TWDs reference this connection, remove the finalizer
+	var tc temporaliov1alpha1.TemporalConnection
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      connectionName,
+		Namespace: deletingTWD.Namespace,
+	}, &tc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // already gone
+		}
+		return fmt.Errorf("unable to fetch TemporalConnection %q: %w", connectionName, err)
+	}
+
+	if controllerutil.ContainsFinalizer(&tc, tcFinalizerName) {
+		l.Info("Removing finalizer from TemporalConnection", "connection", connectionName)
+		controllerutil.RemoveFinalizer(&tc, tcFinalizerName)
+		if err := r.Update(ctx, &tc); err != nil {
+			return fmt.Errorf("unable to remove finalizer from TemporalConnection %q: %w", connectionName, err)
+		}
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
