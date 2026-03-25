@@ -569,6 +569,17 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 
 	require.Error(t, err)
 	assertEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
+
+	// Verifying that ConditionProgressing=False is set
+	var updated temporaliov1alpha1.TemporalWorkerDeployment
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
+	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
+	require.NotNil(t, cond, "Progressing condition should be set")
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, ReasonPlanGenerationFailed, cond.Reason)
+	// PlanGenerationFailed is not a connection issue — TemporalConnectionHealthy must not be set.
+	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
+	assert.Nil(t, connHealthy, "TemporalConnectionHealthy should not be set for plan generation failures")
 }
 
 // TestReconcile_PlanExecutionFailed_EmitsEvent injects a Create failure so that
@@ -601,6 +612,16 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 
 	require.Error(t, err)
 	assertEventEmitted(t, drainEvents(recorder), ReasonPlanExecutionFailed)
+
+	var updated temporaliov1alpha1.TemporalWorkerDeployment
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
+	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
+	require.NotNil(t, cond, "Progressing condition should be set")
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, ReasonPlanExecutionFailed, cond.Reason)
+	// PlanExecutionFailed is not a connection issue — TemporalConnectionHealthy must not be set.
+	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
+	assert.Nil(t, connHealthy, "TemporalConnectionHealthy should not be set for plan execution failures")
 }
 
 // TestReconcile_DescribeWorkerDeploymentNotFound verifies that when the gRPC

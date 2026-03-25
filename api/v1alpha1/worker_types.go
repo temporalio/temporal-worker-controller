@@ -99,7 +99,7 @@ const (
 )
 
 // Deprecated condition type constants. Maintained for backward compatibility with
-// monitoring and automation built against v1.3.x. Use Ready, Progressing, and Degraded
+// monitoring and automation built against v1.3.x. Use Ready and Progressing
 // instead. These will be removed in the next major version of the CRD.
 const (
 	// Deprecated: Use ConditionReady and ConditionProgressing instead.

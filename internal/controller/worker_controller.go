@@ -272,11 +272,11 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// Derive Ready/Progressing/Degraded from rollout state before the final write.
+	// Derive Ready/Progressing from rollout state before the final write.
 	r.syncConditions(&workerDeploy)
 
 	// Single status write per reconcile: persists the generated status and
-	// conditions set during this loop (Ready, Progressing, Degraded).
+	// conditions set during this loop (Ready, Progressing).
 	if err := r.Status().Update(ctx, &workerDeploy); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{
