@@ -4,14 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       version_bump:
-        description: 'Type of version bump to perform'
+        description: 'Type of helm chart version bump to perform (none = publish as-is)'
         required: true
         default: 'patch'
         type: choice
         options:
+          - none
           - patch
           - minor
           - major
+      ref:
+        description: 'Branch or tag to publish from (defaults to main)'
+        required: false
+        default: 'main'
+        type: string
 
 permissions:
   contents: read
@@ -32,6 +38,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ steps.generate_token.outputs.token }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       - name: Configure Git
@@ -50,8 +57,14 @@ jobs:
           VERSION_BUMP: ${{ inputs.version_bump }}
         run: |
           # Get current version from Chart.yaml
-          CURRENT_VERSION=$(grep 'version:' helm/temporal-worker-controller/Chart.yaml | awk '{print $2}')
+          CURRENT_VERSION=$(grep '^version:' helm/temporal-worker-controller/Chart.yaml | awk '{print $2}')
           echo "Current version: $CURRENT_VERSION"
+
+          if [[ "${VERSION_BUMP}" == "none" ]]; then
+            echo "No version bump requested, publishing existing version: $CURRENT_VERSION"
+            echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Split version into parts
           IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
@@ -77,15 +90,17 @@ jobs:
           # Update Chart.yaml with new version
           sed -i "s/version: $CURRENT_VERSION/version: $NEW_VERSION/g" helm/temporal-worker-controller/Chart.yaml
 
-          # Also bump CRDs chart version
-          sed -i "s/version: $CURRENT_VERSION/version: $NEW_VERSION/g" helm/temporal-worker-controller-crds/Chart.yaml
+          # Also bump CRDs chart version if it exists
+          if [ -f helm/temporal-worker-controller-crds/Chart.yaml ]; then
+            sed -i "s/version: $CURRENT_VERSION/version: $NEW_VERSION/g" helm/temporal-worker-controller-crds/Chart.yaml
+            git add helm/temporal-worker-controller-crds/Chart.yaml
+          fi
 
           # Set output variable for use in later steps
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
-          # Commit both Chart.yaml files
+          # Commit Chart.yaml files
           git add helm/temporal-worker-controller/Chart.yaml
-          git add helm/temporal-worker-controller-crds/Chart.yaml
           git commit -m "Bump chart version to $NEW_VERSION [skip ci]"
           git push
 
@@ -102,10 +117,14 @@ jobs:
           VERSION=${{ steps.bump_version.outputs.version }}
           echo "Chart version: $VERSION"
 
-          # Package and push the CRDs chart
-          helm package ./helm/temporal-worker-controller-crds
-          helm push temporal-worker-controller-crds-${VERSION}.tgz oci://docker.io/temporalio
-          echo "✅ CRDs chart pushed successfully to oci://docker.io/temporalio/temporal-worker-controller-crds:${VERSION}"
+          # Package and push the CRDs chart if it exists
+          if [ -d "./helm/temporal-worker-controller-crds" ]; then
+            helm package ./helm/temporal-worker-controller-crds
+            helm push temporal-worker-controller-crds-${VERSION}.tgz oci://docker.io/temporalio
+            echo "✅ CRDs chart pushed successfully to oci://docker.io/temporalio/temporal-worker-controller-crds:${VERSION}"
+          else
+            echo "⚠️ CRDs chart not found, skipping"
+          fi
 
           # Package and push the controller chart
           helm package ./helm/temporal-worker-controller
