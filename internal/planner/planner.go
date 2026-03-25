@@ -44,12 +44,12 @@ type WorkerResourceApply struct {
 // Plan holds the actions to execute during reconciliation
 type Plan struct {
 	// Which actions to take
-	DeleteDeployments []*appsv1.Deployment
-	ScaleDeployments  map[*corev1.ObjectReference]uint32
-	UpdateDeployments []*appsv1.Deployment
-	ShouldCreateDeployment   bool
-	VersionConfig            *VersionConfig
-	TestWorkflows            []WorkflowConfig
+	DeleteDeployments      []*appsv1.Deployment
+	ScaleDeployments       map[*corev1.ObjectReference]uint32
+	UpdateDeployments      []*appsv1.Deployment
+	ShouldCreateDeployment bool
+	VersionConfig          *VersionConfig
+	TestWorkflows          []WorkflowConfig
 
 	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []WorkerResourceApply
@@ -679,7 +679,6 @@ func getScaleDeployments(
 
 	return scaleDeployments
 }
-
 
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
