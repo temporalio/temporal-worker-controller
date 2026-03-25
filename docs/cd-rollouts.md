@@ -125,28 +125,25 @@ The two standard conditions (`Ready`, `Progressing`) keep the Lua simple — it 
 # In your argocd-cm ConfigMap
 data:
   resource.customizations.health.temporal.io_TemporalWorkerDeployment: |
-    local hs = {status = "Progressing", message = "Waiting for conditions"}
+    local ready = nil
+    local progressing = nil
     if obj.status ~= nil and obj.status.conditions ~= nil then
-      for _, condition in ipairs(obj.status.conditions) do
-        if condition.type == "Ready" then
-          if condition.status == "True" then
-            hs.status = "Healthy"
-            hs.message = condition.message
-            return hs
-          end
-        end
-        if condition.type == "Progressing" then
-          if condition.status == "True" then
-            hs.status = "Progressing"
-          else
-            hs.status = "Degraded"
-          end
-          hs.message = condition.message
-          return hs
-        end
+      for _, c in ipairs(obj.status.conditions) do
+        if c.type == "Ready" then ready = c end
+        if c.type == "Progressing" then progressing = c end
       end
     end
-    return hs
+    if ready ~= nil and ready.status == "True" then
+      return {status = "Healthy", message = ready.message}
+    end
+    if progressing ~= nil then
+      if progressing.status == "True" then
+        return {status = "Progressing", message = progressing.message}
+      else
+        return {status = "Degraded", message = progressing.message}
+      end
+    end
+    return {status = "Progressing", message = "Waiting for conditions"}
 ```
 
 With a health check like this in place:
