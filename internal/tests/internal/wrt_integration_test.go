@@ -157,11 +157,12 @@ func wrtTestCases() []testCase {
 				}),
 		},
 
-		// Template variable rendering end-to-end.
-		// Verifies that {{ .K8sNamespace }} and {{ .TWDName }} in a WRT annotation are rendered
-		// to the correct values before the resource is applied.
+		// Metric selector matchLabels injection end-to-end.
+		// Verifies that the controller appends worker_deployment_name, worker_deployment_build_id,
+		// and temporal_namespace to an External metric selector that has matchLabels present,
+		// and that user-provided labels (task_type) coexist alongside the injected keys.
 		{
-			name: "wrt-template-variable",
+			name: "wrt-metric-selector-injection",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -176,23 +177,35 @@ func wrtTestCases() []testCase {
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					buildID := k8s.ComputeBuildID(twd)
-					wrtName := "template-hpa"
-					expectedDepName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
-					expectedLabel := twd.Namespace + "/" + twd.Name
+					wrtName := "metric-sel-hpa"
+					depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
 
 					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
 						"apiVersion": "autoscaling/v2",
 						"kind": "HorizontalPodAutoscaler",
-						"metadata": {
-							"annotations": {
-								"my-workload": "{{ .K8sNamespace }}/{{ .TWDName }}"
-							}
-						},
 						"spec": {
 							"scaleTargetRef": {},
 							"minReplicas": 2,
 							"maxReplicas": 5,
-							"metrics": []
+							"metrics": [
+								{
+									"type": "External",
+									"external": {
+										"metric": {
+											"name": "temporal_backlog_count_by_version",
+											"selector": {
+												"matchLabels": {
+													"task_type": "Activity"
+												}
+											}
+										},
+										"target": {
+											"type": "AverageValue",
+											"averageValue": "10"
+										}
+									}
+								}
+							]
 						}
 					}`))
 					if err := env.K8sClient.Create(ctx, wrt); err != nil {
@@ -200,20 +213,15 @@ func wrtTestCases() []testCase {
 					}
 
 					hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
-					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, expectedDepName, 30*time.Second)
+					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
 
-					eventually(t, 30*time.Second, time.Second, func() error {
-						var hpa autoscalingv2.HorizontalPodAutoscaler
-						if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: twd.Namespace}, &hpa); err != nil {
-							return err
-						}
-						got := hpa.Annotations["my-workload"]
-						if got != expectedLabel {
-							return fmt.Errorf("annotation my-workload = %q, want %q", got, expectedLabel)
-						}
-						return nil
-					})
-					t.Logf("Template variables {{ .K8sNamespace }}/{{ .TWDName }} correctly rendered to %q", expectedLabel)
+					expectedMetricLabels := map[string]string{
+						"task_type":                  "Activity",
+						"worker_deployment_name":      twd.Namespace + "_" + twd.Name,
+						"worker_deployment_build_id":  buildID,
+						"temporal_namespace":          twd.Spec.WorkerOptions.TemporalNamespace,
+					}
+					waitForHPAWithInjectedMetricSelector(t, ctx, env.K8sClient, twd.Namespace, hpaName, expectedMetricLabels, 30*time.Second)
 				}),
 		},
 
@@ -513,6 +521,42 @@ func assertHPAOwnerRefToWRT(
 	}
 	t.Errorf("HPA %s/%s missing controller owner reference to WorkerResourceTemplate %s (ownerRefs: %+v)",
 		namespace, hpaName, expectedWRTName, hpa.OwnerReferences)
+}
+
+// waitForHPAWithInjectedMetricSelector polls until the named HPA has all expectedLabels
+// present in the first External metric entry's selector.matchLabels. Extra labels on the
+// HPA are allowed — the controller merges its labels into whatever the user provided.
+func waitForHPAWithInjectedMetricSelector(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace, hpaName string,
+	expectedLabels map[string]string,
+	timeout time.Duration,
+) {
+	t.Helper()
+	t.Logf("Waiting for HPA %q with injected metric selector labels in namespace %q", hpaName, namespace)
+	eventually(t, timeout, time.Second, func() error {
+		var hpa autoscalingv2.HorizontalPodAutoscaler
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: namespace}, &hpa); err != nil {
+			return err
+		}
+		if len(hpa.Spec.Metrics) == 0 {
+			return fmt.Errorf("HPA %s has no metrics", hpaName)
+		}
+		ext := hpa.Spec.Metrics[0].External
+		if ext == nil || ext.Metric.Selector == nil {
+			return fmt.Errorf("HPA %s first metric has no external selector", hpaName)
+		}
+		ml := ext.Metric.Selector.MatchLabels
+		for k, want := range expectedLabels {
+			if got := ml[k]; got != want {
+				return fmt.Errorf("HPA metric selector matchLabels[%q] = %q, want %q", k, got, want)
+			}
+		}
+		return nil
+	})
+	t.Logf("HPA %q has correctly injected metric selector labels", hpaName)
 }
 
 // waitForPDBWithInjectedMatchLabels polls until the named PDB exists and has the
