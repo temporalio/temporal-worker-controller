@@ -8,7 +8,7 @@ For migration help, see [migration-to-versioned.md](migration-to-versioned.md).
 
 ## Understanding the conditions
 
-The `TemporalWorkerDeployment` resource exposes three standard conditions on `status.conditions` that CD tools and scripts can consume.
+The `TemporalWorkerDeployment` resource exposes two standard conditions on `status.conditions` that CD tools and scripts can consume.
 
 ### `Ready`
 
@@ -23,20 +23,17 @@ The `TemporalWorkerDeployment` resource exposes three standard conditions on `st
 | `WaitingForPollers` | Target version's Deployment exists but workers haven't registered with Temporal yet |
 | `WaitingForPromotion` | Workers are registered (Inactive) but not yet promoted to Current |
 | `Ramping` | Progressive strategy is ramping traffic to the new version |
-| Connection/plan error reasons | A blocking error is preventing progress — see Degraded below |
+| Error reasons (see Progressing below) | A blocking error is preventing progress |
 
 ### `Progressing`
 
-`Progressing=True` means a rollout is actively in-flight and the controller is making forward progress. `Progressing=False` means either the rollout is done (`Ready=True`) or something is blocking progress (`Degraded=True`).
+`Progressing=True` means a rollout is actively in-flight and the controller is making forward progress. `Progressing=False` means either the rollout is done (`Ready=True`) or a blocking error is preventing progress.
 
-### `Degraded`
-
-`Degraded=True` means the controller encountered a blocking error and cannot make progress. Importantly, this is not limited to rollout errors — it is set whenever the controller fails to reconcile, regardless of whether a rollout is currently in progress.
-
-For example, if you update your `TemporalConnection` to point at an unreachable host, or reference a secret that doesn't exist, the next reconcile loop will fail with `Degraded=True` and `Ready=False` — even if no version rollout is happening. The `reason` field identifies what went wrong:
+When `Progressing=False` due to an error, the `reason` field identifies what went wrong:
 
 | Reason | Meaning |
 |---|---|
+| `RolloutComplete` | Not an error — the rollout finished successfully |
 | `TemporalConnectionNotFound` | The referenced `TemporalConnection` resource doesn't exist |
 | `AuthSecretInvalid` | The credential secret is missing, malformed, or has an expired certificate |
 | `TemporalClientCreationFailed` | The controller can't reach the Temporal server (dial/health-check failure) |
@@ -44,7 +41,7 @@ For example, if you update your `TemporalConnection` to point at an unreachable 
 | `PlanGenerationFailed` | Internal error generating the reconciliation plan |
 | `PlanExecutionFailed` | Internal error executing the plan (e.g., a Kubernetes API call failed) |
 
-Once the underlying problem is fixed, the next successful reconcile will clear `Degraded` and restore `Progressing` or `Ready` to the correct state.
+Once the underlying problem is fixed, the next successful reconcile will restore `Progressing` and `Ready` to the correct state.
 
 ## Triggering a rollout
 
@@ -122,7 +119,7 @@ kubectl wait temporalworkerdeployment/my-worker \
 
 ArgoCD does not have a generic fallback that automatically checks `status.conditions` on unknown CRD types. For any resource whose group (`temporal.io`) is not in ArgoCD's built-in health check registry, ArgoCD silently skips that resource when computing application health. A [custom Lua health check](https://argo-cd.readthedocs.io/en/stable/operator-manual/health/) is the standard mechanism for teaching ArgoCD how to assess a CRD's health.
 
-The three standard conditions (`Ready`, `Progressing`, `Degraded`) keep the Lua simple — it only needs to read the condition type and status, not any controller-specific status fields. The following script is a starting point; adapt it to your ArgoCD version and any site-specific requirements:
+The two standard conditions (`Ready`, `Progressing`) keep the Lua simple — it only needs to read the condition type and status, not any controller-specific status fields. The following script is a starting point; adapt it to your ArgoCD version and any site-specific requirements:
 
 ```yaml
 # In your argocd-cm ConfigMap
@@ -131,18 +128,18 @@ data:
     local hs = {status = "Progressing", message = "Waiting for conditions"}
     if obj.status ~= nil and obj.status.conditions ~= nil then
       for _, condition in ipairs(obj.status.conditions) do
-        if condition.type == "Degraded" and condition.status == "True" then
-          hs.status = "Degraded"
-          hs.message = condition.message
-          return hs
-        end
-      end
-      for _, condition in ipairs(obj.status.conditions) do
         if condition.type == "Ready" then
           if condition.status == "True" then
             hs.status = "Healthy"
-          else
+            hs.message = condition.message
+            return hs
+          end
+        end
+        if condition.type == "Progressing" then
+          if condition.status == "True" then
             hs.status = "Progressing"
+          else
+            hs.status = "Degraded"
           end
           hs.message = condition.message
           return hs
@@ -154,9 +151,9 @@ data:
 
 With a health check like this in place:
 
-- ArgoCD shows **Progressing** while the rollout is in-flight.
-- ArgoCD shows **Degraded** if the controller encounters a blocking error (connection problems, API failures, etc.).
 - ArgoCD shows **Healthy** once `Ready=True`.
+- ArgoCD shows **Progressing** while a rollout is in-flight (`Progressing=True`).
+- ArgoCD shows **Degraded** when progress is blocked (`Progressing=False` with an error reason).
 
 If you use [sync waves](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-waves/) and workers must be fully rolled out before a dependent service is updated, place the `TemporalWorkerDeployment` in an earlier wave.
 

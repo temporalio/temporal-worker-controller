@@ -96,17 +96,13 @@ const (
 	// ConditionProgressing is True while a rollout is actively in-flight —
 	// i.e., the target version has not yet been promoted to current.
 	ConditionProgressing = "Progressing"
-
-	// ConditionDegraded is True when a blocking error prevents the controller
-	// from making progress. The Reason field identifies the specific failure.
-	ConditionDegraded = "Degraded"
 )
 
 // Deprecated condition type constants. Maintained for backward compatibility with
 // monitoring and automation built against v1.3.x. Use Ready, Progressing, and Degraded
-// instead. These will be removed in the next major version.
+// instead. These will be removed in the next major version of the CRD.
 const (
-	// Deprecated: Use ConditionReady and ConditionDegraded instead.
+	// Deprecated: Use ConditionReady and ConditionProgressing instead.
 	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
 
 	// Deprecated: Use ConditionReady instead.
@@ -138,27 +134,23 @@ const (
 	// the ramping version and is receiving a configured percentage of new workflows.
 	ReasonRamping = "Ramping"
 
-	// ReasonAsExpected is set on ConditionDegraded=False to indicate that no
-	// reconciliation errors occurred.
-	ReasonAsExpected = "AsExpected"
-
-	// ReasonTemporalConnectionNotFound is set on ConditionDegraded=True when the
+	// ReasonTemporalConnectionNotFound is set on ConditionProgressing=False when the
 	// referenced TemporalConnection resource cannot be found.
 	ReasonTemporalConnectionNotFound = "TemporalConnectionNotFound"
 
-	// ReasonAuthSecretInvalid is set on ConditionDegraded=True when the credential
+	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the credential
 	// secret referenced by the TemporalConnection is misconfigured. This covers:
 	// (1) the secret reference has an empty name, (2) the named Kubernetes Secret
 	// cannot be fetched or has an unexpected type, and (3) the mTLS certificate in
 	// the secret is expired or about to expire.
 	ReasonAuthSecretInvalid = "AuthSecretInvalid"
 
-	// ReasonTemporalClientCreationFailed is set on ConditionDegraded=True when the
+	// ReasonTemporalClientCreationFailed is set on ConditionProgressing=False when the
 	// Temporal SDK client cannot connect to the server (dial failure or failed health
 	// check). The credentials were valid; the server itself is unreachable.
 	ReasonTemporalClientCreationFailed = "TemporalClientCreationFailed"
 
-	// ReasonTemporalStateFetchFailed is set on ConditionDegraded=True when the
+	// ReasonTemporalStateFetchFailed is set on ConditionProgressing=False when the
 	// controller cannot query the current worker deployment state from Temporal.
 	ReasonTemporalStateFetchFailed = "TemporalStateFetchFailed"
 

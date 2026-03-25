@@ -7,8 +7,8 @@ package internal
 // Covered:
 //   - ConditionProgressing = True                (version registered but not yet current)
 //   - ConditionReady = True                      (version promoted to current)
-//   - ConditionDegraded = True                   (blocking error: missing TemporalConnection, etc.)
-//   - Event reason TemporalConnectionNotFound    (emitted alongside Degraded condition)
+//   - ConditionProgressing = False               (blocking error: missing TemporalConnection, etc.)
+//   - Event reason TemporalConnectionNotFound    (emitted alongside Progressing=False condition)
 //   - ReasonTemporalClientCreationFailed: TemporalConnection pointing to an unreachable port
 //   - ReasonTemporalStateFetchFailed: TWD pointing to a Temporal namespace that doesn't exist
 //
@@ -97,7 +97,7 @@ func runConditionsAndEventsTests(
 		})
 	}
 
-	// The following three tests each trigger a different ConditionDegraded=True reason.
+	// The following three tests each trigger a different ConditionProgressing=False reason.
 	// They all run standalone (not through testTemporalWorkerDeploymentCreation) because
 	// the controller fails before creating any k8s Deployments, so the normal status-validation
 	// and deployment-wait machinery in testTemporalWorkerDeploymentCreation would time out.
@@ -110,7 +110,7 @@ func runConditionsAndEventsTests(
 	// All three share the same skeleton, extracted into testUnhealthyConnectionCondition below.
 	t.Run("conditions-missing-connection", func(t *testing.T) {
 		// No TemporalConnection is created; the controller cannot find the one referenced by
-		// the TWD and immediately sets Degraded=True.
+		// the TWD and immediately sets Progressing=False.
 		testUnhealthyConnectionCondition(t, k8sClient,
 			"conditions-missing-connection", testNamespace, ts.GetDefaultNamespace(),
 			nil,
@@ -136,7 +136,7 @@ func runConditionsAndEventsTests(
 // testUnhealthyConnectionCondition is shared by the four error-path condition tests.
 // It optionally creates a TemporalConnection (nil connectionSpec = missing connection),
 // creates a TWD pointing to that connection with the given temporalNamespace, then asserts
-// that ConditionDegraded becomes True with the expected reason and that a matching Warning
+// that ConditionProgressing becomes False with the expected reason and that a matching Warning
 // event is emitted.
 func testUnhealthyConnectionCondition(
 	t *testing.T,
@@ -172,8 +172,8 @@ func testUnhealthyConnectionCondition(
 	}
 
 	waitForCondition(t, ctx, k8sClient, twd.Name, twd.Namespace,
-		temporaliov1alpha1.ConditionDegraded,
-		metav1.ConditionTrue, expectedReason,
+		temporaliov1alpha1.ConditionProgressing,
+		metav1.ConditionFalse, expectedReason,
 		30*time.Second, time.Second)
 	waitForEvent(t, ctx, k8sClient, twd.Name, twd.Namespace,
 		expectedReason, 30*time.Second, time.Second)

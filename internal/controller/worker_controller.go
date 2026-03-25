@@ -150,7 +150,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
 		l.Error(err, "unable to fetch TemporalConnection")
-		r.recordWarningAndSetDegraded(ctx, &workerDeploy,
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonTemporalConnectionNotFound,
 			fmt.Sprintf("Unable to fetch TemporalConnection %q: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err),
 			fmt.Sprintf("TemporalConnection %q not found: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err))
@@ -161,7 +161,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
 	if err != nil {
 		l.Error(err, "unable to resolve auth secret name")
-		r.recordWarningAndSetDegraded(ctx, &workerDeploy,
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonAuthSecretInvalid,
 			fmt.Sprintf("Unable to resolve auth secret from TemporalConnection %q: %v", temporalConnection.Name, err),
 			fmt.Sprintf("Unable to resolve auth secret: %v", err))
@@ -184,7 +184,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		})
 		if err != nil {
 			l.Error(err, "invalid Temporal auth secret")
-			r.recordWarningAndSetDegraded(ctx, &workerDeploy,
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonAuthSecretInvalid,
 				fmt.Sprintf("Invalid Temporal auth secret for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
 				fmt.Sprintf("Invalid auth secret: %v", err))
@@ -194,7 +194,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
 		if err != nil {
 			l.Error(err, "unable to create TemporalClient")
-			r.recordWarningAndSetDegraded(ctx, &workerDeploy,
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonTemporalClientCreationFailed,
 				fmt.Sprintf("Unable to create Temporal client for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
 				fmt.Sprintf("Failed to connect to Temporal: %v", err))
@@ -230,7 +230,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		getControllerIdentity(),
 	)
 	if err != nil {
-		r.recordWarningAndSetDegraded(ctx, &workerDeploy,
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonTemporalStateFetchFailed,
 			fmt.Sprintf("Unable to get Temporal worker deployment state: %v", err),
 			fmt.Sprintf("Failed to query Temporal worker deployment state: %v", err))
@@ -256,7 +256,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// Generate a plan to get to desired spec from current status
 	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec, temporalState)
 	if err != nil {
-		r.recordWarningAndSetDegraded(ctx, &workerDeploy,
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanGenerationFailed,
 			fmt.Sprintf("Unable to generate reconciliation plan: %v", err),
 			fmt.Sprintf("Plan generation failed: %v", err))
@@ -265,7 +265,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// Execute the plan, handling any errors
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
-		r.recordWarningAndSetDegraded(ctx, &workerDeploy,
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanExecutionFailed,
 			fmt.Sprintf("Unable to execute reconciliation plan: %v", err),
 			fmt.Sprintf("Plan execution failed: %v", err))
@@ -313,14 +313,10 @@ func (r *TemporalWorkerDeploymentReconciler) setCondition(
 	})
 }
 
-// syncConditions sets Ready, Progressing, and Degraded based on the current rollout state.
-// It must be called at the end of a successful reconcile (no errors) so that Degraded is
-// cleared and Progressing/Ready reflect the latest Temporal version status.
+// syncConditions sets Ready and Progressing based on the current rollout state.
+// It must be called at the end of a successful reconcile (no errors) so that
+// Progressing/Ready reflect the latest Temporal version status.
 func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.TemporalWorkerDeployment) {
-	// Happy path: clear Degraded unconditionally — reaching this point means no errors occurred.
-	r.setCondition(twd, temporaliov1alpha1.ConditionDegraded,
-		metav1.ConditionFalse, temporaliov1alpha1.ReasonAsExpected, "No reconciliation errors")
-
 	// Deprecated: set TemporalConnectionHealthy=True on all successful reconciles for v1.3.x compat.
 	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, //nolint:staticcheck // backward compat
 		metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy, //nolint:staticcheck // backward compat
@@ -362,9 +358,10 @@ func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alp
 	}
 }
 
-// recordWarningAndSetDegraded emits a warning event, sets Degraded=True (and Ready/Progressing=False),
-// and persists the status immediately. Called on all error paths that block reconciliation progress.
-func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetDegraded(
+// recordWarningAndSetBlocked emits a warning event, sets Progressing=False and Ready=False
+// with the given reason, and persists the status immediately. Called on all error paths that
+// block reconciliation progress.
+func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	ctx context.Context,
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
 	reason string,
@@ -372,7 +369,6 @@ func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetDegraded(
 	conditionMessage string,
 ) {
 	r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, reason, eventMessage)
-	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionDegraded, metav1.ConditionTrue, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, reason, conditionMessage)
 	// Deprecated: set TemporalConnectionHealthy=False for v1.3.x compat, but only for
