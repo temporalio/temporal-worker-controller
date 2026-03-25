@@ -487,6 +487,8 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
 		}); err != nil {
 			l.Info("Failed to clear ramping version (may have been cleared by SetCurrentVersion)", "error", err)
 		}
+	} else {
+		l.Info("No ramping version set, skipping clear ramping version")
 	}
 
 	// Step 3: Delete versions that are eligible. Versions that are still draining
