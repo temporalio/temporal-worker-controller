@@ -125,8 +125,23 @@ helm upgrade temporal-worker-controller \
   --version <new-version> \
   --namespace temporal-system
 
-# Step 2: Install the CRDs chart to take Helm ownership of the existing CRDs
-# kubectl apply reconciles any changes; same-version CRDs are a no-op on the cluster
+# Step 2: Stamp Helm ownership labels/annotations onto the existing CRDs.
+# CRDs installed via the old `crds/` directory have no Helm tracking metadata.
+# Without this step, `helm install` in step 3 fails with "cannot be imported into
+# the current release: invalid ownership metadata".
+kubectl label crd \
+  temporalconnections.temporal.io \
+  temporalworkerdeployments.temporal.io \
+  app.kubernetes.io/managed-by=Helm --overwrite
+
+kubectl annotate crd \
+  temporalconnections.temporal.io \
+  temporalworkerdeployments.temporal.io \
+  meta.helm.sh/release-name=temporal-worker-controller-crds \
+  meta.helm.sh/release-namespace=temporal-system --overwrite
+
+# Step 3: Install the CRDs chart to take Helm ownership of the existing CRDs.
+# Same-version CRDs are a no-op on the cluster.
 helm install temporal-worker-controller-crds \
   oci://docker.io/temporalio/temporal-worker-controller-crds \
   --version <new-version> \
