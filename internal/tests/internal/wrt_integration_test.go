@@ -32,11 +32,11 @@ import (
 // ValidatorFunction creates the WRT.
 func wrtTestCases() []testCase {
 	return []testCase{
-		// Deployment owner ref on per-Build-ID resource copy.
-		// Verifies that each per-Build-ID HPA has the versioned Deployment (not the TWD) as its
-		// controller owner reference, so that k8s GC deletes the HPA when the Deployment is removed.
+		// WRT owner ref on per-Build-ID resource copy.
+		// Verifies that each per-Build-ID HPA has the WorkerResourceTemplate (not the Deployment)
+		// as its controller owner reference, so that k8s GC deletes the HPA when the WRT is removed.
 		{
-			name: "wrt-deployment-owner-ref",
+			name: "wrt-owner-ref",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -61,7 +61,7 @@ func wrtTestCases() []testCase {
 
 					hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
-					assertHPAOwnerRefToDeployment(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName)
+					assertHPAOwnerRefToWRT(t, ctx, env.K8sClient, twd.Namespace, hpaName, wrtName)
 				}),
 		},
 
@@ -158,8 +158,8 @@ func wrtTestCases() []testCase {
 		},
 
 		// Template variable rendering end-to-end.
-		// Verifies that {{ .DeploymentName }} in a WRT annotation is rendered to the actual
-		// versioned Deployment name before the resource is applied.
+		// Verifies that {{ .K8sNamespace }} and {{ .TWDName }} in a WRT annotation are rendered
+		// to the correct values before the resource is applied.
 		{
 			name: "wrt-template-variable",
 			builder: testhelpers.NewTestCase().
@@ -178,13 +178,14 @@ func wrtTestCases() []testCase {
 					buildID := k8s.ComputeBuildID(twd)
 					wrtName := "template-hpa"
 					expectedDepName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+					expectedLabel := twd.Namespace + "/" + twd.Name
 
 					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
 						"apiVersion": "autoscaling/v2",
 						"kind": "HorizontalPodAutoscaler",
 						"metadata": {
 							"annotations": {
-								"my-deployment": "{{ .DeploymentName }}"
+								"my-workload": "{{ .K8sNamespace }}/{{ .TWDName }}"
 							}
 						},
 						"spec": {
@@ -206,13 +207,13 @@ func wrtTestCases() []testCase {
 						if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: twd.Namespace}, &hpa); err != nil {
 							return err
 						}
-						got := hpa.Annotations["my-deployment"]
-						if got != expectedDepName {
-							return fmt.Errorf("annotation my-deployment = %q, want %q", got, expectedDepName)
+						got := hpa.Annotations["my-workload"]
+						if got != expectedLabel {
+							return fmt.Errorf("annotation my-workload = %q, want %q", got, expectedLabel)
 						}
 						return nil
 					})
-					t.Logf("Template variable {{ .DeploymentName }} correctly rendered to %q", expectedDepName)
+					t.Logf("Template variables {{ .K8sNamespace }}/{{ .TWDName }} correctly rendered to %q", expectedLabel)
 				}),
 		},
 
@@ -491,13 +492,13 @@ func makeWRTWithRaw(name, namespace, workerDeploymentRefName string, raw []byte)
 	}
 }
 
-// assertHPAOwnerRefToDeployment asserts that the named HPA has a controller owner reference
-// pointing at the named versioned Deployment (not the TWD).
-func assertHPAOwnerRefToDeployment(
+// assertHPAOwnerRefToWRT asserts that the named HPA has a controller owner reference
+// pointing at the named WorkerResourceTemplate (not the Deployment or TWD).
+func assertHPAOwnerRefToWRT(
 	t *testing.T,
 	ctx context.Context,
 	k8sClient client.Client,
-	namespace, hpaName, expectedDepName string,
+	namespace, hpaName, expectedWRTName string,
 ) {
 	t.Helper()
 	var hpa autoscalingv2.HorizontalPodAutoscaler
@@ -505,13 +506,13 @@ func assertHPAOwnerRefToDeployment(
 		t.Fatalf("failed to get HPA %s: %v", hpaName, err)
 	}
 	for _, ref := range hpa.OwnerReferences {
-		if ref.Kind == "Deployment" && ref.Name == expectedDepName && ref.Controller != nil && *ref.Controller {
-			t.Logf("HPA %s correctly has controller owner ref to Deployment %s", hpaName, expectedDepName)
+		if ref.Kind == "WorkerResourceTemplate" && ref.Name == expectedWRTName && ref.Controller != nil && *ref.Controller {
+			t.Logf("HPA %s correctly has controller owner ref to WorkerResourceTemplate %s", hpaName, expectedWRTName)
 			return
 		}
 	}
-	t.Errorf("HPA %s/%s missing controller owner reference to Deployment %s (ownerRefs: %+v)",
-		namespace, hpaName, expectedDepName, hpa.OwnerReferences)
+	t.Errorf("HPA %s/%s missing controller owner reference to WorkerResourceTemplate %s (ownerRefs: %+v)",
+		namespace, hpaName, expectedWRTName, hpa.OwnerReferences)
 }
 
 // waitForPDBWithInjectedMatchLabels polls until the named PDB exists and has the

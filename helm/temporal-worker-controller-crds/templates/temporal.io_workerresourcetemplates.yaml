@@ -59,24 +59,32 @@ spec:
           status:
             properties:
               conditions:
-                description: Conditions describe the current state of the WorkerResourceTemplate.
-                  The Ready condition is True when all active Build ID instances have
-                  been successfully applied with the current template generation.
                 items:
                   properties:
                     lastTransitionTime:
                       format: date-time
                       type: string
                     message:
+                      maxLength: 32768
                       type: string
                     observedGeneration:
                       format: int64
+                      minimum: 0
                       type: integer
                     reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       type: string
                     status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
                       type: string
                     type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                       type: string
                   required:
                   - lastTransitionTime
@@ -90,30 +98,19 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               versions:
-                description: Versions describes the per-Build-ID apply status of worker
-                  resource template instances.
                 items:
                   properties:
                     buildID:
                       type: string
                     lastAppliedGeneration:
-                      description: LastAppliedGeneration is the WorkerResourceTemplate
-                        metadata.generation at the time of the last successful apply
-                        for this Build ID. 0 means no successful apply has occurred
-                        yet.
                       format: int64
                       type: integer
                     lastAppliedHash:
-                      description: Hash of the rendered resource as of the last successful
-                        apply. Used internally by the controller to skip redundant SSA
-                        calls.
                       type: string
                     lastTransitionTime:
                       format: date-time
                       type: string
                     message:
-                      description: Message is non-empty when the most recent apply
-                        attempt failed.
                       type: string
                     resourceName:
                       type: string

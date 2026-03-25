@@ -31,7 +31,7 @@ spec:
     scaledownDelay: 30s
     deleteDelay: 24h
   # Desired number of worker replicas
-  replicas: 1
+  #replicas:
   # Desired specification for worker pods
   template:
     spec:

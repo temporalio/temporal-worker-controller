@@ -147,16 +147,18 @@ func RenderWorkerResourceTemplate(
 	}
 	obj.SetLabels(labels)
 
-	// Set owner reference pointing to the versioned Deployment so k8s GC cleans up
-	// the worker resource template when the Deployment is deleted.
+	// Set owner reference pointing to the WRT so k8s GC cleans up all rendered
+	// resource copies when the WRT is deleted.
+	// Sunset cleanup (Deployment deleted) is handled explicitly by the controller
+	// via plan.DeleteWorkerResources rather than relying on Deployment GC ownership.
 	blockOwnerDeletion := true
 	isController := true
 	obj.SetOwnerReferences([]metav1.OwnerReference{
 		{
-			APIVersion:         appsv1.SchemeGroupVersion.String(),
-			Kind:               "Deployment",
-			Name:               deployment.Name,
-			UID:                deployment.UID,
+			APIVersion:         temporaliov1alpha1.GroupVersion.String(),
+			Kind:               "WorkerResourceTemplate",
+			Name:               wrt.Name,
+			UID:                wrt.UID,
 			BlockOwnerDeletion: &blockOwnerDeletion,
 			Controller:         &isController,
 		},

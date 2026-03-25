@@ -209,6 +209,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-hpa",
 			Namespace: "default",
+			UID:       types.UID("wrt-uid-456"),
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
@@ -239,12 +240,12 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	assert.Equal(t, "abc123", labels[BuildIDLabel])
 	assert.Equal(t, "my-worker", labels[twdNameLabel])
 
-	// Check owner reference points to the Deployment
+	// Check owner reference points to the WRT
 	ownerRefs := obj.GetOwnerReferences()
 	require.Len(t, ownerRefs, 1)
-	assert.Equal(t, "my-worker-abc123", ownerRefs[0].Name)
-	assert.Equal(t, "Deployment", ownerRefs[0].Kind)
-	assert.Equal(t, types.UID("test-uid-123"), ownerRefs[0].UID)
+	assert.Equal(t, "my-hpa", ownerRefs[0].Name)
+	assert.Equal(t, "WorkerResourceTemplate", ownerRefs[0].Kind)
+	assert.Equal(t, types.UID("wrt-uid-456"), ownerRefs[0].UID)
 
 	// Check scaleTargetRef was auto-injected
 	spec, ok := obj.Object["spec"].(map[string]interface{})
