@@ -132,13 +132,11 @@ helm upgrade temporal-worker-controller \
 kubectl label crd \
   temporalconnections.temporal.io \
   temporalworkerdeployments.temporal.io \
-  workerresourcetemplates.temporal.io \
   app.kubernetes.io/managed-by=Helm --overwrite
 
 kubectl annotate crd \
   temporalconnections.temporal.io \
   temporalworkerdeployments.temporal.io \
-  workerresourcetemplates.temporal.io \
   meta.helm.sh/release-name=temporal-worker-controller-crds \
   meta.helm.sh/release-namespace=temporal-system --overwrite
 
