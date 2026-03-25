@@ -114,11 +114,19 @@ func RenderWorkerResourceTemplate(
 
 	selectorLabels := ComputeSelectorLabels(twdName, buildID)
 
-	// Step 2: auto-inject scaleTargetRef and matchLabels into spec subtree.
+	// Labels the controller injects into every metrics[*].external.metric.selector.matchLabels
+	// that is present in the template. These identify the exact per-version Prometheus series.
+	metricSelectorLabels := map[string]string{
+		"worker_deployment_name":       wrt.Namespace + "_" + twdName,
+		"worker_deployment_build_id":   buildID,
+		"temporal_namespace":           temporalNamespace,
+	}
+
+	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, and metric selector labels.
 	// NestedFieldNoCopy returns a live reference so mutations are reflected in obj.Object directly.
 	if specRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec"); ok {
 		if spec, ok := specRaw.(map[string]interface{}); ok {
-			autoInjectFields(spec, deployment.Name, selectorLabels)
+			autoInjectFields(spec, deployment.Name, selectorLabels, metricSelectorLabels)
 		}
 	}
 
@@ -168,25 +176,62 @@ func RenderWorkerResourceTemplate(
 	return obj, nil
 }
 
-// autoInjectFields applies the two controller-owned opt-in injections to the top-level
-// spec map of a rendered resource:
+// autoInjectFields applies the controller-owned injections to the top-level spec map:
 //
-//   - spec.selector.matchLabels: injected ONLY at this exact path. Deeper matchLabels
-//     (e.g. spec.metrics[*].external.metric.selector.matchLabels) are user-owned and
-//     are left untouched.
+//   - spec.selector.matchLabels: injected ONLY at this exact path when {} (empty).
+//     Opt-in sentinel: absent = no injection; {} = inject pod selector labels.
 //
-//   - scaleTargetRef: injected anywhere in the spec tree via injectScaleTargetRefRecursive,
-//     because it is unambiguous across all supported resource types (HPA, WPA, etc.).
+//   - spec.metrics[*].external.metric.selector.matchLabels: temporal metric labels
+//     (worker_deployment_name, build_id, temporal_namespace) are merged in whenever
+//     matchLabels is present (including {}). User labels like task_type coexist.
+//     If matchLabels is absent, no injection occurs for that metric entry.
 //
-// In both cases {} (empty object) is the required opt-in sentinel; absent or non-empty
-// values are left untouched.
-func autoInjectFields(spec map[string]interface{}, deploymentName string, selectorLabels map[string]string) {
-	// matchLabels: only inject at spec.selector.matchLabels — not metric or other selectors.
+//   - scaleTargetRef: injected anywhere in the spec tree when {} (empty), via
+//     injectScaleTargetRefRecursive. Unambiguous across all supported resource types.
+func autoInjectFields(spec map[string]interface{}, deploymentName string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
+	// spec.selector.matchLabels: {} opt-in sentinel.
 	if sel, ok := spec["selector"].(map[string]interface{}); ok {
 		if isEmptyMap(sel["matchLabels"]) {
-			_ = unstructured.SetNestedStringMap(sel, selectorLabels, "matchLabels")
+			_ = unstructured.SetNestedStringMap(sel, podSelectorLabels, "matchLabels")
 		}
 	}
+
+	// metrics[*].external.metric.selector.matchLabels: merge temporal labels whenever present.
+	if len(metricSelectorLabels) > 0 {
+		if metrics, ok := spec["metrics"].([]interface{}); ok {
+			for _, m := range metrics {
+				entry, ok := m.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				ext, ok := entry["external"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				metricSpec, ok := ext["metric"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				sel, ok := metricSpec["selector"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if _, exists := sel["matchLabels"]; !exists {
+					continue
+				}
+				// matchLabels is present: merge-inject temporal labels, preserving user labels.
+				existing, _, _ := unstructured.NestedStringMap(sel, "matchLabels")
+				if existing == nil {
+					existing = make(map[string]string)
+				}
+				for k, v := range metricSelectorLabels {
+					existing[k] = v
+				}
+				_ = unstructured.SetNestedStringMap(sel, existing, "matchLabels")
+			}
+		}
+	}
+
 	// scaleTargetRef: inject anywhere in the spec tree.
 	injectScaleTargetRefRecursive(spec, deploymentName)
 }

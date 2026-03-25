@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/template"
-	"text/template/parse"
-
 	authorizationv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -282,9 +279,6 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 
 		// 6. spec.selector.matchLabels: the controller owns this exact path. If absent or {},
 		// the controller injects the versioned Deployment's selector labels; if non-empty, reject.
-		// Note: only spec.selector.matchLabels is controller-owned. Metric selectors
-		// (e.g. spec.metrics[*].external.metric.selector.matchLabels) are user-owned and
-		// may be set freely — the controller does not touch them.
 		if selector, ok := innerSpec["selector"].(map[string]interface{}); ok {
 			if ml, exists := selector["matchLabels"]; exists && ml != nil && !isEmptyMap(ml) {
 				allErrs = append(allErrs, field.Forbidden(
@@ -295,9 +289,15 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 				))
 			}
 		}
+
+		// 7. metrics[*].external.metric.selector.matchLabels: the controller injects
+		// worker_deployment_name, build_id, and temporal_namespace into any metric selector
+		// matchLabels that is present. These keys must not be hardcoded — the controller
+		// generates the correct per-version values at render time.
+		checkMetricSelectorLabelsNotSet(innerSpec, innerSpecPath, &allErrs)
 	}
 
-	// 7. Validate Go template expressions in all string values.
+	// 8. Validate Go template expressions in all string values.
 	// Only simple {{ .FieldName }} references to the three TemplateData fields are allowed.
 	templatePath := field.NewPath("spec").Child("template")
 	validateTemplateExpressions(obj, templatePath, &allErrs)
@@ -332,53 +332,59 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 	}
 }
 
-// allowedTemplateFields is the set of TemplateData field names that may appear in
-// {{ .FieldName }} expressions inside spec.template string values.
-var allowedTemplateFields = map[string]bool{
-	"K8sNamespace":      true,
-	"TWDName":           true,
-	"TemporalNamespace": true,
-	"BuildID":           true,
+// checkMetricSelectorLabelsNotSet validates that no metrics[*].external.metric.selector.matchLabels
+// contains any user-specified value. The controller injects worker_deployment_name,
+// worker_deployment_build_id, and temporal_namespace automatically; matchLabels must be
+// absent (no injection) or {} (opt-in sentinel).
+func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
+	metrics, ok := spec["metrics"].([]interface{})
+	if !ok {
+		return
+	}
+	metricsPath := path.Child("metrics")
+	for i, m := range metrics {
+		entry, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		ext, ok := entry["external"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		metricSpec, ok := ext["metric"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sel, ok := metricSpec["selector"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		ml, ok := sel["matchLabels"].(map[string]interface{})
+		if !ok || len(ml) == 0 {
+			continue // absent or {} — both valid
+		}
+		*allErrs = append(*allErrs, field.Forbidden(
+			metricsPath.Index(i).Child("external").Child("metric").Child("selector").Child("matchLabels"),
+			"metric selector matchLabels must be absent or {} (empty); the controller injects "+
+				"worker_deployment_name, worker_deployment_build_id, and temporal_namespace automatically",
+		))
+	}
 }
 
-// validateTemplateExpressions recursively walks a JSON value tree. For each string
-// value containing "{{", it parses the Go template and rejects any expression that is
-// not a simple {{ .FieldName }} reference to one of the three allowed TemplateData fields.
+// validateTemplateExpressions recursively walks a JSON value tree and rejects any
+// string value containing Go template expressions ({{ }}). Template expressions are
+// no longer supported; the controller injects all version-specific values automatically.
 func validateTemplateExpressions(v interface{}, path *field.Path, errs *field.ErrorList) {
 	switch typed := v.(type) {
 	case string:
 		if !strings.Contains(typed, "{{") {
 			return
 		}
-		tmpl, err := template.New("").Parse(typed)
-		if err != nil {
-			*errs = append(*errs, field.Invalid(path, typed,
-				fmt.Sprintf("invalid Go template syntax: %v", err)))
-			return
-		}
-		if tmpl.Tree == nil || tmpl.Tree.Root == nil {
-			return
-		}
-		for _, node := range tmpl.Tree.Root.Nodes {
-			switch n := node.(type) {
-			case *parse.TextNode:
-				// Literal text — always OK.
-			case *parse.ActionNode:
-				if !isAllowedFieldAction(n) {
-					*errs = append(*errs, field.Invalid(path, typed,
-						fmt.Sprintf("template expression %q is not allowed; only simple field references "+
-							"{{ .K8sNamespace }}, {{ .TWDName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", n)))
-				}
-			default:
-				// Catches control structures and other non-action top-level nodes:
-				// *parse.IfNode ({{ if }}), *parse.RangeNode ({{ range }}),
-				// *parse.WithNode ({{ with }}), *parse.TemplateNode ({{ template }}),
-				// *parse.CommentNode ({{/* */}}), and any future node types.
-				*errs = append(*errs, field.Invalid(path, typed,
-					fmt.Sprintf("template construct %q is not allowed; only simple field references "+
-						"{{ .K8sNamespace }}, {{ .TWDName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", node)))
-			}
-		}
+		*errs = append(*errs, field.Invalid(path, typed,
+			"Go template expressions ({{ }}) are not supported; the controller injects "+
+				"version-specific values automatically via scaleTargetRef: {}, "+
+				"selector.matchLabels: {}, and metrics[*].external.metric.selector.matchLabels: {}"))
+		return
 	case map[string]interface{}:
 		for k, val := range typed {
 			validateTemplateExpressions(val, path.Child(k), errs)
@@ -388,30 +394,6 @@ func validateTemplateExpressions(v interface{}, path *field.Path, errs *field.Er
 			validateTemplateExpressions(item, path.Index(i), errs)
 		}
 	}
-}
-
-// isAllowedFieldAction returns true if n is a simple {{ .FieldName }} action
-// with no pipelines, variable declarations, or function calls.
-func isAllowedFieldAction(n *parse.ActionNode) bool {
-	// Reject variable declarations like {{ $x := .DeploymentName }}.
-	if len(n.Pipe.Decl) != 0 {
-		return false
-	}
-	// Reject pipelines like {{ .DeploymentName | upper }}.
-	if len(n.Pipe.Cmds) != 1 {
-		return false
-	}
-	cmd := n.Pipe.Cmds[0]
-	// Reject function calls or multi-argument expressions.
-	if len(cmd.Args) != 1 {
-		return false
-	}
-	fieldNode, ok := cmd.Args[0].(*parse.FieldNode)
-	// Reject nested field access like {{ .Foo.Bar }}.
-	if !ok || len(fieldNode.Ident) != 1 {
-		return false
-	}
-	return allowedTemplateFields[fieldNode.Ident[0]]
 }
 
 // isEmptyMap returns true if v is a map[string]interface{} with no entries.

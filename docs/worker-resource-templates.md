@@ -27,11 +27,16 @@ The controller auto-injects two fields when you set them to `{}` (empty object) 
 | Field | Scope | Injected value |
 |-------|-------|---------------|
 | `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}` |
-| `selector.matchLabels` | Only at `spec.selector.matchLabels` | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <twdName>}` |
+| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <twdName>}` |
+| `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{worker_deployment_name: <ns>_<twd-name>, build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
 
-`scaleTargetRef` injection is recursive — it applies wherever the key appears in the spec tree, which covers HPAs, WPAs, and other autoscaler CRDs that use the same field.
+`scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
 
-`selector.matchLabels` injection is **non-recursive** and only applies to `spec.selector.matchLabels`. Metric selectors nested deeper in the spec (e.g. `spec.metrics[*].external.metric.selector.matchLabels`) are **user-owned**: you may set them freely and the controller will not touch them. Do not use `{}` as a sentinel in a metric selector — it will remain empty and will likely produce an error from the metric backend.
+`spec.selector.matchLabels` uses `{}` as the opt-in sentinel — absent means no injection; `{}` means inject pod selector labels.
+
+`spec.metrics[*].external.metric.selector.matchLabels` injects the three Temporal metric identity labels (`worker_deployment_name`, `build_id`, `temporal_namespace`) into any External metric selector where the `matchLabels` key is present (including `{}`). The injection is a merge — user labels like `task_type: "Activity"` coexist. If `matchLabels` is absent on a metric entry, no injection occurs for that entry.
+
+The webhook rejects any template that hardcodes `worker_deployment_name`, `build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned.
 
 ## Resource naming
 
@@ -119,6 +124,19 @@ spec:
             target:
               type: Utilization
               averageUtilization: 70
+        # For backlog-based scaling, add an External metric entry.
+        # worker_deployment_name, build_id, and temporal_namespace are injected
+        # automatically — do not set them here.
+        - type: External
+          external:
+            metric:
+              name: temporal_backlog_count_by_version
+              selector:
+                matchLabels:
+                  task_type: "Activity"
+            target:
+              type: AverageValue
+              averageValue: "10"
 ```
 
 See [examples/wrt-hpa.yaml](../examples/wrt-hpa.yaml) for an example pre-configured for the helloworld demo.
