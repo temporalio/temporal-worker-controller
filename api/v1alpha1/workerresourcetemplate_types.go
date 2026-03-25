@@ -107,7 +107,7 @@ type WorkerResourceTemplateStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=wrt
 //+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.temporalWorkerDeploymentRef.name",description="Referenced TemporalWorkerDeployment"
-//+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.template.kind",description="Kind of owned resource"
+//+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.template.kind",description="Kind of resource that is being templated"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // WorkerResourceTemplate attaches an arbitrary namespaced Kubernetes resource

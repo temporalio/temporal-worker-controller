@@ -21,7 +21,7 @@ spec:
       jsonPath: .spec.temporalWorkerDeploymentRef.name
       name: Worker
       type: string
-    - description: Kind of owned resource
+    - description: Kind of resource that is being templated
       jsonPath: .spec.template.kind
       name: Kind
       type: string

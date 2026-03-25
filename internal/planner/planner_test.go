@@ -397,7 +397,7 @@ func TestGeneratePlan(t *testing.T) {
 			expectUpdate: 1,
 		},
 		{
-			name: "one WRT with two deployments produces two owned resource applies",
+			name: "one WRT with two deployments produces two worker resource applies",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
 					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
@@ -429,7 +429,7 @@ func TestGeneratePlan(t *testing.T) {
 			expectWorkerResourceApplies: 2,
 		},
 		{
-			name: "no WRTs produces no owned resource applies",
+			name: "no WRTs produces no worker resource applies",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
 					"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
@@ -571,7 +571,7 @@ func TestGeneratePlan(t *testing.T) {
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
-			assert.Equal(t, tc.expectWorkerResourceApplies, len(plan.ApplyWorkerResources), "unexpected number of owned resource applies")
+			assert.Equal(t, tc.expectWorkerResourceApplies, len(plan.ApplyWorkerResources), "unexpected number of worker resource applies")
 			if tc.expectManagerIdentity != nil {
 				require.NotNil(t, plan.VersionConfig, "expected VersionConfig to be non-nil when asserting ManagerIdentity")
 				assert.Equal(t, *tc.expectManagerIdentity, plan.VersionConfig.ManagerIdentity, "unexpected ManagerIdentity")
@@ -3142,7 +3142,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments)
-			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of owned resource applies")
+			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of worker resource applies")
 		})
 	}
 }

@@ -349,7 +349,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			continue
 		}
 
-		l.Info("applying owned resource",
+		l.Info("applying rendered worker resource template",
 			"name", apply.Resource.GetName(),
 			"kind", apply.Resource.GetKind(),
 			"fieldManager", k8s.FieldManager,
@@ -372,7 +372,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			client.FieldOwner(k8s.FieldManager),
 		)
 		if applyErr != nil {
-			l.Error(applyErr, "unable to apply owned resource",
+			l.Error(applyErr, "unable to apply rendered worker resource template",
 				"name", apply.Resource.GetName(),
 				"kind", apply.Resource.GetKind(),
 			)
