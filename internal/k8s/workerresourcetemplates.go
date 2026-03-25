@@ -119,9 +119,9 @@ func RenderWorkerResourceTemplate(
 	// Ordering is not a concern: matchLabels is a map; encoding/json serialises map keys in
 	// sorted order, so ComputeRenderedObjectHash is deterministic regardless of insertion order.
 	metricSelectorLabels := map[string]string{
-		"worker_deployment_name":       wrt.Namespace + "_" + twdName,
-		"worker_deployment_build_id":   buildID,
-		"temporal_namespace":           temporalNamespace,
+		"worker_deployment_name":     wrt.Namespace + "_" + twdName,
+		"worker_deployment_build_id": buildID,
+		"temporal_namespace":         temporalNamespace,
 	}
 
 	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, and metric selector labels.

@@ -194,9 +194,9 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 	// pod selector labels must NOT bleed into metric selectors (separate injection paths).
 	t.Run("pod selector labels are not injected into metric selector matchLabels", func(t *testing.T) {
 		metricLabels := map[string]string{
-			"worker_deployment_name":       "default_my-worker",
-			"worker_deployment_build_id":   "abc123",
-			"temporal_namespace":           "my-ns",
+			"worker_deployment_name":     "default_my-worker",
+			"worker_deployment_build_id": "abc123",
+			"temporal_namespace":         "my-ns",
 		}
 		spec := map[string]interface{}{
 			"selector": map[string]interface{}{

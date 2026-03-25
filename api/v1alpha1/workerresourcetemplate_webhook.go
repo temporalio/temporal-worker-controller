@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
 	authorizationv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -348,7 +349,6 @@ func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Pa
 	if !ok {
 		return
 	}
-	controllerOwnedKeys := ControllerOwnedMetricLabelKeys
 	metricsPath := path.Child("metrics")
 	for i, m := range metrics {
 		entry, ok := m.(map[string]interface{})
@@ -371,7 +371,7 @@ func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Pa
 		if !ok || len(ml) == 0 {
 			continue // absent or {} — both valid
 		}
-		for _, key := range controllerOwnedKeys {
+		for _, key := range ControllerOwnedMetricLabelKeys {
 			if _, exists := ml[key]; exists {
 				*allErrs = append(*allErrs, field.Forbidden(
 					metricsPath.Index(i).Child("external").Child("metric").Child("selector").Child("matchLabels").Key(key),
