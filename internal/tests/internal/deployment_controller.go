@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -103,45 +104,47 @@ func applyDeployment(t *testing.T, ctx context.Context, k8sClient client.Client,
 	return stopFuncs
 }
 
-// Set deployment status to `DeploymentAvailable` to simulate a healthy deployment
-// This is necessary because envtest doesn't actually start pods
+// Set deployment status to `DeploymentAvailable` to simulate a healthy deployment.
+// This is necessary because envtest doesn't actually start pods.
+// Uses retry-on-conflict because the controller may update the Deployment (e.g. rolling
+// update) between our Get and Status().Update(), bumping the resourceVersion.
 func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient client.Client, deployment appsv1.Deployment) {
-	// Refetch to get the latest resourceVersion before updating status, since the
-	// controller may have modified the Deployment (e.g. rolling update) while workers
-	// were starting up.
-	var fresh appsv1.Deployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: deployment.Name, Namespace: deployment.Namespace}, &fresh); err != nil {
-		t.Fatalf("failed to refetch deployment before status update: %v", err)
-	}
-	now := metav1.Now()
-	fresh.Status = appsv1.DeploymentStatus{
-		Replicas:            *fresh.Spec.Replicas,
-		UpdatedReplicas:     *fresh.Spec.Replicas,
-		ReadyReplicas:       *fresh.Spec.Replicas,
-		AvailableReplicas:   *fresh.Spec.Replicas,
-		UnavailableReplicas: 0,
-		Conditions: []appsv1.DeploymentCondition{
-			{
-				Type:               appsv1.DeploymentAvailable,
-				Status:             corev1.ConditionTrue,
-				LastUpdateTime:     now,
-				LastTransitionTime: now,
-				Reason:             "MinimumReplicasAvailable",
-				Message:            "Deployment has minimum availability.",
+	t.Helper()
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var fresh appsv1.Deployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: deployment.Name, Namespace: deployment.Namespace}, &fresh); err != nil {
+			return err
+		}
+		now := metav1.Now()
+		fresh.Status = appsv1.DeploymentStatus{
+			Replicas:            *fresh.Spec.Replicas,
+			UpdatedReplicas:     *fresh.Spec.Replicas,
+			ReadyReplicas:       *fresh.Spec.Replicas,
+			AvailableReplicas:   *fresh.Spec.Replicas,
+			UnavailableReplicas: 0,
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:               appsv1.DeploymentAvailable,
+					Status:             corev1.ConditionTrue,
+					LastUpdateTime:     now,
+					LastTransitionTime: now,
+					Reason:             "MinimumReplicasAvailable",
+					Message:            "Deployment has minimum availability.",
+				},
+				{
+					Type:               appsv1.DeploymentProgressing,
+					Status:             corev1.ConditionTrue,
+					LastUpdateTime:     now,
+					LastTransitionTime: now,
+					Reason:             "NewReplicaSetAvailable",
+					Message:            "ReplicaSet is available.",
+				},
 			},
-			{
-				Type:               appsv1.DeploymentProgressing,
-				Status:             corev1.ConditionTrue,
-				LastUpdateTime:     now,
-				LastTransitionTime: now,
-				Reason:             "NewReplicaSetAvailable",
-				Message:            "ReplicaSet is available.",
-			},
-		},
-	}
-	t.Logf("started %d healthy workers, updating deployment status", *fresh.Spec.Replicas)
-	if err := k8sClient.Status().Update(ctx, &fresh); err != nil {
-		t.Fatalf("failed to update deployment status: %v", err)
+		}
+		return k8sClient.Status().Update(ctx, &fresh)
+	})
+	if err != nil {
+		t.Fatalf("failed to update deployment status after retries: %v", err)
 	}
 }
 
