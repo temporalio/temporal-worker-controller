@@ -58,13 +58,24 @@ type ClientPool struct {
 	logger    log.Logger
 	clients   map[ClientPoolKey]ClientInfo
 	k8sClient runtimeclient.Client
+	// dialFn establishes a Temporal SDK connection from the given options. In production
+	// this is sdkclient.Dial; in tests it can be replaced with a function that returns a
+	// mock client without making any network calls.
+	dialFn func(sdkclient.Options) (sdkclient.Client, error)
+	// systemCertPoolFn loads the host OS certificate pool used as the base when a custom
+	// CA is appended via ca.crt. In production this is x509.SystemCertPool; in tests it
+	// can be replaced to inject a known set of "system" root CAs without depending on the
+	// OS trust store.
+	systemCertPoolFn func() (*x509.CertPool, error)
 }
 
 func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	return &ClientPool{
-		logger:    l,
-		clients:   make(map[ClientPoolKey]ClientInfo),
-		k8sClient: c,
+		logger:           l,
+		clients:          make(map[ClientPoolKey]ClientInfo),
+		k8sClient:        c,
+		dialFn:           sdkclient.Dial,
+		systemCertPoolFn: x509.SystemCertPool,
 	}
 }
 
@@ -141,7 +152,7 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	// Cloud. When ca.crt is absent, RootCAs remains unset and Go's TLS implementation
 	// uses the system CA bundle by default.
 	if caCert, ok := secret.Data["ca.crt"]; ok && len(caCert) > 0 {
-		rootCAs, err := x509.SystemCertPool()
+		rootCAs, err := cp.systemCertPoolFn()
 		if err != nil {
 			cp.logger.Warn("Failed to load system CA pool, falling back to empty pool", "error", err)
 			rootCAs = x509.NewCertPool()
@@ -260,7 +271,7 @@ func (cp *ClientPool) ParseClientSecret(
 }
 
 func (cp *ClientPool) DialAndUpsertClient(clientOpts sdkclient.Options, clientPoolKey ClientPoolKey, clientAuth ClientAuth) (sdkclient.Client, error) {
-	c, err := sdkclient.Dial(clientOpts)
+	c, err := cp.dialFn(clientOpts)
 	if err != nil {
 		return nil, err
 	}
