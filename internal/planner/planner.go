@@ -43,12 +43,17 @@ type WorkerResourceApply struct {
 // Plan holds the actions to execute during reconciliation
 type Plan struct {
 	// Which actions to take
-	DeleteDeployments      []*appsv1.Deployment
-	ScaleDeployments       map[*corev1.ObjectReference]uint32
-	UpdateDeployments      []*appsv1.Deployment
-	ShouldCreateDeployment bool
-	VersionConfig          *VersionConfig
-	TestWorkflows          []WorkflowConfig
+	DeleteDeployments []*appsv1.Deployment
+	ScaleDeployments  map[*corev1.ObjectReference]uint32
+	// ClearReplicasDeployments lists active versioned Deployments whose spec.replicas
+	// should be patched to nil. Populated when spec.Replicas transitions to nil so that
+	// stale replica counts are removed and an external autoscaler can take ownership
+	// without competing with a previously-controller-managed value.
+	ClearReplicasDeployments []*corev1.ObjectReference
+	UpdateDeployments        []*appsv1.Deployment
+	ShouldCreateDeployment   bool
+	VersionConfig            *VersionConfig
+	TestWorkflows            []WorkflowConfig
 
 	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []WorkerResourceApply
@@ -137,7 +142,8 @@ func GeneratePlan(
 
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
-	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec, k8sState.HPATargetDeployments)
+	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
+	plan.ClearReplicasDeployments = getClearReplicasDeployments(k8sState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
@@ -528,37 +534,37 @@ func getDeleteDeployments(
 	return deleteDeployments
 }
 
-// getScaleDeployments determines which deployments should be scaled and to what size.
-// hpaTargets is the set of k8s Deployment names that have an HPA targeting them;
-// UpdateScale is skipped for active (current/ramping) Deployments in this set so that
-// the HPA owns the replicas field — matching standard k8s Deployment controller behavior.
-// Scale-down to 0 for inactive/drained versions is always applied regardless of HPA,
-// because those versions are sunsetting and the HPA will be GC'd with the Deployment.
+// getScaleDeployments determines which deployments should be explicitly scaled and to what size.
+// It only runs when spec.Replicas is set (controller-managed mode). Drained versions and inactive
+// versions that are not the rollout target are always scaled to zero during sunset.
 func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
-	hpaTargets map[string]bool,
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
-	replicas := *spec.Replicas
 
-	// Scale the current version to spec.Replicas if no HPA is managing it.
-	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
-		ref := status.CurrentVersion.Deployment
-		if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
-			if !hpaTargets[d.Name] && (d.Spec.Replicas == nil || *d.Spec.Replicas != replicas) {
-				scaleDeployments[ref] = uint32(replicas)
+	// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
+	if spec.Replicas != nil {
+		replicas := *spec.Replicas
+
+		// Scale the current version if needed
+		if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
+			ref := status.CurrentVersion.Deployment
+			if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
+				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+					scaleDeployments[ref] = uint32(replicas)
+				}
 			}
 		}
-	}
 
-	// Scale the target version to spec.Replicas if no HPA is managing it.
-	if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
-		status.TargetVersion.Deployment != nil {
-		if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
-			if !hpaTargets[d.Name] && (d.Spec.Replicas == nil || *d.Spec.Replicas != replicas) {
-				scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
+		// Scale the target version if it exists, and isn't current
+		if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
+			status.TargetVersion.Deployment != nil {
+			if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
+				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
+					scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
+				}
 			}
 		}
 	}
@@ -576,28 +582,31 @@ func getScaleDeployments(
 
 		switch version.Status {
 		case temporaliov1alpha1.VersionStatusInactive:
-			// Scale down inactive versions that are not the target.
-			// Force scale-down even if an HPA exists — the HPA will be GC'd with the Deployment.
+			// Scale down inactive versions that are not the target
 			if status.TargetVersion.BuildID == version.BuildID {
-				if !hpaTargets[d.Name] && (d.Spec.Replicas == nil || *d.Spec.Replicas != replicas) {
-					scaleDeployments[version.Deployment] = uint32(replicas)
+				// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
+				if spec.Replicas != nil {
+					replicas := *spec.Replicas
+					if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+						scaleDeployments[version.Deployment] = uint32(replicas)
+					}
 				}
-			} else if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
+			} else if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target inactive versions with nil replicas or >0 replicas
 				scaleDeployments[version.Deployment] = 0
 			}
 		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
-			// Skip UpdateScale if an HPA is managing this Deployment.
-			if hpaTargets[d.Name] {
-				continue
-			}
-			if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
-				scaleDeployments[version.Deployment] = uint32(replicas)
+			// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
+			// Scale up these deployments
+			if spec.Replicas != nil {
+				replicas := *spec.Replicas
+				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+					scaleDeployments[version.Deployment] = uint32(replicas)
+				}
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
 			if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
-				// TODO(jlegrone): Compute scale based on load? Or percentage of replicas?
 				// Scale down drained deployments after delay
-				if d.Spec.Replicas != nil && *d.Spec.Replicas != 0 {
+				if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target drained versions with nil replicas or >0 replicas
 					scaleDeployments[version.Deployment] = 0
 				}
 			}
@@ -605,6 +614,55 @@ func getScaleDeployments(
 	}
 
 	return scaleDeployments
+}
+
+// getClearReplicasDeployments returns the ObjectReferences of active Deployments whose spec.replicas
+// should be patched to nil. This is needed when transitioning from controller-managed replicas
+// (spec.Replicas set) to external autoscaling (spec.Replicas nil): stale replica counts on
+// Deployments would otherwise compete with the external scaler's ownership.
+// See: https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#migrating-deployments-and-statefulsets-to-horizontal-autoscaling
+func getClearReplicasDeployments(
+	k8sState *k8s.DeploymentState,
+	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+) []*corev1.ObjectReference {
+	if spec.Replicas != nil {
+		return nil // controller manages replicas; no clearing needed
+	}
+
+	var refs []*corev1.ObjectReference
+	addIfNotNil := func(ref *corev1.ObjectReference, buildID string) {
+		d, ok := k8sState.Deployments[buildID]
+		if ok && d.Spec.Replicas != nil {
+			refs = append(refs, ref)
+		}
+	}
+
+	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
+		addIfNotNil(status.CurrentVersion.Deployment, status.CurrentVersion.BuildID)
+	}
+	if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
+		status.TargetVersion.Deployment != nil {
+		addIfNotNil(status.TargetVersion.Deployment, status.TargetVersion.BuildID)
+	}
+
+	for _, version := range status.DeprecatedVersions {
+		if version.Deployment == nil {
+			continue
+		}
+		switch version.Status {
+		case temporaliov1alpha1.VersionStatusInactive:
+			// Only clear if this is the rollout target; other inactive versions are scaled to 0.
+			if status.TargetVersion.BuildID == version.BuildID {
+				addIfNotNil(version.Deployment, version.BuildID)
+			}
+		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
+			addIfNotNil(version.Deployment, version.BuildID)
+			// Drained versions are always scaled to 0; no clearing needed.
+		}
+	}
+
+	return refs
 }
 
 // shouldCreateDeployment determines if a new deployment needs to be created

@@ -952,7 +952,7 @@ func TestGetScaleDeployments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec, nil)
+			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec)
 			assert.Equal(t, len(tc.expectScales), len(scales), "unexpected number of scales")
 			actualScaleDeploymentNames := make([]string, 0)
 			for deploymentRef, actualReplicas := range scales {
@@ -965,6 +965,192 @@ func TestGetScaleDeployments(t *testing.T) {
 				if !slices.Contains(actualScaleDeploymentNames, expectedName) {
 					t.Errorf("expected to find Deployment %s in ScaleDeployments, but did not find it", expectedName)
 				}
+			}
+		})
+	}
+}
+
+func TestGetClearReplicasDeployments(t *testing.T) {
+	nilReplicas := func() *appsv1.Deployment {
+		d := createDeploymentWithDefaultConnectionSpecHash(3)
+		d.Spec.Replicas = nil
+		return d
+	}
+
+	testCases := []struct {
+		name        string
+		k8sState    *k8s.DeploymentState
+		status      *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		spec        *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		expectClear []string // deployment names expected in ClearReplicasDeployments
+	}{
+		{
+			name: "no-op when spec.Replicas is set (controller manages replicas)",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"a": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-a"},
+					},
+				},
+			},
+			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{Replicas: func() *int32 { r := int32(3); return &r }()},
+			expectClear: nil,
+		},
+		{
+			name: "clears current version when transitioning to external scaling",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"a": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-a"},
+					},
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-a"},
+					},
+				},
+			},
+			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectClear: []string{"test-a"},
+		},
+		{
+			name: "clears both current and target when both have stale replica counts",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"a": createDeploymentWithDefaultConnectionSpecHash(3),
+					"b": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-a"},
+					},
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "b",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-b"},
+					},
+				},
+			},
+			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectClear: []string{"test-a", "test-b"},
+		},
+		{
+			name: "no-op when active deployments already have nil replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"a": nilReplicas(),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-a"},
+					},
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "a",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-a"},
+					},
+				},
+			},
+			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectClear: nil,
+		},
+		{
+			name: "clears inactive deprecated version that is the rollout target",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"a": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				// TargetVersion.Deployment is nil here: the Deployment ref lives in the
+				// DeprecatedVersions entry (the deprecated version was promoted to target).
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "a",
+						Status:  temporaliov1alpha1.VersionStatusInactive,
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "a",
+							Status:     temporaliov1alpha1.VersionStatusInactive,
+							Deployment: &corev1.ObjectReference{Name: "test-a"},
+						},
+					},
+				},
+			},
+			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectClear: []string{"test-a"},
+		},
+		{
+			name: "does not clear drained deprecated version (will be scaled to zero instead)",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"b": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "a",
+						Status:     temporaliov1alpha1.VersionStatusInactive,
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "b",
+							Status:     temporaliov1alpha1.VersionStatusDrained,
+							Deployment: &corev1.ObjectReference{Name: "test-b"},
+						},
+						DrainedSince: &metav1.Time{Time: time.Now().Add(-24 * time.Hour)},
+					},
+				},
+			},
+			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectClear: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			refs := getClearReplicasDeployments(tc.k8sState, tc.status, tc.spec)
+			assert.Equal(t, len(tc.expectClear), len(refs), "unexpected number of ClearReplicasDeployments")
+			actualNames := make([]string, 0, len(refs))
+			for _, ref := range refs {
+				actualNames = append(actualNames, ref.Name)
+			}
+			for _, expectedName := range tc.expectClear {
+				assert.Contains(t, actualNames, expectedName, "expected %s in ClearReplicasDeployments", expectedName)
 			}
 		})
 	}

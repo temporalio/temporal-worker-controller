@@ -18,7 +18,6 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -47,11 +46,6 @@ type DeploymentState struct {
 	DeploymentsByTime []*appsv1.Deployment
 	// Map of buildID to deployment references
 	DeploymentRefs map[string]*corev1.ObjectReference
-	// HPATargetDeployments is the set of k8s Deployment names that have at least one HPA
-	// targeting them via spec.scaleTargetRef. The controller skips UpdateScale for these
-	// active Deployments (letting the HPA own the replicas field), matching standard k8s
-	// Deployment controller behavior.
-	HPATargetDeployments map[string]bool
 }
 
 // GetDeploymentState queries Kubernetes to get the state of all deployments
@@ -64,10 +58,9 @@ func GetDeploymentState(
 	workerDeploymentName string,
 ) (*DeploymentState, error) {
 	state := &DeploymentState{
-		Deployments:          make(map[string]*appsv1.Deployment),
-		DeploymentsByTime:    []*appsv1.Deployment{},
-		DeploymentRefs:       make(map[string]*corev1.ObjectReference),
-		HPATargetDeployments: make(map[string]bool),
+		Deployments:       make(map[string]*appsv1.Deployment),
+		DeploymentsByTime: []*appsv1.Deployment{},
+		DeploymentRefs:    make(map[string]*corev1.ObjectReference),
 	}
 
 	// List k8s deployments that correspond to managed worker deployment versions
@@ -95,21 +88,6 @@ func GetDeploymentState(
 			state.DeploymentRefs[buildID] = NewObjectRef(deploy)
 		}
 		// Any deployments without the build ID label are ignored
-	}
-
-	// List HPAs in the namespace and record which Deployments they target.
-	// This lets getScaleDeployments skip UpdateScale for HPA-managed Deployments,
-	// matching standard k8s Deployment controller behavior (only the HPA calls UpdateScale).
-	var hpaList autoscalingv2.HorizontalPodAutoscalerList
-	if err := k8sClient.List(ctx, &hpaList, client.InNamespace(namespace)); err != nil {
-		return nil, fmt.Errorf("unable to list HPAs: %w", err)
-	}
-	for i := range hpaList.Items {
-		hpa := &hpaList.Items[i]
-		ref := hpa.Spec.ScaleTargetRef
-		if ref.APIVersion == "apps/v1" && ref.Kind == "Deployment" && ref.Name != "" {
-			state.HPATargetDeployments[ref.Name] = true
-		}
 	}
 
 	return state, nil

@@ -29,7 +29,10 @@ type plan struct {
 	DeleteDeployments []*appsv1.Deployment
 	CreateDeployment  *appsv1.Deployment
 	ScaleDeployments  map[*corev1.ObjectReference]uint32
-	UpdateDeployments []*appsv1.Deployment
+	// ClearReplicasDeployments lists active versioned Deployments whose spec.replicas
+	// should be patched to nil, populated when spec.Replicas transitions to nil.
+	ClearReplicasDeployments []*corev1.ObjectReference
+	UpdateDeployments        []*appsv1.Deployment
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
@@ -157,6 +160,7 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	// Convert planner result to controller plan
 	plan.DeleteDeployments = planResult.DeleteDeployments
 	plan.ScaleDeployments = planResult.ScaleDeployments
+	plan.ClearReplicasDeployments = planResult.ClearReplicasDeployments
 	plan.UpdateDeployments = planResult.UpdateDeployments
 
 	// Convert version config

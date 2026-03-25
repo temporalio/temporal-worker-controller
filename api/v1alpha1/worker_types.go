@@ -50,11 +50,15 @@ type WorkerOptions struct {
 // TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment
 type TemporalWorkerDeploymentSpec struct {
 
-	// Number of desired pods. This is a pointer to distinguish between explicit
-	// zero and not specified. Defaults to 1.
+	// Number of desired pods. When set, the controller manages replicas for all active
+	// worker versions. When omitted (nil), the controller creates versioned Deployments
+	// with nil replicas and never calls UpdateScale on active versions — following the
+	// Kubernetes-recommended pattern for HPA and other external autoscalers
+	// (https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#migrating-deployments-and-statefulsets-to-horizontal-autoscaling).
+	// The controller still scales drained versions (and inactive versions that are not
+	// the rollout target) to zero regardless.
 	// This field makes TemporalWorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
 	// +optional
-	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
 	// Template describes the pods that will be created.

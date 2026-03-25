@@ -69,6 +69,24 @@ func (r *TemporalWorkerDeploymentReconciler) executeK8sOperations(ctx context.Co
 		}
 	}
 
+	// Clear replicas on active Deployments when transitioning to external autoscaling.
+	for _, ref := range p.ClearReplicasDeployments {
+		dep := &appsv1.Deployment{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, dep); err != nil {
+			l.Error(err, "unable to get deployment for replica clear", "deployment", ref.Name)
+			return fmt.Errorf("unable to get deployment %q for replica clear: %w", ref.Name, err)
+		}
+		patch := client.MergeFrom(dep.DeepCopy())
+		dep.Spec.Replicas = nil
+		if err := r.Patch(ctx, dep, patch); err != nil {
+			l.Error(err, "unable to clear replicas on deployment", "deployment", ref.Name)
+			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentScaleFailed,
+				"Failed to clear replicas on Deployment %q: %v", ref.Name, err)
+			return fmt.Errorf("unable to clear replicas on deployment %q: %w", ref.Name, err)
+		}
+		l.Info("cleared replicas on deployment for external autoscaling", "deployment", ref.Name)
+	}
+
 	// Update deployments
 	for _, d := range p.UpdateDeployments {
 		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
