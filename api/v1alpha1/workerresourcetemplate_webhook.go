@@ -335,8 +335,7 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 // allowedTemplateFields is the set of TemplateData field names that may appear in
 // {{ .FieldName }} expressions inside spec.template string values.
 var allowedTemplateFields = map[string]bool{
-	"DeploymentName":    true,
-	"Namespace":         true,
+	"K8sNamespace":      true,
 	"TWDName":           true,
 	"TemporalNamespace": true,
 	"BuildID":           true,
@@ -368,7 +367,7 @@ func validateTemplateExpressions(v interface{}, path *field.Path, errs *field.Er
 				if !isAllowedFieldAction(n) {
 					*errs = append(*errs, field.Invalid(path, typed,
 						fmt.Sprintf("template expression %q is not allowed; only simple field references "+
-							"{{ .DeploymentName }}, {{ .TWDName }}, {{ .TemporalNamespace }}, {{ .Namespace }}, and {{ .BuildID }} are permitted", n)))
+							"{{ .K8sNamespace }}, {{ .TWDName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", n)))
 				}
 			default:
 				// Catches control structures and other non-action top-level nodes:
@@ -377,7 +376,7 @@ func validateTemplateExpressions(v interface{}, path *field.Path, errs *field.Er
 				// *parse.CommentNode ({{/* */}}), and any future node types.
 				*errs = append(*errs, field.Invalid(path, typed,
 					fmt.Sprintf("template construct %q is not allowed; only simple field references "+
-						"{{ .DeploymentName }}, {{ .TWDName }}, {{ .TemporalNamespace }}, {{ .Namespace }}, and {{ .BuildID }} are permitted", node)))
+						"{{ .K8sNamespace }}, {{ .TWDName }}, {{ .TemporalNamespace }}, and {{ .BuildID }} are permitted", node)))
 			}
 		}
 	case map[string]interface{}:

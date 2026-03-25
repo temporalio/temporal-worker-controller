@@ -70,17 +70,14 @@ func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string 
 
 // TemplateData holds the variables available in Go template expressions within spec.template.
 type TemplateData struct {
-	// DeploymentName is the Temporal-side deployment name (format: "k8s-namespace/twd-name",
-	// e.g. "default/helloworld"). This matches the deployment name the worker registers under.
-	DeploymentName string
-	// Namespace is the Kubernetes namespace of the TemporalWorkerDeployment (e.g. "default").
-	// Valid as a Kubernetes label value. Use with TWDName and BuildID to construct the
-	// Temporal Cloud worker_version label value: "{{ .Namespace }}_{{ .TWDName }}_{{ .BuildID }}"
-	Namespace string
+	// K8sNamespace is the Kubernetes namespace of the TemporalWorkerDeployment (e.g. "default").
+	// Valid as a Kubernetes label value.
+	K8sNamespace string
 	// TWDName is the name of the TemporalWorkerDeployment (e.g. "helloworld").
 	// Valid as a Kubernetes label value (≤63 chars, no special characters).
 	TWDName string
-	// TemporalNamespace is the Temporal namespace the worker connects to.
+	// TemporalNamespace is the Temporal namespace the worker connects to
+	// (e.g. "worker-controller-demo.a2dd6"). Distinct from K8sNamespace.
 	TemporalNamespace string
 	// BuildID is the Build ID for this version.
 	BuildID string
@@ -108,8 +105,7 @@ func RenderWorkerResourceTemplate(
 
 	twdName := wrt.Spec.TemporalWorkerDeploymentRef.Name
 	data := TemplateData{
-		DeploymentName:    wrt.Namespace + "/" + twdName,
-		Namespace:         wrt.Namespace,
+		K8sNamespace:      wrt.Namespace,
 		TWDName:           twdName,
 		TemporalNamespace: temporalNamespace,
 		BuildID:           buildID,

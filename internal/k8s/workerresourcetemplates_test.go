@@ -81,7 +81,8 @@ func TestComputeSelectorLabels(t *testing.T) {
 
 func TestRenderString(t *testing.T) {
 	data := TemplateData{
-		DeploymentName:    "my-worker-abc123",
+		K8sNamespace:      "my-namespace",
+		TWDName:           "my-worker",
 		TemporalNamespace: "my-temporal-ns",
 		BuildID:           "abc123",
 	}
@@ -91,11 +92,12 @@ func TestRenderString(t *testing.T) {
 		want  string
 	}{
 		{"plain string", "plain string"},
-		{"{{ .DeploymentName }}", "my-worker-abc123"},
+		{"{{ .K8sNamespace }}", "my-namespace"},
+		{"{{ .TWDName }}", "my-worker"},
 		{"{{ .TemporalNamespace }}", "my-temporal-ns"},
 		{"{{ .BuildID }}", "abc123"},
 		{"Monitor for build {{ .BuildID }}", "Monitor for build abc123"},
-		{"{{ .DeploymentName }}.{{ .TemporalNamespace }}", "my-worker-abc123.my-temporal-ns"},
+		{"{{ .K8sNamespace }}_{{ .TWDName }}_{{ .BuildID }}", "my-namespace_my-worker_abc123"},
 	}
 	for _, tc := range tests {
 		got, err := renderString(tc.input, data)
@@ -257,7 +259,7 @@ func TestRenderWorkerResourceTemplate_WithTemplates(t *testing.T) {
 		"apiVersion": "monitoring.example.com/v1",
 		"kind":       "WorkloadMonitor",
 		"spec": map[string]interface{}{
-			"targetWorkload": "{{ .DeploymentName }}",
+			"targetWorkload": "{{ .K8sNamespace }}/{{ .TWDName }}",
 			"description":    "Monitor for build {{ .BuildID }} in {{ .TemporalNamespace }}",
 		},
 	}

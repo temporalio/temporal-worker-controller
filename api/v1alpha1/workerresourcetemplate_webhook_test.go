@@ -240,14 +240,14 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 		},
 
 		// --- Template expression validation ---
-		"valid template: {{ .DeploymentName }}": {
-			obj: newWRT("tmpl-deployment", "my-worker", map[string]interface{}{
+		"valid template: {{ .K8sNamespace }}": {
+			obj: newWRT("tmpl-k8s-namespace", "my-worker", map[string]interface{}{
 				"apiVersion": "autoscaling/v2",
 				"kind":       "HorizontalPodAutoscaler",
 				"spec": map[string]interface{}{
 					"minReplicas": float64(2),
 					"maxReplicas": float64(10),
-					"someField":   "prefix-{{ .DeploymentName }}-suffix",
+					"someField":   "prefix-{{ .K8sNamespace }}-suffix",
 				},
 			}),
 		},
