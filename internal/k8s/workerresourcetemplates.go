@@ -167,36 +167,47 @@ func RenderWorkerResourceTemplate(
 	return obj, nil
 }
 
-// autoInjectFields recursively traverses obj and injects scaleTargetRef and matchLabels
-// wherever the key is present with an empty-object value. Users signal intent by writing
-// `scaleTargetRef: {}` or `matchLabels: {}` in their spec.template. This covers Layer 1
-// auto-injection without the risk of adding unknown fields to resource types that don't use them.
+// autoInjectFields applies the two controller-owned opt-in injections to the top-level
+// spec map of a rendered resource:
 //
-// Note: {} (empty object) is the required opt-in sentinel. Writing null looks equivalent in
-// YAML but the Kubernetes API server deletes null-valued keys before storage, so null is
-// never present when the controller reads the object back and injection would not occur.
-func autoInjectFields(obj map[string]interface{}, deploymentName string, selectorLabels map[string]string) {
+//   - spec.selector.matchLabels: injected ONLY at this exact path. Deeper matchLabels
+//     (e.g. spec.metrics[*].external.metric.selector.matchLabels) are user-owned and
+//     are left untouched.
+//
+//   - scaleTargetRef: injected anywhere in the spec tree via injectScaleTargetRefRecursive,
+//     because it is unambiguous across all supported resource types (HPA, WPA, etc.).
+//
+// In both cases {} (empty object) is the required opt-in sentinel; absent or non-empty
+// values are left untouched.
+func autoInjectFields(spec map[string]interface{}, deploymentName string, selectorLabels map[string]string) {
+	// matchLabels: only inject at spec.selector.matchLabels — not metric or other selectors.
+	if sel, ok := spec["selector"].(map[string]interface{}); ok {
+		if isEmptyMap(sel["matchLabels"]) {
+			_ = unstructured.SetNestedStringMap(sel, selectorLabels, "matchLabels")
+		}
+	}
+	// scaleTargetRef: inject anywhere in the spec tree.
+	injectScaleTargetRefRecursive(spec, deploymentName)
+}
+
+// injectScaleTargetRefRecursive recursively traverses obj and injects scaleTargetRef
+// wherever the key is present with an empty-object value (user opted in with {}).
+// scaleTargetRef is unambiguous across all supported resource types, so recursive
+// injection is safe here.
+func injectScaleTargetRefRecursive(obj map[string]interface{}, deploymentName string) {
 	for k, v := range obj {
-		switch k {
-		case "scaleTargetRef":
-			// Inject when the key is present with an empty-object value (user opted in).
+		if k == "scaleTargetRef" {
 			if isEmptyMap(v) {
 				_ = unstructured.SetNestedMap(obj, buildScaleTargetRef(deploymentName), k)
 			}
-		case "matchLabels":
-			// Inject when the key is present with an empty-object value (user opted in).
-			if isEmptyMap(v) {
-				_ = unstructured.SetNestedStringMap(obj, selectorLabels, k)
-			}
-		default:
-			// Recurse into nested maps and slices of maps.
-			if nested, ok := v.(map[string]interface{}); ok {
-				autoInjectFields(nested, deploymentName, selectorLabels)
-			} else if arr, ok := v.([]interface{}); ok {
-				for _, item := range arr {
-					if nestedItem, ok := item.(map[string]interface{}); ok {
-						autoInjectFields(nestedItem, deploymentName, selectorLabels)
-					}
+			continue
+		}
+		if nested, ok := v.(map[string]interface{}); ok {
+			injectScaleTargetRefRecursive(nested, deploymentName)
+		} else if arr, ok := v.([]interface{}); ok {
+			for _, item := range arr {
+				if nestedItem, ok := item.(map[string]interface{}); ok {
+					injectScaleTargetRefRecursive(nestedItem, deploymentName)
 				}
 			}
 		}

@@ -190,6 +190,45 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 		labels := selector["matchLabels"].(map[string]interface{})
 		assert.Equal(t, "label", labels["custom"], "should not overwrite user-provided labels")
 	})
+
+	// Metric selectors (e.g. spec.metrics[*].external.metric.selector.matchLabels) are
+	// user-owned. A {} value there must NOT be overwritten with the Deployment selector labels.
+	t.Run("does not inject into metric selector matchLabels", func(t *testing.T) {
+		spec := map[string]interface{}{
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{}, // opt-in sentinel — should be injected
+			},
+			"metrics": []interface{}{
+				map[string]interface{}{
+					"type": "External",
+					"external": map[string]interface{}{
+						"metric": map[string]interface{}{
+							"name": "my_queue_depth",
+							"selector": map[string]interface{}{
+								"matchLabels": map[string]interface{}{}, // user-owned — must NOT be injected
+							},
+						},
+					},
+				},
+			},
+		}
+		autoInjectFields(spec, "my-worker-abc123", selectorLabels)
+
+		// spec.selector.matchLabels should have been injected
+		topSelector := spec["selector"].(map[string]interface{})
+		topLabels, ok := topSelector["matchLabels"].(map[string]interface{})
+		require.True(t, ok, "spec.selector.matchLabels should have been injected")
+		assert.Equal(t, "abc123", topLabels[BuildIDLabel])
+
+		// metric selector matchLabels must remain untouched (still empty)
+		metrics := spec["metrics"].([]interface{})
+		metricEntry := metrics[0].(map[string]interface{})
+		external := metricEntry["external"].(map[string]interface{})
+		metric := external["metric"].(map[string]interface{})
+		metricSelector := metric["selector"].(map[string]interface{})
+		metricMatchLabels := metricSelector["matchLabels"].(map[string]interface{})
+		assert.Empty(t, metricMatchLabels, "metric selector matchLabels must not be overwritten by controller")
+	})
 }
 
 func TestRenderWorkerResourceTemplate(t *testing.T) {

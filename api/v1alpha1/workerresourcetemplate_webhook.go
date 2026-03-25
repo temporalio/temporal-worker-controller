@@ -280,11 +280,11 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		// storage, so the controller would never see it and injection would not occur.
 		checkScaleTargetRefNotSet(innerSpec, innerSpecPath, &allErrs)
 
-		// 6. selector.matchLabels: if absent or empty ({}), the controller injects it with
-		// the versioned Deployment's selector labels. If non-empty, reject — the controller owns
-		// this field when it is present.
-		// Note: {} is the required opt-in sentinel. null is stripped by the k8s API server before
-		// storage, so the controller would never see it and injection would not occur.
+		// 6. spec.selector.matchLabels: the controller owns this exact path. If absent or {},
+		// the controller injects the versioned Deployment's selector labels; if non-empty, reject.
+		// Note: only spec.selector.matchLabels is controller-owned. Metric selectors
+		// (e.g. spec.metrics[*].external.metric.selector.matchLabels) are user-owned and
+		// may be set freely — the controller does not touch them.
 		if selector, ok := innerSpec["selector"].(map[string]interface{}); ok {
 			if ml, exists := selector["matchLabels"]; exists && ml != nil && !isEmptyMap(ml) {
 				allErrs = append(allErrs, field.Forbidden(

@@ -20,16 +20,18 @@ This is also the recommended mechanism for metric-based or backlog-based autosca
 
 ## Auto-injection
 
-The controller auto-injects two fields when you set them to `null` in `spec.template`. Setting them to `null` is the explicit signal that you want injection:
+The controller auto-injects two fields when you set them to `{}` (empty object) in `spec.template`. `{}` is the explicit opt-in sentinel:
 - If you omit the field entirely, nothing is injected.
-- If you set a non-null value, the webhook rejects the `WorkerResourceTemplate` because the controller owns these fields.
+- If you set a non-empty value, the webhook rejects the `WorkerResourceTemplate` because the controller owns these fields.
 
-| Field | Injected value |
-|-------|---------------|
-| `spec.scaleTargetRef` (any resource with this field) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}` |
-| `spec.selector.matchLabels` (any resource with this field) | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <twdName>}` |
+| Field | Scope | Injected value |
+|-------|-------|---------------|
+| `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}` |
+| `selector.matchLabels` | Only at `spec.selector.matchLabels` | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <twdName>}` |
 
-The `scaleTargetRef` injection applies to any resource type that has a `scaleTargetRef` field — not just HPAs. Other autoscaler CRDs use the same field and benefit from the same injection.
+`scaleTargetRef` injection is recursive — it applies wherever the key appears in the spec tree, which covers HPAs, WPAs, and other autoscaler CRDs that use the same field.
+
+`selector.matchLabels` injection is **non-recursive** and only applies to `spec.selector.matchLabels`. Metric selectors nested deeper in the spec (e.g. `spec.metrics[*].external.metric.selector.matchLabels`) are **user-owned**: you may set them freely and the controller will not touch them. Do not use `{}` as a sentinel in a metric selector — it will remain empty and will likely produce an error from the metric backend.
 
 ## Resource naming
 
