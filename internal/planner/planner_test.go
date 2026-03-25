@@ -970,190 +970,22 @@ func TestGetScaleDeployments(t *testing.T) {
 	}
 }
 
-func TestGetClearReplicasDeployments(t *testing.T) {
-	nilReplicas := func() *appsv1.Deployment {
-		d := createDeploymentWithDefaultConnectionSpecHash(3)
-		d.Spec.Replicas = nil
-		return d
-	}
-
-	testCases := []struct {
-		name        string
-		k8sState    *k8s.DeploymentState
-		status      *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec        *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		expectClear []string // deployment names expected in ClearReplicasDeployments
-	}{
-		{
-			name: "no-op when spec.Replicas is set (controller manages replicas)",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"a": createDeploymentWithDefaultConnectionSpecHash(3),
-				},
-			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "a",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-a"},
-					},
-				},
-			},
-			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{Replicas: func() *int32 { r := int32(3); return &r }()},
-			expectClear: nil,
-		},
-		{
-			name: "clears current version when transitioning to external scaling",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"a": createDeploymentWithDefaultConnectionSpecHash(3),
-				},
-			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "a",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-a"},
-					},
-				},
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "a",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-a"},
-					},
-				},
-			},
-			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
-			expectClear: []string{"test-a"},
-		},
-		{
-			name: "clears both current and target when both have stale replica counts",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"a": createDeploymentWithDefaultConnectionSpecHash(3),
-					"b": createDeploymentWithDefaultConnectionSpecHash(3),
-				},
-			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "a",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-a"},
-					},
-				},
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "b",
-						Status:     temporaliov1alpha1.VersionStatusRamping,
-						Deployment: &corev1.ObjectReference{Name: "test-b"},
-					},
-				},
-			},
-			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
-			expectClear: []string{"test-a", "test-b"},
-		},
-		{
-			name: "no-op when active deployments already have nil replicas",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"a": nilReplicas(),
-				},
-			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "a",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-a"},
-					},
-				},
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "a",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-a"},
-					},
-				},
-			},
-			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
-			expectClear: nil,
-		},
-		{
-			name: "clears inactive deprecated version that is the rollout target",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"a": createDeploymentWithDefaultConnectionSpecHash(3),
-				},
-			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				// TargetVersion.Deployment is nil here: the Deployment ref lives in the
-				// DeprecatedVersions entry (the deprecated version was promoted to target).
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID: "a",
-						Status:  temporaliov1alpha1.VersionStatusInactive,
-					},
-				},
-				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
-					{
-						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-							BuildID:    "a",
-							Status:     temporaliov1alpha1.VersionStatusInactive,
-							Deployment: &corev1.ObjectReference{Name: "test-a"},
-						},
-					},
-				},
-			},
-			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
-			expectClear: []string{"test-a"},
-		},
-		{
-			name: "does not clear drained deprecated version (will be scaled to zero instead)",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"b": createDeploymentWithDefaultConnectionSpecHash(3),
-				},
-			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "a",
-						Status:     temporaliov1alpha1.VersionStatusInactive,
-					},
-				},
-				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
-					{
-						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-							BuildID:    "b",
-							Status:     temporaliov1alpha1.VersionStatusDrained,
-							Deployment: &corev1.ObjectReference{Name: "test-b"},
-						},
-						DrainedSince: &metav1.Time{Time: time.Now().Add(-24 * time.Hour)},
-					},
-				},
-			},
-			spec:        &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
-			expectClear: nil,
+// TestUpdateDeploymentInPlace_ReplicasNil verifies that updateDeploymentInPlace does not
+// overwrite spec.replicas when spec.Replicas is nil (external autoscaler mode).
+// Patching spec.replicas to nil would be a no-op anyway (Deployment defaulter resets nil→1),
+// so the controller must simply stop writing the field when it doesn't own replicas.
+func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) {
+	five := int32(5)
+	dep := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &five, // HPA previously set to 5
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{}},
 		},
 	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			refs := getClearReplicasDeployments(tc.k8sState, tc.status, tc.spec)
-			assert.Equal(t, len(tc.expectClear), len(refs), "unexpected number of ClearReplicasDeployments")
-			actualNames := make([]string, 0, len(refs))
-			for _, ref := range refs {
-				actualNames = append(actualNames, ref.Name)
-			}
-			for _, expectedName := range tc.expectClear {
-				assert.Contains(t, actualNames, expectedName, "expected %s in ClearReplicasDeployments", expectedName)
-			}
-		})
-	}
+	spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{} // spec.Replicas == nil
+	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.TemporalConnectionSpec{})
+	require.NotNil(t, dep.Spec.Replicas)
+	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
 }
 
 func TestShouldCreateDeployment(t *testing.T) {
@@ -3367,12 +3199,12 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	assert.Equal(t, "HorizontalPodAutoscaler", apply.Resource.GetKind())
 	assert.Equal(t, "autoscaling/v2", apply.Resource.GetAPIVersion())
 
-	// Resource must be owned by the versioned Deployment
+	// Resource must be owned by the WRT (not the Deployment)
 	ownerRefs := apply.Resource.GetOwnerReferences()
 	require.Len(t, ownerRefs, 1)
-	assert.Equal(t, deployment.Name, ownerRefs[0].Name)
-	assert.Equal(t, "Deployment", ownerRefs[0].Kind)
-	assert.Equal(t, types.UID("uid-abc"), ownerRefs[0].UID)
+	assert.Equal(t, wrt.Name, ownerRefs[0].Name)
+	assert.Equal(t, "WorkerResourceTemplate", ownerRefs[0].Kind)
+	assert.Equal(t, wrt.UID, ownerRefs[0].UID)
 
 	// Resource name must be deterministic
 	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
@@ -3474,7 +3306,7 @@ func TestGetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
 		"apiVersion": "monitoring.example.com/v1",
 		"kind":       "WorkloadMonitor",
 		"spec": map[string]interface{}{
-			"targetWorkload":    "{{ .DeploymentName }}",
+			"targetWorkload":    "{{ .K8sNamespace }}/{{ .TWDName }}",
 			"versionLabel":      "build-{{ .BuildID }}",
 			"temporalNamespace": "{{ .TemporalNamespace }}",
 		},
@@ -3498,7 +3330,7 @@ func TestGetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "k8s-production/my-worker", spec["targetWorkload"], ".DeploymentName not rendered")
+	assert.Equal(t, "k8s-production/my-worker", spec["targetWorkload"], ".K8sNamespace/.TWDName not rendered")
 	assert.Equal(t, "build-build-abc", spec["versionLabel"], ".BuildID not rendered")
 	assert.Equal(t, "temporal-production", spec["temporalNamespace"], ".TemporalNamespace not rendered")
 }
@@ -3524,6 +3356,107 @@ func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temp
 			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
+}
+
+func TestGetDeleteWorkerResources(t *testing.T) {
+	hpaRaw, _ := json.Marshal(map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec":       map[string]interface{}{"minReplicas": 1},
+	})
+	wrt := temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-hpa", Namespace: "default"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			Template:                    runtime.RawExtension{Raw: hpaRaw},
+		},
+	}
+
+	makeDeployment := func(name, buildID string) *appsv1.Deployment {
+		d := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{k8s.BuildIDLabel: buildID},
+			},
+		}
+		return d
+	}
+
+	t.Run("no delete deployments produces no refs", func(t *testing.T) {
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, nil)
+		assert.Nil(t, refs)
+	})
+
+	t.Run("no wrts produces no refs", func(t *testing.T) {
+		refs := getDeleteWorkerResources(nil, []*appsv1.Deployment{makeDeployment("worker-abc", "abc")})
+		assert.Nil(t, refs)
+	})
+
+	t.Run("resource name computed deterministically without status entry", func(t *testing.T) {
+		// The resource name must be computable even when wrt.Status.Versions is empty —
+		// i.e. the WRT was never applied for this buildID before the Deployment was deleted.
+		dep := makeDeployment("worker-build-abc", "build-abc")
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep})
+		require.Len(t, refs, 1)
+		expectedName := k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")
+		assert.Equal(t, expectedName, refs[0].Name)
+		assert.Equal(t, "default", refs[0].Namespace)
+		assert.Equal(t, "autoscaling/v2", refs[0].APIVersion)
+		assert.Equal(t, "HorizontalPodAutoscaler", refs[0].Kind)
+	})
+
+	t.Run("multiple WRTs × single deployment produces one ref per WRT", func(t *testing.T) {
+		pdbRaw, _ := json.Marshal(map[string]interface{}{
+			"apiVersion": "policy/v1",
+			"kind":       "PodDisruptionBudget",
+			"spec":       map[string]interface{}{"minAvailable": 1},
+		})
+		wrt2 := temporaliov1alpha1.WorkerResourceTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
+			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+				Template:                    runtime.RawExtension{Raw: pdbRaw},
+			},
+		}
+		dep := makeDeployment("worker-build-abc", "build-abc")
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt, wrt2}, []*appsv1.Deployment{dep})
+		require.Len(t, refs, 2)
+		kinds := map[string]bool{refs[0].Kind: true, refs[1].Kind: true}
+		assert.True(t, kinds["HorizontalPodAutoscaler"], "expected HPA ref")
+		assert.True(t, kinds["PodDisruptionBudget"], "expected PDB ref")
+	})
+
+	t.Run("single WRT × multiple deployments produces one ref per deployment", func(t *testing.T) {
+		dep1 := makeDeployment("worker-abc", "build-abc")
+		dep2 := makeDeployment("worker-def", "build-def")
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep1, dep2})
+		require.Len(t, refs, 2)
+		names := map[string]bool{refs[0].Name: true, refs[1].Name: true}
+		assert.True(t, names[k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")])
+		assert.True(t, names[k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-def")])
+	})
+
+	t.Run("deployment with missing build-id label is skipped", func(t *testing.T) {
+		dep := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "worker-no-label"},
+		}
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep})
+		assert.Nil(t, refs)
+	})
+
+	t.Run("wrt with unparseable template is skipped", func(t *testing.T) {
+		badWRT := temporaliov1alpha1.WorkerResourceTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "bad-wrt", Namespace: "default"},
+			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+				Template:                    runtime.RawExtension{Raw: []byte(`not json`)},
+			},
+		}
+		dep := makeDeployment("worker-abc", "build-abc")
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{badWRT, wrt}, []*appsv1.Deployment{dep})
+		require.Len(t, refs, 1) // only the valid WRT
+		assert.Equal(t, "HorizontalPodAutoscaler", refs[0].Kind)
+	})
 }
 
 func TestGetWRTOwnerRefPatches(t *testing.T) {

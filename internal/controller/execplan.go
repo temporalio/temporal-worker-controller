@@ -23,6 +23,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -50,6 +52,31 @@ func (r *TemporalWorkerDeploymentReconciler) executeK8sOperations(ctx context.Co
 		}
 	}
 
+	// Delete rendered WRT resources whose versioned Deployment is being sunset.
+	// Rendered resources are owned by the WRT (not the Deployment), so k8s GC does not
+	// clean them up when the Deployment is deleted; the controller does it here instead.
+	// Errors are logged and skipped — a failed delete will be retried next reconcile
+	// (the Deployment is already gone so its build ID won't produce a new apply).
+	for _, res := range p.DeleteWorkerResources {
+		obj := &unstructured.Unstructured{}
+		gv, err := schema.ParseGroupVersion(res.APIVersion)
+		if err != nil {
+			l.Error(err, "unable to parse APIVersion for worker resource delete",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
+			continue
+		}
+		obj.SetGroupVersionKind(schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: res.Kind})
+		obj.SetNamespace(res.Namespace)
+		obj.SetName(res.Name)
+		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+			l.Error(err, "unable to delete worker resource on version sunset",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
+		} else {
+			l.Info("deleted worker resource on version sunset",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
+		}
+	}
+
 	// Scale deployments
 	for d, replicas := range p.ScaleDeployments {
 		l.Info("scaling deployment", "deployment", d, "replicas", replicas)
@@ -67,24 +94,6 @@ func (r *TemporalWorkerDeploymentReconciler) executeK8sOperations(ctx context.Co
 				"Failed to scale Deployment %q to %d replicas: %v", d.Name, replicas, err)
 			return fmt.Errorf("unable to scale deployment: %w", err)
 		}
-	}
-
-	// Clear replicas on active Deployments when transitioning to external autoscaling.
-	for _, ref := range p.ClearReplicasDeployments {
-		dep := &appsv1.Deployment{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, dep); err != nil {
-			l.Error(err, "unable to get deployment for replica clear", "deployment", ref.Name)
-			return fmt.Errorf("unable to get deployment %q for replica clear: %w", ref.Name, err)
-		}
-		patch := client.MergeFrom(dep.DeepCopy())
-		dep.Spec.Replicas = nil
-		if err := r.Patch(ctx, dep, patch); err != nil {
-			l.Error(err, "unable to clear replicas on deployment", "deployment", ref.Name)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentScaleFailed,
-				"Failed to clear replicas on Deployment %q: %v", ref.Name, err)
-			return fmt.Errorf("unable to clear replicas on deployment %q: %w", ref.Name, err)
-		}
-		l.Info("cleared replicas on deployment for external autoscaling", "deployment", ref.Name)
 	}
 
 	// Update deployments

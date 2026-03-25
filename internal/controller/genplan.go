@@ -29,10 +29,7 @@ type plan struct {
 	DeleteDeployments []*appsv1.Deployment
 	CreateDeployment  *appsv1.Deployment
 	ScaleDeployments  map[*corev1.ObjectReference]uint32
-	// ClearReplicasDeployments lists active versioned Deployments whose spec.replicas
-	// should be patched to nil, populated when spec.Replicas transitions to nil.
-	ClearReplicasDeployments []*corev1.ObjectReference
-	UpdateDeployments        []*appsv1.Deployment
+	UpdateDeployments []*appsv1.Deployment
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
@@ -41,6 +38,11 @@ type plan struct {
 
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []planner.WorkerResourceApply
+
+	// Rendered WRT resource copies to delete explicitly on version sunset.
+	// Rendered resources are owned by the WRT (not the Deployment), so they are not
+	// GC'd when the Deployment is deleted; the controller deletes them here instead.
+	DeleteWorkerResources []planner.WorkerResourceRef
 
 	// WRTs that need a controller owner reference added, as (base, patched) pairs
 	// ready for client.MergeFrom patching in executePlan.
@@ -160,13 +162,13 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	// Convert planner result to controller plan
 	plan.DeleteDeployments = planResult.DeleteDeployments
 	plan.ScaleDeployments = planResult.ScaleDeployments
-	plan.ClearReplicasDeployments = planResult.ClearReplicasDeployments
 	plan.UpdateDeployments = planResult.UpdateDeployments
 
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
 
 	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
+	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 
 	// Convert test workflows

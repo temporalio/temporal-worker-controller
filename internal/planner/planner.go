@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -45,27 +46,32 @@ type Plan struct {
 	// Which actions to take
 	DeleteDeployments []*appsv1.Deployment
 	ScaleDeployments  map[*corev1.ObjectReference]uint32
-	// ClearReplicasDeployments lists active versioned Deployments whose spec.replicas
-	// should be patched to nil. Populated when spec.Replicas transitions to nil so that
-	// stale replica counts are removed and an external autoscaler can take ownership
-	// without competing with a previously-controller-managed value.
-	ClearReplicasDeployments []*corev1.ObjectReference
-	UpdateDeployments        []*appsv1.Deployment
+	UpdateDeployments []*appsv1.Deployment
 	ShouldCreateDeployment   bool
 	VersionConfig            *VersionConfig
 	TestWorkflows            []WorkflowConfig
 
 	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []WorkerResourceApply
+	// DeleteWorkerResources lists rendered WRT resource copies to delete explicitly.
+	// Populated when a versioned Deployment is being deleted (version sunset), since
+	// rendered resources are now owned by the WRT (not the Deployment) and therefore
+	// are not GC'd automatically when the Deployment is removed.
+	DeleteWorkerResources []WorkerResourceRef
 	// EnsureWRTOwnerRefs holds (base, patched) pairs for WRTs that need a
 	// controller owner reference added, ready for client.MergeFrom patching.
-	// This is distinct from the owner refs set on the rendered resource copies
-	// (e.g. per-version HPAs): those point from each rendered copy → its versioned
-	// Deployment, so they are GC'd when a version sunsets. These point from the
-	// WRT itself → the TWD, so the WRT is GC'd when the TWD is deleted. The
-	// controller sets this (rather than the webhook) because the owner ref requires
-	// the TWD's UID, which the controller resolves from spec.temporalWorkerDeploymentRef.
+	// These point from each WRT → the TWD, so the WRT is GC'd when the TWD is
+	// deleted. The controller sets this (rather than the webhook) because the owner
+	// ref requires the TWD's UID, resolved from spec.temporalWorkerDeploymentRef.
 	EnsureWRTOwnerRefs []WRTOwnerRefPatch
+}
+
+// WorkerResourceRef identifies a single rendered WRT resource copy to delete.
+type WorkerResourceRef struct {
+	Namespace  string
+	Name       string
+	APIVersion string
+	Kind       string
 }
 
 // WRTOwnerRefPatch holds a WRT pair for a single merge-patch:
@@ -143,7 +149,6 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
 	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
-	plan.ClearReplicasDeployments = getClearReplicasDeployments(k8sState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
@@ -157,6 +162,7 @@ func GeneratePlan(
 	//                 but have no corresponding Deployment.
 
 	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments)
+	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
 	return plan, nil
@@ -173,9 +179,8 @@ func getWorkerResourceApplies(
 	deleteDeployments []*appsv1.Deployment,
 ) []WorkerResourceApply {
 	// Build a set of deployment names that are scheduled for deletion so we can
-	// skip rendering WRTs for them. Their owner references already point at the
-	// versioned Deployment, so k8s GC will clean up the rendered resources once
-	// the Deployment is deleted — no SSA apply needed.
+	// skip rendering WRTs for them. Their rendered resources are deleted explicitly
+	// by the controller via DeleteWorkerResources (see getDeleteWorkerResources).
 	deletingDeployments := make(map[string]struct{}, len(deleteDeployments))
 	for _, d := range deleteDeployments {
 		deletingDeployments[d.Name] = struct{}{}
@@ -276,6 +281,61 @@ func getWRTOwnerRefPatches(
 		patches = append(patches, WRTOwnerRefPatch{Base: wrt, Patched: patched})
 	}
 	return patches
+}
+
+// getDeleteWorkerResources returns the rendered WRT resource copies that should be explicitly
+// deleted by the controller. Called when versioned Deployments are being deleted (version sunset):
+// since rendered resources are owned by the WRT (not the Deployment), they are not GC'd
+// automatically and must be deleted by the controller.
+func getDeleteWorkerResources(
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
+	deleteDeployments []*appsv1.Deployment,
+) []WorkerResourceRef {
+	if len(deleteDeployments) == 0 || len(wrts) == 0 {
+		return nil
+	}
+
+	// Collect the build IDs that are being deleted.
+	var deletingBuildIDs []string
+	for _, d := range deleteDeployments {
+		if bid, ok := d.Labels[k8s.BuildIDLabel]; ok && bid != "" {
+			deletingBuildIDs = append(deletingBuildIDs, bid)
+		}
+	}
+
+	var refs []WorkerResourceRef
+	for i := range wrts {
+		wrt := &wrts[i]
+
+		// Parse apiVersion and kind from the WRT's spec.template.
+		var templateMeta struct {
+			APIVersion string `json:"apiVersion"`
+			Kind       string `json:"kind"`
+		}
+		if err := json.Unmarshal(wrt.Spec.Template.Raw, &templateMeta); err != nil {
+			continue // skip if template is unparseable
+		}
+		if templateMeta.APIVersion == "" || templateMeta.Kind == "" {
+			continue
+		}
+
+		for _, buildID := range deletingBuildIDs {
+			// Compute the resource name deterministically — no status lookup needed.
+			// This ensures cleanup even if the WRT was never successfully applied for this
+			// buildID (e.g. the version was already eligible for deletion when the WRT was
+			// first created). The Delete call is a no-op if the resource doesn't exist.
+			resourceName := k8s.ComputeWorkerResourceTemplateName(
+				wrt.Spec.TemporalWorkerDeploymentRef.Name, wrt.Name, buildID,
+			)
+			refs = append(refs, WorkerResourceRef{
+				Namespace:  wrt.Namespace,
+				Name:       resourceName,
+				APIVersion: templateMeta.APIVersion,
+				Kind:       templateMeta.Kind,
+			})
+		}
+	}
+	return refs
 }
 
 // checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
@@ -436,8 +496,12 @@ func updateDeploymentWithPodTemplateSpec(
 	deployment.Spec.Template.ObjectMeta.Annotations = podAnnotations
 	deployment.Spec.Template.Spec = *podSpec
 
-	// Update replicas if changed
-	deployment.Spec.Replicas = spec.Replicas
+	// Only set replicas when the controller is managing them (spec.Replicas non-nil).
+	// When nil, an external autoscaler owns replicas; preserving the current value
+	// avoids competing with it on every Update.
+	if spec.Replicas != nil {
+		deployment.Spec.Replicas = spec.Replicas
+	}
 	deployment.Spec.MinReadySeconds = spec.MinReadySeconds
 }
 
@@ -616,54 +680,6 @@ func getScaleDeployments(
 	return scaleDeployments
 }
 
-// getClearReplicasDeployments returns the ObjectReferences of active Deployments whose spec.replicas
-// should be patched to nil. This is needed when transitioning from controller-managed replicas
-// (spec.Replicas set) to external autoscaling (spec.Replicas nil): stale replica counts on
-// Deployments would otherwise compete with the external scaler's ownership.
-// See: https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#migrating-deployments-and-statefulsets-to-horizontal-autoscaling
-func getClearReplicasDeployments(
-	k8sState *k8s.DeploymentState,
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
-) []*corev1.ObjectReference {
-	if spec.Replicas != nil {
-		return nil // controller manages replicas; no clearing needed
-	}
-
-	var refs []*corev1.ObjectReference
-	addIfNotNil := func(ref *corev1.ObjectReference, buildID string) {
-		d, ok := k8sState.Deployments[buildID]
-		if ok && d.Spec.Replicas != nil {
-			refs = append(refs, ref)
-		}
-	}
-
-	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
-		addIfNotNil(status.CurrentVersion.Deployment, status.CurrentVersion.BuildID)
-	}
-	if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
-		status.TargetVersion.Deployment != nil {
-		addIfNotNil(status.TargetVersion.Deployment, status.TargetVersion.BuildID)
-	}
-
-	for _, version := range status.DeprecatedVersions {
-		if version.Deployment == nil {
-			continue
-		}
-		switch version.Status {
-		case temporaliov1alpha1.VersionStatusInactive:
-			// Only clear if this is the rollout target; other inactive versions are scaled to 0.
-			if status.TargetVersion.BuildID == version.BuildID {
-				addIfNotNil(version.Deployment, version.BuildID)
-			}
-		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
-			addIfNotNil(version.Deployment, version.BuildID)
-			// Drained versions are always scaled to 0; no clearing needed.
-		}
-	}
-
-	return refs
-}
 
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
