@@ -88,12 +88,24 @@ type TemporalWorkerDeploymentSpec struct {
 
 // Condition type constants for TemporalWorkerDeployment.
 const (
-	// ConditionTemporalConnectionHealthy indicates whether the referenced TemporalConnection
-	// resource exists and is properly configured.
+	// ConditionReady is True when the Temporal connection is reachable and the
+	// target version is the current version in Temporal. CD systems such as
+	// ArgoCD and Flux use this condition to gate deployment success.
+	ConditionReady = "Ready"
+
+	// ConditionProgressing is True while a rollout is actively in-flight —
+	// i.e., the target version has not yet been promoted to current.
+	ConditionProgressing = "Progressing"
+)
+
+// Deprecated condition type constants. Maintained for backward compatibility with
+// monitoring and automation built against v1.3.x. Use Ready and Progressing
+// instead. These will be removed in the next major version of the CRD.
+const (
+	// Deprecated: Use ConditionReady and ConditionProgressing instead.
 	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
 
-	// ConditionRolloutComplete indicates whether the target version has been successfully
-	// registered as the current version, completing the rollout.
+	// Deprecated: Use ConditionReady instead.
 	ConditionRolloutComplete = "RolloutComplete"
 )
 
@@ -104,33 +116,46 @@ const (
 // They should be treated as stable within an API version and renamed only with
 // a corresponding version bump.
 const (
-	// ReasonTemporalConnectionNotFound is set on ConditionTemporalConnectionHealthy
-	// when the referenced TemporalConnection resource cannot be found.
+	// ReasonRolloutComplete is set on ConditionReady=True and ConditionProgressing=False
+	// when the target version has been successfully registered as the current version.
+	ReasonRolloutComplete = "RolloutComplete"
+
+	// ReasonWaitingForPollers is set on ConditionProgressing=True when the target
+	// version's Kubernetes Deployment has been created but the version is not yet
+	// registered with Temporal (workers have not started polling yet).
+	ReasonWaitingForPollers = "WaitingForPollers"
+
+	// ReasonWaitingForPromotion is set on ConditionProgressing=True when the target
+	// version is registered with Temporal (Inactive) but has not yet been promoted
+	// to current or ramping.
+	ReasonWaitingForPromotion = "WaitingForPromotion"
+
+	// ReasonRamping is set on ConditionProgressing=True when the target version is
+	// the ramping version and is receiving a configured percentage of new workflows.
+	ReasonRamping = "Ramping"
+
+	// ReasonTemporalConnectionNotFound is set on ConditionProgressing=False when the
+	// referenced TemporalConnection resource cannot be found.
 	ReasonTemporalConnectionNotFound = "TemporalConnectionNotFound"
 
-	// ReasonAuthSecretInvalid is set on ConditionTemporalConnectionHealthy when the
-	// credential secret referenced by the TemporalConnection is misconfigured. This
-	// covers: (1) the secret reference has an empty name, (2) the named Kubernetes
-	// Secret cannot be fetched or has an unexpected type, and (3) the mTLS certificate
-	// in the secret is expired or about to expire.
+	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the credential
+	// secret referenced by the TemporalConnection is misconfigured. This covers:
+	// (1) the secret reference has an empty name, (2) the named Kubernetes Secret
+	// cannot be fetched or has an unexpected type, and (3) the mTLS certificate in
+	// the secret is expired or about to expire.
 	ReasonAuthSecretInvalid = "AuthSecretInvalid"
 
-	// ReasonTemporalClientCreationFailed is set on ConditionTemporalConnectionHealthy
-	// when the Temporal SDK client cannot connect to the server (dial failure or failed
-	// health check). The credentials were valid; the server itself is unreachable.
+	// ReasonTemporalClientCreationFailed is set on ConditionProgressing=False when the
+	// Temporal SDK client cannot connect to the server (dial failure or failed health
+	// check). The credentials were valid; the server itself is unreachable.
 	ReasonTemporalClientCreationFailed = "TemporalClientCreationFailed"
 
-	// ReasonTemporalStateFetchFailed is set on ConditionTemporalConnectionHealthy
-	// when the controller cannot query the current worker deployment state from Temporal.
+	// ReasonTemporalStateFetchFailed is set on ConditionProgressing=False when the
+	// controller cannot query the current worker deployment state from Temporal.
 	ReasonTemporalStateFetchFailed = "TemporalStateFetchFailed"
 
-	// ReasonTemporalConnectionHealthy is set on ConditionTemporalConnectionHealthy
-	// when the connection is reachable and the auth secret is resolved.
+	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
 	ReasonTemporalConnectionHealthy = "TemporalConnectionHealthy"
-
-	// ReasonRolloutComplete is set on ConditionRolloutComplete when the target
-	// version has been successfully registered as the current version.
-	ReasonRolloutComplete = "RolloutComplete"
 )
 
 // VersionStatus indicates the status of a version.
