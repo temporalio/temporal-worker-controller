@@ -48,14 +48,11 @@ const (
 	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by temporalWorkerDeploymentRef.name.
 	wrtWorkerRefKey = ".spec.temporalWorkerDeploymentRef.name"
 
-	// twdFinalizerName is the finalizer added to TemporalWorkerDeployment resources
-	// to ensure Temporal server-side versioning data is cleaned up before the CRD is deleted.
-	twdFinalizerName = "temporal.io/worker-deployment-cleanup"
-
-	// tcFinalizerName is the finalizer added to TemporalConnection resources to prevent
-	// them from being deleted while any TemporalWorkerDeployment still references them.
-	// This ensures the connection is available during TWD deletion cleanup.
-	tcFinalizerName = "temporal.io/connection-in-use"
+	// finalizerName is the finalizer added to TemporalWorkerDeployment and TemporalConnection
+	// resources to prevent deletion before cleanup actions are taken. On TWD resources, it
+	// ensures Temporal server-side versioning data is cleaned up. On TemporalConnection
+	// resources, it prevents deletion while any TWD still references the connection.
+	finalizerName = "temporal.io/delete-protection"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -156,7 +153,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// the CRD to be deleted. Without this, stale build ID routing persists in Temporal
 	// and prevents unversioned workers from picking up tasks on the same task queue.
 	if !workerDeploy.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&workerDeploy, twdFinalizerName) {
+		if controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
 			l.Info("TemporalWorkerDeployment is being deleted, running cleanup")
 			if err := r.handleDeletion(ctx, l, &workerDeploy); err != nil {
 				l.Error(err, "failed to clean up Temporal server-side deployment data")
@@ -170,7 +167,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 			}
 
 			// Cleanup succeeded, remove the finalizer so K8s can delete the resource
-			controllerutil.RemoveFinalizer(&workerDeploy, twdFinalizerName)
+			controllerutil.RemoveFinalizer(&workerDeploy, finalizerName)
 			if err := r.Update(ctx, &workerDeploy); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -180,8 +177,8 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Ensure finalizer is present on non-deleted resources
-	if !controllerutil.ContainsFinalizer(&workerDeploy, twdFinalizerName) {
-		controllerutil.AddFinalizer(&workerDeploy, twdFinalizerName)
+	if !controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
+		controllerutil.AddFinalizer(&workerDeploy, finalizerName)
 		if err := r.Update(ctx, &workerDeploy); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -636,9 +633,9 @@ func (r *TemporalWorkerDeploymentReconciler) ensureConnectionFinalizer(
 	l logr.Logger,
 	tc *temporaliov1alpha1.TemporalConnection,
 ) error {
-	if !controllerutil.ContainsFinalizer(tc, tcFinalizerName) {
+	if !controllerutil.ContainsFinalizer(tc, finalizerName) {
 		l.Info("Adding finalizer to TemporalConnection", "connection", tc.Name)
-		controllerutil.AddFinalizer(tc, tcFinalizerName)
+		controllerutil.AddFinalizer(tc, finalizerName)
 		if err := r.Update(ctx, tc); err != nil {
 			return fmt.Errorf("unable to add finalizer to TemporalConnection %q: %w", tc.Name, err)
 		}
@@ -686,9 +683,9 @@ func (r *TemporalWorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
 		return fmt.Errorf("unable to fetch TemporalConnection %q: %w", connectionName, err)
 	}
 
-	if controllerutil.ContainsFinalizer(&tc, tcFinalizerName) {
+	if controllerutil.ContainsFinalizer(&tc, finalizerName) {
 		l.Info("Removing finalizer from TemporalConnection", "connection", connectionName)
-		controllerutil.RemoveFinalizer(&tc, tcFinalizerName)
+		controllerutil.RemoveFinalizer(&tc, finalizerName)
 		if err := r.Update(ctx, &tc); err != nil {
 			return fmt.Errorf("unable to remove finalizer from TemporalConnection %q: %w", connectionName, err)
 		}
