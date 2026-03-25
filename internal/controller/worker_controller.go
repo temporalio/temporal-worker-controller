@@ -123,7 +123,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	var workerDeploy temporaliov1alpha1.TemporalWorkerDeployment
 	if err := r.Get(ctx, req.NamespacedName, &workerDeploy); err != nil {
 		if !apierrors.IsNotFound(err) {
-			l.Error(err, "unable to fetch TemporalWorker")
+			l.Error(err, "unable to fetch TemporalWorkerDeployment")
 			return ctrl.Result{}, err
 		}
 		// TWD not found: set Ready=False on any WRTs that reference it so users get a
@@ -404,7 +404,7 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.TemporalConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
-		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsForWorkerResourceTemplate)).
+		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 			RecoverPanic:            &recoverPanic,
@@ -412,8 +412,9 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		Complete(r)
 }
 
-// findTWDsForWorkerResourceTemplate maps a WorkerResourceTemplate to the TWD reconcile request.
-func (r *TemporalWorkerDeploymentReconciler) findTWDsForWorkerResourceTemplate(ctx context.Context, wrt client.Object) []reconcile.Request {
+// reconcileRequestForWRT returns a reconcile.Request to reconcile the TWD associated with the
+// supplied WRT.
+func (r *TemporalWorkerDeploymentReconciler) reconcileRequestForWRT(ctx context.Context, wrt client.Object) []reconcile.Request {
 	wrtObj, ok := wrt.(*temporaliov1alpha1.WorkerResourceTemplate)
 	if !ok {
 		return nil

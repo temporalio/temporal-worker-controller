@@ -100,6 +100,8 @@ spec:
               versions:
                 items:
                   properties:
+                    applyError:
+                      type: string
                     buildID:
                       type: string
                     lastAppliedGeneration:
@@ -109,8 +111,6 @@ spec:
                       type: string
                     lastTransitionTime:
                       format: date-time
-                      type: string
-                    message:
                       type: string
                     resourceName:
                       type: string

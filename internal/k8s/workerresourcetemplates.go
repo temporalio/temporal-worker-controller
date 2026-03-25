@@ -20,10 +20,11 @@ import (
 // giving negligible collision probability across thousands of (WRT × BuildID) pairs.
 const RenderedHashLen = 16
 
-// WorkerResourceTemplateFieldManager is the SSA field manager name used when applying
+// FieldManager is the SSA field manager name used when applying
 // WorkerResourceTemplate-rendered resources. A single constant per controller is the
 // standard Kubernetes pattern (see e.g. the ResourceClaim controller).
-const WorkerResourceTemplateFieldManager = "temporal-worker-controller"
+// TODO: Use this when we apply SSA to all resources.
+const FieldManager = "temporal-worker-controller"
 
 const (
 	// workerResourceTemplateMaxNameLen is the maximum length of a generated worker resource template name.
@@ -301,12 +302,12 @@ func ComputeRenderedObjectHash(resource *unstructured.Unstructured) string {
 // generation is the WRT metadata.generation at the time of the apply; pass 0 on error
 // to preserve the last-known-good generation. hash is the controller-internal rendered-object
 // hash used for the SSA skip optimisation (pass "" on error).
-func WorkerResourceTemplateVersionStatusForBuildID(buildID, resourceName string, generation int64, hash, message string) temporaliov1alpha1.WorkerResourceTemplateVersionStatus {
+func WorkerResourceTemplateVersionStatusForBuildID(buildID, resourceName string, generation int64, hash, applyError string) temporaliov1alpha1.WorkerResourceTemplateVersionStatus {
 	return temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
 		BuildID:               buildID,
 		ResourceName:          resourceName,
 		LastAppliedGeneration: generation,
-		Message:               message,
+		ApplyError:            applyError,
 		LastAppliedHash:       hash,
 		LastTransitionTime:    metav1.Now(),
 	}

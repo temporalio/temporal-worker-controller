@@ -564,11 +564,11 @@ func waitForWRTStatusNotApplied(
 		}
 		for _, v := range wrt.Status.Versions {
 			if v.BuildID == buildID {
-				if v.Message != "" && v.LastAppliedGeneration == 0 {
-					t.Logf("WRT status correctly shows apply failure for build ID %q, message: %s", buildID, v.Message)
+				if v.ApplyError != "" && v.LastAppliedGeneration == 0 {
+					t.Logf("WRT status correctly shows apply failure for build ID %q, message: %s", buildID, v.ApplyError)
 					return nil
 				}
-				return fmt.Errorf("WRT status for build ID %q: lastAppliedGeneration=%d message=%q (want failure with gen=0)", buildID, v.LastAppliedGeneration, v.Message)
+				return fmt.Errorf("WRT status for build ID %q: lastAppliedGeneration=%d message=%q (want failure with gen=0)", buildID, v.LastAppliedGeneration, v.ApplyError)
 			}
 		}
 		return fmt.Errorf("WRT status has no entry for build ID %q (current: %+v)", buildID, wrt.Status.Versions)

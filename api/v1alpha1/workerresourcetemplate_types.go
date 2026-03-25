@@ -76,9 +76,9 @@ type WorkerResourceTemplateVersionStatus struct {
 	// +optional
 	LastAppliedGeneration int64 `json:"lastAppliedGeneration,omitempty"`
 
-	// Message is non-empty when the most recent apply attempt failed.
+	// ApplyError is non-empty when the most recent apply attempt failed.
 	// +optional
-	Message string `json:"message,omitempty"`
+	ApplyError string `json:"applyError,omitempty"`
 
 	// LastAppliedHash is a hash of the rendered resource as of the last successful apply.
 	// The controller uses this internally to skip redundant SSA apply calls when the

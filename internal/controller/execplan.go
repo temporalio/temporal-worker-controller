@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -350,7 +352,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		l.Info("applying owned resource",
 			"name", apply.Resource.GetName(),
 			"kind", apply.Resource.GetKind(),
-			"fieldManager", k8s.WorkerResourceTemplateFieldManager,
+			"fieldManager", k8s.FieldManager,
 		)
 		// client.Apply uses Server-Side Apply, which is a create-or-update operation:
 		// if the resource does not yet exist the API server creates it; if it already
@@ -367,7 +369,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			apply.Resource,
 			client.Apply,
 			client.ForceOwnership,
-			client.FieldOwner(k8s.WorkerResourceTemplateFieldManager),
+			client.FieldOwner(k8s.FieldManager),
 		)
 		if applyErr != nil {
 			l.Error(applyErr, "unable to apply owned resource",
@@ -431,11 +433,11 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				}
 				continue
 			}
-			var msg string
+			var applyErr string
 			var appliedGeneration int64
 			if result.err != nil {
 				applyErrs = append(applyErrs, result.err)
-				msg = result.err.Error()
+				applyErr = result.err.Error()
 				anyFailed = true
 				// 0 means "unset" / "not yet successfully applied at current generation".
 				// Failure Message and LastTransitionTime are still recorded below.
@@ -444,7 +446,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 				appliedGeneration = wrt.Generation
 			}
 			versions = append(versions, k8s.WorkerResourceTemplateVersionStatusForBuildID(
-				result.buildID, result.resourceName, appliedGeneration, result.hash, msg,
+				result.buildID, result.resourceName, appliedGeneration, result.hash, applyErr,
 			))
 		}
 
@@ -459,7 +461,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			condStatus = metav1.ConditionFalse
 			condReason = temporaliov1alpha1.ReasonWRTApplyFailed
 			// Use the first apply error as the condition message; full per-version details
-			// are available in status.versions[*].message.
+			// are available in status.versions[*].applyError.
 			for _, result := range results {
 				if result.err != nil {
 					condMessage = result.err.Error()
@@ -475,6 +477,10 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			ObservedGeneration: wrt.Generation,
 		})
 
+		// Sort the versions by BuildID for deterministic status output.
+		slices.SortFunc(versions, func(a, b temporaliov1alpha1.WorkerResourceTemplateVersionStatus) int {
+			return strings.Compare(a.BuildID, b.BuildID)
+		})
 		wrt.Status.Versions = versions
 		if err := r.Status().Update(ctx, wrt); err != nil {
 			statusErrs = append(statusErrs, fmt.Errorf("update status for WRT %s/%s: %w", key.namespace, key.name, err))
