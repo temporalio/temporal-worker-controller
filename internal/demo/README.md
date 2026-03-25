@@ -168,7 +168,12 @@ A pre-built Grafana dashboard is included at `internal/demo/k8s/grafana-dashboar
    ```bash
    kubectl -n monitoring port-forward svc/prometheus-grafana 3000:80 &
    ```
-2. Open http://localhost:3000 (default credentials: `admin` / `prom-operator`)
+2. Open http://localhost:3000 and log in
+    ```bash
+    Get your grafana admin user password by running:
+    
+      kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+    ```
 3. Go to **Dashboards → Import** → **Upload JSON file**
 4. Select `internal/demo/k8s/grafana-dashboard.json`
 
