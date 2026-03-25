@@ -59,11 +59,9 @@ spec:
 #              averageValue: "400m"
 
         # Metric 2: backlog count — scale up when tasks are queued but not yet picked up.
-        # Temporal Cloud's worker_version label ("{namespace}_{twd-name}_{build-id}") is
-        # parsed by the recording rule in prometheus-stack-values.yaml into separate
-        # namespace, twd_name, and build_id labels. Both twd_name and build_id are needed:
-        # build_id is only unique within a single TWD, not across all TWDs in a namespace.
-        # The HPA uses whichever metric demands more replicas.
+        # The recording rule in prometheus-stack-values.yaml extracts twd_name and build_id
+        # from Temporal Cloud's worker_version label. Both are needed: build_id is only
+        # unique within a single TWD, not across all TWDs in a namespace.
         - type: External
           external:
             metric:
@@ -75,6 +73,7 @@ spec:
                   # build_id alone is not enough — it is only unique within one TWD.
                   twd_name: "{{ .TWDName }}"
                   build_id: "{{ .BuildID }}"
+                  temporal_namespace: "{{ .TemporalNamespace }}"
                   task_type: "Activity"
             target:
               # Scale up if more than 5 tasks are queued per current replica.
