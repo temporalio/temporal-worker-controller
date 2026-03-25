@@ -217,9 +217,9 @@ func wrtTestCases() []testCase {
 
 					expectedMetricLabels := map[string]string{
 						"task_type":                  "Activity",
-						"worker_deployment_name":      twd.Namespace + "_" + twd.Name,
-						"worker_deployment_build_id":  buildID,
-						"temporal_namespace":          twd.Spec.WorkerOptions.TemporalNamespace,
+						"worker_deployment_name":     twd.Namespace + "_" + twd.Name,
+						"worker_deployment_build_id": buildID,
+						"temporal_namespace":         twd.Spec.WorkerOptions.TemporalNamespace,
 					}
 					waitForHPAWithInjectedMetricSelector(t, ctx, env.K8sClient, twd.Namespace, hpaName, expectedMetricLabels, 30*time.Second)
 				}),

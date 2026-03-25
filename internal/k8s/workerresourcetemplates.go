@@ -200,42 +200,48 @@ func autoInjectFields(spec map[string]interface{}, deploymentName string, podSel
 
 	// metrics[*].external.metric.selector.matchLabels: merge temporal labels whenever present.
 	if len(metricSelectorLabels) > 0 {
-		if metrics, ok := spec["metrics"].([]interface{}); ok {
-			for _, m := range metrics {
-				entry, ok := m.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				ext, ok := entry["external"].(map[string]interface{})
-				if !ok {
-					continue
-				}
-				metricSpec, ok := ext["metric"].(map[string]interface{})
-				if !ok {
-					continue
-				}
-				sel, ok := metricSpec["selector"].(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if _, exists := sel["matchLabels"]; !exists {
-					continue
-				}
-				// matchLabels is present: merge-inject temporal labels, preserving user labels.
-				existing, _, _ := unstructured.NestedStringMap(sel, "matchLabels")
-				if existing == nil {
-					existing = make(map[string]string)
-				}
-				for k, v := range metricSelectorLabels {
-					existing[k] = v
-				}
-				_ = unstructured.SetNestedStringMap(sel, existing, "matchLabels")
-			}
-		}
+		appendMetricsMatchLabelSelector(spec, metricSelectorLabels)
 	}
 
 	// scaleTargetRef: inject anywhere in the spec tree.
 	injectScaleTargetRefRecursive(spec, deploymentName)
+}
+
+// appendMetricsMatchLabelSelector appends temporal metric labels to the metrics[*].external.metric.selector.matchLabels
+// map, preserving user labels.
+func appendMetricsMatchLabelSelector(spec map[string]interface{}, metricSelectorLabels map[string]string) {
+	if metrics, ok := spec["metrics"].([]interface{}); ok {
+		for _, m := range metrics {
+			entry, ok := m.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			ext, ok := entry["external"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			metricSpec, ok := ext["metric"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			sel, ok := metricSpec["selector"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if _, exists := sel["matchLabels"]; !exists {
+				continue
+			}
+			// matchLabels is present: merge-inject temporal labels, preserving user labels.
+			existing, _, _ := unstructured.NestedStringMap(sel, "matchLabels")
+			if existing == nil {
+				existing = make(map[string]string)
+			}
+			for k, v := range metricSelectorLabels {
+				existing[k] = v
+			}
+			_ = unstructured.SetNestedStringMap(sel, existing, "matchLabels")
+		}
+	}
 }
 
 // injectScaleTargetRefRecursive recursively traverses obj and injects scaleTargetRef
