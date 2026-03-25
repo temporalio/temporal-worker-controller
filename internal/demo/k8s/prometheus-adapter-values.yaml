@@ -30,19 +30,15 @@ rules:
       name:
         as: "temporal_slot_utilization"
       resources:
-        overrides:
-          namespace:
-            resource: namespace  # maps the "namespace" label to the k8s namespace
+        namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric
 
     # Phase 2: approximate backlog count per worker version (from Temporal Cloud).
-    # Uses the temporal_backlog_count_by_version recording rule, which adds
-    # namespace="default" so the adapter can scope this to the k8s namespace.
-    # The worker_version label is preserved for the HPA matchLabels selector.
+    # Uses the temporal_backlog_count_by_version recording rule.
+    # cluster-scoped so HPAs in any namespace can consume it; worker_deployment_name
+    # + build_id matchLabels in the HPA are sufficient to select the right series.
     - seriesQuery: 'temporal_backlog_count_by_version{}'
       metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'
       name:
         as: "temporal_backlog_count_by_version"
       resources:
-        overrides:
-          namespace:
-            resource: namespace
+        namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric

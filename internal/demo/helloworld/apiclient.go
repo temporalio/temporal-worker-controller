@@ -32,8 +32,11 @@ func fetchUser(ctx context.Context, apiEndpoint string) (GetSubjectResponse, err
 		return GetSubjectResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Use custom HTTP client with random network latency up to 30s
-	client := util.NewHTTPClient(30 * time.Second)
+	// Use custom HTTP client with random network latency in [10s, 20s).
+	// Narrower range (same 15s avg as before) keeps throughput predictable so
+	// the HPA doesn't over-scale from burst drains when many short activities
+	// finish simultaneously.
+	client := util.NewHTTPClient(10*time.Second, 20*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return GetSubjectResponse{}, fmt.Errorf("failed to fetch user: %w", err)

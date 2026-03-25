@@ -66,7 +66,6 @@ additionalPrometheusRulesMap:
           - record: temporal_slot_utilization
             labels:
               task_queue: "default/helloworld"
-              namespace: "default"
             expr: |
               sum by (twd_name, build_id) (
                 temporal_worker_task_slots_used{
@@ -86,39 +85,35 @@ additionalPrometheusRulesMap:
               )
 
       - name: temporal_cloud_backlog
-        interval: 60s
+        interval: 30s
         rules:
-          # Backlog count per worker version, with three k8s-compatible labels extracted
-          # from Temporal Cloud's worker_version label ("{k8s-ns}_{twd-name}_{build-id}").
+          # Backlog count per worker version, shaped to match the label format that
+          # Temporal Cloud will emit natively in a future release. This recording rule
+          # is a temporary shim: once Temporal Cloud emits worker_deployment_name and
+          # build_id as separate labels, this rule can be deleted with no other changes.
+          #
+          # Current Temporal Cloud label:
+          #   worker_version="{k8s-namespace}_{twd-name}_{build-id}"
           #
           # k8s namespaces and TWD names follow DNS naming rules (no underscores), so _
           # is an unambiguous separator and label_replace is reliable.
           #
-          # Why not use worker_version directly in HPA matchLabels?
-          # The combined "{namespace}_{twd-name}_{build-id}" string frequently exceeds the
-          # 63-char k8s label value limit: a survey of 50 production accounts showed combined
-          # namespace+twd-name lengths of 15–64+ chars, leaving no room for the build ID.
+          # Extracted labels (matching future Temporal Cloud output):
+          #   worker_deployment_name — "{k8s-namespace}_{twd-name}" (all but last segment)
+          #   build_id               — last segment; ≤63 chars, valid k8s label value
+          #   task_type              — preserved from source metric
+          #   temporal_namespace     — preserved from source metric
           #
-          # Extracted labels:
-          #   namespace          — first segment of worker_version; routes the metric to the
-          #                        correct k8s namespace in the External Metrics API
-          #   twd_name           — middle segment; needed because build_id is only unique
-          #                        within one TWD
-          #   build_id           — last segment; ≤63 chars, always a valid k8s label value
-          #   task_type          — preserved from source metric; filter in HPA matchLabels
-          #   temporal_namespace — preserved from source metric; use in HPA matchLabels
-          #                        to scope to a specific Temporal namespace
+          # The prometheus-adapter serves this as a cluster-scoped external metric
+          # (namespaced: false), so HPAs in any namespace can consume it.
           - record: temporal_backlog_count_by_version
             expr: |
               label_replace(
                 label_replace(
-                  label_replace(
-                    sum by (worker_version, task_type, temporal_namespace) (
-                      temporal_cloud_v1_approximate_backlog_count
-                    ),
-                    "namespace", "$1", "worker_version", "^([^_]+)_.*"
+                  sum by (worker_version, task_type, temporal_namespace) (
+                    temporal_cloud_v1_approximate_backlog_count
                   ),
-                  "twd_name", "$1", "worker_version", "^[^_]+_(.+)_[^_]+$"
+                  "worker_deployment_name", "$1", "worker_version", "^(.+)_[^_]+$"
                 ),
                 "build_id", "$1", "worker_version", ".*_([^_]+)$"
               )
