@@ -34,6 +34,16 @@ type WorkerResourceTemplateValidator struct {
 
 var _ webhook.CustomValidator = &WorkerResourceTemplateValidator{}
 
+// ControllerOwnedMetricLabelKeys are the metric selector label keys that the controller
+// appends automatically to every metrics[*].external.metric.selector.matchLabels at render
+// time. Users must not set these manually — the controller generates the correct per-version
+// values and merges them into whatever matchLabels the user provides.
+var ControllerOwnedMetricLabelKeys = []string{
+	"worker_deployment_name",
+	"worker_deployment_build_id",
+	"temporal_namespace",
+}
+
 // NewWorkerResourceTemplateValidator creates a validator from a manager.
 //
 // Three environment variables are read at startup (all injected by the Helm chart):
@@ -338,7 +348,7 @@ func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Pa
 	if !ok {
 		return
 	}
-	controllerOwnedKeys := []string{"worker_deployment_name", "worker_deployment_build_id", "temporal_namespace"}
+	controllerOwnedKeys := ControllerOwnedMetricLabelKeys
 	metricsPath := path.Child("metrics")
 	for i, m := range metrics {
 		entry, ok := m.(map[string]interface{})

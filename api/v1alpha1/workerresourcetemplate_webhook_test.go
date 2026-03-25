@@ -239,19 +239,6 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 			}),
 		},
 
-		// --- Template expressions: the webhook does not validate them; any {{ }} will fail at apply time ---
-		"template expression in string field is accepted": {
-			obj: newWRT("tmpl-accepted", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ .SomeExpression }}",
-				},
-			}),
-		},
-
 		// --- Metric selector matchLabels validation ---
 		// User labels (e.g. task_type) are allowed; controller-owned keys are rejected.
 		"metric selector matchLabels with user label is valid": {

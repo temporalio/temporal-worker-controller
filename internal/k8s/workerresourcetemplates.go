@@ -116,6 +116,8 @@ func RenderWorkerResourceTemplate(
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
 	// that is present in the template. These identify the exact per-version Prometheus series.
+	// Ordering is not a concern: matchLabels is a map; encoding/json serialises map keys in
+	// sorted order, so ComputeRenderedObjectHash is deterministic regardless of insertion order.
 	metricSelectorLabels := map[string]string{
 		"worker_deployment_name":       wrt.Namespace + "_" + twdName,
 		"worker_deployment_build_id":   buildID,
