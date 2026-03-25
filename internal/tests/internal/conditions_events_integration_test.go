@@ -5,11 +5,10 @@ package internal
 // the existing test machinery are covered here.
 //
 // Covered:
-//   - ConditionTemporalConnectionHealthy = True  (any successful reconcile)
-//   - ConditionRolloutComplete = True            (version promoted to current)
-//   - Event reason RolloutComplete               (emitted alongside the condition above)
-//   - ConditionTemporalConnectionHealthy = False (missing TemporalConnection)
-//   - Event reason TemporalConnectionNotFound    (emitted alongside the condition above)
+//   - ConditionProgressing = True                (version registered but not yet current)
+//   - ConditionReady = True                      (version promoted to current)
+//   - ConditionProgressing = False               (blocking error: missing TemporalConnection, etc.)
+//   - Event reason TemporalConnectionNotFound    (emitted alongside Progressing=False condition)
 //   - ReasonTemporalClientCreationFailed: TemporalConnection pointing to an unreachable port
 //   - ReasonTemporalStateFetchFailed: TWD pointing to a Temporal namespace that doesn't exist
 //
@@ -42,9 +41,9 @@ func runConditionsAndEventsTests(
 ) {
 	cases := []testCase{
 		{
-			// Verifies that ConditionTemporalConnectionHealthy is set to True whenever
-			// the controller successfully connects to Temporal.
-			name: "conditions-connection-healthy",
+			// Verifies that ConditionProgressing=True is set while a version is registered
+			// with Temporal but not yet promoted to current (Manual strategy).
+			name: "conditions-progressing",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -58,17 +57,17 @@ func runConditionsAndEventsTests(
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					waitForCondition(t, ctx, env.K8sClient, twd.Name, twd.Namespace,
-						temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+						temporaliov1alpha1.ConditionProgressing,
 						metav1.ConditionTrue,
-						temporaliov1alpha1.ReasonTemporalConnectionHealthy,
+						temporaliov1alpha1.ReasonWaitingForPromotion,
 						10*time.Second, time.Second)
 				}),
 		},
 		{
-			// Verifies that ConditionRolloutComplete is set to True after the controller
-			// promotes a version to current. Note: only a condition is set here — no
+			// Verifies that ConditionReady=True is set after the controller promotes
+			// a version to current. Note: only a condition is set here — no
 			// separate k8s Event is emitted for RolloutComplete.
-			name: "conditions-rollout-complete",
+			name: "conditions-ready-reason-rollout-complete",
 			builder: testhelpers.NewTestCase().
 				WithInput(
 					testhelpers.NewTemporalWorkerDeploymentBuilder().
@@ -83,7 +82,7 @@ func runConditionsAndEventsTests(
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
 					waitForCondition(t, ctx, env.K8sClient, twd.Name, twd.Namespace,
-						temporaliov1alpha1.ConditionRolloutComplete,
+						temporaliov1alpha1.ConditionReady,
 						metav1.ConditionTrue,
 						temporaliov1alpha1.ReasonRolloutComplete,
 						10*time.Second, time.Second)
@@ -98,8 +97,8 @@ func runConditionsAndEventsTests(
 		})
 	}
 
-	// The following three tests each trigger a different ConditionTemporalConnectionHealthy=False
-	// reason. They all run standalone (not through testTemporalWorkerDeploymentCreation) because
+	// The following three tests each trigger a different ConditionProgressing=False reason.
+	// They all run standalone (not through testTemporalWorkerDeploymentCreation) because
 	// the controller fails before creating any k8s Deployments, so the normal status-validation
 	// and deployment-wait machinery in testTemporalWorkerDeploymentCreation would time out.
 	//
@@ -111,7 +110,7 @@ func runConditionsAndEventsTests(
 	// All three share the same skeleton, extracted into testUnhealthyConnectionCondition below.
 	t.Run("conditions-missing-connection", func(t *testing.T) {
 		// No TemporalConnection is created; the controller cannot find the one referenced by
-		// the TWD and immediately sets the condition to False.
+		// the TWD and immediately sets Progressing=False.
 		testUnhealthyConnectionCondition(t, k8sClient,
 			"conditions-missing-connection", testNamespace, ts.GetDefaultNamespace(),
 			nil,
@@ -137,8 +136,8 @@ func runConditionsAndEventsTests(
 // testUnhealthyConnectionCondition is shared by the four error-path condition tests.
 // It optionally creates a TemporalConnection (nil connectionSpec = missing connection),
 // creates a TWD pointing to that connection with the given temporalNamespace, then asserts
-// that ConditionTemporalConnectionHealthy becomes False with the expected reason and that a
-// matching Warning event is emitted.
+// that ConditionProgressing becomes False with the expected reason and that a matching Warning
+// event is emitted.
 func testUnhealthyConnectionCondition(
 	t *testing.T,
 	k8sClient client.Client,
@@ -173,7 +172,7 @@ func testUnhealthyConnectionCondition(
 	}
 
 	waitForCondition(t, ctx, k8sClient, twd.Name, twd.Namespace,
-		temporaliov1alpha1.ConditionTemporalConnectionHealthy,
+		temporaliov1alpha1.ConditionProgressing,
 		metav1.ConditionFalse, expectedReason,
 		30*time.Second, time.Second)
 	waitForEvent(t, ctx, k8sClient, twd.Name, twd.Namespace,

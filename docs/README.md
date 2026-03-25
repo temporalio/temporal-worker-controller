@@ -11,6 +11,9 @@ This documentation structure is designed to support various types of technical d
 
 ## Index
 
+### [CD Rollouts](cd-rollouts.md)
+How to integrate the controller into Helm, kubectl, ArgoCD, and Flux pipelines for steady-state rollouts once you are already using Worker Versioning.
+
 ### [Architecture](architecture.md)
 High-level overview of the Temporal Worker Controller architecture.
 
