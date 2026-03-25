@@ -59,14 +59,15 @@ spec:
 #              averageValue: "400m"
 
         # Metric: backlog count — scale up when tasks are queued but not yet picked up.
-        # worker_deployment_name, build_id, and temporal_namespace are injected
-        # automatically by the controller — do not set them here.
+        # worker_deployment_name, worker_deployment_build_id, and temporal_namespace are
+        # appended automatically by the controller — do not set them here.
         - type: External
           external:
             metric:
               name: temporal_backlog_count_by_version
               selector:
-                matchLabels: {}
+                matchLabels:
+                  task_type: "Activity"
             target:
               # Scale up if more than 10 tasks are queued per current replica.
               # At 2 wf/sec and 15s avg activity duration, steady state is ~6 pods.

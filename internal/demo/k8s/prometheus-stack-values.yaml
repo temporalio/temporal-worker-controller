@@ -103,16 +103,16 @@ additionalPrometheusRulesMap:
           #   worker_deployment_build_id  — last segment; ≤63 chars, valid k8s label value
           #   temporal_namespace          — preserved from source metric
           #
-          # Pre-filtered to task_type="Activity": workers process activities, not workflow
-          # tasks, so activity backlog is the correct signal for worker autoscaling.
+          # task_type is preserved as a dimension so HPAs can filter by it
+          # (e.g. task_type="Activity" or task_type="Workflow").
           # The prometheus-adapter serves this as a cluster-scoped external metric
           # (namespaced: false), so HPAs in any namespace can consume it.
           - record: temporal_backlog_count_by_version
             expr: |
               label_replace(
                 label_replace(
-                  sum by (worker_version, temporal_namespace) (
-                    temporal_cloud_v1_approximate_backlog_count{task_type="Activity"}
+                  sum by (worker_version, task_type, temporal_namespace) (
+                    temporal_cloud_v1_approximate_backlog_count
                   ),
                   "worker_deployment_name", "$1", "worker_version", "^(.+)_[^_]+$"
                 ),

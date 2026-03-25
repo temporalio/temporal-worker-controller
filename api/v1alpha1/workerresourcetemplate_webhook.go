@@ -290,17 +290,13 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 			}
 		}
 
-		// 7. metrics[*].external.metric.selector.matchLabels: the controller injects
-		// worker_deployment_name, build_id, and temporal_namespace into any metric selector
-		// matchLabels that is present. These keys must not be hardcoded — the controller
-		// generates the correct per-version values at render time.
+		// 7. metrics[*].external.metric.selector.matchLabels: the controller appends
+		// worker_deployment_name, worker_deployment_build_id, and temporal_namespace to any
+		// metric selector matchLabels that is present. These keys must not be hardcoded —
+		// the controller generates the correct per-version values at render time.
+		// User labels (e.g. task_type: "Activity") are allowed alongside the controller-owned keys.
 		checkMetricSelectorLabelsNotSet(innerSpec, innerSpecPath, &allErrs)
 	}
-
-	// 8. Validate Go template expressions in all string values.
-	// Only simple {{ .FieldName }} references to the three TemplateData fields are allowed.
-	templatePath := field.NewPath("spec").Child("template")
-	validateTemplateExpressions(obj, templatePath, &allErrs)
 
 	return warnings, allErrs
 }
@@ -332,15 +328,17 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 	}
 }
 
-// checkMetricSelectorLabelsNotSet validates that no metrics[*].external.metric.selector.matchLabels
-// contains any user-specified value. The controller injects worker_deployment_name,
-// worker_deployment_build_id, and temporal_namespace automatically; matchLabels must be
-// absent (no injection) or {} (opt-in sentinel).
+// checkMetricSelectorLabelsNotSet validates that metrics[*].external.metric.selector.matchLabels
+// does not contain any of the controller-owned keys. The controller appends
+// worker_deployment_name, worker_deployment_build_id, and temporal_namespace to whatever
+// matchLabels the user provides; hardcoding these keys would either conflict or be stale.
+// User labels (e.g. task_type: "Activity") are permitted alongside the controller-owned keys.
 func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
 	metrics, ok := spec["metrics"].([]interface{})
 	if !ok {
 		return
 	}
+	controllerOwnedKeys := []string{"worker_deployment_name", "worker_deployment_build_id", "temporal_namespace"}
 	metricsPath := path.Child("metrics")
 	for i, m := range metrics {
 		entry, ok := m.(map[string]interface{})
@@ -363,35 +361,15 @@ func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Pa
 		if !ok || len(ml) == 0 {
 			continue // absent or {} — both valid
 		}
-		*allErrs = append(*allErrs, field.Forbidden(
-			metricsPath.Index(i).Child("external").Child("metric").Child("selector").Child("matchLabels"),
-			"metric selector matchLabels must be absent or {} (empty); the controller injects "+
-				"worker_deployment_name, worker_deployment_build_id, and temporal_namespace automatically",
-		))
-	}
-}
-
-// validateTemplateExpressions recursively walks a JSON value tree and rejects any
-// string value containing Go template expressions ({{ }}). Template expressions are
-// no longer supported; the controller injects all version-specific values automatically.
-func validateTemplateExpressions(v interface{}, path *field.Path, errs *field.ErrorList) {
-	switch typed := v.(type) {
-	case string:
-		if !strings.Contains(typed, "{{") {
-			return
-		}
-		*errs = append(*errs, field.Invalid(path, typed,
-			"Go template expressions ({{ }}) are not supported; the controller injects "+
-				"version-specific values automatically via scaleTargetRef: {}, "+
-				"selector.matchLabels: {}, and metrics[*].external.metric.selector.matchLabels: {}"))
-		return
-	case map[string]interface{}:
-		for k, val := range typed {
-			validateTemplateExpressions(val, path.Child(k), errs)
-		}
-	case []interface{}:
-		for i, item := range typed {
-			validateTemplateExpressions(item, path.Index(i), errs)
+		for _, key := range controllerOwnedKeys {
+			if _, exists := ml[key]; exists {
+				*allErrs = append(*allErrs, field.Forbidden(
+					metricsPath.Index(i).Child("external").Child("metric").Child("selector").Child("matchLabels").Key(key),
+					fmt.Sprintf("label %q is managed by the controller; do not set it manually — "+
+						"the controller appends worker_deployment_name, worker_deployment_build_id, and temporal_namespace "+
+						"to any matchLabels present (including {})", key),
+				))
+			}
 		}
 	}
 }

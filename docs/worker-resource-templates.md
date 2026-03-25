@@ -28,15 +28,15 @@ The controller auto-injects two fields when you set them to `{}` (empty object) 
 |-------|-------|---------------|
 | `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}` |
 | `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <twdName>}` |
-| `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{worker_deployment_name: <ns>_<twd-name>, build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
+| `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{worker_deployment_name: <ns>_<twd-name>, worker_deployment_build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
 
 `scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
 
 `spec.selector.matchLabels` uses `{}` as the opt-in sentinel — absent means no injection; `{}` means inject pod selector labels.
 
-`spec.metrics[*].external.metric.selector.matchLabels` injects the three Temporal metric identity labels (`worker_deployment_name`, `build_id`, `temporal_namespace`) into any External metric selector where the `matchLabels` key is present (including `{}`). The injection is a merge — user labels like `task_type: "Activity"` coexist. If `matchLabels` is absent on a metric entry, no injection occurs for that entry.
+`spec.metrics[*].external.metric.selector.matchLabels` appends the three Temporal metric identity labels (`worker_deployment_name`, `worker_deployment_build_id`, `temporal_namespace`) to any External metric selector where the `matchLabels` key is present (including `{}`). User labels like `task_type: "Activity"` coexist — the controller merges its keys alongside whatever you provide. If `matchLabels` is absent on a metric entry, no injection occurs for that entry.
 
-The webhook rejects any template that hardcodes `worker_deployment_name`, `build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned.
+The webhook rejects any template that hardcodes `worker_deployment_name`, `worker_deployment_build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned.
 
 ## Resource naming
 

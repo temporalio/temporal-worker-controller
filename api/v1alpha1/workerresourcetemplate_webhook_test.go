@@ -239,147 +239,23 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 			}),
 		},
 
-		// --- Template expression validation: all {{ }} expressions are rejected ---
-		"template expression rejected: {{ .K8sNamespace }}": {
-			obj: newWRT("tmpl-k8s-namespace", "my-worker", map[string]interface{}{
+		// --- Template expressions: the webhook does not validate them; any {{ }} will fail at apply time ---
+		"template expression in string field is accepted": {
+			obj: newWRT("tmpl-accepted", "my-worker", map[string]interface{}{
 				"apiVersion": "autoscaling/v2",
 				"kind":       "HorizontalPodAutoscaler",
 				"spec": map[string]interface{}{
 					"minReplicas": float64(2),
 					"maxReplicas": float64(10),
-					"someField":   "prefix-{{ .K8sNamespace }}-suffix",
+					"someField":   "{{ .SomeExpression }}",
 				},
 			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: {{ .TemporalNamespace }}": {
-			obj: newWRT("tmpl-ns", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ .TemporalNamespace }}",
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: {{ .BuildID }}": {
-			obj: newWRT("tmpl-buildid", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ .BuildID }}",
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: invalid syntax": {
-			obj: newWRT("tmpl-bad-syntax", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ .Unclosed",
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: unknown field": {
-			obj: newWRT("tmpl-unknown-field", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ .DeploymentNme }}", // typo
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: pipeline": {
-			obj: newWRT("tmpl-pipeline", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ .DeploymentName | printf \"%s\" }}",
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: range": {
-			obj: newWRT("tmpl-range", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ range $i, $c := .BuildID }}x{{ end }}",
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: if": {
-			obj: newWRT("tmpl-if", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   `{{ if eq .BuildID "abc" }}hack{{ end }}`,
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: variable declaration": {
-			obj: newWRT("tmpl-var-decl", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ $x := .DeploymentName }}{{ $x }}",
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected: nested field": {
-			obj: newWRT("tmpl-nested", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"someField":   "{{ .DeploymentName.Nested }}",
-				},
-			}),
-			errorMsg: "not supported",
-		},
-		"template expression rejected in deeply nested spec field": {
-			obj: newWRT("tmpl-nested-spec", "my-worker", map[string]interface{}{
-				"apiVersion": "autoscaling/v2",
-				"kind":       "HorizontalPodAutoscaler",
-				"spec": map[string]interface{}{
-					"minReplicas": float64(2),
-					"maxReplicas": float64(10),
-					"deep": map[string]interface{}{
-						"nested": map[string]interface{}{
-							"field": "{{ .BadField }}",
-						},
-					},
-				},
-			}),
-			errorMsg: "not supported",
 		},
 
 		// --- Metric selector matchLabels validation ---
-		"non-empty metric selector matchLabels rejected": {
-			obj: newWRT("metric-sel-nonempty", "my-worker", map[string]interface{}{
+		// User labels (e.g. task_type) are allowed; controller-owned keys are rejected.
+		"metric selector matchLabels with user label is valid": {
+			obj: newWRT("metric-sel-user-label", "my-worker", map[string]interface{}{
 				"apiVersion": "autoscaling/v2",
 				"kind":       "HorizontalPodAutoscaler",
 				"spec": map[string]interface{}{
@@ -406,9 +282,89 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 					},
 				},
 			}),
-			errorMsg: "metric selector matchLabels must be absent or {}",
 		},
-		"empty metric selector matchLabels is valid (controller injects)": {
+		"metric selector matchLabels with worker_deployment_name rejected": {
+			obj: newWRT("metric-sel-wdn", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"metrics": []interface{}{
+						map[string]interface{}{
+							"type": "External",
+							"external": map[string]interface{}{
+								"metric": map[string]interface{}{
+									"name": "temporal_backlog_count_by_version",
+									"selector": map[string]interface{}{
+										"matchLabels": map[string]interface{}{
+											"worker_deployment_name": "default_my-worker",
+										},
+									},
+								},
+								"target": map[string]interface{}{"type": "AverageValue", "averageValue": "10"},
+							},
+						},
+					},
+				},
+			}),
+			errorMsg: `"worker_deployment_name" is managed by the controller`,
+		},
+		"metric selector matchLabels with worker_deployment_build_id rejected": {
+			obj: newWRT("metric-sel-wdbid", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"metrics": []interface{}{
+						map[string]interface{}{
+							"type": "External",
+							"external": map[string]interface{}{
+								"metric": map[string]interface{}{
+									"name": "temporal_backlog_count_by_version",
+									"selector": map[string]interface{}{
+										"matchLabels": map[string]interface{}{
+											"worker_deployment_build_id": "abc123",
+										},
+									},
+								},
+								"target": map[string]interface{}{"type": "AverageValue", "averageValue": "10"},
+							},
+						},
+					},
+				},
+			}),
+			errorMsg: `"worker_deployment_build_id" is managed by the controller`,
+		},
+		"metric selector matchLabels with temporal_namespace rejected": {
+			obj: newWRT("metric-sel-tn", "my-worker", map[string]interface{}{
+				"apiVersion": "autoscaling/v2",
+				"kind":       "HorizontalPodAutoscaler",
+				"spec": map[string]interface{}{
+					"minReplicas": float64(2),
+					"maxReplicas": float64(10),
+					"metrics": []interface{}{
+						map[string]interface{}{
+							"type": "External",
+							"external": map[string]interface{}{
+								"metric": map[string]interface{}{
+									"name": "temporal_backlog_count_by_version",
+									"selector": map[string]interface{}{
+										"matchLabels": map[string]interface{}{
+											"temporal_namespace": "my-ns",
+										},
+									},
+								},
+								"target": map[string]interface{}{"type": "AverageValue", "averageValue": "10"},
+							},
+						},
+					},
+				},
+			}),
+			errorMsg: `"temporal_namespace" is managed by the controller`,
+		},
+		"empty metric selector matchLabels is valid (controller appends)": {
 			obj: newWRT("metric-sel-empty", "my-worker", map[string]interface{}{
 				"apiVersion": "autoscaling/v2",
 				"kind":       "HorizontalPodAutoscaler",

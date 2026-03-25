@@ -114,7 +114,7 @@ func RenderWorkerResourceTemplate(
 
 	selectorLabels := ComputeSelectorLabels(twdName, buildID)
 
-	// Labels the controller injects into every metrics[*].external.metric.selector.matchLabels
+	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
 	// that is present in the template. These identify the exact per-version Prometheus series.
 	metricSelectorLabels := map[string]string{
 		"worker_deployment_name":       wrt.Namespace + "_" + twdName,
