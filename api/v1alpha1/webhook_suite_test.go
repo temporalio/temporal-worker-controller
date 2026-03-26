@@ -5,18 +5,23 @@
 package v1alpha1
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	admissionv1 "k8s.io/api/admission/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -30,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -57,6 +63,7 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	By("bootstrapping test environment")
+	wrtWebhook := loadWRTWebhookFromHelmChart(filepath.Join("..", "..", "helm", "temporal-worker-controller"))
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			// CRDs live in the crds chart's templates directory
@@ -64,7 +71,7 @@ var _ = BeforeSuite(func() {
 		},
 		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
-			Paths: []string{filepath.Join("..", "..", "config", "webhook")},
+			ValidatingWebhooks: []*admissionregistrationv1.ValidatingWebhookConfiguration{wrtWebhook},
 		},
 	}
 
@@ -149,6 +156,32 @@ var _ = BeforeSuite(func() {
 	}).Should(Succeed())
 
 })
+
+// loadWRTWebhookFromHelmChart renders the Helm chart's webhook.yaml with default values using
+// `helm template` and extracts the ValidatingWebhookConfiguration for WorkerResourceTemplate.
+// This makes the test authoritative against the Helm chart rather than a hand-maintained copy.
+func loadWRTWebhookFromHelmChart(chartPath string) *admissionregistrationv1.ValidatingWebhookConfiguration {
+	out, err := exec.Command("helm", "template", "test", chartPath, "--show-only", "templates/webhook.yaml").Output()
+	Expect(err).NotTo(HaveOccurred(), "helm template failed — is helm installed?")
+
+	// The file contains multiple YAML documents; find the WRT ValidatingWebhookConfiguration.
+	for _, doc := range bytes.Split(out, []byte("\n---\n")) {
+		trimmed := strings.TrimSpace(string(doc))
+		if !strings.Contains(trimmed, "kind: ValidatingWebhookConfiguration") {
+			continue
+		}
+		if !strings.Contains(trimmed, "vworkerresourcetemplate.kb.io") {
+			continue
+		}
+		jsonBytes, convErr := sigsyaml.YAMLToJSON([]byte(trimmed))
+		Expect(convErr).NotTo(HaveOccurred(), "failed to convert WRT webhook YAML to JSON")
+		var wh admissionregistrationv1.ValidatingWebhookConfiguration
+		Expect(json.Unmarshal(jsonBytes, &wh)).To(Succeed(), "failed to decode WRT ValidatingWebhookConfiguration")
+		return &wh
+	}
+	Fail("WRT ValidatingWebhookConfiguration not found in rendered helm chart webhook.yaml")
+	return nil
+}
 
 var _ = AfterSuite(func() {
 	if testEnv == nil {
