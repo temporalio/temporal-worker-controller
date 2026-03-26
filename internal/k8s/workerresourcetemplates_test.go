@@ -79,33 +79,6 @@ func TestComputeSelectorLabels(t *testing.T) {
 	assert.Equal(t, "abc-123", labels[BuildIDLabel])
 }
 
-func TestRenderString(t *testing.T) {
-	data := TemplateData{
-		K8sNamespace:      "my-namespace",
-		TWDName:           "my-worker",
-		TemporalNamespace: "my-temporal-ns",
-		BuildID:           "abc123",
-	}
-
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"plain string", "plain string"},
-		{"{{ .K8sNamespace }}", "my-namespace"},
-		{"{{ .TWDName }}", "my-worker"},
-		{"{{ .TemporalNamespace }}", "my-temporal-ns"},
-		{"{{ .BuildID }}", "abc123"},
-		{"Monitor for build {{ .BuildID }}", "Monitor for build abc123"},
-		{"{{ .K8sNamespace }}_{{ .TWDName }}_{{ .BuildID }}", "my-namespace_my-worker_abc123"},
-	}
-	for _, tc := range tests {
-		got, err := renderString(tc.input, data)
-		require.NoError(t, err)
-		assert.Equal(t, tc.want, got)
-	}
-}
-
 func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 	selectorLabels := map[string]string{
 		BuildIDLabel: "abc123",
@@ -368,46 +341,4 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	ref, ok := spec["scaleTargetRef"].(map[string]interface{})
 	require.True(t, ok, "scaleTargetRef should have been auto-injected")
 	assert.Equal(t, "my-worker-abc123", ref["name"])
-}
-
-func TestRenderWorkerResourceTemplate_WithTemplates(t *testing.T) {
-	objSpec := map[string]interface{}{
-		"apiVersion": "monitoring.example.com/v1",
-		"kind":       "WorkloadMonitor",
-		"spec": map[string]interface{}{
-			"targetWorkload": "{{ .K8sNamespace }}/{{ .TWDName }}",
-			"description":    "Monitor for build {{ .BuildID }} in {{ .TemporalNamespace }}",
-		},
-	}
-	rawBytes, err := json.Marshal(objSpec)
-	require.NoError(t, err)
-
-	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-monitor",
-			Namespace: "production",
-		},
-		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
-				Name: "my-worker",
-			},
-			Template: runtime.RawExtension{Raw: rawBytes},
-		},
-	}
-
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-worker-abc123",
-			Namespace: "production",
-			UID:       types.UID("uid-abc"),
-		},
-	}
-
-	obj, err := RenderWorkerResourceTemplate(wrt, deployment, "abc123", "my-temporal-ns")
-	require.NoError(t, err)
-
-	spec, ok := obj.Object["spec"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "production/my-worker", spec["targetWorkload"])
-	assert.Equal(t, "Monitor for build abc123 in my-temporal-ns", spec["description"])
 }

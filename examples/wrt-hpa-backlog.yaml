@@ -52,8 +52,7 @@ spec:
 #              name: temporal_slot_utilization
 #              selector:
 #                matchLabels:
-#                  twd_name: "{{ .TWDName }}"
-#                  build_id: "{{ .BuildID }}"
+#                  task_type: "Activity"
 #            target:
 #              type: AverageValue
 #              averageValue: "400m"

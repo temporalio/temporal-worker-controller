@@ -62,8 +62,7 @@ spec:
               name: temporal_slot_utilization
               selector:
                 matchLabels:
-                  twd_name: "{{ .TWDName }}" # < 63 chars
-                  build_id: "{{ .BuildID }}"
+                  task_type: "Activity"
             target:
               type: AverageValue
               averageValue: "50m"   # 400 milli-units = 0.40 = 40% utilization target

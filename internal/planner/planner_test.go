@@ -3300,52 +3300,10 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
 }
 
-func TestGetWorkerResourceApplies_GoTemplateRendering(t *testing.T) {
-	// Arbitrary CRD that uses all three template variables.
-	objSpec := map[string]interface{}{
-		"apiVersion": "monitoring.example.com/v1",
-		"kind":       "WorkloadMonitor",
-		"spec": map[string]interface{}{
-			"targetWorkload":    "{{ .K8sNamespace }}/{{ .TWDName }}",
-			"versionLabel":      "build-{{ .BuildID }}",
-			"temporalNamespace": "{{ .TemporalNamespace }}",
-		},
-	}
-	raw, _ := json.Marshal(objSpec)
-	wrt := temporaliov1alpha1.WorkerResourceTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-monitor", Namespace: "k8s-production"},
-		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
-			Template:                    runtime.RawExtension{Raw: raw},
-		},
-	}
-
-	deployment := createDeploymentWithUID("my-worker-build-abc", "uid-abc")
-	k8sState := &k8s.DeploymentState{
-		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
-	}
-
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "temporal-production", nil)
-	require.Len(t, applies, 1)
-
-	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "k8s-production/my-worker", spec["targetWorkload"], ".K8sNamespace/.TWDName not rendered")
-	assert.Equal(t, "build-build-abc", spec["versionLabel"], ".BuildID not rendered")
-	assert.Equal(t, "temporal-production", spec["temporalNamespace"], ".TemporalNamespace not rendered")
-}
-
-// createTestWRTWithInvalidTemplate builds a WRT whose spec.template contains a broken Go
-// template expression, causing RenderWorkerResourceTemplate to return an error.
+// createTestWRTWithInvalidTemplate builds a WRT whose spec.template contains invalid json
+// template, causing RenderWorkerResourceTemplate to return an error.
 func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temporaliov1alpha1.WorkerResourceTemplate {
-	badSpec := map[string]interface{}{
-		"apiVersion": "autoscaling/v2",
-		"kind":       "HorizontalPodAutoscaler",
-		"spec": map[string]interface{}{
-			"description": "{{ .NonExistentField }}", // will fail with missingkey=error
-		},
-	}
-	raw, _ := json.Marshal(badSpec)
+	raw, _ := json.Marshal([]byte("invalid json"))
 	return temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,

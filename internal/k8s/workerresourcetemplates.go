@@ -1,13 +1,11 @@
 package k8s
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"text/template"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -90,8 +88,7 @@ type TemplateData struct {
 // Processing order:
 //  1. Unmarshal spec.template into an Unstructured
 //  2. Auto-inject scaleTargetRef and matchLabels (Layer 1)
-//  3. Render Go templates in all string values (Layer 2)
-//  4. Set metadata (name, namespace, labels, owner reference)
+//  3. Set metadata (name, namespace, labels, owner reference)
 func RenderWorkerResourceTemplate(
 	wrt *temporaliov1alpha1.WorkerResourceTemplate,
 	deployment *appsv1.Deployment,
@@ -105,13 +102,6 @@ func RenderWorkerResourceTemplate(
 	}
 
 	twdName := wrt.Spec.TemporalWorkerDeploymentRef.Name
-	data := TemplateData{
-		K8sNamespace:      wrt.Namespace,
-		TWDName:           twdName,
-		TemporalNamespace: temporalNamespace,
-		BuildID:           buildID,
-	}
-
 	selectorLabels := ComputeSelectorLabels(twdName, buildID)
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
@@ -132,18 +122,7 @@ func RenderWorkerResourceTemplate(
 		}
 	}
 
-	// Step 3: render Go templates in all string values.
-	rendered, err := renderTemplateValues(obj.Object, data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to render templates: %w", err)
-	}
-	renderedMap, ok := rendered.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected type after template rendering: %T", rendered)
-	}
-	obj.Object = renderedMap
-
-	// Step 4: set metadata using Unstructured typed methods.
+	// Step 3: set metadata using Unstructured typed methods.
 	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.TemporalWorkerDeploymentRef.Name, wrt.Name, buildID)
 	obj.SetName(resourceName)
 	obj.SetNamespace(wrt.Namespace)
@@ -281,58 +260,6 @@ func buildScaleTargetRef(deploymentName string) map[string]interface{} {
 		"kind":       "Deployment",
 		"name":       deploymentName,
 	}
-}
-
-// renderTemplateValues recursively traverses a JSON-decoded value tree and renders
-// Go template expressions in all string values. Returns the modified value.
-func renderTemplateValues(v interface{}, data TemplateData) (interface{}, error) {
-	switch typed := v.(type) {
-	case string:
-		rendered, err := renderString(typed, data)
-		if err != nil {
-			return nil, err
-		}
-		return rendered, nil
-	case map[string]interface{}:
-		for k, val := range typed {
-			rendered, err := renderTemplateValues(val, data)
-			if err != nil {
-				return nil, fmt.Errorf("field %q: %w", k, err)
-			}
-			typed[k] = rendered
-		}
-		return typed, nil
-	case []interface{}:
-		for i, item := range typed {
-			rendered, err := renderTemplateValues(item, data)
-			if err != nil {
-				return nil, fmt.Errorf("index %d: %w", i, err)
-			}
-			typed[i] = rendered
-		}
-		return typed, nil
-	default:
-		// numbers, booleans, nil — pass through unchanged
-		return v, nil
-	}
-}
-
-// renderString renders a single string as a Go template with the given data.
-// Strings without template expressions are returned unchanged with zero allocations,
-// avoiding the template library's buffer copy for the common case of plain strings.
-func renderString(s string, data TemplateData) (string, error) {
-	if !strings.Contains(s, "{{") {
-		return s, nil
-	}
-	tmpl, err := template.New("").Option("missingkey=error").Parse(s)
-	if err != nil {
-		return "", fmt.Errorf("invalid template %q: %w", s, err)
-	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("template execution failed for %q: %w", s, err)
-	}
-	return buf.String(), nil
 }
 
 // ComputeRenderedObjectHash returns a stable, deterministic hash of a rendered Unstructured
