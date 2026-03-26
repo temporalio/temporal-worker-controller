@@ -322,7 +322,7 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 	for i := range wrtList.Items {
 		wrt := &wrtList.Items[i]
 		meta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionTypeReady,
+			Type:               temporaliov1alpha1.ConditionReady,
 			Status:             metav1.ConditionFalse,
 			Reason:             temporaliov1alpha1.ReasonWRTTWDNotFound,
 			Message:            fmt.Sprintf("TemporalWorkerDeployment %q not found", twd.Name),

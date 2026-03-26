@@ -90,29 +90,6 @@ type TemporalWorkerDeploymentSpec struct {
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
-// Condition type constants for TemporalWorkerDeployment.
-const (
-	// ConditionReady is True when the Temporal connection is reachable and the
-	// target version is the current version in Temporal. CD systems such as
-	// ArgoCD and Flux use this condition to gate deployment success.
-	ConditionReady = "Ready"
-
-	// ConditionProgressing is True while a rollout is actively in-flight —
-	// i.e., the target version has not yet been promoted to current.
-	ConditionProgressing = "Progressing"
-)
-
-// Deprecated condition type constants. Maintained for backward compatibility with
-// monitoring and automation built against v1.3.x. Use Ready and Progressing
-// instead. These will be removed in the next major version of the CRD.
-const (
-	// Deprecated: Use ConditionReady and ConditionProgressing instead.
-	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
-
-	// Deprecated: Use ConditionReady instead.
-	ConditionRolloutComplete = "RolloutComplete"
-)
-
 // Condition reason constants for TemporalWorkerDeployment.
 //
 // These strings appear in status.conditions[].reason and are part of the CRD's

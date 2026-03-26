@@ -481,7 +481,7 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 			}
 		}
 		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionTypeReady,
+			Type:               temporaliov1alpha1.ConditionReady,
 			Status:             condStatus,
 			Reason:             condReason,
 			Message:            condMessage,

@@ -45,16 +45,6 @@ type WorkerResourceTemplateSpec struct {
 }
 
 const (
-	// ConditionTypeReady is the condition type that reports whether all active
-	// Build ID instances of this WorkerResourceTemplate have been successfully applied.
-	// Using the standard "Ready" type makes this condition visible to helm install --wait
-	// and kubectl apply --wait.
-	//
-	// True:    all active Build ID instances applied successfully at the current template generation.
-	// False:   one or more instances failed to apply (see Message for the error).
-	// Unknown: no apply has been attempted yet (e.g. the WRT was just created).
-	ConditionTypeReady = "Ready"
-
 	// ReasonWRTAllVersionsApplied is the condition reason when all instances are successfully applied.
 	ReasonWRTAllVersionsApplied = "AllVersionsApplied"
 	// ReasonWRTApplyFailed is the condition reason when one or more instances failed to apply.
