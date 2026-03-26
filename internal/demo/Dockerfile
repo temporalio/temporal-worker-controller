@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.25 as builder
+FROM golang:1.25 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG WORKER
@@ -30,6 +30,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o worke
 # Use distroless as minimal base image to package the worker binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM scratch
+ARG WORKER
 ARG DD_GIT_REPOSITORY_URL
 ARG DD_GIT_COMMIT_SHA
 ENV DD_GIT_REPOSITORY_URL=${DD_GIT_REPOSITORY_URL}

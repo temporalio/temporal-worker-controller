@@ -35,8 +35,8 @@ prometheus:
       - temporal-cloud-api-key
     additionalScrapeConfigs:
       - job_name: temporal_cloud
-        scrape_interval: 60s
-        scrape_timeout: 30s
+        scrape_interval: 10s
+        scrape_timeout: 5s
         honor_timestamps: true
         scheme: https
         authorization:
@@ -56,7 +56,7 @@ additionalPrometheusRulesMap:
   temporal-worker-scaling:
     groups:
       - name: temporal_worker_slots
-        interval: 15s
+        interval: 10s
         rules:
           # Slot utilization ratio per worker version, filtered to activity workers only.
           # Range: 0.0 (idle) to 1.0 (fully saturated).
@@ -64,28 +64,24 @@ additionalPrometheusRulesMap:
           # The worker emits twd_name and build_id as separate labels (both valid
           # Kubernetes label values), so no label_replace is needed here.
           - record: temporal_slot_utilization
-            labels:
-              task_queue: "default/helloworld"
             expr: |
-              sum by (twd_name, build_id) (
+              sum by (worker_deployment_name, worker_deployment_build_id, temporal_namespace, worker_type) (
                 temporal_worker_task_slots_used{
-                  task_queue="default/helloworld",
-                  worker_type="ActivityWorker"
+                  task_queue="default/helloworld"
                 }
               )
               /
               clamp_min(
-                sum by (twd_name, build_id) (
-                  temporal_worker_task_slots_available{
-                    task_queue="default/helloworld",
-                    worker_type="ActivityWorker"
-                  }
+                sum by (worker_deployment_name, worker_deployment_build_id, temporal_namespace, worker_type) (
+                  temporal_worker_task_slots_used{task_queue="default/helloworld"}
+                  +
+                  temporal_worker_task_slots_available{task_queue="default/helloworld"}
                 ),
                 1
               )
 
       - name: temporal_cloud_backlog
-        interval: 30s
+        interval: 10s
         rules:
           # Backlog count per worker version, shaped to match the label format that
           # Temporal Cloud will emit natively in a future release. This recording rule
@@ -116,7 +112,7 @@ additionalPrometheusRulesMap:
               label_replace(
                 label_replace(
                   sum by (worker_version, task_type, temporal_namespace) (
-                    temporal_cloud_v1_approximate_backlog_count
+                    temporal_cloud_v1_approximate_backlog_count{worker_version=~".+_.+_.+"}
                   ),
                   "worker_deployment_name", "$1", "worker_version", "^(.+)_[^_]+$"
                 ),

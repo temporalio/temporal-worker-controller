@@ -20,7 +20,7 @@ import (
 	"go.temporal.io/sdk/log"
 )
 
-func configureObservability(deploymentName, buildID string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
+func configureObservability(deploymentName, buildID, temporalNamespace string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
 	slogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource:   false,
 		Level:       slog.LevelDebug,
@@ -33,15 +33,13 @@ func configureObservability(deploymentName, buildID string, metricsPort int) (l 
 		panic(err)
 	}
 	// Extract the TWD name from the Temporal deployment name ("namespace/name").
-	twdName := deploymentName
-	if idx := strings.LastIndex(deploymentName, "/"); idx >= 0 {
-		twdName = deploymentName[idx+1:]
-	}
+	deploymentNameCleanForLabel := strings.Replace(deploymentName, "/", "_", 1)
 	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
 		Meter: metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
 		InitialAttributes: attribute.NewSet(
-			attribute.String("twd_name", twdName),
-			attribute.String("build_id", buildID),
+			attribute.String("worker_deployment_name", deploymentNameCleanForLabel),
+			attribute.String("worker_deployment_build_id", buildID),
+			attribute.String("temporal_namespace", temporalNamespace),
 		),
 	})
 

@@ -96,7 +96,7 @@
       "targets": [
         {
           "expr": "temporal_slot_utilization",
-          "legendFormat": "{{twd_name}} / {{build_id}}",
+          "legendFormat": "{{worker_deployment_name}} / {{worker_deployment_build_id}}",
           "refId": "A"
         }
       ],
@@ -128,7 +128,7 @@
       "targets": [
         {
           "expr": "temporal_backlog_count_by_version{task_type=\"Workflow\"}",
-          "legendFormat": "{{twd_name}} / {{build_id}}",
+          "legendFormat": "{{worker_deployment_name}} / {{worker_deployment_build_id}}",
           "refId": "A"
         }
       ],
@@ -153,7 +153,7 @@
       "targets": [
         {
           "expr": "temporal_backlog_count_by_version{task_type=\"Activity\"}",
-          "legendFormat": "{{twd_name}} / {{build_id}}",
+          "legendFormat": "{{worker_deployment_name}} / {{worker_deployment_build_id}}",
           "refId": "A"
         }
       ],
@@ -185,12 +185,12 @@
       "targets": [
         {
           "expr": "temporal_worker_task_slots_used{worker_type=\"ActivityWorker\", task_queue=\"default/helloworld\"}",
-          "legendFormat": "used {{pod}} {{build_id}}",
+          "legendFormat": "used {{pod}} {{worker_deployment_build_id}}",
           "refId": "A"
         },
         {
           "expr": "temporal_worker_task_slots_available{worker_type=\"ActivityWorker\", task_queue=\"default/helloworld\"}",
-          "legendFormat": "available {{pod}} {{build_id}}",
+          "legendFormat": "available {{pod}} {{worker_deployment_build_id}}",
           "refId": "B"
         }
       ],
@@ -215,12 +215,12 @@
       "targets": [
         {
           "expr": "temporal_worker_task_slots_used{worker_type=\"WorkflowWorker\", task_queue=\"default/helloworld\"}",
-          "legendFormat": "used {{pod}} {{build_id}}",
+          "legendFormat": "used {{pod}} {{worker_deployment_build_id}}",
           "refId": "A"
         },
         {
           "expr": "temporal_worker_task_slots_available{worker_type=\"WorkflowWorker\", task_queue=\"default/helloworld\"}",
-          "legendFormat": "available {{pod}} {{build_id}}",
+          "legendFormat": "available {{pod}} {{worker_deployment_build_id}}",
           "refId": "B"
         }
       ],

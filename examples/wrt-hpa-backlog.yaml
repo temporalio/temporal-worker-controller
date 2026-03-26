@@ -42,20 +42,23 @@ spec:
     kind: HorizontalPodAutoscaler
     spec:
       scaleTargetRef: {}
-      minReplicas: 6
-      maxReplicas: 20
+      minReplicas: 1
+      maxReplicas: 10
       metrics:
-#        # Metric 1: slot utilization — scale up when workers are busy.
-#        - type: External
-#          external:
-#            metric:
-#              name: temporal_slot_utilization
-#              selector:
-#                matchLabels:
-#                  task_type: "Activity"
-#            target:
-#              type: AverageValue
-#              averageValue: "400m"
+        # Metric 1: slot utilization — scale-down guard: prevent scale down if workers are busy.
+        # type: Value (not AverageValue) because temporal_slot_utilization is an aggregate ratio
+        # (0=idle, 1=saturated). The HPA computes: desired = ceil(currentReplicas × value / target).
+        # Target 700m = 70%: hold replicas until utilization drops below 70%.
+        - type: External
+          external:
+            metric:
+              name: temporal_slot_utilization
+              selector:
+                matchLabels:
+                  worker_type: "ActivityWorker"
+            target:
+              type: Value
+              value: "700m"
 
         # Metric: backlog count — scale up when tasks are queued but not yet picked up.
         # worker_deployment_name, worker_deployment_build_id, and temporal_namespace are
@@ -72,16 +75,20 @@ spec:
               # At 2 wf/sec and 15s avg activity duration, steady state is ~6 pods.
               # Tune based on your workflow latency requirements.
               type: AverageValue
-              averageValue: "10"
+              averageValue: "1"
       behavior:
         scaleUp:
           stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 10
+          selectPolicy: Max
+
         scaleDown:
-          # Longer window on scale-down so pinned v1 workflows finish draining
-          # before replicas are removed. Rate-limited to 20%/min to prevent sudden
-          # capacity drops that would cause the backlog to spike again.
-          stabilizationWindowSeconds: 600
+          stabilizationWindowSeconds: 60
           policies:
           - type: Percent
-            value: 20
-            periodSeconds: 60
+            value: 10
+            periodSeconds: 10
+          selectPolicy: Max

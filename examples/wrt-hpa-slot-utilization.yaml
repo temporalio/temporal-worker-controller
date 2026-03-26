@@ -53,19 +53,19 @@ spec:
         # (both valid Kubernetes label values: ≤63 chars, alphanumeric with - and _).
         # Together they uniquely identify a single versioned Deployment across all TWDs.
         #
-        # Target: maintain ~70% slot utilization (averageValue 700m = 0.70 out of 1.0).
-        # The HPA adds replicas until:
-        #   current_replicas × averageValue ≥ total observed utilization
+        # type: Value (not AverageValue) because temporal_slot_utilization is an aggregate ratio
+        # (0=idle, 1=saturated). The HPA computes: desired = ceil(currentReplicas × value / target).
+        # Target 700m = 70%: scale until utilization is at or below 70%.
         - type: External
           external:
             metric:
               name: temporal_slot_utilization
               selector:
                 matchLabels:
-                  task_type: "Activity"
+                  worker_type: "ActivityWorker"
             target:
-              type: AverageValue
-              averageValue: "50m"   # 400 milli-units = 0.40 = 40% utilization target
+              type: Value
+              value: "700m"
       behavior:
         scaleUp:
           stabilizationWindowSeconds: 0    # scale up immediately (set to 30 in production)

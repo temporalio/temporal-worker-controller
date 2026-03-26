@@ -42,3 +42,6 @@ rules:
         as: "temporal_backlog_count_by_version"
       resources:
         namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric
+
+# Must be greater than the Prometheus scrape interval.
+metricsRelistInterval: 15s
