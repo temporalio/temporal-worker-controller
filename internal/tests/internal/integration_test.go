@@ -949,6 +949,10 @@ func TestIntegration(t *testing.T) {
 
 	// Conditions and events tests
 	runConditionsAndEventsTests(t, k8sClient, mgr, ts, testNamespace.Name)
+
+	// Deletion cleanup tests
+	runDeletionTests(t, k8sClient, mgr, ts, testNamespace.Name)
+
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
