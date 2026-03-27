@@ -64,6 +64,10 @@ spec:
           value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
         - name: CONTROLLER_VERSION
           value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+        {{- with .Values.watchNamespace }}
+        - name: WATCH_NAMESPACE
+          value: {{ . | quote }}
+        {{- end }}
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}
