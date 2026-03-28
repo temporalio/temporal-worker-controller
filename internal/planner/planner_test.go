@@ -908,6 +908,93 @@ func TestGetScaleDeployments(t *testing.T) {
 			expectScales: map[string]uint32{"test-a": 3},
 		},
 		{
+			name: "HPA mode: rolled-back target was drained to zero, scale it back to 1",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					// The rolled-back target: exists, Spec.Replicas was explicitly set to 0 by drain
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+				DeploymentRefs: map[string]*corev1.ObjectReference{
+					"old": {Name: "test-old"},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "old",
+						Status:     temporaliov1alpha1.VersionStatusInactive,
+						Deployment: &corev1.ObjectReference{Name: "test-old"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+			},
+			// spec.Replicas == nil means HPA controls replicas
+			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectScales: map[string]uint32{"test-old": 1},
+		},
+		{
+			name: "HPA mode: target deployment is brand-new (Spec.Replicas nil), no explicit scale needed",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					// New deployment created with nil replicas — Deployment controller defaults to 1.
+					// Spec.Replicas is nil, so the condition d.Spec.Replicas != nil && *d.Spec.Replicas == 0 is false.
+					"new": {
+						ObjectMeta: metav1.ObjectMeta{Name: "test-new"},
+						Spec:       appsv1.DeploymentSpec{Replicas: nil},
+					},
+				},
+				DeploymentRefs: map[string]*corev1.ObjectReference{
+					"new": {Name: "test-new"},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusInactive,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+			},
+			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "HPA mode: target has positive Spec.Replicas already (HPA managing), no explicit scale",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+				DeploymentRefs: map[string]*corev1.ObjectReference{
+					"old": {Name: "test-old"},
+				},
+			},
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "old",
+						Status:     temporaliov1alpha1.VersionStatusInactive,
+						Deployment: &corev1.ObjectReference{Name: "test-old"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+			},
+			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			expectScales: map[string]uint32{},
+		},
+		{
 			name: "don't scale down drained deployment before delay",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{

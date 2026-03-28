@@ -608,12 +608,12 @@ func getScaleDeployments(
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
 
-	// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
-	if spec.Replicas != nil {
-		replicas := *spec.Replicas
-
-		// Scale the current version if needed
-		if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
+	// Scale the current version if needed
+	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
+		// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
+		// Scale the Current Version per the TemporalWorkerDeploymentSpec.Replicas value.
+		if spec.Replicas != nil {
+			replicas := *spec.Replicas
 			ref := status.CurrentVersion.Deployment
 			if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
@@ -621,11 +621,22 @@ func getScaleDeployments(
 				}
 			}
 		}
+	}
 
-		// Scale the target version if it exists, and isn't current
-		if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
-			status.TargetVersion.Deployment != nil {
-			if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
+	// Scale the target version if it exists, and isn't current
+	if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
+		status.TargetVersion.Deployment != nil {
+		if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
+
+			// If the Target Version is an already-existing Deployment that was scaled to zero by the controller
+			// due to Sunset Policy, and the TWD has nil replicas because a scaler is managing the replicas, then
+			// no one will scale the Target Version back up, so we need to scale it back to 1 replica, which is what
+			// would happen if the Deployment was being created from scratch with nil replicas.
+			if spec.Replicas != nil || (spec.Replicas == nil && d.Spec.Replicas != nil && *d.Spec.Replicas == 0) {
+				replicas := int32(1) // just scale up to 1 if we are in the spec.Replicas == nil && d.Spec.Replicas == 0 case.
+				if spec.Replicas != nil {
+					replicas = *spec.Replicas
+				}
 				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
 					scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
 				}
