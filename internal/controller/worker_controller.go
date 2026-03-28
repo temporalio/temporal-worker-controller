@@ -316,7 +316,7 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 		client.InNamespace(twd.Namespace),
 		client.MatchingFields{wrtWorkerRefKey: twd.Name},
 	); err != nil {
-		return fmt.Errorf("list WRTs referencing missing TWD %q: %w", twd.Name, err)
+		return fmt.Errorf("list WorkerResourceTemplates referencing missing TemporalWorkerDeployment %q: %w", twd.Name, err)
 	}
 	var errs []error
 	for i := range wrtList.Items {
@@ -329,8 +329,8 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 			ObservedGeneration: wrt.Generation,
 		})
 		if err := r.Status().Update(ctx, wrt); err != nil {
-			l.Error(err, "unable to update WRT status for missing TWD", "wrt", wrt.Name, "twd", twd.Name)
-			errs = append(errs, fmt.Errorf("update status for WRT %s/%s: %w", wrt.Namespace, wrt.Name, err))
+			l.Error(err, "unable to update WorkerResourceTemplate status for missing TemporalWorkerDeployment", "wrt", wrt.Name, "twd", twd.Name)
+			errs = append(errs, fmt.Errorf("update status for WorkerResourceTemplate %s/%s: %w", wrt.Namespace, wrt.Name, err))
 		}
 	}
 	return errors.Join(errs...)
