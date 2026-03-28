@@ -21,7 +21,7 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: {{ .Release.Name }}-validating-webhook-configuration
+  name: {{ .Release.Name }}-wrt-validating-webhook-configuration
   labels:
     app.kubernetes.io/component: webhook
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}

@@ -16,7 +16,6 @@ import (
 
 func HelloWorld(ctx workflow.Context) (string, error) {
 	ctx = util.SetActivityTimeout(ctx, 5*time.Minute)
-	print("hi")
 
 	// Get a subject
 	var subject GetSubjectResponse

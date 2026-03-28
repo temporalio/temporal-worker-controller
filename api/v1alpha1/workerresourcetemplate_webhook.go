@@ -27,7 +27,7 @@ type WorkerResourceTemplateValidator struct {
 	RESTMapper            meta.RESTMapper
 	ControllerSAName      string
 	ControllerSANamespace string
-	// AllowedKinds is the explicit list of resource kinds permitted as WRT objects.
+	// AllowedKinds is the explicit list of resource kinds permitted as WorkerResourceTemplate objects.
 	// Must be non-empty; when empty or nil, all kinds are rejected.
 	// Populated from the ALLOWED_KINDS environment variable (comma-separated).
 	AllowedKinds []string
@@ -60,7 +60,7 @@ var ControllerOwnedMetricLabelKeys = []string{
 //   - ALLOWED_KINDS — comma-separated list of kind names that are permitted as
 //     WorkerResourceTemplate objects (e.g. "HorizontalPodAutoscaler,PodDisruptionBudget").
 //     Configurable via workerResourceTemplate.allowedResources[*].kinds in values.yaml.
-//     Must be set; when empty or unset, all WRT kind submissions are rejected.
+//     Must be set; when empty or unset, all WorkerResourceTemplate kind submissions are rejected.
 func NewWorkerResourceTemplateValidator(mgr ctrl.Manager) *WorkerResourceTemplateValidator {
 	var allowedKinds []string
 	if env := os.Getenv("ALLOWED_KINDS"); env != "" {
@@ -189,7 +189,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 	if spec.Template.Raw == nil {
 		allErrs = append(allErrs, field.Required(
 			field.NewPath("spec").Child("template"),
-			"object must be specified",
+			"template must be specified",
 		))
 		return warnings, allErrs
 	}
@@ -199,7 +199,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		allErrs = append(allErrs, field.Invalid(
 			field.NewPath("spec").Child("template"),
 			"<raw>",
-			fmt.Sprintf("failed to parse object: %v", err),
+			fmt.Sprintf("failed to parse template: %v", err),
 		))
 		return warnings, allErrs
 	}
@@ -266,7 +266,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		// is polling). If all workers are scaled to zero and the task queue goes idle for ~5 minutes,
 		// the metric stops being emitted and resets to zero. If new tasks then arrive but no worker
 		// polls, the metric remains zero — making it impossible for a metric-based autoscaler to
-		// detect the backlog and scale back up. Until Temporal provides a reliable mechanism for
+		// detect the backlog and scale back up. Until Temporal makes this a reliable metric for
 		// scaling workers to zero and back, minReplicas=0 is rejected.
 		if minReplicas, exists := innerSpec["minReplicas"]; exists {
 			if v, ok := minReplicas.(float64); ok && v == 0 {
@@ -285,7 +285,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		// the versioned Deployment. If non-empty, reject — the controller owns this field and any
 		// hardcoded value would point at the wrong Deployment.
 		// Note: {} is the required opt-in sentinel. null is stripped by the k8s API server before
-		// storage, so the controller would never see it and injection would not occur.
+		// storage, so the controller would never see the field and injection would not occur.
 		checkScaleTargetRefNotSet(innerSpec, innerSpecPath, &allErrs)
 
 		// 6. spec.selector.matchLabels: the controller owns this exact path. If absent or {},
@@ -318,7 +318,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 // and a hardcoded value would point at the wrong (non-versioned) Deployment.
 //
 // Note: {} is the required opt-in sentinel. null is stripped by the Kubernetes API server before
-// storage, so the controller would never see it and injection would not occur.
+// storage, so the controller would never see the field and injection would not occur.
 func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
 	for k, v := range obj {
 		if k == "scaleTargetRef" {
@@ -342,8 +342,8 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 // checkMetricSelectorLabelsNotSet validates that metrics[*].external.metric.selector.matchLabels
 // does not contain any of the controller-owned keys. The controller appends
 // worker_deployment_name, worker_deployment_build_id, and temporal_namespace to whatever
-// matchLabels the user provides; hardcoding these keys would either conflict or be stale.
-// User labels (e.g. task_type: "Activity") are permitted alongside the controller-owned keys.
+// matchLabels the user provides. User labels (e.g. task_type: "Activity") are permitted alongside
+// the controller-owned keys.
 func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
 	metrics, ok := spec["metrics"].([]interface{})
 	if !ok {

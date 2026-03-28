@@ -6,16 +6,16 @@
 
 The Temporal Worker Controller creates one Kubernetes `Deployment` per worker version (Build ID). If you attach an HPA directly to a single Deployment, it breaks as versions roll over — the old HPA still targets the old Deployment, the new Deployment has no HPA, and you have to manage cleanup yourself.
 
-`WorkerResourceTemplate` solves this by treating the resource as a template. The controller renders one instance per worker version with running workers, injects the correct versioned Deployment name, and cleans up automatically when the versioned Deployment is deleted (e.g., during the sunset process after traffic has drained).
+`WorkerResourceTemplate` solves this by treating the resource as a template. The controller renders one instance per worker version with running workers, injects the correct versioned Kubernetes Deployment name, injects per-version metrics tags where appropriate, and cleans up automatically when the versioned Deployment is deleted (e.g., during the sunset process after traffic has drained).
 
-This is also the recommended mechanism for metric-based or backlog-based autoscaling: attach a standard HPA with custom metrics to your workers and the controller keeps one per running worker version, each pointing at the right Deployment.
+This is also the recommended mechanism for metric-based or backlog-based autoscaling: attach a standard HPA with custom metrics to your workers and the controller keeps one per running worker version, each pointing at the right Deployment and version-tagged metrics.
 
 ## How it works
 
 1. You create a `WorkerResourceTemplate` that references a `TemporalWorkerDeployment` and contains the resource spec in `spec.template`.
 2. The validating webhook checks that you have permission to manage that resource type yourself (SubjectAccessReview), and that the resource kind is on the allowed list (see below).
 3. On each reconcile loop, the controller renders one copy of `spec.template` per worker version with a running Deployment, injects fields (see below), and applies it via Server-Side Apply.
-4. Each copy is owned by the corresponding versioned `Deployment`, so it is garbage-collected automatically when that Deployment is deleted.
+4. Each per-version copy is deleted by the controller when its corresponding Kubernetes Deployment is deleted per the sunset policy.
 5. `WorkerResourceTemplate.status.versions` is updated with the applied/failed status for each version.
 
 ## Auto-injection

@@ -68,7 +68,7 @@ type WorkerResourceTemplateVersionStatus struct {
 	//
 	// Reading the status:
 	//   - 0                                  → never applied
-	//   - 0 < lastAppliedGeneration < .metadata.generation → older spec applied; current spec pending or failing (see Message)
+	//   - 0 < lastAppliedGeneration < .metadata.generation → older spec applied; current spec pending or failing (see ApplyError)
 	//   - lastAppliedGeneration == .metadata.generation    → healthy, up-to-date
 	//   - lastAppliedGeneration > 0 && message != ""       → previously applied at that generation; current apply failing
 	// +optional
@@ -110,11 +110,11 @@ type WorkerResourceTemplateStatus struct {
 //+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.template.kind",description="Kind of resource that is being templated"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
-// WorkerResourceTemplate attaches an arbitrary namespaced Kubernetes resource
-// (HPA, PDB, WPA, custom CRDs, etc.) to each per-Build-ID versioned Deployment
-// managed by a TemporalWorkerDeployment. One copy of the resource is created per
-// active Build ID, owned by this WorkerResourceTemplate (so all copies are deleted
-// when the WorkerResourceTemplate itself is deleted).
+// WorkerResourceTemplate creates an arbitrary namespaced Kubernetes resource
+// (HPA, PDB, WPA, custom CRDs, etc.) for each per-Build-ID versioned Deployment
+// managed by a TemporalWorkerDeployment. One instance of the resource is created
+// per active Build ID, and is owned by this WorkerResourceTemplate (so all instances
+// are deleted when the WorkerResourceTemplate itself is deleted).
 type WorkerResourceTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
