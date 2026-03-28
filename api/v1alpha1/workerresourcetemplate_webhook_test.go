@@ -97,7 +97,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 					Template:                    runtime.RawExtension{Raw: nil},
 				},
 			},
-			errorMsg: "object must be specified",
+			errorMsg: "template must be specified",
 		},
 		"missing apiVersion": {
 			obj: newWRT("no-apiv", "my-worker", map[string]interface{}{
