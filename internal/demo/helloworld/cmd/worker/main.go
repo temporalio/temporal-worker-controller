@@ -13,7 +13,14 @@ import (
 )
 
 func main() {
-	w, stopFunc := util.NewVersionedWorker(worker.Options{})
+	// Limit activity slots to 5 per pod so the HPA demo reaches ~10 replicas at a
+	// realistic load rate. Default (1000) would require thousands of concurrent workflows
+	// to saturate even a single pod. Remove this limit in production.
+	w, stopFunc := util.NewVersionedWorker(worker.Options{
+		MaxConcurrentActivityExecutionSize: 5,
+		MaxConcurrentActivityTaskPollers:   5,
+		MaxConcurrentWorkflowTaskPollers:   2,
+	})
 	defer stopFunc()
 
 	// Register activities and workflows

@@ -38,6 +38,9 @@ const (
 	// TODO(jlegrone): add this everywhere
 	deployOwnerKey = ".metadata.controller"
 	buildIDLabel   = "temporal.io/build-id"
+
+	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by temporalWorkerDeploymentRef.name.
+	wrtWorkerRefKey = ".spec.temporalWorkerDeploymentRef.name"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -119,11 +122,15 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// Fetch the worker deployment
 	var workerDeploy temporaliov1alpha1.TemporalWorkerDeployment
 	if err := r.Get(ctx, req.NamespacedName, &workerDeploy); err != nil {
-		l.Error(err, "unable to fetch TemporalWorker")
-		// we'll ignore not-found errors, since they can't be fixed by an immediate
-		// requeue (we'll need to wait for a new notification), and we can get them
-		// on deleted requests.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if !apierrors.IsNotFound(err) {
+			l.Error(err, "unable to fetch TemporalWorkerDeployment")
+			return ctrl.Result{}, err
+		}
+		// TWD not found: set Ready=False on any WRTs that reference it so users get a
+		// clear signal rather than a silent no-op. No requeue for the not-found itself —
+		// the next reconcile fires naturally when the TWD is created. If the List or
+		// status updates fail (transient API errors), return the error to requeue with backoff.
+		return ctrl.Result{}, r.markWRTsTWDNotFound(ctx, req.NamespacedName)
 	}
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
@@ -297,6 +304,38 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}, nil
 }
 
+// markWRTsTWDNotFound sets Ready=False/TWDNotFound on all WorkerResourceTemplates that reference
+// a TemporalWorkerDeployment that could not be found. This covers the case where the WRT is
+// created before the TWD exists, or where the TWD was deleted before the controller set an owner
+// reference on the WRT (which would otherwise cause Kubernetes GC to delete the WRT).
+// Returns an error if the List or any status update fails so the caller can requeue.
+func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Context, twd types.NamespacedName) error {
+	l := log.FromContext(ctx)
+	var wrtList temporaliov1alpha1.WorkerResourceTemplateList
+	if err := r.List(ctx, &wrtList,
+		client.InNamespace(twd.Namespace),
+		client.MatchingFields{wrtWorkerRefKey: twd.Name},
+	); err != nil {
+		return fmt.Errorf("list WorkerResourceTemplates referencing missing TemporalWorkerDeployment %q: %w", twd.Name, err)
+	}
+	var errs []error
+	for i := range wrtList.Items {
+		wrt := &wrtList.Items[i]
+		meta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               temporaliov1alpha1.ConditionReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             temporaliov1alpha1.ReasonWRTTWDNotFound,
+			Message:            fmt.Sprintf("TemporalWorkerDeployment %q not found", twd.Name),
+			ObservedGeneration: wrt.Generation,
+		})
+		if err := r.Status().Update(ctx, wrt); err != nil {
+			l.Error(err, "unable to update WorkerResourceTemplate status for missing TemporalWorkerDeployment", "wrt", wrt.Name, "twd", twd.Name)
+			errs = append(errs, fmt.Errorf("update status for WorkerResourceTemplate %s/%s: %w", wrt.Namespace, wrt.Name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // setCondition sets a condition on the TemporalWorkerDeployment status.
 func (r *TemporalWorkerDeploymentReconciler) setCondition(
 	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
@@ -406,16 +445,46 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		return err
 	}
 
+	// Index WorkerResourceTemplate by spec.temporalWorkerDeploymentRef.name for efficient listing.
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.WorkerResourceTemplate{}, wrtWorkerRefKey, func(rawObj client.Object) []string {
+		wrt, ok := rawObj.(*temporaliov1alpha1.WorkerResourceTemplate)
+		if !ok {
+			mgr.GetLogger().Error(errors.New("error indexing WorkerResourceTemplates"), "could not convert raw object", rawObj)
+			return nil
+		}
+		return []string{wrt.Spec.TemporalWorkerDeploymentRef.Name}
+	}); err != nil {
+		return err
+	}
+
 	recoverPanic := !r.DisableRecoverPanic
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.TemporalConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
+		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 			RecoverPanic:            &recoverPanic,
 		}).
 		Complete(r)
+}
+
+// reconcileRequestForWRT returns a reconcile.Request to reconcile the TWD associated with the
+// supplied WRT.
+func (r *TemporalWorkerDeploymentReconciler) reconcileRequestForWRT(ctx context.Context, wrt client.Object) []reconcile.Request {
+	wrtObj, ok := wrt.(*temporaliov1alpha1.WorkerResourceTemplate)
+	if !ok {
+		return nil
+	}
+	return []reconcile.Request{
+		{
+			NamespacedName: types.NamespacedName{
+				Name:      wrtObj.Spec.TemporalWorkerDeploymentRef.Name,
+				Namespace: wrt.GetNamespace(),
+			},
+		},
+	}
 }
 
 func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {

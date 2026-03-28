@@ -64,23 +64,44 @@ spec:
           value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
         - name: CONTROLLER_VERSION
           value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+        # POD_NAMESPACE and SERVICE_ACCOUNT_NAME are populated automatically by
+        # Kubernetes from the pod's own metadata (namespace and service account name).
+        # The validating webhook reads them to perform SubjectAccessReview checks
+        # using the controller's identity.
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: SERVICE_ACCOUNT_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.serviceAccountName
+        # ALLOWED_KINDS controls which resource kinds are accepted by the
+        # WorkerResourceTemplate validating webhook. Derived from
+        # workerResourceTemplate.allowedResources[*].kinds in values.yaml.
+        # An empty value rejects all kinds — at least one must be configured.
+        {{- $allKinds := list -}}
+        {{- range .Values.workerResourceTemplate.allowedResources -}}
+          {{- range .kinds -}}
+            {{- $allKinds = append $allKinds . -}}
+          {{- end -}}
+        {{- end }}
+        - name: ALLOWED_KINDS
+          value: {{ join "," $allKinds | quote }}
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}
         - "--metrics-bind-address=127.0.0.1:{{ .Values.metrics.port }}"
         {{- end }}
         - "--health-probe-bind-address=:8081"
-        {{- if .Values.webhook.enabled }}
-        {{ fail "webhooks aren't supported yet" }}
         ports:
-          - containerPort: 9443
+          - containerPort: {{ .Values.webhook.port }}
             name: webhook-server
             protocol: TCP
         volumeMounts:
-          - mountPath: /tmp/k8s-webhook-server/serving-certs
+          - mountPath: {{ .Values.webhook.certDir }}
             name: cert
             readOnly: true
-        {{- end }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -125,14 +146,11 @@ spec:
             cpu: 5m
             memory: 64Mi
       {{- end }}
-      {{- if .Values.webhook.enabled }}
-      {{ fail "webhooks aren't supported yet" }}
       volumes:
         - name: cert
           secret:
             defaultMode: 420
             secretName: webhook-server-cert
-      {{- end }}
       serviceAccountName: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- with .Values.nodeSelector }}

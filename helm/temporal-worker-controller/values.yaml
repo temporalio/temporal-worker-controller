@@ -75,15 +75,50 @@ metrics:
 namespace:
   create: false
 
-# Not yet supported
 webhook:
+  # enabled controls the optional TemporalWorkerDeployment validating webhook.
+  # The WorkerResourceTemplate validating webhook is always enabled and does
+  # not require this flag.
   enabled: false
   port: 9443
   certDir: /tmp/k8s-webhook-server/serving-certs
 
-# Not yet supported
+# Configuration for WorkerResourceTemplate objects.
+workerResourceTemplate:
+  # allowedResources defines which resource kinds may be embedded in WRT objects.
+  # The webhook rejects any kind not listed here, and the controller is granted RBAC
+  # to manage exactly these resource types. An empty list rejects all kinds — at
+  # least one entry must be configured.
+  #
+  # Each entry has three fields:
+  #   kinds:      kind names the webhook will accept (case-insensitive)
+  #   apiGroups:  API groups for the controller's RBAC policy
+  #   resources:  resource names for the controller's RBAC policy
+  #
+  allowedResources:
+    # HPA (autoscaling/v1 and autoscaling/v2 share the same API group)
+    - kinds: ["HorizontalPodAutoscaler"]
+      apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+
 certmanager:
-  enabled: false
+  # install controls whether cert-manager is installed as a Helm subchart.
+  # Set to true if cert-manager is not already installed in the cluster.
+  # See https://cert-manager.io/docs/installation/
+  install: false
+
+  # enabled controls creation of the cert-manager Issuer and Certificate used for
+  # webhook TLS. cert-manager must be installed in the cluster (either via the
+  # subchart above or separately).
+  # Set to false only if you are providing your own TLS certificate (see caBundle below).
+  enabled: true
+
+  # caBundle is only used when enabled: false (i.e. you are managing webhook TLS yourself).
+  # Set this to the base64-encoded PEM CA certificate that signed the TLS certificate in
+  # the "webhook-server-cert" Secret. The Kubernetes API server uses this to verify the
+  # webhook server's TLS certificate.
+  # Leave empty when enabled: true — cert-manager injects the CA bundle automatically.
+  caBundle: ""
 
 # Not yet supported
 prometheus:

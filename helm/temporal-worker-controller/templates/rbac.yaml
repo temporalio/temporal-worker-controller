@@ -123,6 +123,55 @@ rules:
       - get
       - patch
       - update
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerresourcetemplates
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - update
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerresourcetemplates/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+  # Rules for managing resources attached via WorkerResourceTemplate.
+  # Driven entirely by workerResourceTemplate.allowedResources in values.yaml.
+  {{- range .Values.workerResourceTemplate.allowedResources }}
+  - apiGroups:
+      {{- range .apiGroups }}
+      - {{ . | quote }}
+      {{- end }}
+    resources:
+      {{- range .resources }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
+      - update
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -241,6 +290,58 @@ rules:
       - temporal.io
     resources:
       - temporalworkerdeployments/status
+    verbs:
+      - get
+---
+# permissions for end users to edit workerresourcetemplates.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-workerresourcetemplate-editor-role
+rules:
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerresourcetemplates
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerresourcetemplates/status
+    verbs:
+      - get
+---
+# permissions for end users to view workerresourcetemplates.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-workerresourcetemplate-viewer-role
+rules:
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerresourcetemplates
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerresourcetemplates/status
     verbs:
       - get
 ---

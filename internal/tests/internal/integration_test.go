@@ -12,6 +12,7 @@ import (
 	"go.temporal.io/server/temporal"
 	"go.temporal.io/server/temporaltest"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -832,9 +833,122 @@ func TestIntegration(t *testing.T) {
 		})
 	}
 
+	// WorkerResourceTemplate integration test:
+	// Creates a WRT with an HPA spec and verifies that the controller applies one HPA per active Build ID.
+	t.Run("wrt-creates-hpa-per-build-id", func(t *testing.T) {
+		ctx := context.Background()
+		twdName := "wrt-hpa-test"
+		wrtName := "test-hpa"
+
+		// Build the TWD using the existing builder (sets connection ref, temporal namespace, task queue).
+		tc := testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewTemporalWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithTargetTemplate("v1.0"),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+					WithCurrentVersion("v1.0", true, false),
+			).
+			BuildWithValues(twdName, testNamespace.Name, ts.GetDefaultNamespace())
+		twd := tc.GetTWD()
+
+		t.Log("Creating TemporalConnection")
+		temporalConnection := &temporaliov1alpha1.TemporalConnection{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
+				Namespace: twd.Namespace,
+			},
+			Spec: temporaliov1alpha1.TemporalConnectionSpec{
+				HostPort: ts.GetFrontendHostPort(),
+			},
+		}
+		if err := k8sClient.Create(ctx, temporalConnection); err != nil {
+			t.Fatalf("failed to create TemporalConnection: %v", err)
+		}
+
+		env := testhelpers.TestEnv{
+			K8sClient:                  k8sClient,
+			Mgr:                        mgr,
+			Ts:                         ts,
+			Connection:                 temporalConnection,
+			ExistingDeploymentReplicas: make(map[string]int32),
+			ExistingDeploymentImages:   make(map[string]string),
+			ExpectedDeploymentReplicas: make(map[string]int32),
+		}
+
+		t.Log("Creating TemporalWorkerDeployment")
+		if err := k8sClient.Create(ctx, twd); err != nil {
+			t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+		}
+
+		// Wait for the controller to create the versioned Deployment, then start workers
+		// and mark it healthy so that the reconciler sees it as an active Build ID.
+		waitForExpectedTargetDeployment(t, twd, env, 30*time.Second)
+		buildID := k8s.ComputeBuildID(twd)
+		depName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+		stopFuncs := applyDeployment(t, ctx, k8sClient, depName, testNamespace.Name)
+		defer handleStopFuncs(stopFuncs)
+
+		// Wait for TWD status to reach Current before creating the WRT,
+		// so that k8sState.Deployments already contains the active Build ID
+		// when the reconciler next runs.
+		verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, tc.GetExpectedStatus(), 30*time.Second, 5*time.Second)
+
+		t.Log("Creating WorkerResourceTemplate with HPA spec")
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      wrtName,
+				Namespace: testNamespace.Name,
+			},
+			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: twd.Name},
+				// scaleTargetRef is set to {} to trigger auto-injection by the controller.
+				Template: runtime.RawExtension{Raw: []byte(`{
+					"apiVersion": "autoscaling/v2",
+					"kind": "HorizontalPodAutoscaler",
+					"spec": {
+						"scaleTargetRef": {},
+						"minReplicas": 2,
+						"maxReplicas": 5,
+						"metrics": []
+					}
+				}`)},
+			},
+		}
+		if err := k8sClient.Create(ctx, wrt); err != nil {
+			t.Fatalf("failed to create WorkerResourceTemplate: %v", err)
+		}
+
+		// Compute expected HPA name using the same function the controller uses.
+		hpaName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
+		expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
+
+		// Poll until the HPA appears and verify scaleTargetRef was auto-injected.
+		waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, testNamespace.Name, hpaName, expectedDeploymentName, 30*time.Second)
+
+		// Poll until WRT.Status.Versions shows a successful apply for the build ID.
+		waitForWRTStatusApplied(t, ctx, k8sClient, testNamespace.Name, wrtName, buildID, 30*time.Second)
+
+		// Assert that the WRT has the TWD as a controller owner reference.
+		assertWRTControllerOwnerRef(t, ctx, k8sClient, testNamespace.Name, wrtName, twd.Name)
+	})
+
+	// WRT integration tests: per-Build-ID HPA owner refs and scaleTargetRef injection,
+	// PDB matchLabels injection, multiple WRTs on the same TWD, template variable rendering,
+	// multi-version rollout copies, SSA apply failure handling, and SSA idempotency.
+	// Each entry uses the standard runner; WRT-specific assertions are in ValidatorFunction.
+	for _, tc := range wrtTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+		})
+	}
+
 	// Conditions and events tests
 	runConditionsAndEventsTests(t, k8sClient, mgr, ts, testNamespace.Name)
-
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
@@ -883,9 +997,20 @@ func testTemporalWorkerDeploymentCreation(
 		f(t, ctx, tc, env)
 	}
 
+	// Apply any test-specific mutations to the TWD before it is created.
+	if f := tc.GetTWDMutatorFunc(); f != nil {
+		f(twd)
+	}
+
 	t.Log("Creating a TemporalWorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
 		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+	}
+
+	// Hook: runs after TWD creation but before waiting for the target Deployment.
+	// Use this to assert blocking behaviour and then unblock the rollout.
+	if f := tc.GetPostTWDCreateFunc(); f != nil {
+		f(t, ctx, tc, env)
 	}
 
 	t.Log("Waiting for the controller to reconcile")

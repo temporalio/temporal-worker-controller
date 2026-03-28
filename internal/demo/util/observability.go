@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -19,7 +20,7 @@ import (
 	"go.temporal.io/sdk/log"
 )
 
-func configureObservability(buildID string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
+func configureObservability(deploymentName, buildID, temporalNamespace string, metricsPort int) (l log.Logger, m opentelemetry.MetricsHandler, stopFunc func()) {
 	slogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource:   false,
 		Level:       slog.LevelDebug,
@@ -31,9 +32,15 @@ func configureObservability(buildID string, metricsPort int) (l log.Logger, m op
 	if err != nil {
 		panic(err)
 	}
+	// Extract the TWD name from the Temporal deployment name ("namespace/name").
+	deploymentNameCleanForLabel := strings.Replace(deploymentName, "/", "_", 1)
 	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
-		Meter:             metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
-		InitialAttributes: attribute.NewSet(attribute.String("version", buildID)),
+		Meter: metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
+		InitialAttributes: attribute.NewSet(
+			attribute.String("temporal_temporal_worker_deployment_name", deploymentNameCleanForLabel),
+			attribute.String("temporal_worker_build_id", buildID),
+			attribute.String("temporal_namespace", temporalNamespace),
+		),
 	})
 
 	go func() {

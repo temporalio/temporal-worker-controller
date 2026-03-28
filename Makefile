@@ -150,8 +150,8 @@ help: ## Display this help.
 
 # crd:maxDescLen=0 is to avoid error described in https://github.com/kubernetes-sigs/kubebuilder/issues/2556#issuecomment-1074844483
 .PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	GOWORK=off GO111MODULE=on $(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true webhook paths=./api/... paths=./internal/... paths=./cmd/... \
+manifests: controller-gen ## Generate ClusterRole and CustomResourceDefinition objects.
+	GOWORK=off GO111MODULE=on $(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true paths=./api/... paths=./internal/... paths=./cmd/... \
     output:crd:artifacts:config=helm/temporal-worker-controller-crds/templates
 
 .PHONY: generate
@@ -188,6 +188,15 @@ apply-load-sample-workflow: ## Start a sample workflow every 15 seconds
 		sleep 15; \
 	done
 
+.PHONY: apply-hpa-load
+.SILENT: apply-hpa-load
+apply-hpa-load: ## Start ~2 workflows/sec to build a backlog and drive HPA scaling to ~10 replicas
+	@echo "Starting load at ~2 workflows/sec. Press Ctrl-C to stop."
+	@while true; do \
+		$(MAKE) -s start-sample-workflow & \
+		sleep 0.5; \
+	done
+
 .PHONY: list-workflow-build-ids
 list-workflow-build-ids: ## List workflow executions and their build IDs.
 	@$(TEMPORAL) workflow list --limit 20 --fields SearchAttributes -o json | \
@@ -214,8 +223,8 @@ test-all: manifests generate envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags test_dep ./... -coverprofile cover.out
 
 .PHONY: test-unit
-test-unit: ## Run unit tests with minimal setup.
-	go test ./... -coverprofile cover.out
+test-unit: envtest ## Run unit tests and webhook integration tests (requires envtest binaries).
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
 .PHONY: test-integration
 test-integration: manifests generate envtest ## Run integration tests against local Temporal dev server.

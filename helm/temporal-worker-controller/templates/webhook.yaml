@@ -1,72 +1,4 @@
-{{- if .Values.webhook.enabled -}}
-{{ fail "webhooks aren't supported yet" }}
-kind: MutatingWebhookConfiguration
-metadata:
-  name: {{ .Release.Name }}-mutating-webhook-configuration
-  labels:
-    app.kubernetes.io/component: webhook
-    {{ include "temporal-worker-controller.labels" $ | indent 4 }}
-  annotations:
-    {{- if .Values.certmanager.enabled }}
-    {{ fail "certmanager isn't supported yet" }}
-    cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME # TODO (carlydf): what should these be?
-    {{- end }}
-webhooks:
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: {{ .Release.Name }}-webhook-service
-      namespace: system
-      path: /mutate-temporal-io-temporal-io-v1alpha1-temporalworkerdeployment
-  failurePolicy: Fail
-  name: mtemporalworker.kb.io
-  rules:
-    - apiGroups:
-        - temporal.io.temporal.io
-      apiVersions:
-        - v1alpha1
-      operations:
-        - CREATE
-        - UPDATE
-      resources:
-        - temporalworkers
-  sideEffects: None
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
-metadata:
-  name: {{ .Release.Name }}-validating-webhook-configuration
-  labels:
-    app.kubernetes.io/component: webhook
-    {{ include "temporal-worker-controller.labels" $ | indent 4 }}
-  annotations:
-    {{- if .Values.certmanager.enabled }}
-    {{ fail "certmanager isn't supported yet" }}
-    cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME # TODO (carlydf): what should these be?
-    {{- end }}
-webhooks:
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: {{ .Release.Name }}-webhook-service
-      namespace: system
-      path: /mutate-temporal-io-temporal-io-v1alpha1-temporalworkerdeployment
-  failurePolicy: Fail
-  name: mtemporalworker.kb.io
-  rules:
-    - apiGroups:
-        - temporal.io.temporal.io
-      apiVersions:
-        - v1alpha1
-      operations:
-        - CREATE
-        - UPDATE
-      resources:
-        - temporalworkers
-  sideEffects: None
----
+# Webhook Service — routes traffic from the k8s API server to the controller's webhook server.
 apiVersion: v1
 kind: Service
 metadata:
@@ -74,12 +6,79 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/component: webhook
-    {{ include "temporal-worker-controller.labels" $ | indent 4 }}
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
 spec:
   ports:
-  - port: 443
-    protocol: TCP
-    targetPort: {{ .Values.webhook.port }}
+    - port: 443
+      protocol: TCP
+      targetPort: {{ .Values.webhook.port }}
   selector:
-    {{ include "temporal-worker-controller.selectorLabels" $ | indent 4 }}
-{{- end }} 
+    {{- include "temporal-worker-controller.selectorLabels" . | nindent 4 }}
+---
+# ValidatingWebhookConfiguration for WorkerResourceTemplate.
+# Always installed — this webhook is a required security control that validates
+# all WorkerResourceTemplate create/update/delete requests.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ .Release.Name }}-wrt-validating-webhook-configuration
+  labels:
+    app.kubernetes.io/component: webhook
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  {{- if .Values.certmanager.enabled }}
+  annotations:
+    # cert-manager injects the CA bundle from the named Certificate into this field automatically.
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ .Release.Name }}-serving-cert
+  {{- end }}
+webhooks:
+  - name: vworkerresourcetemplate.kb.io
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      {{- if and (not .Values.certmanager.enabled) .Values.certmanager.caBundle }}
+      caBundle: {{ .Values.certmanager.caBundle }}
+      {{- end }}
+      service:
+        name: {{ .Release.Name }}-webhook-service
+        namespace: {{ .Release.Namespace }}
+        path: /validate-temporal-io-v1alpha1-workerresourcetemplate
+    failurePolicy: Fail
+    rules:
+      - apiGroups: ["temporal.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["workerresourcetemplates"]
+    sideEffects: None
+{{- if .Values.webhook.enabled }}
+---
+# ValidatingWebhookConfiguration for TemporalWorkerDeployment.
+# Optional — controlled by webhook.enabled in values.yaml.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ .Release.Name }}-twd-validating-webhook-configuration
+  labels:
+    app.kubernetes.io/component: webhook
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  {{- if .Values.certmanager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ .Release.Name }}-serving-cert
+  {{- end }}
+webhooks:
+  - name: vtemporalworkerdeployment.kb.io
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      {{- if and (not .Values.certmanager.enabled) .Values.certmanager.caBundle }}
+      caBundle: {{ .Values.certmanager.caBundle }}
+      {{- end }}
+      service:
+        name: {{ .Release.Name }}-webhook-service
+        namespace: {{ .Release.Namespace }}
+        path: /validate-temporal-io-temporal-io-v1alpha1-temporalworkerdeployment
+    failurePolicy: Fail
+    rules:
+      - apiGroups: ["temporal.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["temporalworkerdeployments"]
+    sideEffects: None
+{{- end }}

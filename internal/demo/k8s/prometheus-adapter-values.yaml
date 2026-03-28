@@ -1,0 +1,47 @@
+# prometheus-adapter Helm values for the temporal-worker-controller HPA demo.
+#
+# prometheus-adapter bridges Prometheus metrics to the Kubernetes External Metrics API
+# so HPAs can scale on custom metrics (type: External).
+#
+# Install (first time):
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   helm install prometheus-adapter prometheus-community/prometheus-adapter \
+#     -n monitoring --create-namespace \
+#     -f internal/demo/k8s/prometheus-adapter-values.yaml
+#
+# Upgrade (after changing this file):
+#   helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
+#     -n monitoring -f internal/demo/k8s/prometheus-adapter-values.yaml
+
+prometheus:
+  url: http://prometheus-kube-prometheus-prometheus.monitoring.svc
+  port: 9090
+
+rules:
+  external:
+    # Phase 1: slot utilization per worker version.
+    # HPA selector: metric.name=temporal_slot_utilization, matchLabels: twd_name + build_id.
+    # The worker emits twd_name and build_id as separate Prometheus labels (both valid
+    # Kubernetes label values), and the recording rule in prometheus-stack-values.yaml
+    # aggregates them into temporal_slot_utilization.
+    - seriesQuery: 'temporal_slot_utilization{}'
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+      name:
+        as: "temporal_slot_utilization"
+      resources:
+        namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric
+
+    # Phase 2: approximate backlog count per worker version (from Temporal Cloud).
+    # Uses the temporal_backlog_count_by_version recording rule.
+    # cluster-scoped so HPAs in any namespace can consume it; temporal_worker_deployment_name
+    # + build_id matchLabels in the HPA are sufficient to select the right series.
+    - seriesQuery: 'temporal_backlog_count_by_version{}'
+      metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'
+      name:
+        as: "temporal_backlog_count_by_version"
+      resources:
+        namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric
+
+# Must be greater than the Prometheus scrape interval.
+metricsRelistInterval: 15s

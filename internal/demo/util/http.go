@@ -11,25 +11,27 @@ import (
 )
 
 // sleepyTransport wraps an http.RoundTripper and introduces random network delays
+// uniformly distributed in [MinDelay, MaxDelay).
 type sleepyTransport struct {
 	Transport http.RoundTripper
+	MinDelay  time.Duration
 	MaxDelay  time.Duration
 }
 
 // RoundTrip implements http.RoundTripper with random delays
 func (dt *sleepyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Introduce random delay up to MaxDelay
-	delay := time.Duration(rand.Int63n(int64(dt.MaxDelay)))
+	delay := dt.MinDelay + time.Duration(rand.Int63n(int64(dt.MaxDelay-dt.MinDelay)))
 	time.Sleep(delay)
-
 	return dt.Transport.RoundTrip(req)
 }
 
-// NewHTTPClient creates an HTTP client with random network delays up to maxDelay
-func NewHTTPClient(maxDelay time.Duration) *http.Client {
+// NewHTTPClient creates an HTTP client with random network delays uniformly distributed
+// in [minDelay, maxDelay).
+func NewHTTPClient(minDelay, maxDelay time.Duration) *http.Client {
 	return &http.Client{
 		Transport: &sleepyTransport{
 			Transport: http.DefaultTransport,
+			MinDelay:  minDelay,
 			MaxDelay:  maxDelay,
 		},
 	}

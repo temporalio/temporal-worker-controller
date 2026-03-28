@@ -111,6 +111,9 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PAT}}
 
+      - name: Build chart dependencies
+        run: helm repo add jetstack https://charts.jetstack.io && helm dependency build ./helm/temporal-worker-controller
+
       - name: Package and Push Helm charts
         run: |
           # Use version from previous step

@@ -2,6 +2,7 @@
 
 bin
 dist
+helm/**/charts/*.tgz
 
 secret.env
 skaffold.env

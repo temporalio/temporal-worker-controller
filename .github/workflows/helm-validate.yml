@@ -18,6 +18,9 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v3
 
+      - name: Build chart dependencies
+        run: helm repo add jetstack https://charts.jetstack.io && helm dependency build helm/temporal-worker-controller
+
       - name: Lint chart
         run: helm lint --strict helm/temporal-worker-controller
 
@@ -29,6 +32,9 @@ jobs:
 
       - name: Install Helm
         uses: azure/setup-helm@v3
+
+      - name: Build chart dependencies
+        run: helm repo add jetstack https://charts.jetstack.io && helm dependency build helm/temporal-worker-controller
 
       - name: Template with default values
         run: helm template test-release helm/temporal-worker-controller

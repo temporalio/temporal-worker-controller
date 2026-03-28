@@ -28,6 +28,9 @@ jobs:
       - name: Install crane
         uses: imjasonh/setup-crane@v0.4
 
+      - name: Build chart dependencies
+        run: helm repo add jetstack https://charts.jetstack.io && helm dependency build helm/temporal-worker-controller
+
       - name: Render chart and verify images
         run: |
           set -euo pipefail

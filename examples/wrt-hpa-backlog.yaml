@@ -1,0 +1,94 @@
+# WorkerResourceTemplate — per-version HPA scaling on slot utilization + backlog count (Phase 2)
+#
+# Extends wrt-hpa-slot-utilization.yaml by adding approximate_backlog_count from
+# Temporal Cloud as a second scaling metric. Having both metrics means the HPA scales up
+# when workers are busy (slot_utilization) AND when tasks are queued but not yet picked
+# up (backlog_count). During a progressive rollout, each version's HPA responds
+# independently: v2 scales up as its backlog grows; v1 scales down as its pinned
+# workflows drain.
+#
+# Prerequisites (in addition to Phase 1 prerequisites):
+#   1. Create the Temporal Cloud API key secret:
+#        kubectl create secret generic temporal-cloud-metrics-token \
+#          -n monitoring \
+#          --from-file=api-key=certs/api-key.txt
+#   2. Apply the updated prometheus-stack and adapter configs:
+#        helm upgrade prometheus prometheus-community/kube-prometheus-stack \
+#          -n monitoring -f internal/demo/k8s/prometheus-stack-values.yaml
+#        helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
+#          -n monitoring -f internal/demo/k8s/prometheus-adapter-values.yaml
+#   3. Verify the backlog metric is flowing:
+#        # Port-forward Prometheus and query: temporal_backlog_count_by_version
+#
+# Apply:
+#   kubectl apply -f examples/wrt-hpa-backlog.yaml
+#
+# Watch the full demo:
+#   make apply-hpa-load
+#   # In another terminal: skaffold run --profile helloworld-worker (to deploy v2)
+#   kubectl get hpa -w
+#   # Observe v1 scaling down as its workflows drain; v2 scaling up as backlog grows
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-hpa-backlog
+  namespace: default
+spec:
+  temporalWorkerDeploymentRef:
+    name: helloworld
+
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      scaleTargetRef: {}
+      minReplicas: 1
+      maxReplicas: 30
+      metrics:
+        # Metric 1: slot utilization — scale-down guard: prevent scale down if workers are busy.
+        # type: Value (not AverageValue) because temporal_slot_utilization is an aggregate ratio
+        # (0=idle, 1=saturated). The HPA computes: desired = ceil(currentReplicas × value / target).
+        # Target 750m = 75%: hold replicas until utilization drops below 75%.
+        - type: External
+          external:
+            metric:
+              name: temporal_slot_utilization
+              selector:
+                matchLabels:
+                  worker_type: "ActivityWorker"
+            target:
+              type: Value
+              value: "750m"
+
+        # Metric: backlog count — scale up when tasks are queued but not yet picked up.
+        # temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace are
+        # appended automatically by the controller — do not set them here.
+        - type: External
+          external:
+            metric:
+              name: temporal_backlog_count_by_version
+              selector:
+                matchLabels:
+                  task_type: "Activity"
+            target:
+              # Scale up if more than 10 tasks are queued per current replica.
+              # At 2 wf/sec and 15s avg activity duration, steady state is ~6 pods.
+              # Tune based on your workflow latency requirements.
+              type: AverageValue
+              averageValue: "1"
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 10
+          selectPolicy: Max
+
+        scaleDown:
+          stabilizationWindowSeconds: 120
+          policies:
+          - type: Percent
+            value: 10
+            periodSeconds: 10
+          selectPolicy: Max

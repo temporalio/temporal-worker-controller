@@ -7,11 +7,15 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
@@ -19,7 +23,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -43,6 +51,31 @@ func (r *TemporalWorkerDeploymentReconciler) executeK8sOperations(ctx context.Co
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentDeleteFailed,
 				"Failed to delete Deployment %q: %v", d.Name, err)
 			return err
+		}
+	}
+
+	// Delete rendered WRT resources whose versioned Deployment is being sunset.
+	// Rendered resources are owned by the WRT (not the Deployment), so k8s GC does not
+	// clean them up when the Deployment is deleted; the controller does it here instead.
+	// Errors are logged and skipped — a failed delete will be retried next reconcile
+	// (the Deployment is already gone so its build ID won't produce a new apply).
+	for _, res := range p.DeleteWorkerResources {
+		obj := &unstructured.Unstructured{}
+		gv, err := schema.ParseGroupVersion(res.APIVersion)
+		if err != nil {
+			l.Error(err, "unable to parse APIVersion for worker resource delete",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
+			continue
+		}
+		obj.SetGroupVersionKind(schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: res.Kind})
+		obj.SetNamespace(res.Namespace)
+		obj.SetName(res.Name)
+		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+			l.Error(err, "unable to delete worker resource on version sunset",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
+		} else {
+			l.Info("deleted worker resource on version sunset",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
 		}
 	}
 
@@ -271,5 +304,199 @@ func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l 
 		return err
 	}
 
-	return nil
+	// Patch any WRTs that are missing the owner reference to this TWD.
+	// Failures are logged but do not block the worker resource template apply step below —
+	// a WRT may have been deleted between plan generation and execution, and
+	// applying resources is more important than setting owner references.
+	for _, ownerPatch := range p.EnsureWRTOwnerRefs {
+		if err := r.Patch(ctx, ownerPatch.Patched, client.MergeFrom(ownerPatch.Base)); err != nil {
+			l.Error(err, "failed to patch WRT with controller reference",
+				"namespace", ownerPatch.Patched.Namespace,
+				"name", ownerPatch.Patched.Name,
+			)
+		}
+	}
+
+	// Apply worker resource templates via Server-Side Apply.
+	// Partial failure isolation: all resources are attempted even if some fail;
+	// errors are collected and returned together.
+	type wrtKey struct{ namespace, name string }
+	type applyResult struct {
+		buildID      string
+		resourceName string
+		hash         string // rendered hash recorded on successful apply; "" on error
+		err          error
+		skipped      bool // true if the apply was skipped because the rendered hash is unchanged
+	}
+	wrtResults := make(map[wrtKey][]applyResult)
+
+	for _, apply := range p.ApplyWorkerResources {
+		key := wrtKey{apply.WRTNamespace, apply.WRTName}
+
+		// Render failure: record the error in status without attempting an SSA apply.
+		if apply.RenderError != nil {
+			l.Error(apply.RenderError, "skipping SSA apply due to render failure",
+				"wrt", apply.WRTName,
+				"buildID", apply.BuildID,
+			)
+			wrtResults[key] = append(wrtResults[key], applyResult{
+				buildID: apply.BuildID,
+				err:     apply.RenderError,
+			})
+			continue
+		}
+
+		// Skip the SSA apply if the rendered object is identical to what was last
+		// successfully applied. This avoids unnecessary API server load at scale
+		// (hundreds of TWDs × hundreds of versions × multiple WRTs).
+		// An empty RenderedHash means hashing failed; always apply in that case.
+		if apply.RenderedHash != "" && apply.RenderedHash == apply.LastAppliedHash {
+			wrtResults[key] = append(wrtResults[key], applyResult{
+				buildID:      apply.BuildID,
+				resourceName: apply.Resource.GetName(),
+				hash:         apply.RenderedHash,
+				skipped:      true,
+			})
+			continue
+		}
+
+		l.Info("applying rendered worker resource template",
+			"name", apply.Resource.GetName(),
+			"kind", apply.Resource.GetKind(),
+			"fieldManager", k8s.FieldManager,
+		)
+		// client.Apply uses Server-Side Apply, which is a create-or-update operation:
+		// if the resource does not yet exist the API server creates it; if it already
+		// exists the API server merges only the fields owned by this field manager,
+		// leaving fields owned by other managers (e.g. a user patching the resource
+		// directly via kubectl) untouched.
+		// Note: the HPA controller does not compete with SSA here — it only writes to
+		// the status subresource (currentReplicas, desiredReplicas, conditions), which
+		// is a separate API endpoint that SSA apply never touches.
+		// client.ForceOwnership allows this field manager to claim any fields that were
+		// previously owned by a different manager (e.g. after a field manager rename).
+		applyErr := r.Client.Patch(
+			ctx,
+			apply.Resource,
+			client.Apply,
+			client.ForceOwnership,
+			client.FieldOwner(k8s.FieldManager),
+		)
+		if applyErr != nil {
+			l.Error(applyErr, "unable to apply rendered worker resource template",
+				"name", apply.Resource.GetName(),
+				"kind", apply.Resource.GetKind(),
+			)
+		}
+		// Only record the hash on success so a transient error forces a retry next cycle.
+		var appliedHash string
+		if applyErr == nil {
+			appliedHash = apply.RenderedHash
+		}
+		wrtResults[key] = append(wrtResults[key], applyResult{
+			buildID:      apply.BuildID,
+			resourceName: apply.Resource.GetName(),
+			hash:         appliedHash,
+			err:          applyErr,
+		})
+	}
+
+	// Write per-Build-ID status back to each WRT.
+	// Done after all applies so a single failed apply does not prevent status
+	// updates for the other (WRT, Build ID) pairs.
+	// If every result for a WRT was skipped (hash unchanged since last successful
+	// apply), the status is already correct — skip the status write entirely to
+	// avoid unnecessary resourceVersion bumps.
+	var applyErrs, statusErrs []error
+	for key, results := range wrtResults {
+		allSkipped := true
+		for _, res := range results {
+			if !res.skipped {
+				allSkipped = false
+				break
+			}
+		}
+		if allSkipped {
+			continue
+		}
+
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
+			statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
+			continue
+		}
+
+		// Build the new per-Build-ID version list.
+		// For BuildIDs whose apply was skipped (rendered hash unchanged), we copy the
+		// existing status entry verbatim — the stored LastAppliedHash and
+		// LastTransitionTime must not be overwritten with a no-op entry.
+		existingByBuildID := make(map[string]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
+		for _, v := range wrt.Status.Versions {
+			existingByBuildID[v.BuildID] = v
+		}
+
+		versions := make([]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, 0, len(results))
+		anyFailed := false
+		for _, result := range results {
+			if result.skipped {
+				if existing, ok := existingByBuildID[result.buildID]; ok {
+					versions = append(versions, existing)
+				}
+				continue
+			}
+			var applyErr string
+			var appliedGeneration int64
+			if result.err != nil {
+				applyErrs = append(applyErrs, result.err)
+				applyErr = result.err.Error()
+				anyFailed = true
+				// 0 means "unset" / "not yet successfully applied at current generation".
+				// Failure Message and LastTransitionTime are still recorded below.
+				appliedGeneration = 0
+			} else {
+				appliedGeneration = wrt.Generation
+			}
+			versions = append(versions, k8s.WorkerResourceTemplateVersionStatusForBuildID(
+				result.buildID, result.resourceName, appliedGeneration, result.hash, applyErr,
+			))
+		}
+
+		// Compute the top-level Ready condition.
+		// True:  all active Build IDs applied at the current generation (or already current —
+		//        skipped ones carry a non-zero LastAppliedGeneration from their last successful apply).
+		// False: one or more apply calls failed this cycle.
+		condStatus := metav1.ConditionTrue
+		condReason := temporaliov1alpha1.ReasonWRTAllVersionsApplied
+		condMessage := ""
+		if anyFailed {
+			condStatus = metav1.ConditionFalse
+			condReason = temporaliov1alpha1.ReasonWRTApplyFailed
+			// Use the first apply error as the condition message; full per-version details
+			// are available in status.versions[*].applyError.
+			for _, result := range results {
+				if result.err != nil {
+					condMessage = result.err.Error()
+					break
+				}
+			}
+		}
+		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               temporaliov1alpha1.ConditionReady,
+			Status:             condStatus,
+			Reason:             condReason,
+			Message:            condMessage,
+			ObservedGeneration: wrt.Generation,
+		})
+
+		// Sort the versions by BuildID for deterministic status output.
+		slices.SortFunc(versions, func(a, b temporaliov1alpha1.WorkerResourceTemplateVersionStatus) int {
+			return strings.Compare(a.BuildID, b.BuildID)
+		})
+		wrt.Status.Versions = versions
+		if err := r.Status().Update(ctx, wrt); err != nil {
+			statusErrs = append(statusErrs, fmt.Errorf("update status for WRT %s/%s: %w", key.namespace, key.name, err))
+		}
+	}
+
+	return errors.Join(append(applyErrs, statusErrs...)...)
 }

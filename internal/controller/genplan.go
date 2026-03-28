@@ -16,6 +16,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // plan holds the actions to execute during reconciliation
@@ -34,6 +35,18 @@ type plan struct {
 
 	// Start a workflow
 	startTestWorkflows []startWorkflowConfig
+
+	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
+	ApplyWorkerResources []planner.WorkerResourceApply
+
+	// Rendered WRT resource copies to delete explicitly on version sunset.
+	// Rendered resources are owned by the WRT (not the Deployment), so they are not
+	// GC'd when the Deployment is deleted; the controller deletes them here instead.
+	DeleteWorkerResources []planner.WorkerResourceRef
+
+	// WRTs that need a controller owner reference added, as (base, patched) pairs
+	// ready for client.MergeFrom patching in executePlan.
+	EnsureWRTOwnerRefs []planner.WRTOwnerRefPatch
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -116,6 +129,16 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		RolloutStrategy: rolloutStrategy,
 	}
 
+	// Fetch all WorkerResourceTemplates that reference this TWD so that the planner
+	// can render one apply action per (WRT × active Build ID) pair.
+	var wrtList temporaliov1alpha1.WorkerResourceTemplateList
+	if err := r.List(ctx, &wrtList,
+		client.InNamespace(w.Namespace),
+		client.MatchingFields{wrtWorkerRefKey: w.Name},
+	); err != nil {
+		return nil, fmt.Errorf("unable to list WorkerResourceTemplates: %w", err)
+	}
+
 	planResult, err := planner.GeneratePlan(
 		l,
 		k8sState,
@@ -128,6 +151,9 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 		r.MaxDeploymentVersionsIneligibleForDeletion,
 		gateInput,
 		isGateInputSecret,
+		wrtList.Items,
+		w.Name,
+		w.UID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error generating plan: %w", err)
@@ -140,6 +166,10 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
+
+	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
+	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
+	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

@@ -50,11 +50,15 @@ type WorkerOptions struct {
 // TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment
 type TemporalWorkerDeploymentSpec struct {
 
-	// Number of desired pods. This is a pointer to distinguish between explicit
-	// zero and not specified. Defaults to 1.
+	// Number of desired pods. When set, the controller manages replicas for all active
+	// worker versions. When omitted (nil), the controller creates versioned Deployments
+	// with nil replicas and never calls UpdateScale on active versions — following the
+	// Kubernetes-recommended pattern for HPA and other external autoscalers
+	// (https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#migrating-deployments-and-statefulsets-to-horizontal-autoscaling).
+	// The controller still scales drained versions (and inactive versions that are not
+	// the rollout target) to zero regardless.
 	// This field makes TemporalWorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
 	// +optional
-	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
 	// Template describes the pods that will be created.
@@ -85,29 +89,6 @@ type TemporalWorkerDeploymentSpec struct {
 	// WorkerOptions configures the worker's connection to Temporal.
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
-
-// Condition type constants for TemporalWorkerDeployment.
-const (
-	// ConditionReady is True when the Temporal connection is reachable and the
-	// target version is the current version in Temporal. CD systems such as
-	// ArgoCD and Flux use this condition to gate deployment success.
-	ConditionReady = "Ready"
-
-	// ConditionProgressing is True while a rollout is actively in-flight —
-	// i.e., the target version has not yet been promoted to current.
-	ConditionProgressing = "Progressing"
-)
-
-// Deprecated condition type constants. Maintained for backward compatibility with
-// monitoring and automation built against v1.3.x. Use Ready and Progressing
-// instead. These will be removed in the next major version of the CRD.
-const (
-	// Deprecated: Use ConditionReady and ConditionProgressing instead.
-	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
-
-	// Deprecated: Use ConditionReady instead.
-	ConditionRolloutComplete = "RolloutComplete"
-)
 
 // Condition reason constants for TemporalWorkerDeployment.
 //

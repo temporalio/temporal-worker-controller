@@ -211,6 +211,15 @@ func cleanBuildID(s string) string {
 	return strings.Trim(s, "-._")
 }
 
+// ComputeSelectorLabels returns the selector labels used by a versioned Deployment.
+// These are the same labels set on the Deployment.Spec.Selector.MatchLabels.
+func ComputeSelectorLabels(twdName, buildID string) map[string]string {
+	return map[string]string{
+		twdNameLabel: TruncateString(CleanStringForDNS(twdName), 63),
+		BuildIDLabel: TruncateString(buildID, 63),
+	}
+}
+
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
 func NewDeploymentWithOwnerRef(
 	typeMeta *metav1.TypeMeta,
@@ -220,10 +229,7 @@ func NewDeploymentWithOwnerRef(
 	buildID string,
 	connection temporaliov1alpha1.TemporalConnectionSpec,
 ) *appsv1.Deployment {
-	selectorLabels := map[string]string{
-		twdNameLabel: TruncateString(CleanStringForDNS(objectMeta.GetName()), 63),
-		BuildIDLabel: TruncateString(buildID, 63),
-	}
+	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
 
 	// Set pod labels
 	podLabels := make(map[string]string)

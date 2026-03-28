@@ -1,0 +1,52 @@
+# WorkerResourceTemplate — HPA example
+#
+# This example attaches a HorizontalPodAutoscaler to each active versioned Deployment
+# of the "helloworld" TemporalWorkerDeployment (from the local demo).
+#
+# Prerequisites:
+#   - The helloworld demo is running (skaffold run --profile helloworld-worker)
+#   - The controller was installed with cert-manager (certmanager.enabled: true, the default)
+#   - You have permission to create HPAs in this namespace
+#
+# Apply:
+#   kubectl apply -f examples/wrt-hpa.yaml
+#
+# Verify:
+#   kubectl get wrt              # shows Applied status per Build ID
+#   kubectl get hpa              # shows one HPA per active Build ID
+#
+# See docs/worker-resource-templates.md for full documentation.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-hpa
+  # Deploy into the same namespace as the helloworld TemporalWorkerDeployment.
+  # The default Skaffold setup does not set a namespace, so resources land in "default".
+  namespace: default
+spec:
+  # Must match the name of the TemporalWorkerDeployment.
+  temporalWorkerDeploymentRef:
+    name: helloworld
+
+  # The resource template. The controller creates one copy per active Build ID,
+  # naming each one "<twdName>-<wrtName>-<buildID>".
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      # Setting scaleTargetRef to {} tells the controller to auto-inject the
+      # correct versioned Deployment reference for each Build ID. Do not set this
+      # to a real value — the webhook will reject it.
+      # Note: {} (empty object) is required here. Writing null looks equivalent in
+      # YAML but the Kubernetes API server deletes null-valued keys before storage,
+      # so the controller would never see the field and injection would not occur.
+      scaleTargetRef: {}
+      minReplicas: 1
+      maxReplicas: 3
+      metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 70
