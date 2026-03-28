@@ -34,7 +34,7 @@ rules:
 
     # Phase 2: approximate backlog count per worker version (from Temporal Cloud).
     # Uses the temporal_backlog_count_by_version recording rule.
-    # cluster-scoped so HPAs in any namespace can consume it; worker_deployment_name
+    # cluster-scoped so HPAs in any namespace can consume it; temporal_worker_deployment_name
     # + build_id matchLabels in the HPA are sufficient to select the right series.
     - seriesQuery: 'temporal_backlog_count_by_version{}'
       metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'

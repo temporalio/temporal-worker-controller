@@ -167,9 +167,9 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 	// pod selector labels must NOT bleed into metric selectors (separate injection paths).
 	t.Run("pod selector labels are not injected into metric selector matchLabels", func(t *testing.T) {
 		metricLabels := map[string]string{
-			"worker_deployment_name":     "default_my-worker",
-			"worker_deployment_build_id": "abc123",
-			"temporal_namespace":         "my-ns",
+			"temporal_worker_deployment_name": "default_my-worker",
+			"temporal_worker_build_id":        "abc123",
+			"temporal_namespace":              "my-ns",
 		}
 		spec := map[string]interface{}{
 			"selector": map[string]interface{}{
@@ -196,13 +196,13 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 		topLabels, ok := topSelector["matchLabels"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "abc123", topLabels[BuildIDLabel])
-		assert.NotContains(t, topLabels, "worker_deployment_name", "pod selector must not get metric labels")
+		assert.NotContains(t, topLabels, "temporal_worker_deployment_name", "pod selector must not get metric labels")
 
 		// metric selector gets temporal metric labels only
 		metrics := spec["metrics"].([]interface{})
 		ml := metrics[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
-		assert.Equal(t, "default_my-worker", ml["worker_deployment_name"])
-		assert.Equal(t, "abc123", ml["worker_deployment_build_id"])
+		assert.Equal(t, "default_my-worker", ml["temporal_worker_deployment_name"])
+		assert.Equal(t, "abc123", ml["temporal_worker_build_id"])
 		assert.Equal(t, "my-ns", ml["temporal_namespace"])
 		assert.NotContains(t, ml, BuildIDLabel, "metric selector must not get pod selector labels")
 	})
@@ -210,9 +210,9 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 
 func TestAutoInjectFields_MetricSelector(t *testing.T) {
 	metricLabels := map[string]string{
-		"worker_deployment_name":     "default_my-worker",
-		"worker_deployment_build_id": "abc123",
-		"temporal_namespace":         "my-ns",
+		"temporal_worker_deployment_name": "default_my-worker",
+		"temporal_worker_build_id":        "abc123",
+		"temporal_namespace":              "my-ns",
 	}
 	podLabels := map[string]string{BuildIDLabel: "abc123", twdNameLabel: "my-worker"}
 
@@ -238,8 +238,8 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 		spec := metricSpec(map[string]interface{}{})
 		autoInjectFields(spec, "my-worker-abc123", podLabels, metricLabels)
 		ml := spec["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
-		assert.Equal(t, "default_my-worker", ml["worker_deployment_name"])
-		assert.Equal(t, "abc123", ml["worker_deployment_build_id"])
+		assert.Equal(t, "default_my-worker", ml["temporal_worker_deployment_name"])
+		assert.Equal(t, "abc123", ml["temporal_worker_build_id"])
 		assert.Equal(t, "my-ns", ml["temporal_namespace"])
 	})
 
@@ -248,8 +248,8 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 		autoInjectFields(spec, "my-worker-abc123", podLabels, metricLabels)
 		ml := spec["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
 		assert.Equal(t, "Activity", ml["task_type"], "user label must be preserved")
-		assert.Equal(t, "default_my-worker", ml["worker_deployment_name"])
-		assert.Equal(t, "abc123", ml["worker_deployment_build_id"])
+		assert.Equal(t, "default_my-worker", ml["temporal_worker_deployment_name"])
+		assert.Equal(t, "abc123", ml["temporal_worker_build_id"])
 	})
 
 	t.Run("does not inject when matchLabels key is absent", func(t *testing.T) {

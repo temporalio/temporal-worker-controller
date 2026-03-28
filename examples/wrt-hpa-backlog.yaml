@@ -61,7 +61,7 @@ spec:
               value: "750m"
 
         # Metric: backlog count — scale up when tasks are queued but not yet picked up.
-        # worker_deployment_name, worker_deployment_build_id, and temporal_namespace are
+        # temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace are
         # appended automatically by the controller — do not set them here.
         - type: External
           external:

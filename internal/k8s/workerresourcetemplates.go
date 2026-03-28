@@ -94,9 +94,9 @@ func RenderWorkerResourceTemplate(
 	// Ordering is not a concern: matchLabels is a map; encoding/json serialises map keys in
 	// sorted order, so ComputeRenderedObjectHash is deterministic regardless of insertion order.
 	metricSelectorLabels := map[string]string{
-		"worker_deployment_name":     wrt.Namespace + "_" + twdName,
-		"worker_deployment_build_id": buildID,
-		"temporal_namespace":         temporalNamespace,
+		"temporal_worker_deployment_name": wrt.Namespace + "_" + twdName,
+		"temporal_worker_build_id":        buildID,
+		"temporal_namespace":              temporalNamespace,
 	}
 
 	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, and metric selector labels.
@@ -148,7 +148,7 @@ func RenderWorkerResourceTemplate(
 //     Opt-in sentinel: absent = no injection; {} = inject pod selector labels.
 //
 //   - spec.metrics[*].external.metric.selector.matchLabels: temporal metric labels
-//     (worker_deployment_name, build_id, temporal_namespace) are merged in whenever
+//     (temporal_worker_deployment_name, build_id, temporal_namespace) are merged in whenever
 //     matchLabels is present (including {}). User labels like task_type coexist.
 //     If matchLabels is absent, no injection occurs for that metric entry.
 //

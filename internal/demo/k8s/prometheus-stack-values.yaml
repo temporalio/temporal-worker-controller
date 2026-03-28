@@ -65,14 +65,14 @@ additionalPrometheusRulesMap:
           # Kubernetes label values), so no label_replace is needed here.
           - record: temporal_slot_utilization
             expr: |
-              sum by (worker_deployment_name, worker_deployment_build_id, temporal_namespace, worker_type) (
+              sum by (temporal_worker_deployment_name, temporal_worker_build_id, temporal_namespace, worker_type) (
                 temporal_worker_task_slots_used{
                   task_queue="default/helloworld"
                 }
               )
               /
               clamp_min(
-                sum by (worker_deployment_name, worker_deployment_build_id, temporal_namespace, worker_type) (
+                sum by (temporal_worker_deployment_name, temporal_worker_build_id, temporal_namespace, worker_type) (
                   temporal_worker_task_slots_used{task_queue="default/helloworld"}
                   +
                   temporal_worker_task_slots_available{task_queue="default/helloworld"}
@@ -85,7 +85,7 @@ additionalPrometheusRulesMap:
         rules:
           # Backlog count per worker version, shaped to match the label format that
           # Temporal Cloud will emit natively in a future release. This recording rule
-          # is a temporary shim: once Temporal Cloud emits worker_deployment_name and
+          # is a temporary shim: once Temporal Cloud emits temporal_worker_deployment_name and
           # build_id as separate labels, this rule can be deleted with no other changes.
           #
           # Current Temporal Cloud label:
@@ -95,13 +95,13 @@ additionalPrometheusRulesMap:
           # is an unambiguous separator and label_replace is reliable.
           #
           # Extracted labels (matching future Temporal Cloud output):
-          #   worker_deployment_name      — "{k8s-namespace}_{twd-name}" (all but last segment)
-          #   worker_deployment_build_id  — last segment; ≤63 chars, valid k8s label value
+          #   temporal_worker_deployment_name      — "{k8s-namespace}_{twd-name}" (all but last segment)
+          #   temporal_worker_build_id  — last segment; ≤63 chars, valid k8s label value
           #   temporal_namespace          — preserved from source metric
           #
           # Produced labels:
-          #   worker_deployment_name      — inner label_replace: all but the last _ segment
-          #   worker_deployment_build_id  — outer label_replace: last _ segment
+          #   temporal_worker_deployment_name      — inner label_replace: all but the last _ segment
+          #   temporal_worker_build_id  — outer label_replace: last _ segment
           #   temporal_namespace          — preserved from source metric
           #   task_type                   — preserved as a dimension; HPAs can filter by
           #                                 task_type="Activity", task_type="Workflow", etc.
@@ -114,8 +114,8 @@ additionalPrometheusRulesMap:
                   sum by (worker_version, task_type, temporal_namespace) (
                     temporal_cloud_v1_approximate_backlog_count{worker_version=~".+_.+_.+"}
                   ),
-                  "worker_deployment_name", "$1", "worker_version", "^(.+)_[^_]+$"
+                  "temporal_worker_deployment_name", "$1", "worker_version", "^(.+)_[^_]+$"
                 ),
-                "worker_deployment_build_id", "$1", "worker_version", ".*_([^_]+)$"
+                "temporal_worker_build_id", "$1", "worker_version", ".*_([^_]+)$"
               )
 

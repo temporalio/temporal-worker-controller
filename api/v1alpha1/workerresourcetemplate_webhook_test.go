@@ -270,7 +270,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 				},
 			}),
 		},
-		"metric selector matchLabels with worker_deployment_name rejected": {
+		"metric selector matchLabels with temporal_worker_deployment_name rejected": {
 			obj: newWRT("metric-sel-wdn", "my-worker", map[string]interface{}{
 				"apiVersion": "autoscaling/v2",
 				"kind":       "HorizontalPodAutoscaler",
@@ -285,7 +285,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 									"name": "temporal_backlog_count_by_version",
 									"selector": map[string]interface{}{
 										"matchLabels": map[string]interface{}{
-											"worker_deployment_name": "default_my-worker",
+											"temporal_worker_deployment_name": "default_my-worker",
 										},
 									},
 								},
@@ -295,9 +295,9 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 					},
 				},
 			}),
-			errorMsg: `"worker_deployment_name" is managed by the controller`,
+			errorMsg: `"temporal_worker_deployment_name" is managed by the controller`,
 		},
-		"metric selector matchLabels with worker_deployment_build_id rejected": {
+		"metric selector matchLabels with temporal_worker_build_id rejected": {
 			obj: newWRT("metric-sel-wdbid", "my-worker", map[string]interface{}{
 				"apiVersion": "autoscaling/v2",
 				"kind":       "HorizontalPodAutoscaler",
@@ -312,7 +312,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 									"name": "temporal_backlog_count_by_version",
 									"selector": map[string]interface{}{
 										"matchLabels": map[string]interface{}{
-											"worker_deployment_build_id": "abc123",
+											"temporal_worker_build_id": "abc123",
 										},
 									},
 								},
@@ -322,7 +322,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 					},
 				},
 			}),
-			errorMsg: `"worker_deployment_build_id" is managed by the controller`,
+			errorMsg: `"temporal_worker_build_id" is managed by the controller`,
 		},
 		"metric selector matchLabels with temporal_namespace rejected": {
 			obj: newWRT("metric-sel-tn", "my-worker", map[string]interface{}{

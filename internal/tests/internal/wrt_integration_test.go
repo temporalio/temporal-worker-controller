@@ -158,7 +158,7 @@ func wrtTestCases() []testCase {
 		},
 
 		// Metric selector matchLabels injection end-to-end.
-		// Verifies that the controller appends worker_deployment_name, worker_deployment_build_id,
+		// Verifies that the controller appends temporal_worker_deployment_name, temporal_worker_build_id,
 		// and temporal_namespace to an External metric selector that has matchLabels present,
 		// and that user-provided labels (task_type) coexist alongside the injected keys.
 		{
@@ -216,10 +216,10 @@ func wrtTestCases() []testCase {
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaName, depName, 30*time.Second)
 
 					expectedMetricLabels := map[string]string{
-						"task_type":                  "Activity",
-						"worker_deployment_name":     twd.Namespace + "_" + twd.Name,
-						"worker_deployment_build_id": buildID,
-						"temporal_namespace":         twd.Spec.WorkerOptions.TemporalNamespace,
+						"task_type":                       "Activity",
+						"temporal_worker_deployment_name": twd.Namespace + "_" + twd.Name,
+						"temporal_worker_build_id":        buildID,
+						"temporal_namespace":              twd.Spec.WorkerOptions.TemporalNamespace,
 					}
 					waitForHPAWithInjectedMetricSelector(t, ctx, env.K8sClient, twd.Namespace, hpaName, expectedMetricLabels, 30*time.Second)
 				}),

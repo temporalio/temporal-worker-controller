@@ -37,8 +37,8 @@ func configureObservability(deploymentName, buildID, temporalNamespace string, m
 	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
 		Meter: metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),
 		InitialAttributes: attribute.NewSet(
-			attribute.String("worker_deployment_name", deploymentNameCleanForLabel),
-			attribute.String("worker_deployment_build_id", buildID),
+			attribute.String("temporal_temporal_worker_deployment_name", deploymentNameCleanForLabel),
+			attribute.String("temporal_worker_build_id", buildID),
 			attribute.String("temporal_namespace", temporalNamespace),
 		),
 	})

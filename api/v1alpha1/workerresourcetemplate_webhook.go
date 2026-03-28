@@ -40,8 +40,8 @@ var _ webhook.CustomValidator = &WorkerResourceTemplateValidator{}
 // time. Users must not set these manually — the controller generates the correct per-version
 // values and merges them into whatever matchLabels the user provides.
 var ControllerOwnedMetricLabelKeys = []string{
-	"worker_deployment_name",
-	"worker_deployment_build_id",
+	"temporal_worker_deployment_name",
+	"temporal_worker_build_id",
 	"temporal_namespace",
 }
 
@@ -302,7 +302,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		}
 
 		// 7. metrics[*].external.metric.selector.matchLabels: the controller appends
-		// worker_deployment_name, worker_deployment_build_id, and temporal_namespace to any
+		// temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace to any
 		// metric selector matchLabels that is present. These keys must not be hardcoded —
 		// the controller generates the correct per-version values at render time.
 		// User labels (e.g. task_type: "Activity") are allowed alongside the controller-owned keys.
@@ -341,7 +341,7 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 
 // checkMetricSelectorLabelsNotSet validates that metrics[*].external.metric.selector.matchLabels
 // does not contain any of the controller-owned keys. The controller appends
-// worker_deployment_name, worker_deployment_build_id, and temporal_namespace to whatever
+// temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace to whatever
 // matchLabels the user provides. User labels (e.g. task_type: "Activity") are permitted alongside
 // the controller-owned keys.
 func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
@@ -376,7 +376,7 @@ func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Pa
 				*allErrs = append(*allErrs, field.Forbidden(
 					metricsPath.Index(i).Child("external").Child("metric").Child("selector").Child("matchLabels").Key(key),
 					fmt.Sprintf("label %q is managed by the controller; do not set it manually — "+
-						"the controller appends worker_deployment_name, worker_deployment_build_id, and temporal_namespace "+
+						"the controller appends temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace "+
 						"to any matchLabels present (including {})", key),
 				))
 			}
