@@ -95,8 +95,8 @@
       },
       "targets": [
         {
-          "expr": "temporal_slot_utilization",
-          "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
+          "expr": "temporal_slot_utilization{temporal_worker_deployment_name=\"default_helloworld\"}",
+          "legendFormat": "{{worker_type}} - {{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
           "refId": "A"
         }
       ],
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "temporal_backlog_count_by_version{task_type=\"Workflow\"}",
+          "expr": "temporal_backlog_count_by_version{task_type=\"Workflow\", temporal_worker_deployment_name=\"default_helloworld\"}",
           "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
           "refId": "A"
         }
@@ -152,7 +152,7 @@
       },
       "targets": [
         {
-          "expr": "temporal_backlog_count_by_version{task_type=\"Activity\"}",
+          "expr": "temporal_backlog_count_by_version{task_type=\"Activity\", temporal_worker_deployment_name=\"default_helloworld\"}",
           "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
           "refId": "A"
         }

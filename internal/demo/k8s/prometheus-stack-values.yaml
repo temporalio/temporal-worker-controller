@@ -61,8 +61,8 @@ additionalPrometheusRulesMap:
           # Slot utilization ratio per worker version, filtered to activity workers only.
           # Range: 0.0 (idle) to 1.0 (fully saturated).
           #
-          # The worker emits twd_name and build_id as separate labels (both valid
-          # Kubernetes label values), so no label_replace is needed here.
+          # The worker emits temporal_worker_deployment_name, temporal_worker_build_id, temporal_namespace, and worker_type
+          # as separate labels (both valid Kubernetes label values), so no label_replace is needed here.
           - record: temporal_slot_utilization
             expr: |
               sum by (temporal_worker_deployment_name, temporal_worker_build_id, temporal_namespace, worker_type) (
@@ -86,7 +86,8 @@ additionalPrometheusRulesMap:
           # Backlog count per worker version, shaped to match the label format that
           # Temporal Cloud will emit natively in a future release. This recording rule
           # is a temporary shim: once Temporal Cloud emits temporal_worker_deployment_name and
-          # build_id as separate labels, this rule can be deleted with no other changes.
+          # temporal_worker_build_id as separate labels, this rule can be deleted with no
+          # other changes. Note: this rule only works with Build IDs that don't have underscores.
           #
           # Current Temporal Cloud label:
           #   worker_version="{k8s-namespace}_{twd-name}_{build-id}"
