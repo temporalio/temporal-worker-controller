@@ -21,21 +21,22 @@ prometheus:
 rules:
   external:
     # Phase 1: slot utilization per worker version.
-    # HPA selector: metric.name=temporal_slot_utilization, matchLabels: twd_name + build_id.
-    # The worker emits twd_name and build_id as separate Prometheus labels (both valid
-    # Kubernetes label values), and the recording rule in prometheus-stack-values.yaml
-    # aggregates them into temporal_slot_utilization.
+    # HPA selector: metric.name=temporal_slot_utilization,
+    # matchLabels: temporal_worker_deployment_name + temporal_worker_build_id + temporal_namespace.
+    # The worker emits those as separate Prometheus labels (all valid Kubernetes label values), and
+    # the recording rule in prometheus-stack-values.yaml aggregates them into temporal_slot_utilization.
     - seriesQuery: 'temporal_slot_utilization{}'
       metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
       name:
         as: "temporal_slot_utilization"
       resources:
-        namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric
+        namespaced: false  # cluster-scoped: HPAs in any k8s namespace can consume this metric
 
     # Phase 2: approximate backlog count per worker version (from Temporal Cloud).
     # Uses the temporal_backlog_count_by_version recording rule.
     # cluster-scoped so HPAs in any namespace can consume it; temporal_worker_deployment_name
-    # + build_id matchLabels in the HPA are sufficient to select the right series.
+    # + temporal_worker_build_id + temporal_namespace matchLabels in the HPA are sufficient to
+    # select the right series.
     - seriesQuery: 'temporal_backlog_count_by_version{}'
       metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'
       name:
