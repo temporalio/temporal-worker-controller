@@ -263,11 +263,12 @@ Stop the load generator (`Ctrl-C`) and watch the HPA scale back down as in-fligh
 `approximate_backlog_count` measures tasks queued in Temporal but not yet started on a worker. Adding it as a second HPA metric means the HPA scales up on *arriving* work even before slots are full — important for bursty traffic.
 
 > **Note:** Temporal Cloud emits `temporal_approximate_backlog_count` with a combined
-> `version="namespace/twd-name:build-id"` label that contains characters invalid in
-> Kubernetes label values (`/` and `:`). The recording rule in
-> `prometheus-stack-values.yaml` uses `label_replace` to extract `twd_name` and
-> `build_id` as separate k8s-compatible labels, producing `temporal_backlog_count_by_version`.
-> The HPA then selects on those labels — the same pair used by Phase 1.
+> `worker_version="<worker-deployment-name>_<build-id>"` label that easily exceeds Kubernetes max label
+> length of 63 characters. The recording rule in `prometheus-stack-values.yaml` uses `label_replace` 
+> to extract `temporal_worker_deployment_name` and `temporal_worker_build_id` as separate k8s-compatible 
+> labels, producing `temporal_backlog_count_by_version`. The HPA then selects on those labels — the same 
+> pair used by Phase 1. Temporal Cloud is in the process of rolling out the new separate labels, so this
+> workaround is required until then.
 
 **Step 1 — Create the Temporal Cloud credentials secret.**
 
