@@ -96,7 +96,7 @@
       "targets": [
         {
           "expr": "sum by (temporal_worker_deployment_name, temporal_worker_build_id, temporal_namespace, worker_type) (temporal_worker_task_slots_used{activity_type=\"none\",task_queue=\"default/helloworld\",worker_type=\"ActivityWorker\"}) / (clamp_min(sum by (temporal_worker_deployment_name, temporal_worker_deployment_build_id, temporal_namespace, worker_type) (temporal_worker_task_slots_available{task_queue=\"default/helloworld\",worker_type=\"ActivityWorker\"}), 1) + clamp_min(sum by (temporal_worker_deployment_name, temporal_worker_deployment_build_id, temporal_namespace, worker_type) (temporal_worker_task_slots_used{task_queue=\"default/helloworld\",worker_type=\"ActivityWorker\"}), 1))",
-          "legendFormat": "{{worker_type}} - {{worker_deployment_name}} / {{worker_deployment_build_id}}",
+          "legendFormat": "{{worker_type}} - {{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
           "range": true,
           "refId": "A"
         }
