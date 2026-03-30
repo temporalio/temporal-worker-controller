@@ -34,10 +34,10 @@ type WorkerResourceTemplateSpec struct {
 	//     PodDisruptionBudgets and other resources that select pods.
 	//
 	//   spec.metrics[*].external.metric.selector.matchLabels: {} (or with user labels)
-	//     The controller appends temporal_temporal_worker_deployment_name, temporal_worker_build_id, and
+	//     The controller appends temporal_worker_deployment_name, temporal_worker_build_id, and
 	//     temporal_namespace to any External metric selector where matchLabels is present.
 	//     User labels (e.g. task_type: "Activity") coexist alongside the injected keys.
-	//     Do not set temporal_temporal_worker_deployment_name, temporal_worker_build_id, or
+	//     Do not set temporal_worker_deployment_name, temporal_worker_build_id, or
 	//     temporal_namespace manually — the webhook will reject them.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:pruning:PreserveUnknownFields
