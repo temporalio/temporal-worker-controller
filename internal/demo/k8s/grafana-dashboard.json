@@ -128,7 +128,6 @@
       },
       "targets": [
         {
-          "editorMode": "code",
           "expr": "temporal_backlog_count_by_version{task_type=\"Workflow\", worker_deployment_name=\"default_helloworld\"}",
           "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_deployment_build_id}}",
           "range": true,
@@ -155,7 +154,6 @@
       },
       "targets": [
         {
-          "editorMode": "code",
           "expr": "temporal_backlog_count_by_version{task_type=\"Activity\", worker_deployment_name=\"default_helloworld\"}",
           "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_deployment_build_id}}",
           "range": true,
