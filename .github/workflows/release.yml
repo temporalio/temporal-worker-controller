@@ -55,6 +55,7 @@ jobs:
 
   helm:
     needs: release
+    if: endsWith(github.ref_name, '.0')
     runs-on: ubuntu-latest
     steps:
 
