@@ -96,7 +96,7 @@ jobs:
         id: bump_version
         run: |
           # Get current version from Chart.yaml
-          CURRENT_VERSION=$(grep 'version:' helm/temporal-worker-controller/Chart.yaml | awk '{print $2}')
+          CURRENT_VERSION=$(grep '^version:' helm/temporal-worker-controller/Chart.yaml | awk '{print $2}')
           echo "Current version: $CURRENT_VERSION"
 
           # Determine if this is a patch release based on the git tag
@@ -121,12 +121,14 @@ jobs:
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           echo "New version: $NEW_VERSION"
 
-          # Update Chart.yaml with new version and appVersion
-          sed -i "s/version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller/Chart.yaml
+          # Update Chart.yaml with new version and appVersion.
+          # Use ^version: to only match the top-level chart version, not indented
+          # dependency versions (e.g. cert-manager) which would otherwise be overwritten.
+          sed -i "s/^version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller/Chart.yaml
           sed -i "s/appVersion: .*/appVersion: ${GITHUB_REF_NAME#v}/" helm/temporal-worker-controller/Chart.yaml
 
           # Also bump CRDs chart version
-          sed -i "s/version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller-crds/Chart.yaml
+          sed -i "s/^version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller-crds/Chart.yaml
 
           # Set output variable for use in later steps
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
