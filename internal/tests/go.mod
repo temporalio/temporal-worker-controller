@@ -1,6 +1,6 @@
 module github.com/temporalio/temporal-worker-controller/tests
 
-go 1.25.7
+go 1.25.8
 
 require (
 	github.com/temporalio/temporal-worker-controller v1.0.1

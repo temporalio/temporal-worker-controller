@@ -1,6 +1,6 @@
 module github.com/temporalio/temporal-worker-controller/internal/demo
 
-go 1.25.7
+go 1.25.8
 
 require (
 	github.com/prometheus/client_golang v1.23.0
