@@ -11,16 +11,17 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/pborman/uuid v1.2.1
 	github.com/stretchr/testify v1.11.1
-	go.temporal.io/api v1.60.2
+	go.temporal.io/api v1.62.2
 	go.temporal.io/sdk v1.38.0
 	go.temporal.io/sdk/contrib/envconfig v0.1.0
-	go.temporal.io/server v1.30.1
+	go.temporal.io/server v1.30.3
 	google.golang.org/grpc v1.79.3
 	k8s.io/api v0.34.0
 	k8s.io/apiextensions-apiserver v0.33.0
 	k8s.io/apimachinery v0.34.0
 	k8s.io/client-go v0.34.0
 	sigs.k8s.io/controller-runtime v0.21.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -191,5 +192,4 @@ require (
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 )
