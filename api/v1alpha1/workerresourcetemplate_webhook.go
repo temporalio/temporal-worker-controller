@@ -470,7 +470,11 @@ func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, w
 			Spec: authorizationv1.SubjectAccessReviewSpec{
 				User:   req.UserInfo.Username,
 				Groups: req.UserInfo.Groups,
-				Extra:  convertUserInfoExtra(req.UserInfo.Extra),
+				// Some authentication plugins like GKE's IAM plugin rely on certain fields being
+				// present in the UserInfo.Extra field, so here we make sure to copy any extra
+				// field values from the authentication request into the extra field of the
+				// authorization review.
+				Extra: convertUserInfoExtra(req.UserInfo.Extra),
 				ResourceAttributes: &authorizationv1.ResourceAttributes{
 					Namespace: wrt.Namespace,
 					Verb:      verb,
