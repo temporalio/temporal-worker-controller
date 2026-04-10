@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -390,6 +391,19 @@ func isEmptyMap(v interface{}) bool {
 	return ok && len(m) == 0
 }
 
+// convertUserInfoExtra converts an authentication ExtraValue map to an authorization ExtraValue map.
+// Both types are []string under the hood; the conversion preserves all values exactly.
+func convertUserInfoExtra(extra map[string]authenticationv1.ExtraValue) map[string]authorizationv1.ExtraValue {
+	if len(extra) == 0 {
+		return nil
+	}
+	out := make(map[string]authorizationv1.ExtraValue, len(extra))
+	for k, v := range extra {
+		out[k] = authorizationv1.ExtraValue(v)
+	}
+	return out
+}
+
 // validateWithAPI performs API-dependent validation: RESTMapper scope check and
 // SubjectAccessReview for both the requesting user and the controller service account.
 // verb is the RBAC verb to check ("create" on create/update, "delete" on delete).
@@ -456,6 +470,11 @@ func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, w
 			Spec: authorizationv1.SubjectAccessReviewSpec{
 				User:   req.UserInfo.Username,
 				Groups: req.UserInfo.Groups,
+				// Some authentication plugins like GKE's IAM plugin rely on certain fields being
+				// present in the UserInfo.Extra field, so here we make sure to copy any extra
+				// field values from the authentication request into the extra field of the
+				// authorization review.
+				Extra: convertUserInfoExtra(req.UserInfo.Extra),
 				ResourceAttributes: &authorizationv1.ResourceAttributes{
 					Namespace: wrt.Namespace,
 					Verb:      verb,
