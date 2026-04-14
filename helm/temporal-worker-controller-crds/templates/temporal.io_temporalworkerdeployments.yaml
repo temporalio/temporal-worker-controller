@@ -58,6 +58,30 @@ spec:
               replicas:
                 format: int32
                 type: integer
+              rollback:
+                properties:
+                  steps:
+                    items:
+                      properties:
+                        pauseDuration:
+                          type: string
+                        rampPercentage:
+                          maximum: 99
+                          minimum: 1
+                          type: integer
+                      required:
+                      - pauseDuration
+                      - rampPercentage
+                      type: object
+                    type: array
+                  strategy:
+                    enum:
+                    - AllAtOnce
+                    - Progressive
+                    type: string
+                required:
+                - strategy
+                type: object
               rollout:
                 properties:
                   gate:

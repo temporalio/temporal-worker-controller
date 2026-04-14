@@ -55,6 +55,22 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	return NewWorker(ctx, temporalDeploymentName, workerBuildID, temporalTaskQueue, temporalHostPort, temporalNamespace, true)
 }
 
+// StartVersionedWorker creates a versioned worker and registers a dummy workflow on it.
+// This is used to register a build ID with a Temporal worker deployment to set LastCurrentTime.
+// Returns a stop function that must be called when done.
+func StartVersionedWorker(ctx context.Context, temporalDeploymentName, workerBuildID, temporalTaskQueue, temporalHostPort, temporalNamespace string) (stopFunc func(), err error) {
+	w, stop, err := NewWorker(ctx, temporalDeploymentName, workerBuildID, temporalTaskQueue, temporalHostPort, temporalNamespace, true)
+	if err != nil {
+		return nil, err
+	}
+	w.RegisterWorkflow(func(workflow.Context) error { return nil })
+	if err := w.Start(); err != nil {
+		stop()
+		return nil, err
+	}
+	return stop, nil
+}
+
 func NewWorker(
 	ctx context.Context,
 	temporalDeploymentName, workerBuildID, temporalTaskQueue, temporalHostPort, temporalNamespace string,

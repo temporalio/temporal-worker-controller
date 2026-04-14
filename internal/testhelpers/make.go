@@ -6,6 +6,7 @@ import (
 
 	"github.com/pborman/uuid"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/server/common/worker_versioning"
 	corev1 "k8s.io/api/core/v1"
@@ -23,21 +24,10 @@ func MakeTWD(
 	replicas int32,
 	podSpec corev1.PodTemplateSpec,
 	rolloutStrategy *temporaliov1alpha1.RolloutStrategy,
+	rollbackStrategy *temporaliov1alpha1.RollbackStrategy,
 	sunsetStrategy *temporaliov1alpha1.SunsetStrategy,
 	workerOpts *temporaliov1alpha1.WorkerOptions,
 ) *temporaliov1alpha1.TemporalWorkerDeployment {
-	r := temporaliov1alpha1.RolloutStrategy{}
-	s := temporaliov1alpha1.SunsetStrategy{}
-	w := temporaliov1alpha1.WorkerOptions{}
-	if rolloutStrategy != nil {
-		r = *rolloutStrategy
-	}
-	if sunsetStrategy != nil {
-		s = *sunsetStrategy
-	}
-	if workerOpts != nil {
-		w = *workerOpts
-	}
 
 	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
 		TypeMeta: metav1.TypeMeta{
@@ -51,15 +41,56 @@ func MakeTWD(
 			Labels:    map[string]string{"app": "test-worker"},
 		},
 		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
-			Replicas:        &replicas,
-			Template:        podSpec,
-			RolloutStrategy: r,
-			SunsetStrategy:  s,
-			WorkerOptions:   w,
+			Replicas:         &replicas,
+			Template:         podSpec,
+			RolloutStrategy:  *rolloutStrategy,
+			RollbackStrategy: rollbackStrategy,
+			SunsetStrategy:   *sunsetStrategy,
+			WorkerOptions:    *workerOpts,
 		},
 	}
 	twd.Name = twd.ObjectMeta.Name
 	return twd
+}
+
+func MakeDefaultTWD(
+	name string,
+	namespace string,
+	replicas int32,
+	podSpec corev1.PodTemplateSpec,
+) *temporaliov1alpha1.TemporalWorkerDeployment {
+	// Rollout doesn't have a default because it's required in the spec
+	// Arbitrarily choose AllAtOnce here to avoid empty values
+	rolloutStrategy := &temporaliov1alpha1.RolloutStrategy{
+		Strategy: temporaliov1alpha1.UpdateAllAtOnce,
+	}
+
+	rollbackStrategy := &temporaliov1alpha1.RollbackStrategy{
+		Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+	}
+
+	sunsetStrategy := &temporaliov1alpha1.SunsetStrategy{
+		ScaledownDelay: &metav1.Duration{Duration: defaults.ScaledownDelay},
+		DeleteDelay:    &metav1.Duration{Duration: defaults.DeleteDelay},
+	}
+
+	workerOpts := &temporaliov1alpha1.WorkerOptions{
+		TemporalConnectionRef: temporaliov1alpha1.TemporalConnectionReference{
+			Name: "default-connection",
+		},
+		TemporalNamespace: "default",
+	}
+
+	return MakeTWD(
+		name,
+		namespace,
+		replicas,
+		podSpec,
+		rolloutStrategy,
+		rollbackStrategy,
+		sunsetStrategy,
+		workerOpts,
+	)
 }
 
 // MakePodSpec creates a pod spec with the given containers, labels, and task queue
@@ -106,7 +137,7 @@ func SetTaskQueue(podSpec corev1.PodTemplateSpec, taskQueue string) corev1.PodTe
 }
 
 func MakeTWDWithImage(name, namespace, imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
-	return MakeTWD(name, namespace, 1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
+	return MakeDefaultTWD(name, namespace, 1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""))
 }
 
 // MakeBuildID computes a build id based on the image and
@@ -132,7 +163,7 @@ func MakeBuildID(twdName, imageName, unsafeCustomBuildID string, podSpec *corev1
 }
 
 func MakeTWDWithName(name, namespace string) *temporaliov1alpha1.TemporalWorkerDeployment {
-	twd := MakeTWD(name, namespace, 1, MakePodSpec(nil, nil, ""), nil, nil, nil)
+	twd := MakeDefaultTWD(name, namespace, 1, MakePodSpec(nil, nil, ""))
 	twd.ObjectMeta.Name = name
 	twd.Name = name
 	return twd

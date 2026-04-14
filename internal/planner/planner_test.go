@@ -3581,3 +3581,353 @@ func TestGetWRTOwnerRefPatches(t *testing.T) {
 		require.Len(t, patches, 1)
 	})
 }
+
+func TestIsRollbackScenario(t *testing.T) {
+	lastCurrentTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	testCases := []struct {
+		name           string
+		status         *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		temporalState  *temporal.TemporalWorkerState
+		expectedResult bool
+	}{
+		{
+			name: "rollback detected via LastCurrentTime",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &lastCurrentTime,
+					},
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name: "rollout when LastCurrentTime is nil",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v2",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v2": {
+						BuildID:         "build-v2",
+						LastCurrentTime: nil,
+					},
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "rollout when target version not in temporal state",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v3",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &lastCurrentTime,
+					},
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "rollout when temporalState is nil",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState:  nil,
+			expectedResult: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := logr.Discard()
+			result := isRollbackScenario(logger, tc.status, tc.temporalState)
+			assert.Equal(t, tc.expectedResult, result)
+		})
+	}
+}
+
+func TestConvertRollbackToRolloutStrategy(t *testing.T) {
+	testCases := []struct {
+		name             string
+		rollbackStrategy temporaliov1alpha1.RollbackStrategy
+		expectedStrategy temporaliov1alpha1.DefaultVersionUpdateStrategy
+		expectedSteps    []temporaliov1alpha1.RolloutStep
+		expectedGate     *temporaliov1alpha1.GateWorkflowConfig
+	}{
+		{
+			name: "AllAtOnce rollback converts to AllAtOnce rollout",
+			rollbackStrategy: temporaliov1alpha1.RollbackStrategy{
+				Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+			},
+			expectedStrategy: temporaliov1alpha1.UpdateAllAtOnce,
+			expectedSteps:    nil,
+			expectedGate:     nil,
+		},
+		{
+			name: "Progressive rollback preserves all steps in order",
+			rollbackStrategy: temporaliov1alpha1.RollbackStrategy{
+				Strategy: temporaliov1alpha1.RollbackProgressive,
+				Steps: []temporaliov1alpha1.RolloutStep{
+					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 30 * time.Second}},
+					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: time.Minute}},
+					{RampPercentage: 75, PauseDuration: metav1.Duration{Duration: 2 * time.Minute}},
+				},
+			},
+			expectedStrategy: temporaliov1alpha1.UpdateProgressive,
+			expectedSteps: []temporaliov1alpha1.RolloutStep{
+				{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 30 * time.Second}},
+				{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: time.Minute}},
+				{RampPercentage: 75, PauseDuration: metav1.Duration{Duration: 2 * time.Minute}},
+			},
+			expectedGate: nil,
+		},
+		{
+			name: "empty strategy defaults to AllAtOnce",
+			rollbackStrategy: temporaliov1alpha1.RollbackStrategy{
+				Strategy: "",
+			},
+			expectedStrategy: temporaliov1alpha1.UpdateAllAtOnce,
+			expectedSteps:    nil,
+			expectedGate:     nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := convertRollbackToRolloutStrategy(tc.rollbackStrategy)
+
+			assert.Equal(t, tc.expectedStrategy, result.Strategy)
+			assert.Equal(t, tc.expectedSteps, result.Steps)
+			assert.Equal(t, tc.expectedGate, result.Gate)
+		})
+	}
+}
+
+func TestGetVersionConfigDiff_RollbackScenario(t *testing.T) {
+	logger := logr.Discard()
+	workerDeploymentName := "test-deployment"
+	now := time.Now()
+	zeroRamp := float32(0)
+
+	testCases := []struct {
+		name             string
+		status           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		temporalState    *temporal.TemporalWorkerState
+		config           *Config
+		expectSetCurrent bool
+		description      string
+	}{
+		{
+			name: "rollback with default AllAtOnce strategy",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "build-v1",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: now},
+					},
+				},
+				VersionConflictToken: []byte("token123"),
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &now,
+						Status:          temporaliov1alpha1.VersionStatusInactive,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 5 * time.Minute}},
+						{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 5 * time.Minute}},
+					},
+				},
+				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+				},
+			},
+			expectSetCurrent: true,
+			description:      "Rollback with AllAtOnce should immediately set version as current",
+		},
+		{
+			name: "rollback with Progressive strategy",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "build-v2",
+						Status:       temporaliov1alpha1.VersionStatusCurrent,
+						HealthySince: &metav1.Time{Time: now},
+					},
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "build-v1",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: now},
+					},
+					RampPercentage: &zeroRamp,
+				},
+				VersionConflictToken: []byte("token123"),
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &now,
+						Status:          temporaliov1alpha1.VersionStatusInactive,
+					},
+					"build-v2": {
+						BuildID:         "build-v2",
+						LastCurrentTime: nil,
+						Status:          temporaliov1alpha1.VersionStatusCurrent,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
+				},
+				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: time.Minute}},
+					},
+				},
+			},
+			expectSetCurrent: false,
+			description:      "Rollback with Progressive should not immediately set as current",
+		},
+		{
+			name: "normal rollout when LastCurrentTime is nil",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "build-v1",
+						Status:       temporaliov1alpha1.VersionStatusCurrent,
+						HealthySince: &metav1.Time{Time: now},
+					},
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "build-v2",
+						Status:       temporaliov1alpha1.VersionStatusInactive,
+						HealthySince: &metav1.Time{Time: now},
+					},
+				},
+				VersionConflictToken: []byte("token456"),
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &now,
+						Status:          temporaliov1alpha1.VersionStatusCurrent,
+					},
+					"build-v2": {
+						BuildID:         "build-v2",
+						LastCurrentTime: nil,
+						Status:          temporaliov1alpha1.VersionStatusInactive,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: time.Minute}},
+					},
+				},
+				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackAllAtOnce, // would set current immediately if wrongly used
+				},
+			},
+			expectSetCurrent: false,
+			description:      "New version (nil LastCurrentTime) should use RolloutStrategy, not rollback AllAtOnce",
+		},
+		{
+			name: "rollback when target version is drained",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "build-v2",
+						Status:       temporaliov1alpha1.VersionStatusCurrent,
+						HealthySince: &metav1.Time{Time: now},
+					},
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "build-v1",
+						Status:       temporaliov1alpha1.VersionStatusDrained,
+						HealthySince: &metav1.Time{Time: now},
+					},
+				},
+				VersionConflictToken: []byte("token789"),
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &now,
+						Status:          temporaliov1alpha1.VersionStatusDrained,
+					},
+					"build-v2": {
+						BuildID:         "build-v2",
+						LastCurrentTime: nil,
+						Status:          temporaliov1alpha1.VersionStatusCurrent,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
+				},
+				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+				},
+			},
+			expectSetCurrent: true,
+			description:      "Rollback to a previously-drained version should be detected via LastCurrentTime and immediately set as current",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := getVersionConfigDiff(logger, tc.status, tc.temporalState, tc.config, workerDeploymentName)
+
+			if result == nil {
+				t.Fatal("expected non-nil VersionConfig")
+			}
+
+			assert.Equal(t, tc.expectSetCurrent, result.SetCurrent, tc.description)
+			assert.Equal(t, tc.status.VersionConflictToken, result.ConflictToken)
+		})
+	}
+}

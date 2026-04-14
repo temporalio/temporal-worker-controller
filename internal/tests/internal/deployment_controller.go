@@ -32,13 +32,16 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 	}
 }
 
-func startAndStopWorker(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) {
+// startWorker starts a single worker for the given deployment and returns a stop function.
+// The caller is responsible for calling the stop function when done.
+func startWorker(t *testing.T, ctx context.Context, k8sClient client.Client, deploymentName, namespace string) func() {
 	var deployment appsv1.Deployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{
 		Name:      deploymentName,
 		Namespace: namespace,
 	}, &deployment); err != nil {
 		t.Fatalf("failed to get deployment: %v", err)
+		return func() {}
 	}
 
 	startedCh := make(chan struct{})
@@ -56,11 +59,10 @@ func startAndStopWorker(t *testing.T, ctx context.Context, k8sClient client.Clie
 	// wait for worker to start
 	<-startedCh
 
-	time.Sleep(1 * time.Second)
-
-	// kill worker
-	if stop != nil {
-		stop()
+	return func() {
+		if stop != nil {
+			stop()
+		}
 	}
 }
 
@@ -157,6 +159,7 @@ func makePreliminaryStatusTrue(
 	t *testing.T,
 	env testhelpers.TestEnv,
 	twd *temporaliov1alpha1.TemporalWorkerDeployment,
+	previouslyCurrentImages []string,
 ) {
 	t.Logf("Creating starting test env based on input.Status")
 
@@ -167,6 +170,25 @@ func makePreliminaryStatusTrue(
 		t.Logf("Setting up deprecated version %v with status %v", dv.BuildID, dv.Status)
 		workerStopFuncs := createStatus(ctx, t, env, twd, dv.BaseWorkerDeploymentVersion, nil)
 		loopDefers = append(loopDefers, func() { handleStopFuncs(workerStopFuncs) })
+	}
+
+	// Register versions that were previously current so they have LastCurrentTime set in Temporal
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(twd)
+	for _, image := range previouslyCurrentImages {
+		buildID := testhelpers.MakeBuildID(twd.Name, image, "", nil)
+		t.Logf("Setting LastCurrentTime for previously-current version %q (buildID %q)", image, buildID)
+		stopFunc, err := testhelpers.StartVersionedWorker(ctx, workerDeploymentName, buildID, twd.Name,
+			env.Ts.GetFrontendHostPort(), env.Ts.GetDefaultNamespace())
+		if err != nil {
+			t.Errorf("failed to start worker for previously-current build %q: %v", buildID, err)
+			continue
+		}
+		waitForVersionRegistrationInDeployment(t, ctx, env.Ts, &worker.WorkerDeploymentVersion{
+			DeploymentName: workerDeploymentName,
+			BuildID:        buildID,
+		})
+		setCurrentVersion(t, ctx, env.Ts, workerDeploymentName, buildID)
+		loopDefers = append(loopDefers, stopFunc)
 	}
 
 	if tv := twd.Status.TargetVersion; tv.BuildID != "" {
@@ -225,9 +247,15 @@ func createStatus(
 			setRampingVersion(t, ctx, env.Ts, v.DeploymentName, "", 0)
 		case temporaliov1alpha1.VersionStatusDrained:
 			if env.ExistingDeploymentReplicas[v.BuildID] == 0 {
-				startAndStopWorker(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
+				// Keep the temporary worker alive until setCurrentVersion completes.
+				// Stopping it before the call risks the Worker Deployment entry being
+				// cleaned up (under short PollerHistoryTTL) before registration is confirmed.
+				stopTemporaryWorker := startWorker(t, ctx, env.K8sClient, expectedDeploymentName, prevTWD.Namespace)
+				setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildID)
+				stopTemporaryWorker()
+			} else {
+				setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildID)
 			}
-			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, v.BuildID)
 			setCurrentVersion(t, ctx, env.Ts, v.DeploymentName, "")
 		}
 	}

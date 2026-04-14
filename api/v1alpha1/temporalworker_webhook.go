@@ -57,6 +57,11 @@ func (s *TemporalWorkerDeploymentSpec) Default(ctx context.Context) error {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
 	}
 
+	if s.RollbackStrategy == nil {
+		s.RollbackStrategy = &RollbackStrategy{Strategy: RollbackAllAtOnce}
+	} else if s.RollbackStrategy.Strategy == "" {
+		s.RollbackStrategy.Strategy = RollbackAllAtOnce
+	}
 	return nil
 }
 
@@ -94,6 +99,7 @@ func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Wa
 	}
 
 	allErrs = append(allErrs, validateRolloutStrategy(new.Spec.RolloutStrategy)...)
+	allErrs = append(allErrs, validateRollbackStrategy(*new.Spec.RollbackStrategy)...)
 
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(new, allErrs)
@@ -106,29 +112,7 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 	var allErrs []*field.Error
 
 	if s.Strategy == UpdateProgressive {
-		rolloutSteps := s.Steps
-		if len(rolloutSteps) == 0 {
-			allErrs = append(allErrs,
-				field.Invalid(field.NewPath("spec.rollout.steps"), rolloutSteps, "steps are required for Progressive rollout"),
-			)
-		}
-		var lastRamp int
-		for i, s := range rolloutSteps {
-			// Check duration >= 30s
-			if s.PauseDuration.Duration < 30*time.Second {
-				allErrs = append(allErrs,
-					field.Invalid(field.NewPath(fmt.Sprintf("spec.rollout.steps[%d].pauseDuration", i)), s.PauseDuration.Duration.String(), "pause duration must be at least 30s"),
-				)
-			}
-
-			// Check ramp value greater than last
-			if s.RampPercentage <= lastRamp {
-				allErrs = append(allErrs,
-					field.Invalid(field.NewPath(fmt.Sprintf("spec.rollout.steps[%d].rampPercentage", i)), s.RampPercentage, "rampPercentage must increase between each step"),
-				)
-			}
-			lastRamp = s.RampPercentage
-		}
+		allErrs = append(allErrs, validateProgressiveStrategySteps("spec.rollout.steps", s.Steps)...)
 	}
 
 	// Validate gate input fields
@@ -150,6 +134,44 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 				)
 			}
 		}
+	}
+
+	return allErrs
+}
+
+func validateRollbackStrategy(s RollbackStrategy) []*field.Error {
+	var allErrs []*field.Error
+	if s.Strategy == RollbackProgressive {
+		allErrs = append(allErrs, validateProgressiveStrategySteps("spec.rollback.steps", s.Steps)...)
+	}
+	return allErrs
+}
+
+func validateProgressiveStrategySteps(specName string, steps []RolloutStep) []*field.Error {
+	var allErrs []*field.Error
+
+	if len(steps) == 0 {
+		allErrs = append(allErrs,
+			field.Invalid(field.NewPath(specName), steps, "steps are required for Progressive strategy"),
+		)
+	}
+
+	var lastRamp int
+	for i, step := range steps {
+		// Check duration >= 30s
+		if step.PauseDuration.Duration < 30*time.Second {
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath(fmt.Sprintf("%s[%d].pauseDuration", specName, i)), step.PauseDuration.Duration.String(), "pause duration must be at least 30s"),
+			)
+		}
+
+		// Check ramp value greater than last
+		if step.RampPercentage <= lastRamp {
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath(fmt.Sprintf("%s[%d].rampPercentage", specName, i)), step.RampPercentage, "rampPercentage must increase between each step"),
+			)
+		}
+		lastRamp = step.RampPercentage
 	}
 
 	return allErrs

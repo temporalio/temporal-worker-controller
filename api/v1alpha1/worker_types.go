@@ -83,6 +83,10 @@ type TemporalWorkerDeploymentSpec struct {
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 
+	// How to rollback to a previous version. If not specified, defaults to AllAtOnce strategy.
+	// +optional
+	RollbackStrategy *RollbackStrategy `json:"rollback,omitempty"`
+
 	// How to manage sunsetting drained versions.
 	SunsetStrategy SunsetStrategy `json:"sunset"`
 
@@ -355,6 +359,18 @@ const (
 	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
 )
 
+// DefaultVersionRollbackStrategy describes how to cut over during rollback to a previous version.
+// +kubebuilder:validation:Enum=AllAtOnce;Progressive
+type DefaultVersionRollbackStrategy string
+
+const (
+	// RollbackAllAtOnce immediately switches 100% of traffic back to the previous version.
+	RollbackAllAtOnce DefaultVersionRollbackStrategy = "AllAtOnce"
+
+	// RollbackProgressive gradually ramps traffic back to the previous version.
+	RollbackProgressive DefaultVersionRollbackStrategy = "Progressive"
+)
+
 type GateWorkflowConfig struct {
 	WorkflowType string `json:"workflowType"`
 	// Input is an arbitrary JSON object passed as the first parameter to the gate workflow.
@@ -394,6 +410,21 @@ type RolloutStrategy struct {
 	// Steps to execute progressive rollouts. Only required when strategy is "Progressive".
 	// +optional
 	Steps []RolloutStep `json:"steps,omitempty" protobuf:"bytes,3,rep,name=steps"`
+}
+
+// RollbackStrategy defines strategy to apply when rolling back to a previous version.
+// This is separate from RolloutStrategy because rollbacks have different requirements:
+// - No gate workflow (already trusted version)
+// - No manual mode (rollbacks should be automatic)
+// - Default to AllAtOnce for fast recovery
+type RollbackStrategy struct {
+	// Strategy for rollback. Valid values are "AllAtOnce" or "Progressive".
+	// Defaults to "AllAtOnce" for fast recovery.
+	Strategy DefaultVersionRollbackStrategy `json:"strategy"`
+
+	// Steps to execute progressive rollbacks. Only required when strategy is "Progressive".
+	// +optional
+	Steps []RolloutStep `json:"steps,omitempty"`
 }
 
 // SunsetStrategy defines strategy to apply when sunsetting k8s deployments of drained versions.
