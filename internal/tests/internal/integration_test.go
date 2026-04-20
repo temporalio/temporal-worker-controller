@@ -711,6 +711,73 @@ func TestIntegration(t *testing.T) {
 		})
 	}
 
+	rollbackStrategyTestCases := []testCase{
+		{
+			name: "all-at-once-rollback-expect-immediate-promotion",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithRollbackAllAtOnceStrategy().
+						WithTargetTemplate("v1").
+						WithStatus(
+							testhelpers.NewStatusBuilder().
+								WithTargetVersion("v2", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+								WithCurrentVersion("v2", true, true),
+						),
+				).
+				WithExistingDeployments(
+					testhelpers.NewDeploymentInfo("v2", 1),
+				).
+				WithPreviouslyCurrentVersions("v1").
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1", true, false).
+						WithDeprecatedVersions(
+							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						),
+				).
+				WithExpectedDeployments(
+					testhelpers.NewDeploymentInfo("v2", 1),
+				),
+		},
+		{
+			name: "progressive-rollback-expect-ramp-at-first-step",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewTemporalWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithRollbackProgressiveStrategy(testhelpers.ProgressiveStep(50, time.Hour)).
+						WithTargetTemplate("v1").
+						WithStatus(
+							testhelpers.NewStatusBuilder().
+								WithTargetVersion("v2", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+								WithCurrentVersion("v2", true, true),
+						),
+				).
+				WithExistingDeployments(
+					testhelpers.NewDeploymentInfo("v2", 1),
+				).
+				WithPreviouslyCurrentVersions("v1").
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusRamping, 50, true, false).
+						WithCurrentVersion("v2", true, false),
+				).
+				WithExpectedDeployments(
+					testhelpers.NewDeploymentInfo("v2", 1),
+				),
+		},
+	}
+
+	for _, tc := range rollbackStrategyTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+		})
+	}
+
 	// Create short TTL test Temporal server and client
 	dcShortTTL := dynamicconfig.NewMemoryClient()
 	// make versions eligible for deletion faster
@@ -987,7 +1054,7 @@ func testTemporalWorkerDeploymentCreation(
 		ExpectedDeploymentReplicas: tc.GetExpectedDeploymentReplicas(),
 	}
 
-	makePreliminaryStatusTrue(ctx, t, env, twd)
+	makePreliminaryStatusTrue(ctx, t, env, twd, tc.GetPreviouslyCurrentImages())
 
 	// verify that temporal state matches the preliminary status, to confirm that makePreliminaryStatusTrue worked
 	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, twd.Status, 30*time.Second, 5*time.Second)
@@ -1005,6 +1072,17 @@ func testTemporalWorkerDeploymentCreation(
 	t.Log("Creating a TemporalWorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
 		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+	}
+
+	// Immediately apply the input status before the controller's first reconcile.
+	// k8sClient.Create strips the status subresource, so without this the first reconcile
+	// always sees an empty status (CurrentVersion == nil), which triggers the fast-track.
+	// The controller reconcile is queued asynchronously via the watch/informer
+	// path, so this synchronous Status().Update() reliably precedes it.
+	if twd.Status.TargetVersion.BuildID != "" {
+		if err := k8sClient.Status().Update(ctx, twd); err != nil {
+			t.Fatalf("failed to pre-apply TWD status: %v", err)
+		}
 	}
 
 	// Hook: runs after TWD creation but before waiting for the target Deployment.

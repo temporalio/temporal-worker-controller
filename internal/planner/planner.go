@@ -118,6 +118,8 @@ type WorkflowConfig struct {
 type Config struct {
 	// RolloutStrategy to use
 	RolloutStrategy temporaliov1alpha1.RolloutStrategy
+	// RollbackStrategy to use
+	RollbackStrategy *temporaliov1alpha1.RollbackStrategy
 }
 
 // GeneratePlan creates a plan for updating the worker deployment
@@ -759,7 +761,51 @@ func getTestWorkflows(
 	return testWorkflows
 }
 
-// getVersionConfigDiff determines the version configuration based on the rollout strategy
+func isRollbackScenario(
+	l logr.Logger,
+	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	temporalState *temporal.TemporalWorkerState,
+	config *Config,
+) bool {
+	if config.RollbackStrategy == nil {
+		return false
+	}
+
+	if config.RolloutStrategy.Strategy == temporaliov1alpha1.UpdateManual {
+		return false
+	}
+
+	if temporalState == nil {
+		return false
+	}
+
+	targetVersionInfo, exists := temporalState.Versions[status.TargetVersion.BuildID]
+	if !exists {
+		return false
+	}
+
+	if targetVersionInfo.LastCurrentTime == nil {
+		return false
+	}
+
+	if config.RollbackStrategy.MaxVersionAge != nil && time.Since(*targetVersionInfo.LastCurrentTime) > config.RollbackStrategy.MaxVersionAge.Duration {
+		l.Info("Skipping rollback: the version's last current time exceeds MaxVersionAge",
+			"targetBuildID", status.TargetVersion.BuildID,
+			"lastCurrentTime", targetVersionInfo.LastCurrentTime,
+			"maxVersionAge", config.RollbackStrategy.MaxVersionAge.Duration)
+		return false
+	}
+
+	l.Info("Detected rollback scenario using LastCurrentTime. "+
+		"Warning: Auto-upgrade workflows that upgraded from a previous version to the current version may fail during this rollback, "+
+		"as they may not handle downgrades properly. Monitor workflow executions for failures.",
+		"targetBuildID", status.TargetVersion.BuildID,
+		"lastCurrentTime", targetVersionInfo.LastCurrentTime)
+
+	return true
+}
+
+// getVersionConfigDiff determines the version configuration based on the rollout/rollback strategies
 func getVersionConfigDiff(
 	l logr.Logger,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
@@ -767,9 +813,14 @@ func getVersionConfigDiff(
 	config *Config,
 	workerDeploymentName string,
 ) *VersionConfig {
-	strategy := config.RolloutStrategy
-	conflictToken := status.VersionConflictToken
+	var strategy temporaliov1alpha1.RolloutStrategy
+	if isRollbackScenario(l, status, temporalState, config) {
+		strategy = convertRollbackToRolloutStrategy(*config.RollbackStrategy)
+	} else {
+		strategy = config.RolloutStrategy
+	}
 
+	// Manual strategy check (only relevant for rollout)
 	if strategy.Strategy == temporaliov1alpha1.UpdateManual {
 		return nil
 	}
@@ -800,7 +851,7 @@ func getVersionConfigDiff(
 		managerIdentity = temporalState.ManagerIdentity
 	}
 	vcfg := &VersionConfig{
-		ConflictToken:   conflictToken,
+		ConflictToken:   status.VersionConflictToken,
 		BuildID:         status.TargetVersion.BuildID,
 		ManagerIdentity: managerIdentity,
 	}
@@ -838,6 +889,25 @@ func getVersionConfigDiff(
 	}
 
 	return nil
+}
+
+// Convert to reuse rollout logic with different settings
+func convertRollbackToRolloutStrategy(rb temporaliov1alpha1.RollbackStrategy) temporaliov1alpha1.RolloutStrategy {
+	var strategy temporaliov1alpha1.VersionRolloutStrategy
+	switch rb.Strategy {
+	case temporaliov1alpha1.RollbackAllAtOnce:
+		strategy = temporaliov1alpha1.UpdateAllAtOnce
+	case temporaliov1alpha1.RollbackProgressive:
+		strategy = temporaliov1alpha1.UpdateProgressive
+	default:
+		strategy = temporaliov1alpha1.UpdateAllAtOnce
+	}
+
+	return temporaliov1alpha1.RolloutStrategy{
+		Strategy: strategy,
+		Steps:    rb.Steps,
+		Gate:     nil, // Rollbacks don't have gates
+	}
 }
 
 // handleProgressiveRollout handles the progressive rollout strategy logic

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,8 +24,9 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 	tests := map[string]struct {
 		obj      runtime.Object
 		errorMsg string
+		warnMsg  string
 	}{
-		"valid temporal worker deployment": {
+		"valid default temporal worker deployment": {
 			obj: testhelpers.MakeTWDWithName("valid-worker", ""),
 		},
 		"temporal worker deployment with name too long": {
@@ -39,15 +41,15 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			},
 			errorMsg: "expected a TemporalWorkerDeployment",
 		},
-		"missing rollout steps": {
+		"rollout strategy - invalid Progressive without steps": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-missing-steps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = nil
 				return obj
 			}),
-			errorMsg: "spec.rollout.steps: Invalid value: null: steps are required for Progressive rollout",
+			errorMsg: "spec.rollout.steps: Invalid value: null: steps are required for Progressive strategy",
 		},
-		"ramp value for step <= previous step": {
+		"rollout strategy - invalid Progressive with non-increasing ramp": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
@@ -62,7 +64,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: "[spec.rollout.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.rollout.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
 		},
-		"pause duration < 30s": {
+		"rollout strategy - invalid Progressive pause duration < 30s": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
@@ -73,6 +75,107 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 				return obj
 			}),
 			errorMsg: `spec.rollout.steps[1].pauseDuration: Invalid value: "10s": pause duration must be at least 30s`,
+		},
+		"rollback strategy - Progressive rollback with AllAtOnce rollout warns": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-progressive", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: 30 * time.Second}},
+					},
+				}
+				return obj
+			}),
+			warnMsg: "rollback strategy is slower than rollout",
+		},
+		"rollback strategy - AllAtOnce rollback with Progressive rollout is valid": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-allat-once-prog-rollout", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: time.Minute}},
+						{75, metav1.Duration{Duration: time.Minute}},
+					},
+				}
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+				}
+				return obj
+			}),
+		},
+		"rollback strategy - Progressive rollback faster than Progressive rollout is valid": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-prog-faster", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: 2 * time.Minute}},
+						{75, metav1.Duration{Duration: 2 * time.Minute}},
+					},
+				}
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: time.Minute}},
+						{75, metav1.Duration{Duration: time.Minute}},
+					},
+				}
+				return obj
+			}),
+		},
+		"rollback strategy - Progressive rollback slower than Progressive rollout warns": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-prog-slower", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: time.Minute}},
+						{75, metav1.Duration{Duration: time.Minute}},
+					},
+				}
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: 2 * time.Minute}},
+						{75, metav1.Duration{Duration: 2 * time.Minute}},
+					},
+				}
+				return obj
+			}),
+			warnMsg: "rollback strategy is slower than rollout",
+		},
+		"rollback strategy - invalid Progressive without steps": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-progressive-no-steps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps:    nil,
+				}
+				return obj
+			}),
+			errorMsg: "steps are required for Progressive strategy",
+		},
+		"rollback strategy - invalid Progressive pause duration < 30s": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-progressive-invalid", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: 10 * time.Second}},
+					},
+				}
+				return obj
+			}),
+			errorMsg: "pause duration must be at least 30s",
+		},
+		"rollback strategy - invalid Progressive with non-increasing ramp": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-progressive-decreasing", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: time.Minute}},
+						{25, metav1.Duration{Duration: time.Minute}},
+					},
+				}
+				return obj
+			}),
+			errorMsg: "rampPercentage must increase between each step",
 		},
 	}
 
@@ -89,8 +192,12 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 					require.NoError(t, err)
 				}
 
-				// Warnings should always be nil for this implementation
-				assert.Nil(t, warnings)
+				if tc.warnMsg != "" {
+					require.NotEmpty(t, warnings)
+					assert.Contains(t, warnings[0], tc.warnMsg)
+				} else {
+					assert.Empty(t, warnings)
+				}
 			}
 
 			// Verify that create and update enforce the same rules
@@ -166,6 +273,63 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 				assert.Equal(t, time.Hour, obj.Spec.SunsetStrategy.ScaledownDelay.Duration)
 				require.NotNil(t, obj.Spec.SunsetStrategy.DeleteDelay)
 				assert.Equal(t, 24*time.Hour, obj.Spec.SunsetStrategy.DeleteDelay.Duration)
+			},
+		},
+		"rollback strategy initialized when nil": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("default-rollback-nil", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = nil
+				return obj
+			}),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.RollbackStrategy, "expected RollbackStrategy to be initialized by webhook")
+				assert.Equal(t, temporaliov1alpha1.RollbackAllAtOnce, obj.Spec.RollbackStrategy.Strategy, "expected RollbackStrategy.Strategy to default to AllAtOnce")
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, defaults.RollbackMaxVersionAge, obj.Spec.RollbackStrategy.MaxVersionAge.Duration)
+			},
+		},
+		"rollback strategy defaults empty strategy field to AllAtOnce": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("default-rollback-empty", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: "",
+				}
+				return obj
+			}),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.RollbackStrategy)
+				assert.Equal(t, temporaliov1alpha1.RollbackAllAtOnce, obj.Spec.RollbackStrategy.Strategy, "expected RollbackStrategy.Strategy to default to AllAtOnce")
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, defaults.RollbackMaxVersionAge, obj.Spec.RollbackStrategy.MaxVersionAge.Duration)
+			},
+		},
+		"rollback strategy preserves explicit strategy": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("explicit-rollback-progressive", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: 30 * time.Second}},
+					},
+				}
+				return obj
+			}),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.RollbackStrategy)
+				assert.Equal(t, temporaliov1alpha1.RollbackProgressive, obj.Spec.RollbackStrategy.Strategy, "expected RollbackStrategy.Strategy to remain Progressive")
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, defaults.RollbackMaxVersionAge, obj.Spec.RollbackStrategy.MaxVersionAge.Duration)
+			},
+		},
+		"rollback strategy preserves explicit MaxVersionAge": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("explicit-rollback-max-version-age", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy:      temporaliov1alpha1.RollbackAllAtOnce,
+					MaxVersionAge: &metav1.Duration{Duration: 30 * time.Minute},
+				}
+				return obj
+			}),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.RollbackStrategy)
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, 30*time.Minute, obj.Spec.RollbackStrategy.MaxVersionAge.Duration, "expected explicit MaxVersionAge to be preserved")
 			},
 		},
 	}

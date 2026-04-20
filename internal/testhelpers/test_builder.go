@@ -58,6 +58,23 @@ func (b *TemporalWorkerDeploymentBuilder) WithProgressiveStrategy(steps ...tempo
 	return b
 }
 
+// WithRollbackAllAtOnceStrategy sets the rollback strategy to all-at-once
+func (b *TemporalWorkerDeploymentBuilder) WithRollbackAllAtOnceStrategy() *TemporalWorkerDeploymentBuilder {
+	b.twd.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+		Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+	}
+	return b
+}
+
+// WithRollbackProgressiveStrategy sets the rollback strategy to progressive with given steps
+func (b *TemporalWorkerDeploymentBuilder) WithRollbackProgressiveStrategy(steps ...temporaliov1alpha1.RolloutStep) *TemporalWorkerDeploymentBuilder {
+	b.twd.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+		Strategy: temporaliov1alpha1.RollbackProgressive,
+		Steps:    steps,
+	}
+	return b
+}
+
 // WithGate sets the rollout strategy have a gate workflow
 func (b *TemporalWorkerDeploymentBuilder) WithGate(expectSuccess bool) *TemporalWorkerDeploymentBuilder {
 	if expectSuccess {
@@ -233,6 +250,11 @@ type TestCase struct {
 	// If starting from a particular state, specify that in input.Status.
 	twd *temporaliov1alpha1.TemporalWorkerDeployment
 
+	// previouslyCurrentImages is a list of image names whose corresponding versions should be
+	// registered in Temporal and briefly promoted to current (giving them a LastCurrentTime)
+	// before the test runs. The actual current version is restored afterward.
+	previouslyCurrentImages []string
+
 	// existingDeploymentReplicas specifies the number of replicas for each deprecated build.
 	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
 	// versions, so for test scenarios that start with existing deprecated version Deployments,
@@ -315,6 +337,10 @@ func (tc *TestCase) GetValidatorFunc() func(t *testing.T, ctx context.Context, t
 	return tc.validatorFunc
 }
 
+func (tc *TestCase) GetPreviouslyCurrentImages() []string {
+	return tc.previouslyCurrentImages
+}
+
 // TestCaseBuilder provides a fluent interface for building test cases
 type TestCaseBuilder struct {
 	name              string
@@ -326,6 +352,8 @@ type TestCaseBuilder struct {
 	existingDeploymentInfos []DeploymentInfo
 	expectedDeploymentInfos []DeploymentInfo
 	waitTime                *time.Duration
+
+	previouslyCurrentImages []string
 
 	setupFunc         func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 	twdMutatorFunc    func(*temporaliov1alpha1.TemporalWorkerDeployment)
@@ -355,6 +383,15 @@ func NewTestCaseWithValues(name, k8sNamespace, temporalNamespace string) *TestCa
 		existingDeploymentInfos: make([]DeploymentInfo, 0),
 		expectedDeploymentInfos: make([]DeploymentInfo, 0),
 	}
+}
+
+// WithPreviouslyCurrentVersions specifies images whose versions should be registered in Temporal and
+// briefly promoted to current (giving them a LastCurrentTime) before the test runs. The actual
+// current version declared in WithStatus is restored afterward. Use this for rollback test scenarios
+// where the rollback target was previously the current version.
+func (tcb *TestCaseBuilder) WithPreviouslyCurrentVersions(imageNames ...string) *TestCaseBuilder {
+	tcb.previouslyCurrentImages = imageNames
+	return tcb
 }
 
 // WithSetupFunction defines a function that the test case will call while setting up the state, after creating the initial Status.
@@ -467,11 +504,12 @@ func (tcb *TestCaseBuilder) WithExpectedStatus(statusBuilder *StatusBuilder) *Te
 // Build returns the constructed test case
 func (tcb *TestCaseBuilder) Build() TestCase {
 	ret := TestCase{
-		setupFunc:         tcb.setupFunc,
-		twdMutatorFunc:    tcb.twdMutatorFunc,
-		postTWDCreateFunc: tcb.postTWDCreateFunc,
-		validatorFunc:     tcb.validatorFunc,
-		waitTime:          tcb.waitTime,
+		setupFunc:               tcb.setupFunc,
+		twdMutatorFunc:          tcb.twdMutatorFunc,
+		postTWDCreateFunc:       tcb.postTWDCreateFunc,
+		validatorFunc:           tcb.validatorFunc,
+		waitTime:                tcb.waitTime,
+		previouslyCurrentImages: tcb.previouslyCurrentImages,
 		twd: tcb.twdBuilder.
 			WithName(tcb.name).
 			WithNamespace(tcb.k8sNamespace).

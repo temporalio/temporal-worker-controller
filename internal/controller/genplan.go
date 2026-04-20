@@ -90,43 +90,18 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	}
 
 	rolloutStrategy := w.Spec.RolloutStrategy
+	rollbackStrategy := w.Spec.RollbackStrategy
 
-	// Resolve gate input if gate is configured
-	var gateInput []byte
-	var isGateInputSecret bool
-	if rolloutStrategy.Gate != nil {
-		// Fetch ConfigMap or Secret data if needed
-		var configMapData map[string]string
-		var configMapBinaryData map[string][]byte
-		var secretData map[string][]byte
-
-		if rolloutStrategy.Gate.InputFrom != nil {
-			if cmRef := rolloutStrategy.Gate.InputFrom.ConfigMapKeyRef; cmRef != nil {
-				cm := &corev1.ConfigMap{}
-				if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: cmRef.Name}, cm); err != nil {
-					return nil, fmt.Errorf("failed to get ConfigMap %s/%s: %w", w.Namespace, cmRef.Name, err)
-				}
-				configMapData = cm.Data
-				configMapBinaryData = cm.BinaryData
-			}
-			if secRef := rolloutStrategy.Gate.InputFrom.SecretKeyRef; secRef != nil {
-				sec := &corev1.Secret{}
-				if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: secRef.Name}, sec); err != nil {
-					return nil, fmt.Errorf("failed to get Secret %s/%s: %w", w.Namespace, secRef.Name, err)
-				}
-				secretData = sec.Data
-			}
-		}
-
-		gateInput, isGateInputSecret, err = planner.ResolveGateInput(rolloutStrategy.Gate, w.Namespace, configMapData, configMapBinaryData, secretData)
-		if err != nil {
-			return nil, fmt.Errorf("unable to resolve gate input: %w", err)
-		}
+	// Resolve gate workflow if needed
+	gateInput, isGateInputSecret, err := r.resolveGateWorkflow(ctx, l, w, rolloutStrategy, temporalState)
+	if err != nil {
+		return nil, fmt.Errorf("unable to resolve gate input: %w", err)
 	}
 
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
-		RolloutStrategy: rolloutStrategy,
+		RolloutStrategy:  rolloutStrategy,
+		RollbackStrategy: rollbackStrategy,
 	}
 
 	// Fetch all WorkerResourceTemplates that reference this TWD so that the planner
@@ -193,6 +168,43 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 	}
 
 	return plan, nil
+}
+
+func (r *TemporalWorkerDeploymentReconciler) resolveGateWorkflow(
+	ctx context.Context,
+	l logr.Logger,
+	w *temporaliov1alpha1.TemporalWorkerDeployment,
+	rolloutStrategy temporaliov1alpha1.RolloutStrategy,
+	temporalState *temporal.TemporalWorkerState,
+) (gateInput []byte, isSecret bool, err error) {
+	if rolloutStrategy.Gate == nil {
+		return nil, false, nil
+	}
+
+	// Fetch ConfigMap or Secret data if needed
+	var configMapData map[string]string
+	var configMapBinaryData map[string][]byte
+	var secretData map[string][]byte
+
+	if rolloutStrategy.Gate.InputFrom != nil {
+		if cmRef := rolloutStrategy.Gate.InputFrom.ConfigMapKeyRef; cmRef != nil {
+			cm := &corev1.ConfigMap{}
+			if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: cmRef.Name}, cm); err != nil {
+				return nil, false, fmt.Errorf("failed to get ConfigMap %s/%s: %w", w.Namespace, cmRef.Name, err)
+			}
+			configMapData = cm.Data
+			configMapBinaryData = cm.BinaryData
+		}
+		if secRef := rolloutStrategy.Gate.InputFrom.SecretKeyRef; secRef != nil {
+			sec := &corev1.Secret{}
+			if err := r.Client.Get(ctx, types.NamespacedName{Namespace: w.Namespace, Name: secRef.Name}, sec); err != nil {
+				return nil, false, fmt.Errorf("failed to get Secret %s/%s: %w", w.Namespace, secRef.Name, err)
+			}
+			secretData = sec.Data
+		}
+	}
+
+	return planner.ResolveGateInput(rolloutStrategy.Gate, w.Namespace, configMapData, configMapBinaryData, secretData)
 }
 
 // Create a new deployment with owner reference

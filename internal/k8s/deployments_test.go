@@ -233,8 +233,8 @@ func TestGenerateBuildID(t *testing.T) {
 				pod1 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "1"}, "")
 				pod2 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "2"}, "")
 
-				twd1 := testhelpers.MakeTWD("", "", 1, pod1, nil, nil, nil)
-				twd2 := testhelpers.MakeTWD("", "", 1, pod2, nil, nil, nil)
+				twd1 := testhelpers.MakeDefaultTWD("", "", 1, pod1)
+				twd2 := testhelpers.MakeDefaultTWD("", "", 1, pod2)
 				return twd1, twd2
 			},
 			expectedPrefix:  "my.test_image",
@@ -246,8 +246,8 @@ func TestGenerateBuildID(t *testing.T) {
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
 				img := "my.test_image"
 				pod := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, nil, "")
-				twd1 := testhelpers.MakeTWD("", "", 1, pod, nil, nil, nil)
-				twd2 := testhelpers.MakeTWD("", "", 2, pod, nil, nil, nil)
+				twd1 := testhelpers.MakeDefaultTWD("", "", 1, pod)
+				twd2 := testhelpers.MakeDefaultTWD("", "", 2, pod)
 				return twd1, twd2
 			},
 			expectedPrefix:  "my.test_image",
@@ -257,7 +257,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "no containers",
 			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
-				twd := testhelpers.MakeTWD("", "", 1, testhelpers.MakePodSpec(nil, nil, ""), nil, nil, nil)
+				twd := testhelpers.MakeDefaultTWD("", "", 1, testhelpers.MakePodSpec(nil, nil, ""))
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",

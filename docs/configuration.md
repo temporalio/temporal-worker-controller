@@ -5,10 +5,11 @@ This document provides comprehensive configuration options for the Temporal Work
 ## Table of Contents
 
 1. [Rollout Strategies](#rollout-strategies)
-2. [Sunset Configuration](#sunset-configuration)
-3. [Worker Options](#worker-options)
-4. [Gate Configuration](#gate-configuration)
-5. [Advanced Configuration](#advanced-configuration)
+2. [Rollback Strategy](#rollback-strategy)
+3. [Sunset Configuration](#sunset-configuration)
+4. [Worker Options](#worker-options)
+5. [Gate Configuration](#gate-configuration)
+6. [Advanced Configuration](#advanced-configuration)
 
 ## Rollout Strategies
 
@@ -108,6 +109,60 @@ rollout:
       pauseDuration: 30m  # Long canary period
     - rampPercentage: 100
       pauseDuration: 0s   # Full rollout after canary validation
+```
+
+## Rollback Strategy
+
+The controller automatically detects rollbacks: if the target version was previously the current version (within `maxVersionAge`), it applies the rollback strategy instead of the rollout strategy. This means setting your target version back to a prior build ID is enough to trigger a rollback — no special action required.
+
+> **Note:** Rollback is suppressed when the rollout strategy is `Manual`, since manual mode implies full user control.
+
+### Default Rollback Configuration
+
+```yaml
+rollback:
+  strategy: AllAtOnce   # Default: immediately switch 100% of traffic back
+  maxVersionAge: 1h     # Only treat versions as rollback targets if they were
+                        # current within the last hour. Set to 0s to disable rollback.
+```
+
+### Rollback Strategies
+
+**AllAtOnce (default):** Immediately routes 100% of traffic back to the previous version. Recommended for fast recovery.
+
+```yaml
+rollback:
+  strategy: AllAtOnce
+  maxVersionAge: 1h
+```
+
+**Progressive:** Gradually ramps traffic back, using the same step-based mechanism as progressive rollouts. Use this when you want a controlled rollback, for example to observe metrics during the reversion.
+
+```yaml
+rollback:
+  strategy: Progressive
+  maxVersionAge: 1h
+  steps:
+    - rampPercentage: 50
+      pauseDuration: 5m
+    - rampPercentage: 75
+      pauseDuration: 5m
+```
+
+> **Warning:** The controller will warn at admission time if the rollback strategy is slower than the rollout strategy, since a slow rollback defeats the purpose of fast recovery. If you configure a progressive rollback with a longer total duration than your rollout steps, verify this is intentional.
+
+### `maxVersionAge`
+
+Controls which versions are eligible as rollback targets. A version is only considered a rollback target if the last time it was the current version falls within this duration. Set to a short duration (e.g. `1h`) to limit rollbacks to recently-promoted versions.
+
+### Disabling Rollbacks
+
+Set `maxVersionAge` to `0s` to disable automatic rollback detection entirely. The controller will treat every target version as a fresh rollout, regardless of its history.
+
+```yaml
+rollback:
+  strategy: AllAtOnce
+  maxVersionAge: 0s
 ```
 
 ## Sunset Configuration
