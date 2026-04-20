@@ -24,6 +24,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 	tests := map[string]struct {
 		obj      runtime.Object
 		errorMsg string
+		warnMsg  string
 	}{
 		"valid default temporal worker deployment": {
 			obj: testhelpers.MakeTWDWithName("valid-worker", ""),
@@ -75,7 +76,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: `spec.rollout.steps[1].pauseDuration: Invalid value: "10s": pause duration must be at least 30s`,
 		},
-		"rollback strategy - valid Progressive with steps": {
+		"rollback strategy - Progressive rollback with AllAtOnce rollout warns": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-progressive", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
 				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
 					Strategy: temporaliov1alpha1.RollbackProgressive,
@@ -85,6 +86,61 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 				}
 				return obj
 			}),
+			warnMsg: "rollback strategy is slower than rollout",
+		},
+		"rollback strategy - AllAtOnce rollback with Progressive rollout is valid": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-allat-once-prog-rollout", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: time.Minute}},
+						{75, metav1.Duration{Duration: time.Minute}},
+					},
+				}
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+				}
+				return obj
+			}),
+		},
+		"rollback strategy - Progressive rollback faster than Progressive rollout is valid": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-prog-faster", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: 2 * time.Minute}},
+						{75, metav1.Duration{Duration: 2 * time.Minute}},
+					},
+				}
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: time.Minute}},
+						{75, metav1.Duration{Duration: time.Minute}},
+					},
+				}
+				return obj
+			}),
+		},
+		"rollback strategy - Progressive rollback slower than Progressive rollout warns": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-prog-slower", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: time.Minute}},
+						{75, metav1.Duration{Duration: time.Minute}},
+					},
+				}
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy: temporaliov1alpha1.RollbackProgressive,
+					Steps: []temporaliov1alpha1.RolloutStep{
+						{50, metav1.Duration{Duration: 2 * time.Minute}},
+						{75, metav1.Duration{Duration: 2 * time.Minute}},
+					},
+				}
+				return obj
+			}),
+			warnMsg: "rollback strategy is slower than rollout",
 		},
 		"rollback strategy - invalid Progressive without steps": {
 			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("rollback-progressive-no-steps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
@@ -136,8 +192,12 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 					require.NoError(t, err)
 				}
 
-				// Warnings should always be nil for this implementation
-				assert.Nil(t, warnings)
+				if tc.warnMsg != "" {
+					require.NotEmpty(t, warnings)
+					assert.Contains(t, warnings[0], tc.warnMsg)
+				} else {
+					assert.Empty(t, warnings)
+				}
 			}
 
 			// Verify that create and update enforce the same rules

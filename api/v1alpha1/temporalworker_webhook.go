@@ -108,7 +108,7 @@ func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Wa
 		return nil, newInvalidErr(new, allErrs)
 	}
 
-	return nil, nil
+	return warnRollbackSlowerThanRollout(new.Spec.RolloutStrategy, *new.Spec.RollbackStrategy), nil
 }
 
 func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
@@ -148,6 +148,32 @@ func validateRollbackStrategy(s RollbackStrategy) []*field.Error {
 		allErrs = append(allErrs, validateProgressiveStrategySteps("spec.rollback.steps", s.Steps)...)
 	}
 	return allErrs
+}
+
+func warnRollbackSlowerThanRollout(rollout RolloutStrategy, rollback RollbackStrategy) admission.Warnings {
+	switch rollout.Strategy {
+	case UpdateAllAtOnce:
+		if rollback.Strategy != RollbackAllAtOnce {
+			return admission.Warnings{"rollback strategy is slower than rollout: rollout is AllAtOnce, but rollback is Progressive — is that intended?"}
+		}
+	case UpdateProgressive:
+		if rollback.Strategy == RollbackProgressive {
+			var rolloutTotal, rollbackTotal time.Duration
+			for _, s := range rollout.Steps {
+				rolloutTotal += s.PauseDuration.Duration
+			}
+			for _, s := range rollback.Steps {
+				rollbackTotal += s.PauseDuration.Duration
+			}
+			if rollbackTotal > rolloutTotal {
+				return admission.Warnings{fmt.Sprintf(
+					"rollback strategy is slower than rollout: progressive rollback total duration (%s) exceeds progressive rollout total duration (%s) — is that intended?",
+					rollbackTotal, rolloutTotal,
+				)}
+			}
+		}
+	}
+	return nil
 }
 
 func validateProgressiveStrategySteps(specName string, steps []RolloutStep) []*field.Error {
