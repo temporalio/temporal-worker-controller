@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -222,6 +223,8 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
 				require.NotNil(t, obj.Spec.RollbackStrategy, "expected RollbackStrategy to be initialized by webhook")
 				assert.Equal(t, temporaliov1alpha1.RollbackAllAtOnce, obj.Spec.RollbackStrategy.Strategy, "expected RollbackStrategy.Strategy to default to AllAtOnce")
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, defaults.RollbackMaxVersionAge, obj.Spec.RollbackStrategy.MaxVersionAge.Duration)
 			},
 		},
 		"rollback strategy defaults empty strategy field to AllAtOnce": {
@@ -234,6 +237,8 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
 				require.NotNil(t, obj.Spec.RollbackStrategy)
 				assert.Equal(t, temporaliov1alpha1.RollbackAllAtOnce, obj.Spec.RollbackStrategy.Strategy, "expected RollbackStrategy.Strategy to default to AllAtOnce")
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, defaults.RollbackMaxVersionAge, obj.Spec.RollbackStrategy.MaxVersionAge.Duration)
 			},
 		},
 		"rollback strategy preserves explicit strategy": {
@@ -249,6 +254,22 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
 				require.NotNil(t, obj.Spec.RollbackStrategy)
 				assert.Equal(t, temporaliov1alpha1.RollbackProgressive, obj.Spec.RollbackStrategy.Strategy, "expected RollbackStrategy.Strategy to remain Progressive")
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, defaults.RollbackMaxVersionAge, obj.Spec.RollbackStrategy.MaxVersionAge.Duration)
+			},
+		},
+		"rollback strategy preserves explicit MaxVersionAge": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("explicit-rollback-max-version-age", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+				obj.Spec.RollbackStrategy = &temporaliov1alpha1.RollbackStrategy{
+					Strategy:      temporaliov1alpha1.RollbackAllAtOnce,
+					MaxVersionAge: &metav1.Duration{Duration: 30 * time.Minute},
+				}
+				return obj
+			}),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+				require.NotNil(t, obj.Spec.RollbackStrategy)
+				require.NotNil(t, obj.Spec.RollbackStrategy.MaxVersionAge)
+				assert.Equal(t, 30*time.Minute, obj.Spec.RollbackStrategy.MaxVersionAge.Duration, "expected explicit MaxVersionAge to be preserved")
 			},
 		},
 	}

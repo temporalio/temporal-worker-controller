@@ -60,6 +60,8 @@ spec:
                 type: integer
               rollback:
                 properties:
+                  maxVersionAge:
+                    type: string
                   steps:
                     items:
                       properties:

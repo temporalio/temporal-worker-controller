@@ -3583,15 +3583,26 @@ func TestGetWRTOwnerRefPatches(t *testing.T) {
 }
 
 func TestIsRollbackScenario(t *testing.T) {
-	lastCurrentTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	recentLastCurrentTime := time.Now().Add(-5 * time.Minute)
+	oldLastCurrentTime := time.Now().Add(-2 * time.Hour)
+
+	defaultConfig := &Config{
+		RolloutStrategy: temporaliov1alpha1.RolloutStrategy{Strategy: temporaliov1alpha1.UpdateAllAtOnce},
+		RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
+			Strategy:      temporaliov1alpha1.RollbackAllAtOnce,
+			MaxVersionAge: &metav1.Duration{Duration: defaults.RollbackMaxVersionAge},
+		},
+	}
+
 	testCases := []struct {
 		name           string
 		status         *temporaliov1alpha1.TemporalWorkerDeploymentStatus
 		temporalState  *temporal.TemporalWorkerState
+		config         *Config
 		expectedResult bool
 	}{
 		{
-			name: "rollback detected via LastCurrentTime",
+			name: "rollback detected via LastCurrentTime within MaxVersionAge",
 			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -3603,10 +3614,11 @@ func TestIsRollbackScenario(t *testing.T) {
 				Versions: map[string]*temporal.VersionInfo{
 					"build-v1": {
 						BuildID:         "build-v1",
-						LastCurrentTime: &lastCurrentTime,
+						LastCurrentTime: &recentLastCurrentTime,
 					},
 				},
 			},
+			config:         defaultConfig,
 			expectedResult: true,
 		},
 		{
@@ -3626,6 +3638,7 @@ func TestIsRollbackScenario(t *testing.T) {
 					},
 				},
 			},
+			config:         defaultConfig,
 			expectedResult: false,
 		},
 		{
@@ -3641,10 +3654,11 @@ func TestIsRollbackScenario(t *testing.T) {
 				Versions: map[string]*temporal.VersionInfo{
 					"build-v1": {
 						BuildID:         "build-v1",
-						LastCurrentTime: &lastCurrentTime,
+						LastCurrentTime: &recentLastCurrentTime,
 					},
 				},
 			},
+			config:         defaultConfig,
 			expectedResult: false,
 		},
 		{
@@ -3657,6 +3671,83 @@ func TestIsRollbackScenario(t *testing.T) {
 				},
 			},
 			temporalState:  nil,
+			config:         defaultConfig,
+			expectedResult: false,
+		},
+		{
+			name: "rollout when version age exceeds MaxVersionAge",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &oldLastCurrentTime,
+					},
+				},
+			},
+			config:         defaultConfig,
+			expectedResult: false,
+		},
+		{
+			name: "rollback disabled when MaxVersionAge is zero",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &recentLastCurrentTime,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
+				},
+				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
+					Strategy:      temporaliov1alpha1.RollbackAllAtOnce,
+					MaxVersionAge: &metav1.Duration{Duration: 0},
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "rollback skipped when rollout strategy is Manual",
+			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &recentLastCurrentTime,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy: temporaliov1alpha1.UpdateManual,
+				},
+				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
+					Strategy:      temporaliov1alpha1.RollbackAllAtOnce,
+					MaxVersionAge: &metav1.Duration{Duration: defaults.RollbackMaxVersionAge},
+				},
+			},
 			expectedResult: false,
 		},
 	}
@@ -3664,7 +3755,7 @@ func TestIsRollbackScenario(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := logr.Discard()
-			result := isRollbackScenario(logger, tc.status, tc.temporalState)
+			result := isRollbackScenario(logger, tc.status, tc.temporalState, tc.config)
 			assert.Equal(t, tc.expectedResult, result)
 		})
 	}
@@ -3771,7 +3862,8 @@ func TestGetVersionConfigDiff_RollbackScenario(t *testing.T) {
 					},
 				},
 				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
-					Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+					Strategy:      temporaliov1alpha1.RollbackAllAtOnce,
+					MaxVersionAge: &metav1.Duration{Duration: defaults.RollbackMaxVersionAge},
 				},
 			},
 			expectSetCurrent: true,
@@ -3820,6 +3912,7 @@ func TestGetVersionConfigDiff_RollbackScenario(t *testing.T) {
 					Steps: []temporaliov1alpha1.RolloutStep{
 						{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: time.Minute}},
 					},
+					MaxVersionAge: &metav1.Duration{Duration: defaults.RollbackMaxVersionAge},
 				},
 			},
 			expectSetCurrent: false,
@@ -3866,7 +3959,8 @@ func TestGetVersionConfigDiff_RollbackScenario(t *testing.T) {
 					},
 				},
 				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
-					Strategy: temporaliov1alpha1.RollbackAllAtOnce, // would set current immediately if wrongly used
+					Strategy:      temporaliov1alpha1.RollbackAllAtOnce, // would set current immediately if wrongly used
+					MaxVersionAge: &metav1.Duration{Duration: defaults.RollbackMaxVersionAge},
 				},
 			},
 			expectSetCurrent: false,
@@ -3910,7 +4004,8 @@ func TestGetVersionConfigDiff_RollbackScenario(t *testing.T) {
 					Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 				},
 				RollbackStrategy: &temporaliov1alpha1.RollbackStrategy{
-					Strategy: temporaliov1alpha1.RollbackAllAtOnce,
+					Strategy:      temporaliov1alpha1.RollbackAllAtOnce,
+					MaxVersionAge: &metav1.Duration{Duration: defaults.RollbackMaxVersionAge},
 				},
 			},
 			expectSetCurrent: true,

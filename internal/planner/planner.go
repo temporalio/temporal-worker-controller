@@ -765,7 +765,16 @@ func isRollbackScenario(
 	l logr.Logger,
 	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
 	temporalState *temporal.TemporalWorkerState,
+	config *Config,
 ) bool {
+	if config.RollbackStrategy == nil {
+		return false
+	}
+
+	if config.RolloutStrategy.Strategy == temporaliov1alpha1.UpdateManual {
+		return false
+	}
+
 	if temporalState == nil {
 		return false
 	}
@@ -776,6 +785,14 @@ func isRollbackScenario(
 	}
 
 	if targetVersionInfo.LastCurrentTime == nil {
+		return false
+	}
+
+	if config.RollbackStrategy.MaxVersionAge != nil && time.Since(*targetVersionInfo.LastCurrentTime) > config.RollbackStrategy.MaxVersionAge.Duration {
+		l.Info("Skipping rollback: the version's last current time exceeds MaxVersionAge",
+			"targetBuildID", status.TargetVersion.BuildID,
+			"lastCurrentTime", targetVersionInfo.LastCurrentTime,
+			"maxVersionAge", config.RollbackStrategy.MaxVersionAge.Duration)
 		return false
 	}
 
@@ -797,7 +814,7 @@ func getVersionConfigDiff(
 	workerDeploymentName string,
 ) *VersionConfig {
 	var strategy temporaliov1alpha1.RolloutStrategy
-	if isRollbackScenario(l, status, temporalState) {
+	if isRollbackScenario(l, status, temporalState, config) {
 		strategy = convertRollbackToRolloutStrategy(*config.RollbackStrategy)
 	} else {
 		strategy = config.RolloutStrategy

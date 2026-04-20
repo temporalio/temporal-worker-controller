@@ -62,6 +62,9 @@ func (s *TemporalWorkerDeploymentSpec) Default(ctx context.Context) error {
 	} else if s.RollbackStrategy.Strategy == "" {
 		s.RollbackStrategy.Strategy = RollbackAllAtOnce
 	}
+	if s.RollbackStrategy.MaxVersionAge == nil {
+		s.RollbackStrategy.MaxVersionAge = &v1.Duration{Duration: defaults.RollbackMaxVersionAge}
+	}
 	return nil
 }
 

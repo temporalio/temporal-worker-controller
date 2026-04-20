@@ -425,6 +425,12 @@ type RollbackStrategy struct {
 	// Steps to execute progressive rollbacks. Only required when strategy is "Progressive".
 	// +optional
 	Steps []RolloutStep `json:"steps,omitempty"`
+
+	// MaxVersionAge limits which versions are eligible as rollback targets.
+	// A version is only considered a rollback target if it was last current within this duration.
+	// If nil, there is no age limit.
+	// +optional
+	MaxVersionAge *metav1.Duration `json:"maxVersionAge,omitempty"`
 }
 
 // SunsetStrategy defines strategy to apply when sunsetting k8s deployments of drained versions.
