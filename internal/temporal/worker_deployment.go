@@ -67,7 +67,7 @@ func GetWorkerDeploymentState(
 	namespace string,
 	k8sDeployments map[string]*appsv1.Deployment,
 	targetBuildID string,
-	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
+	strategy temporaliov1alpha1.VersionRolloutStrategy,
 	controllerIdentity string,
 ) (*TemporalWorkerState, error) {
 	state := &TemporalWorkerState{

@@ -84,6 +84,18 @@ type TemporalWorkerDeploymentSpec struct {
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 
 	// How to rollback to a previous version. If not specified, defaults to AllAtOnce strategy.
+	//
+	// A rollback is triggered automatically when the target version's pod spec is updated and
+	// the resulting build ID has previously been set as the default (current) version of the
+	// worker deployment. The controller detects this by checking whether Temporal recorded a
+	// non-nil LastCurrentTime for that build ID.
+	//
+	// The rollback strategy controls routing of NEW workflow executions only. Workflows already
+	// running are pinned to the version they started on and continue executing there; they are
+	// not affected by the rollback. Only new workflow executions will be routed to the rollback
+	// target version.
+	//
+	// Rollback is suppressed when the rollout strategy is Manual.
 	// +optional
 	RollbackStrategy *RollbackStrategy `json:"rollback,omitempty"`
 
@@ -336,17 +348,17 @@ type DeprecatedWorkerDeploymentVersion struct {
 	EligibleForDeletion bool `json:"eligibleForDeletion,omitempty"`
 }
 
-// DefaultVersionUpdateStrategy describes how to cut over new workflow executions
+// VersionRolloutStrategy describes how to cut over new workflow executions
 // to the target worker deployment version.
 // +kubebuilder:validation:Enum=Manual;AllAtOnce;Progressive
-type DefaultVersionUpdateStrategy string
+type VersionRolloutStrategy string
 
 const (
 	// UpdateManual scales worker resources up or down, but does not update the current or ramping worker deployment version.
-	UpdateManual DefaultVersionUpdateStrategy = "Manual"
+	UpdateManual VersionRolloutStrategy = "Manual"
 
 	// UpdateAllAtOnce starts 100% of new workflow executions on the new worker deployment version as soon as it's healthy.
-	UpdateAllAtOnce DefaultVersionUpdateStrategy = "AllAtOnce"
+	UpdateAllAtOnce VersionRolloutStrategy = "AllAtOnce"
 
 	// UpdateProgressive ramps up the percentage of new workflow executions targeting the new worker deployment version over time.
 	//
@@ -356,19 +368,19 @@ const (
 	// Sending a percentage of traffic to a "nil" version means that traffic will be sent to unversioned workers. If
 	// there are no unversioned workers, those tasks will get stuck. This behavior ensures that all traffic on the task
 	// queues in this worker deployment can be handled by an active poller.
-	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
+	UpdateProgressive VersionRolloutStrategy = "Progressive"
 )
 
-// DefaultVersionRollbackStrategy describes how to cut over during rollback to a previous version.
+// VersionRollbackStrategy describes how to cut over during rollback to a previous version.
 // +kubebuilder:validation:Enum=AllAtOnce;Progressive
-type DefaultVersionRollbackStrategy string
+type VersionRollbackStrategy string
 
 const (
 	// RollbackAllAtOnce immediately switches 100% of traffic back to the previous version.
-	RollbackAllAtOnce DefaultVersionRollbackStrategy = "AllAtOnce"
+	RollbackAllAtOnce VersionRollbackStrategy = "AllAtOnce"
 
 	// RollbackProgressive gradually ramps traffic back to the previous version.
-	RollbackProgressive DefaultVersionRollbackStrategy = "Progressive"
+	RollbackProgressive VersionRollbackStrategy = "Progressive"
 )
 
 type GateWorkflowConfig struct {
@@ -401,7 +413,7 @@ type RolloutStrategy struct {
 	// - "Manual"
 	// - "AllAtOnce"
 	// - "Progressive"
-	Strategy DefaultVersionUpdateStrategy `json:"strategy"`
+	Strategy VersionRolloutStrategy `json:"strategy"`
 
 	// Gate specifies a workflow type that must run once to completion on the new worker deployment version before
 	// any traffic is directed to the new version.
@@ -420,7 +432,7 @@ type RolloutStrategy struct {
 type RollbackStrategy struct {
 	// Strategy for rollback. Valid values are "AllAtOnce" or "Progressive".
 	// Defaults to "AllAtOnce" for fast recovery.
-	Strategy DefaultVersionRollbackStrategy `json:"strategy"`
+	Strategy VersionRollbackStrategy `json:"strategy"`
 
 	// Steps to execute progressive rollbacks. Only required when strategy is "Progressive".
 	// +optional

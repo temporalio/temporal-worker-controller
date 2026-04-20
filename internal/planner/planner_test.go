@@ -3765,7 +3765,7 @@ func TestConvertRollbackToRolloutStrategy(t *testing.T) {
 	testCases := []struct {
 		name             string
 		rollbackStrategy temporaliov1alpha1.RollbackStrategy
-		expectedStrategy temporaliov1alpha1.DefaultVersionUpdateStrategy
+		expectedStrategy temporaliov1alpha1.VersionRolloutStrategy
 		expectedSteps    []temporaliov1alpha1.RolloutStep
 		expectedGate     *temporaliov1alpha1.GateWorkflowConfig
 	}{

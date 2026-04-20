@@ -893,7 +893,7 @@ func getVersionConfigDiff(
 
 // Convert to reuse rollout logic with different settings
 func convertRollbackToRolloutStrategy(rb temporaliov1alpha1.RollbackStrategy) temporaliov1alpha1.RolloutStrategy {
-	var strategy temporaliov1alpha1.DefaultVersionUpdateStrategy
+	var strategy temporaliov1alpha1.VersionRolloutStrategy
 	switch rb.Strategy {
 	case temporaliov1alpha1.RollbackAllAtOnce:
 		strategy = temporaliov1alpha1.UpdateAllAtOnce
