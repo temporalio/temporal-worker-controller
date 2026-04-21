@@ -38,6 +38,20 @@ The controller auto-injects two fields when you set them to `{}` (empty object) 
 
 The webhook rejects any template that hardcodes `temporal_worker_deployment_name`, `temporal_worker_build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned.
 
+## Token substitution
+
+For CRDs that don't have a structured `matchLabels` field (e.g. KEDA's `ScaledObject` Prometheus trigger, which takes a freeform PromQL `query` string), the controller performs token substitution over every string-valued leaf in `spec.template` at render time. The three tokens are:
+
+| Token | Substituted value |
+|-------|-------------------|
+| `__TEMPORAL_WORKER_DEPLOYMENT_NAME__` | `<wrt-namespace>_<twdName>` |
+| `__TEMPORAL_WORKER_BUILD_ID__` | the active Build ID |
+| `__TEMPORAL_NAMESPACE__` | the Temporal namespace |
+
+Tokens are opt-in: strings without any token are untouched. Unknown `__FOO__`-style tokens pass through unchanged — only the three tokens above are recognised.
+
+See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml) for a full KEDA example.
+
 ## Resource naming
 
 Each per-Build-ID copy is given a unique, DNS-safe name derived from the `(twdName, wrtName, buildID)` triple. Names are capped at 47 characters to be safe for all Kubernetes resource types, including Deployment (which has pod-naming constraints that effectively limit Deployment names to ~47 characters). The name always ends with an 8-character hash of the full triple, so uniqueness is guaranteed even when the human-readable prefix is truncated.
@@ -70,6 +84,21 @@ workerResourceTemplate:
       apiGroups: ["policy"]
       resources: ["poddisruptionbudgets"]
 ```
+
+To also allow KEDA ScaledObjects, add an entry with the `keda.sh` API group:
+
+```yaml
+workerResourceTemplate:
+  allowedResources:
+    - kinds: ["HorizontalPodAutoscaler"]
+      apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+    - kinds: ["ScaledObject"]
+      apiGroups: ["keda.sh"]
+      resources: ["scaledobjects"]
+```
+
+Requires KEDA CRDs installed in the cluster. Users who create `WorkerResourceTemplate`s with `ScaledObject` need RBAC permission to manage `scaledobjects.keda.sh` in their namespace directly — the webhook's SubjectAccessReview rejects the request otherwise.
 
 Each entry has three fields:
 - `kinds` — kind names the webhook accepts (case-insensitive)
@@ -161,6 +190,45 @@ spec:
       selector:
         matchLabels: {}
 ```
+
+## Example: KEDA ScaledObject per worker version
+
+For clusters where KEDA owns the external-metrics APIService, HPAs with `type: External` cannot resolve against other sources. Produce KEDA `ScaledObject`s directly:
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: my-worker-keda
+  namespace: my-namespace
+spec:
+  temporalWorkerDeploymentRef:
+    name: my-worker
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      # {} tells the controller to inject the versioned Deployment reference.
+      # Do not set this to a real value — the webhook will reject it.
+      scaleTargetRef: {}
+      minReplicaCount: 1
+      maxReplicaCount: 10
+      triggers:
+        - type: prometheus
+          metadata:
+            serverAddress: http://prometheus.monitoring.svc:9090
+            threshold: "1"
+            query: |
+              sum(temporal_backlog_count_by_version{
+                temporal_worker_deployment_name="__TEMPORAL_WORKER_DEPLOYMENT_NAME__",
+                temporal_worker_build_id="__TEMPORAL_WORKER_BUILD_ID__",
+                temporal_namespace="__TEMPORAL_NAMESPACE__"
+              })
+```
+
+Scale-to-zero (`minReplicaCount: 0` or `idleReplicaCount: 0`) is rejected by the webhook for the same Temporal-side reason as HPA `minReplicas: 0`: `approximate_backlog_count` is not emitted when the task queue is idle with no pollers, so the autoscaler cannot detect new work from a cold start.
+
+Requires KEDA installed in the cluster and `ScaledObject` added to `workerResourceTemplate.allowedResources` (see next section).
 
 ## Checking status
 
