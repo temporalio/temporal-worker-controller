@@ -72,8 +72,9 @@ func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string 
 //
 // Processing order:
 //  1. Unmarshal spec.template into an Unstructured
-//  2. Auto-inject scaleTargetRef and matchLabels (Layer 1)
-//  3. Set metadata (name, namespace, labels, owner reference)
+//  2. Substitute __TEMPORAL_*__ tokens in every string leaf
+//  3. Auto-inject scaleTargetRef and matchLabels (Layer 1)
+//  4. Set metadata (name, namespace, labels, owner reference)
 func RenderWorkerResourceTemplate(
 	wrt *temporaliov1alpha1.WorkerResourceTemplate,
 	deployment *appsv1.Deployment,

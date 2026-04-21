@@ -43,7 +43,8 @@ func hpaObjForIntegration() map[string]interface{} {
 }
 
 // scaledObjectForIntegration returns a minimal valid ScaledObject embedded object spec,
-// including a token in the PromQL query to exercise substitution at admission time.
+// including a token in the PromQL query to confirm the webhook accepts templates
+// that contain substitution tokens (substitution itself happens at controller render time).
 func scaledObjectForIntegration() map[string]interface{} {
 	return map[string]interface{}{
 		"apiVersion": "keda.sh/v1alpha1",

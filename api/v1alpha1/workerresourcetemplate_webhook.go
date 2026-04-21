@@ -269,7 +269,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 	if innerSpec, ok := obj["spec"].(map[string]interface{}); ok {
 		innerSpecPath := field.NewPath("spec").Child("template").Child("spec")
 
-		// Scale-to-zero guard — kind-aware. Other kinds (e.g. PodDisruptionBudget)
+		// 4. Scale-to-zero guard — kind-aware. Other kinds (e.g. PodDisruptionBudget)
 		// have no scale-to-zero concept and are intentionally skipped.
 		switch kind {
 		case "HorizontalPodAutoscaler":
