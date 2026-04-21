@@ -87,6 +87,12 @@ func RenderWorkerResourceTemplate(
 	}
 
 	twdName := wrt.Spec.TemporalWorkerDeploymentRef.Name
+
+	// Token substitution runs first so structured injection downstream never
+	// sees unresolved tokens. Tokens are string-presence-driven — templates
+	// that don't contain them are untouched.
+	SubstituteTemporalTokens(obj.Object, BuildTemporalTokens(wrt.Namespace, twdName, buildID, temporalNamespace))
+
 	selectorLabels := ComputeSelectorLabels(twdName, buildID)
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
