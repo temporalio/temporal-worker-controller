@@ -342,3 +342,34 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	require.True(t, ok, "scaleTargetRef should have been auto-injected")
 	assert.Equal(t, "my-worker-abc123", ref["name"])
 }
+
+func TestRenderWorkerResourceTemplate_SubstitutesTokens(t *testing.T) {
+	template := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"scaleTargetRef": map[string]interface{}{},
+			"minReplicas":    float64(1),
+			"maxReplicas":    float64(10),
+			"description":    "build=__TEMPORAL_WORKER_BUILD_ID__ ns=__TEMPORAL_NAMESPACE__ wd=__TEMPORAL_WORKER_DEPLOYMENT_NAME__",
+		},
+	}
+	raw, err := json.Marshal(template)
+	require.NoError(t, err)
+
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "myhpa", Namespace: "team-ns", UID: types.UID("uid")},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "mywd"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "mywd-abc", Namespace: "team-ns"}}
+
+	got, err := RenderWorkerResourceTemplate(wrt, deploy, "build-xyz", "default.acct")
+	require.NoError(t, err)
+
+	spec, ok := got.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "build=build-xyz ns=default.acct wd=team-ns_mywd", spec["description"])
+}
