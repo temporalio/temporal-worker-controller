@@ -68,6 +68,8 @@ var _ = BeforeSuite(func() {
 		CRDDirectoryPaths: []string{
 			// CRDs live in the crds chart's templates directory
 			filepath.Join("..", "..", "helm", "temporal-worker-controller-crds", "templates"),
+			// Stripped KEDA CRDs vendored under testdata for envtest integration tests
+			filepath.Join("testdata", "keda"),
 		},
 		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
@@ -130,7 +132,7 @@ var _ = BeforeSuite(func() {
 	// ALLOWED_KINDS mirrors the default Helm values so integration tests can create HPAs.
 	Expect(os.Setenv("POD_NAMESPACE", "test-system")).To(Succeed())
 	Expect(os.Setenv("SERVICE_ACCOUNT_NAME", "test-controller")).To(Succeed())
-	Expect(os.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler")).To(Succeed())
+	Expect(os.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler,ScaledObject")).To(Succeed())
 
 	err = NewWorkerResourceTemplateValidator(mgr).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
