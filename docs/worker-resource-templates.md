@@ -40,7 +40,7 @@ The webhook rejects any template that hardcodes `temporal_worker_deployment_name
 
 ## Token substitution
 
-For CRDs that don't have a structured `matchLabels` field (e.g. KEDA's `ScaledObject` Prometheus trigger, which takes a freeform PromQL `query` string), the controller performs token substitution over every string-valued leaf in `spec.template` at render time. The three tokens are:
+For CRDs that don't have a structured `matchLabels` field for per-version scoping — e.g. KEDA's `ScaledObject` Prometheus trigger (freeform PromQL `query`) or its native `type: temporal` trigger (freeform `buildId`/`namespace` metadata) — the controller performs token substitution over every string-valued leaf in `spec.template` at render time. The three tokens are:
 
 | Token | Substituted value |
 |-------|-------------------|
@@ -50,7 +50,7 @@ For CRDs that don't have a structured `matchLabels` field (e.g. KEDA's `ScaledOb
 
 Tokens are opt-in: strings without any token are untouched. Unknown `__FOO__`-style tokens pass through unchanged — only the three tokens above are recognised.
 
-See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml) for a full KEDA example.
+See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml) and [examples/wrt-keda-temporal.yaml](../examples/wrt-keda-temporal.yaml) for full KEDA examples using each trigger type.
 
 ## Resource naming
 
@@ -193,7 +193,18 @@ spec:
 
 ## Example: KEDA ScaledObject per worker version
 
-For clusters where KEDA owns the external-metrics APIService, HPAs with `type: External` cannot resolve against other sources. Produce KEDA `ScaledObject`s directly:
+For clusters where KEDA owns the external-metrics APIService, HPAs with `type: External` cannot resolve against other sources. Produce KEDA `ScaledObject`s directly.
+
+KEDA offers two complementary triggers for Temporal autoscaling:
+
+- **`type: prometheus`** — scale on a PromQL query against whatever Prometheus-compatible store is scraping your Temporal metrics (Cloud monitoring, prometheus-adapter, etc.). Works well when your metrics pipeline already carries `temporal_worker_build_id` as a label.
+- **`type: temporal`** (KEDA ≥ 2.17) — scale directly on Temporal's own task queue backlog via gRPC. Bypasses the Prometheus layer entirely; native per-`buildId` scoping. Prefer this when you don't want autoscaling to depend on your metrics pipeline, or when your metrics don't carry the per-version labels.
+
+Scale-to-zero (`minReplicaCount: 0` or `idleReplicaCount: 0`) is rejected by the webhook for both triggers — same Temporal-side reason as HPA `minReplicas: 0`: `approximate_backlog_count` is not emitted when the task queue is idle with no pollers, so the autoscaler cannot detect new work from a cold start.
+
+Both variants require KEDA installed in the cluster and `ScaledObject` added to `workerResourceTemplate.allowedResources` (see next section).
+
+### Using the Prometheus trigger
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
@@ -226,9 +237,45 @@ spec:
               })
 ```
 
-Scale-to-zero (`minReplicaCount: 0` or `idleReplicaCount: 0`) is rejected by the webhook for the same Temporal-side reason as HPA `minReplicas: 0`: `approximate_backlog_count` is not emitted when the task queue is idle with no pollers, so the autoscaler cannot detect new work from a cold start.
+### Using KEDA's native Temporal scaler
 
-Requires KEDA installed in the cluster and `ScaledObject` added to `workerResourceTemplate.allowedResources` (see next section).
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: my-worker-keda-temporal
+  namespace: my-namespace
+spec:
+  temporalWorkerDeploymentRef:
+    name: my-worker
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      scaleTargetRef: {}
+      minReplicaCount: 1
+      maxReplicaCount: 10
+      triggers:
+        - type: temporal
+          metadata:
+            # Temporal gRPC endpoint — <namespace>.tmprl.cloud:7233 for Temporal Cloud,
+            # or your self-hosted frontend service address.
+            endpoint: my-namespace.xxxxx.tmprl.cloud:7233
+            namespace: __TEMPORAL_NAMESPACE__
+            # The task queue this worker polls. Not templated — one WRT per queue.
+            taskQueue: my-task-queue
+            # Per-version backlog scoping via the controller-substituted token.
+            buildId: __TEMPORAL_WORKER_BUILD_ID__
+            targetQueueSize: "10"
+            queueTypes: "workflow,activity"
+          authenticationRef:
+            # A KEDA TriggerAuthentication in the same namespace, providing
+            # Temporal credentials (mTLS cert/key or Cloud API key). See
+            # https://keda.sh/docs/latest/scalers/temporal/ for the spec.
+            name: temporal-cloud-auth
+```
+
+Note: the native Temporal scaler only needs `__TEMPORAL_NAMESPACE__` and `__TEMPORAL_WORKER_BUILD_ID__` — per-version scoping goes through the `buildId` metadata field, not through a metric label. `__TEMPORAL_WORKER_DEPLOYMENT_NAME__` is still substituted if present but typically unused here.
 
 ## Checking status
 
