@@ -22,36 +22,25 @@ package utils
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash"
 	"hash/fnv"
 
-	"github.com/davecgh/go-spew/spew"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 )
 
-// The config MUST NOT be changed because that could change the result of a hash operation
-var prettyPrintConfigForHash = &spew.ConfigState{
-	Indent:                  " ",
-	SortKeys:                true,
-	DisableMethods:          true,
-	SpewKeys:                true,
-	DisablePointerAddresses: true,
-	DisableCapacities:       true,
-}
-
-// dumpForHash keeps the original Spew.Sprintf format to ensure the same checksum
-func dumpForHash(a interface{}) string {
-	return prettyPrintConfigForHash.Sprintf("%#v", a)
-}
-
-// deepHashObject writes specified object to hash using the spew library
-// which follows pointers and prints actual values of the nested objects
-// ensuring the hash does not change when a pointer changes.
+// deepHashObject writes the JSON representation of objectToWrite to hasher.
+// JSON marshaling respects omitempty tags, so new zero-value fields added in
+// future k8s API versions are excluded, keeping hashes stable across upgrades.
 func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
 	hasher.Reset()
-	fmt.Fprintf(hasher, "%v", dumpForHash(objectToWrite))
+	data, err := json.Marshal(objectToWrite)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal for hash: %v", err))
+	}
+	hasher.Write(data)
 }
 
 // ComputeHash returns a hash value calculated from pod template and

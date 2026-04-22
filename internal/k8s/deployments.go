@@ -13,7 +13,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
+	"encoding/json"
+
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
@@ -313,24 +314,15 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 
 // ComputePodTemplateSpecHash computes a SHA256 hash of the user-provided pod template spec.
 // This hash is used to detect drift when the build ID is stable but the pod spec has changed.
-// The hash captures ALL user-controllable fields in the pod template spec.
+// JSON marshaling is used so that new zero-value fields added in future k8s API versions
+// (which carry omitempty) are excluded, keeping hashes stable across k8s upgrades.
 func ComputePodTemplateSpecHash(template corev1.PodTemplateSpec) string {
 	hasher := sha256.New()
-
-	// Use spew to get a deterministic string representation of the entire struct.
-	// This captures ALL fields including env vars, commands, volumes, etc.
-	// The config MUST NOT be changed because that could change the result of a hash operation.
-	printer := &spew.ConfigState{
-		Indent:                  " ",
-		SortKeys:                true,
-		DisableMethods:          true,
-		SpewKeys:                true,
-		DisablePointerAddresses: true,
-		DisableCapacities:       true,
+	data, err := json.Marshal(template)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal pod template spec for hash: %v", err))
 	}
-
-	_, _ = hasher.Write([]byte(printer.Sprintf("%#v", template)))
-
+	hasher.Write(data)
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 

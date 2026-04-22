@@ -31,7 +31,9 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/iam v1.5.3 // indirect
+	cloud.google.com/go/longrunning v0.7.0 // indirect
 	cloud.google.com/go/monitoring v1.24.2 // indirect
+	cloud.google.com/go/run v1.15.0 // indirect
 	cloud.google.com/go/storage v1.56.0 // indirect
 	dario.cat/mergo v1.0.1 // indirect
 	filippo.io/edwards25519 v1.1.1 // indirect
@@ -44,6 +46,23 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/apache/thrift v0.21.0 // indirect
 	github.com/aws/aws-sdk-go v1.55.8 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.41.2 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.32.7 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.7 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.18 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.18 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ecs v1.72.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.17 // indirect
+	github.com/aws/aws-sdk-go-v2/service/lambda v1.88.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.0.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.30.9 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.13 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 // indirect
+	github.com/aws/smithy-go v1.24.1 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -136,6 +155,7 @@ require (
 	github.com/temporalio/ringpop-go v0.0.0-20250130211428-b97329e994f7 // indirect
 	github.com/temporalio/sqlparser v0.0.0-20231115171017-f4060bcfa6cb // indirect
 	github.com/temporalio/tchannel-go v1.22.1-0.20240528171429-1db37fdea938 // indirect
+	github.com/tidwall/btree v1.8.1 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/uber-common/bark v1.3.0 // indirect
 	github.com/uber-go/tally/v4 v4.1.17 // indirect
@@ -154,6 +174,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.40.0 // indirect
 	go.opentelemetry.io/otel/trace v1.40.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.7.1 // indirect
+	go.temporal.io/auto-scaled-workers v0.0.0-20260407181057-edd947d743d2 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.19.0 // indirect
 	go.uber.org/fx v1.24.0 // indirect
