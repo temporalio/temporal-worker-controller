@@ -147,7 +147,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 			temporaliov1alpha1.ReasonInvalidSpec,
 			fmt.Sprintf("Invalid TemporalWorkerDeployment spec: %v", err),
 			err.Error())
-		return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Minute}, nil
+		return ctrl.Result{}, nil
 	}
 
 	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required

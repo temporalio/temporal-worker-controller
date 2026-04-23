@@ -137,8 +137,8 @@ const (
 
 	// ReasonInvalidSpec is set on ConditionReady=False and ConditionProgressing=False
 	// when the spec fails validation that the CRD schema cannot enforce (e.g. rampPercentage
-	// ordering, gate input/inputFrom exclusivity). Reconciliation retries every 5 minutes
-	// while the spec remains invalid. Users should correct the spec.
+	// ordering, gate input/inputFrom exclusivity). Reconciliation resumes automatically
+	// when the user corrects the spec and applies it.
 	ReasonInvalidSpec = "InvalidSpec"
 
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.

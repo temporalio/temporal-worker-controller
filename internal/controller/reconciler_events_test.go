@@ -420,7 +420,7 @@ func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.NotZero(t, result.RequeueAfter, "should requeue after 5m on invalid spec")
+	assert.Zero(t, result.RequeueAfter, "should not requeue — spec update will re-trigger reconciliation")
 
 	events := drainEvents(recorder)
 	assertEventEmitted(t, events, temporaliov1alpha1.ReasonInvalidSpec)
