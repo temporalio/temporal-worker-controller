@@ -43,8 +43,8 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 				},
 				RolloutStrategy: RolloutStrategy{Strategy: UpdateAllAtOnce},
 				WorkerOptions: WorkerOptions{
-					ConnectionRef: ConnectionReference{Name: "my-connection"},
-					TemporalNamespace:     "default",
+					ConnectionRef:     ConnectionReference{Name: "my-connection"},
+					TemporalNamespace: "default",
 				},
 			},
 		}

@@ -94,7 +94,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 				Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 					WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-					Template:                    runtime.RawExtension{Raw: nil},
+					Template:            runtime.RawExtension{Raw: nil},
 				},
 			},
 			errorMsg: "template must be specified",
@@ -427,7 +427,7 @@ func TestWorkerResourceTemplate_ValidateUpdate_Immutability(t *testing.T) {
 	tests := map[string]struct {
 		oldWorkerDeploymentRef string
 		newWorkerDeploymentRef string
-		errorMsg                       string
+		errorMsg               string
 	}{
 		"same temporalWorkerDeploymentRef is valid": {
 			oldWorkerDeploymentRef: "my-worker",
@@ -436,7 +436,7 @@ func TestWorkerResourceTemplate_ValidateUpdate_Immutability(t *testing.T) {
 		"changing temporalWorkerDeploymentRef is forbidden": {
 			oldWorkerDeploymentRef: "my-worker",
 			newWorkerDeploymentRef: "different-worker",
-			errorMsg:                       "temporalWorkerDeploymentRef.name is immutable",
+			errorMsg:               "temporalWorkerDeploymentRef.name is immutable",
 		},
 	}
 
@@ -507,7 +507,7 @@ func TestWorkerResourceTemplate_ValidateDelete_NilRaw(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-			Template:                    runtime.RawExtension{Raw: nil},
+			Template:            runtime.RawExtension{Raw: nil},
 		},
 	}
 	_, err := v.ValidateDelete(ctx, wrt)
@@ -639,13 +639,13 @@ func TestWorkerResourceTemplate_NeitherRefRejected(t *testing.T) {
 
 func TestWorkerResourceTemplate_ValidateUpdate_DeprecatedFieldImmutability(t *testing.T) {
 	tests := map[string]struct {
-		oldObj   *temporaliov1alpha1.WorkerResourceTemplate
-		newObj   *temporaliov1alpha1.WorkerResourceTemplate
-		wantErr  string
+		oldObj  *temporaliov1alpha1.WorkerResourceTemplate
+		newObj  *temporaliov1alpha1.WorkerResourceTemplate
+		wantErr string
 	}{
 		"deprecated→deprecated same name is valid": {
-			oldObj:  newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
-			newObj:  newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
+			oldObj: newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
+			newObj: newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
 		},
 		"deprecated→new with same effective name is valid": {
 			oldObj: newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),

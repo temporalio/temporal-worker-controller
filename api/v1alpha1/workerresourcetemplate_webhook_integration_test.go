@@ -52,7 +52,7 @@ func makeWRTForWebhook(name, ns, workerDeploymentRef string, embeddedObj map[str
 		},
 		Spec: WorkerResourceTemplateSpec{
 			WorkerDeploymentRef: WorkerDeploymentReference{Name: workerDeploymentRef},
-			Template:                    runtime.RawExtension{Raw: raw},
+			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
 }
