@@ -317,11 +317,8 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionS
 // (which carry omitempty) are excluded, keeping hashes stable across k8s upgrades.
 func ComputePodTemplateSpecHash(template corev1.PodTemplateSpec) string {
 	hasher := sha256.New()
-	data, err := json.Marshal(template)
-	if err != nil {
-		panic(fmt.Sprintf("failed to marshal pod template spec for hash: %v", err))
-	}
-	hasher.Write(data)
+	data, _ := json.Marshal(template) // never errors for corev1.PodTemplateSpec
+	_, _ = hasher.Write(data)
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 

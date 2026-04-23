@@ -24,24 +24,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"hash"
 	"hash/fnv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 )
-
-// deepHashObject writes the JSON representation of objectToWrite to hasher.
-// JSON marshaling respects omitempty tags, so new zero-value fields added in
-// future k8s API versions are excluded, keeping hashes stable across upgrades.
-func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
-	hasher.Reset()
-	data, err := json.Marshal(objectToWrite)
-	if err != nil {
-		panic(fmt.Sprintf("failed to marshal for hash: %v", err))
-	}
-	hasher.Write(data)
-}
 
 // ComputeHash returns a hash value calculated from pod template and
 // a collisionCount to avoid hash collision. The hash will be safe encoded to
@@ -51,7 +38,10 @@ func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
 // Copied from https://github.com/kubernetes/kubernetes/blob/86fec81606b579cc478a30656c29ddb400a72dc6/pkg/controller/controller_utils.go#L1174
 func ComputeHash(template *corev1.PodTemplateSpec, collisionCount *int32, short bool) string {
 	podTemplateSpecHasher := fnv.New32a()
-	deepHashObject(podTemplateSpecHasher, *template)
+	// json.Marshal on corev1.PodTemplateSpec never returns an error; omitempty keeps
+	// the output stable across k8s API upgrades that only add optional fields.
+	data, _ := json.Marshal(*template)
+	_, _ = podTemplateSpecHasher.Write(data)
 
 	// Add collisionCount in the hash if it exists.
 	if collisionCount != nil {
