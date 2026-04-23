@@ -107,7 +107,7 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 type NewClientOptions struct {
 	TemporalNamespace string
 	K8sNamespace      string
-	Spec              v1alpha1.TemporalConnectionSpec
+	Spec              v1alpha1.ConnectionSpec
 	Identity          string
 }
 

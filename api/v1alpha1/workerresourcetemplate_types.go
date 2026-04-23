@@ -5,9 +5,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// TemporalWorkerDeploymentReference references a TemporalWorkerDeployment in the same Kubernetes namespace.
-type TemporalWorkerDeploymentReference struct {
-	// Name of the TemporalWorkerDeployment resource in the same namespace.
+// WorkerDeploymentReference references a WorkerDeployment in the same Kubernetes namespace.
+type WorkerDeploymentReference struct {
+	// Name of the WorkerDeployment resource in the same namespace.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
@@ -15,9 +15,14 @@ type TemporalWorkerDeploymentReference struct {
 
 // WorkerResourceTemplateSpec defines the desired state of WorkerResourceTemplate.
 type WorkerResourceTemplateSpec struct {
-	// TemporalWorkerDeploymentRef references the TemporalWorkerDeployment to attach this resource to.
-	// +kubebuilder:validation:Required
-	TemporalWorkerDeploymentRef TemporalWorkerDeploymentReference `json:"temporalWorkerDeploymentRef"`
+	// WorkerDeploymentRef references the WorkerDeployment to attach this resource to.
+	// +optional
+	WorkerDeploymentRef WorkerDeploymentReference `json:"workerDeploymentRef,omitempty"`
+
+	// TemporalWorkerDeploymentRef is deprecated. Use WorkerDeploymentRef instead.
+	// Will be removed in a future release.
+	// +optional
+	TemporalWorkerDeploymentRef WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
 
 	// Template is the Kubernetes resource template applied per active Build ID.
 	// Must include apiVersion, kind, and spec. metadata.name and metadata.namespace
@@ -49,8 +54,8 @@ const (
 	ReasonWRTAllVersionsApplied = "AllVersionsApplied"
 	// ReasonWRTApplyFailed is the condition reason when one or more instances failed to apply.
 	ReasonWRTApplyFailed = "ApplyFailed"
-	// ReasonWRTTWDNotFound is the condition reason when the referenced TemporalWorkerDeployment does not exist.
-	ReasonWRTTWDNotFound = "TemporalWorkerDeploymentNotFound"
+	// ReasonWRTWDNotFound is the condition reason when the referenced WorkerDeployment does not exist.
+	ReasonWRTWDNotFound = "WorkerDeploymentNotFound"
 )
 
 // WorkerResourceTemplateVersionStatus describes the per-Build-ID apply status of a WorkerResourceTemplate.
@@ -106,13 +111,13 @@ type WorkerResourceTemplateStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=wrt
-//+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.temporalWorkerDeploymentRef.name",description="Referenced TemporalWorkerDeployment"
+//+kubebuilder:printcolumn:name="Worker",type="string",JSONPath=".spec.temporalWorkerDeploymentRef.name",description="Referenced WorkerDeployment"
 //+kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".spec.template.kind",description="Kind of resource that is being templated"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 
 // WorkerResourceTemplate creates an arbitrary namespaced Kubernetes resource
 // (HPA, PDB, WPA, custom CRDs, etc.) for each per-Build-ID versioned Deployment
-// managed by a TemporalWorkerDeployment. One instance of the resource is created
+// managed by a WorkerDeployment. One instance of the resource is created
 // per active Build ID, and is owned by this WorkerResourceTemplate (so all instances
 // are deleted when the WorkerResourceTemplate itself is deleted).
 type WorkerResourceTemplate struct {
@@ -130,6 +135,16 @@ type WorkerResourceTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []WorkerResourceTemplate `json:"items"`
+}
+
+// EffectiveWorkerDeploymentName returns the WorkerDeployment name from whichever
+// of WorkerDeploymentRef / TemporalWorkerDeploymentRef is set, preferring the
+// new field. Returns an empty string if neither is set.
+func (s *WorkerResourceTemplateSpec) EffectiveWorkerDeploymentName() string {
+	if s.WorkerDeploymentRef.Name != "" {
+		return s.WorkerDeploymentRef.Name
+	}
+	return s.TemporalWorkerDeploymentRef.Name
 }
 
 func init() {

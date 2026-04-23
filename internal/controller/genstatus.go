@@ -15,15 +15,15 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-func (r *TemporalWorkerDeploymentReconciler) generateStatus(
+func (r *WorkerDeploymentReconciler) generateStatus(
 	ctx context.Context,
 	l logr.Logger,
 	temporalClient temporalclient.Client,
 	req ctrl.Request,
-	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	temporalState *temporal.TemporalWorkerState,
 	k8sState *k8s.DeploymentState,
-) (*temporaliov1alpha1.TemporalWorkerDeploymentStatus, error) {
+) (*temporaliov1alpha1.WorkerDeploymentStatus, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
 	targetBuildID := k8s.ComputeBuildID(workerDeploy)
 

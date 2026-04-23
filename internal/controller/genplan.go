@@ -60,11 +60,11 @@ type startWorkflowConfig struct {
 }
 
 // generatePlan creates a plan for the controller to execute
-func (r *TemporalWorkerDeploymentReconciler) generatePlan(
+func (r *WorkerDeploymentReconciler) generatePlan(
 	ctx context.Context,
 	l logr.Logger,
-	w *temporaliov1alpha1.TemporalWorkerDeployment,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	w *temporaliov1alpha1.WorkerDeployment,
+	connection temporaliov1alpha1.ConnectionSpec,
 	temporalState *temporal.TemporalWorkerState,
 ) (*plan, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(w)
@@ -196,10 +196,10 @@ func (r *TemporalWorkerDeploymentReconciler) generatePlan(
 }
 
 // Create a new deployment with owner reference
-func (r *TemporalWorkerDeploymentReconciler) newDeployment(
-	w *temporaliov1alpha1.TemporalWorkerDeployment,
+func (r *WorkerDeploymentReconciler) newDeployment(
+	w *temporaliov1alpha1.WorkerDeployment,
 	buildID string,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 ) (*appsv1.Deployment, error) {
 	return k8s.NewDeploymentWithControllerRef(w, buildID, connection, r.Scheme)
 }

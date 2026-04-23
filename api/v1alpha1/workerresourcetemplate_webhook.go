@@ -149,7 +149,7 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	allErrs = append(allErrs, specErrs...)
 
 	// Immutability: temporalWorkerDeploymentRef.name must not change on update
-	if oldWRT != nil && oldWRT.Spec.TemporalWorkerDeploymentRef.Name != newWRT.Spec.TemporalWorkerDeploymentRef.Name {
+	if oldWRT != nil && oldWRT.Spec.EffectiveWorkerDeploymentName() != newWRT.Spec.EffectiveWorkerDeploymentName() {
 		allErrs = append(allErrs, field.Forbidden(
 			field.NewPath("spec").Child("temporalWorkerDeploymentRef").Child("name"),
 			"temporalWorkerDeploymentRef.name is immutable and cannot be changed after creation",
@@ -186,6 +186,27 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowedKinds []string) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
+
+	// Exactly one of workerDeploymentRef / temporalWorkerDeploymentRef must be set.
+	if spec.WorkerDeploymentRef.Name != "" && spec.TemporalWorkerDeploymentRef.Name != "" {
+		allErrs = append(allErrs, field.Invalid(
+			field.NewPath("spec"),
+			"workerDeploymentRef & temporalWorkerDeploymentRef",
+			"only one of workerDeploymentRef or temporalWorkerDeploymentRef may be set",
+		))
+	}
+	if spec.WorkerDeploymentRef.Name == "" && spec.TemporalWorkerDeploymentRef.Name == "" {
+		allErrs = append(allErrs, field.Required(
+			field.NewPath("spec").Child("workerDeploymentRef"),
+			"workerDeploymentRef must be set (or temporalWorkerDeploymentRef for migration compatibility)",
+		))
+	}
+	if spec.TemporalWorkerDeploymentRef.Name != "" {
+		warnings = append(warnings, "spec.temporalWorkerDeploymentRef is deprecated; use spec.workerDeploymentRef instead")
+	}
+	if len(allErrs) > 0 {
+		return warnings, allErrs
+	}
 
 	if spec.Template.Raw == nil {
 		allErrs = append(allErrs, field.Required(

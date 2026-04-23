@@ -12,54 +12,54 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-// TemporalWorkerDeploymentBuilder provides a fluent interface for building test TWD objects
-type TemporalWorkerDeploymentBuilder struct {
-	twd *temporaliov1alpha1.TemporalWorkerDeployment
+// WorkerDeploymentBuilder provides a fluent interface for building test TWD objects
+type WorkerDeploymentBuilder struct {
+	twd *temporaliov1alpha1.WorkerDeployment
 
 	statusBuilder *StatusBuilder
 }
 
-// NewTemporalWorkerDeploymentBuilder creates a new builder with sensible defaults
-func NewTemporalWorkerDeploymentBuilder() *TemporalWorkerDeploymentBuilder {
-	return &TemporalWorkerDeploymentBuilder{
+// NewWorkerDeploymentBuilder creates a new builder with sensible defaults
+func NewWorkerDeploymentBuilder() *WorkerDeploymentBuilder {
+	return &WorkerDeploymentBuilder{
 		twd: MakeTWDWithName("", ""),
 	}
 }
 
 // WithName sets the name
-func (b *TemporalWorkerDeploymentBuilder) WithName(name string) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithName(name string) *WorkerDeploymentBuilder {
 	b.twd.ObjectMeta.Name = name
 	b.twd.Name = name
 	return b
 }
 
 // WithNamespace sets the namespace
-func (b *TemporalWorkerDeploymentBuilder) WithNamespace(namespace string) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithNamespace(namespace string) *WorkerDeploymentBuilder {
 	b.twd.ObjectMeta.Namespace = namespace
 	return b
 }
 
 // WithManualStrategy sets the rollout strategy to manual
-func (b *TemporalWorkerDeploymentBuilder) WithManualStrategy() *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithManualStrategy() *WorkerDeploymentBuilder {
 	b.twd.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateManual
 	return b
 }
 
 // WithAllAtOnceStrategy sets the rollout strategy to all-at-once
-func (b *TemporalWorkerDeploymentBuilder) WithAllAtOnceStrategy() *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithAllAtOnceStrategy() *WorkerDeploymentBuilder {
 	b.twd.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateAllAtOnce
 	return b
 }
 
 // WithProgressiveStrategy sets the rollout strategy to progressive with given steps
-func (b *TemporalWorkerDeploymentBuilder) WithProgressiveStrategy(steps ...temporaliov1alpha1.RolloutStep) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithProgressiveStrategy(steps ...temporaliov1alpha1.RolloutStep) *WorkerDeploymentBuilder {
 	b.twd.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 	b.twd.Spec.RolloutStrategy.Steps = steps
 	return b
 }
 
 // WithGate sets the rollout strategy have a gate workflow
-func (b *TemporalWorkerDeploymentBuilder) WithGate(expectSuccess bool) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithGate(expectSuccess bool) *WorkerDeploymentBuilder {
 	if expectSuccess {
 		b.twd.Spec.RolloutStrategy.Gate = &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: successTestWorkflowType}
 	} else {
@@ -69,37 +69,37 @@ func (b *TemporalWorkerDeploymentBuilder) WithGate(expectSuccess bool) *Temporal
 }
 
 // WithReplicas sets the number of replicas
-func (b *TemporalWorkerDeploymentBuilder) WithReplicas(replicas int32) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithReplicas(replicas int32) *WorkerDeploymentBuilder {
 	b.twd.Spec.Replicas = &replicas
 	return b
 }
 
 // WithTargetTemplate sets the template of the worker deployment to a pod spec with the given image name, thus defining the target version.
-func (b *TemporalWorkerDeploymentBuilder) WithTargetTemplate(imageName string) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithTargetTemplate(imageName string) *WorkerDeploymentBuilder {
 	b.twd.Spec.Template = MakePodSpecWithImage(imageName)
 	return b
 }
 
 // WithUnsafeCustomBuildID sets the optional custom build id of the TWD, thus defining a stable target version separate from the hash of the pod spec.
-func (b *TemporalWorkerDeploymentBuilder) WithUnsafeCustomBuildID(buildID string) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithUnsafeCustomBuildID(buildID string) *WorkerDeploymentBuilder {
 	b.twd.Spec.WorkerOptions.UnsafeCustomBuildID = buildID
 	return b
 }
 
-// WithTemporalConnection sets the temporal connection name
-func (b *TemporalWorkerDeploymentBuilder) WithTemporalConnection(connectionName string) *TemporalWorkerDeploymentBuilder {
-	b.twd.Spec.WorkerOptions.TemporalConnectionRef = temporaliov1alpha1.TemporalConnectionReference{Name: connectionName}
+// WithConnection sets the temporal connection name
+func (b *WorkerDeploymentBuilder) WithConnection(connectionName string) *WorkerDeploymentBuilder {
+	b.twd.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{Name: connectionName}
 	return b
 }
 
 // WithTemporalNamespace sets the temporal namespace
-func (b *TemporalWorkerDeploymentBuilder) WithTemporalNamespace(temporalNamespace string) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithTemporalNamespace(temporalNamespace string) *WorkerDeploymentBuilder {
 	b.twd.Spec.WorkerOptions.TemporalNamespace = temporalNamespace
 	return b
 }
 
 // WithLabels sets the labels
-func (b *TemporalWorkerDeploymentBuilder) WithLabels(labels map[string]string) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithLabels(labels map[string]string) *WorkerDeploymentBuilder {
 	if b.twd.ObjectMeta.Labels == nil {
 		b.twd.ObjectMeta.Labels = make(map[string]string)
 	}
@@ -109,16 +109,16 @@ func (b *TemporalWorkerDeploymentBuilder) WithLabels(labels map[string]string) *
 	return b
 }
 
-func (b *TemporalWorkerDeploymentBuilder) WithStatus(statusBuilder *StatusBuilder) *TemporalWorkerDeploymentBuilder {
+func (b *WorkerDeploymentBuilder) WithStatus(statusBuilder *StatusBuilder) *WorkerDeploymentBuilder {
 	b.statusBuilder = statusBuilder
 	return b
 }
 
-// Build returns the constructed TemporalWorkerDeployment
-func (b *TemporalWorkerDeploymentBuilder) Build() *temporaliov1alpha1.TemporalWorkerDeployment {
+// Build returns the constructed WorkerDeployment
+func (b *WorkerDeploymentBuilder) Build() *temporaliov1alpha1.WorkerDeployment {
 	// Set defaults if not already set
-	if b.twd.Spec.WorkerOptions.TemporalConnectionRef.Name == "" {
-		b.twd.Spec.WorkerOptions.TemporalConnectionRef = temporaliov1alpha1.TemporalConnectionReference{Name: b.twd.Name}
+	if b.twd.Spec.WorkerOptions.ConnectionRef.Name == "" {
+		b.twd.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{Name: b.twd.Name}
 	}
 
 	if b.twd.ObjectMeta.Labels == nil {
@@ -210,11 +210,11 @@ func (sb *StatusBuilder) WithDeprecatedVersions(infos ...DeprecatedVersionInfo) 
 }
 
 // Build returns the constructed status
-func (sb *StatusBuilder) Build() *temporaliov1alpha1.TemporalWorkerDeploymentStatus {
+func (sb *StatusBuilder) Build() *temporaliov1alpha1.WorkerDeploymentStatus {
 	if sb.targetVersionBuilder == nil {
 		return nil
 	}
-	ret := &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+	ret := &temporaliov1alpha1.WorkerDeploymentStatus{
 		TargetVersion: sb.targetVersionBuilder(sb.name, sb.k8sNamespace),
 	}
 	if sb.currentVersionBuilder != nil {
@@ -226,27 +226,27 @@ func (sb *StatusBuilder) Build() *temporaliov1alpha1.TemporalWorkerDeploymentSta
 	return ret
 }
 
-// TestCase represents a single test scenario for integration testing of TemporalWorkerDeployment controllers.
+// TestCase represents a single test scenario for integration testing of WorkerDeployment controllers.
 // It encapsulates the input state, expected outputs, and any additional setup required for the test.
 type TestCase struct {
-	// twd is the TemporalWorkerDeployment resource to test with.
+	// twd is the WorkerDeployment resource to test with.
 	// If starting from a particular state, specify that in input.Status.
-	twd *temporaliov1alpha1.TemporalWorkerDeployment
+	twd *temporaliov1alpha1.WorkerDeployment
 
 	// existingDeploymentReplicas specifies the number of replicas for each deprecated build.
-	// TemporalWorkerDeploymentStatus only tracks the names of the Deployments for deprecated
+	// WorkerDeploymentStatus only tracks the names of the Deployments for deprecated
 	// versions, so for test scenarios that start with existing deprecated version Deployments,
 	// specify the number of replicas for each deprecated build here.
 	existingDeploymentReplicas map[string]int32
 
 	// existingDeploymentImages specifies the images for each deprecated build.
-	// TemporalWorkerDeploymentStatus only tracks the build ids of the Deployments for deprecated
+	// WorkerDeploymentStatus only tracks the build ids of the Deployments for deprecated
 	// versions, not their images so for test scenarios that start with existing deprecated version Deployments,
 	// specify the images for each deprecated build here.
 	existingDeploymentImages map[string]string
 
-	// expectedStatus is the expected TemporalWorkerDeploymentStatus after the test completes.
-	expectedStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+	// expectedStatus is the expected WorkerDeploymentStatus after the test completes.
+	expectedStatus *temporaliov1alpha1.WorkerDeploymentStatus
 
 	// expectedDeploymentReplicas validates that deployments have correct number of replicas.
 	// TODO(carlydf): validate replica count for more than just the deprecated versions
@@ -262,7 +262,7 @@ type TestCase struct {
 	// twdMutatorFunc is called on the TWD immediately before it is created in the API server.
 	// Use this for test-specific TWD modifications not expressible through the builder
 	// (e.g. setting a gate config with InputFrom.ConfigMapKeyRef).
-	twdMutatorFunc func(*temporaliov1alpha1.TemporalWorkerDeployment)
+	twdMutatorFunc func(*temporaliov1alpha1.WorkerDeployment)
 
 	// postTWDCreateFunc is called immediately after the TWD is created but before the runner
 	// waits for the target Deployment. Use this to inject steps that must happen after TWD
@@ -275,7 +275,7 @@ type TestCase struct {
 	validatorFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
 
-func (tc *TestCase) GetTWD() *temporaliov1alpha1.TemporalWorkerDeployment {
+func (tc *TestCase) GetTWD() *temporaliov1alpha1.WorkerDeployment {
 	return tc.twd
 }
 
@@ -287,7 +287,7 @@ func (tc *TestCase) GetExistingDeploymentImages() map[string]string {
 	return tc.existingDeploymentImages
 }
 
-func (tc *TestCase) GetExpectedStatus() *temporaliov1alpha1.TemporalWorkerDeploymentStatus {
+func (tc *TestCase) GetExpectedStatus() *temporaliov1alpha1.WorkerDeploymentStatus {
 	return tc.expectedStatus
 }
 
@@ -303,7 +303,7 @@ func (tc *TestCase) GetSetupFunc() func(t *testing.T, ctx context.Context, tc Te
 	return tc.setupFunc
 }
 
-func (tc *TestCase) GetTWDMutatorFunc() func(*temporaliov1alpha1.TemporalWorkerDeployment) {
+func (tc *TestCase) GetTWDMutatorFunc() func(*temporaliov1alpha1.WorkerDeployment) {
 	return tc.twdMutatorFunc
 }
 
@@ -321,14 +321,14 @@ type TestCaseBuilder struct {
 	k8sNamespace      string
 	temporalNamespace string
 
-	twdBuilder              *TemporalWorkerDeploymentBuilder
+	twdBuilder              *WorkerDeploymentBuilder
 	expectedStatusBuilder   *StatusBuilder
 	existingDeploymentInfos []DeploymentInfo
 	expectedDeploymentInfos []DeploymentInfo
 	waitTime                *time.Duration
 
 	setupFunc         func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
-	twdMutatorFunc    func(*temporaliov1alpha1.TemporalWorkerDeployment)
+	twdMutatorFunc    func(*temporaliov1alpha1.WorkerDeployment)
 	postTWDCreateFunc func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 	validatorFunc     func(t *testing.T, ctx context.Context, tc TestCase, env TestEnv)
 }
@@ -336,7 +336,7 @@ type TestCaseBuilder struct {
 // NewTestCase creates a new test case builder
 func NewTestCase() *TestCaseBuilder {
 	return &TestCaseBuilder{
-		twdBuilder:              NewTemporalWorkerDeploymentBuilder(),
+		twdBuilder:              NewWorkerDeploymentBuilder(),
 		expectedStatusBuilder:   NewStatusBuilder(),
 		existingDeploymentInfos: make([]DeploymentInfo, 0),
 		expectedDeploymentInfos: make([]DeploymentInfo, 0),
@@ -350,7 +350,7 @@ func NewTestCaseWithValues(name, k8sNamespace, temporalNamespace string) *TestCa
 		k8sNamespace:      k8sNamespace,
 		temporalNamespace: temporalNamespace,
 
-		twdBuilder:              NewTemporalWorkerDeploymentBuilder(),
+		twdBuilder:              NewWorkerDeploymentBuilder(),
 		expectedStatusBuilder:   NewStatusBuilder(),
 		existingDeploymentInfos: make([]DeploymentInfo, 0),
 		expectedDeploymentInfos: make([]DeploymentInfo, 0),
@@ -364,7 +364,7 @@ func (tcb *TestCaseBuilder) WithSetupFunction(f func(t *testing.T, ctx context.C
 }
 
 // WithValidatorFunction defines a function called by the runner after both
-// verifyTemporalWorkerDeploymentStatusEventually and verifyTemporalStateMatchesStatusEventually
+// verifyWorkerDeploymentStatusEventually and verifyTemporalStateMatchesStatusEventually
 // have confirmed the TWD has reached its expected state. Use it for additional assertions beyond
 // the standard TWD status and Temporal state checks — for example WRT-specific resource
 // inspection or multi-phase rollout scenarios that require further TWD updates.
@@ -376,7 +376,7 @@ func (tcb *TestCaseBuilder) WithValidatorFunction(f func(t *testing.T, ctx conte
 // WithTWDMutatorFunc defines a function called on the TWD immediately before it is created.
 // Use this for test-specific modifications that are not expressible through the builder
 // (e.g. setting a gate config with InputFrom.ConfigMapKeyRef).
-func (tcb *TestCaseBuilder) WithTWDMutatorFunc(f func(*temporaliov1alpha1.TemporalWorkerDeployment)) *TestCaseBuilder {
+func (tcb *TestCaseBuilder) WithTWDMutatorFunc(f func(*temporaliov1alpha1.WorkerDeployment)) *TestCaseBuilder {
 	tcb.twdMutatorFunc = f
 	return tcb
 }
@@ -391,7 +391,7 @@ func (tcb *TestCaseBuilder) WithPostTWDCreateFunc(f func(t *testing.T, ctx conte
 }
 
 // WithInput sets the input TWD
-func (tcb *TestCaseBuilder) WithInput(twdBuilder *TemporalWorkerDeploymentBuilder) *TestCaseBuilder {
+func (tcb *TestCaseBuilder) WithInput(twdBuilder *WorkerDeploymentBuilder) *TestCaseBuilder {
 	tcb.twdBuilder = twdBuilder
 	return tcb
 }
@@ -424,7 +424,7 @@ func NewDeprecatedVersionInfo(imageName string, status temporaliov1alpha1.Versio
 }
 
 // DeploymentInfo defines the necessary information about a Deployment, so that tests can
-// recreate and validate state that is not visible in the TemporalWorkerDeployment status
+// recreate and validate state that is not visible in the WorkerDeployment status
 type DeploymentInfo struct {
 	image               string
 	replicas            int32
@@ -475,7 +475,7 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 		twd: tcb.twdBuilder.
 			WithName(tcb.name).
 			WithNamespace(tcb.k8sNamespace).
-			WithTemporalConnection(tcb.name).
+			WithConnection(tcb.name).
 			WithTemporalNamespace(tcb.temporalNamespace).
 			Build(),
 		existingDeploymentReplicas: make(map[string]int32),
@@ -521,15 +521,15 @@ type TestEnv struct {
 	// created during test setup to make it seem as if they were created by the controller.
 	Mgr        manager.Manager
 	Ts         *temporaltest.TestServer
-	Connection *temporaliov1alpha1.TemporalConnection
-	// TemporalWorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
+	Connection *temporaliov1alpha1.Connection
+	// WorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
 	// created, so for test scenarios that start with existing Deployments, specify the number of replicas for each.
 	ExistingDeploymentReplicas map[string]int32
-	// TemporalWorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
+	// WorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
 	// created, so for test scenarios that start with existing Deployments, specify the image names here, so that the
 	// test runner can generate the same pod spec and build id as the controller.
 	ExistingDeploymentImages map[string]string
-	// TemporalWorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
+	// WorkerDeploymentStatus only tracks the build ids and Deployment names of the Deployments that have been
 	// created, so for test scenarios that check the replicas of Deployments after Reconciliation, specify the number
 	// of replicas for each.
 	ExpectedDeploymentReplicas map[string]int32

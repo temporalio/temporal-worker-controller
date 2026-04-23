@@ -12,18 +12,18 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// TemporalConnectionReference contains the name of a TemporalConnection resource
-// in the same namespace as the TemporalWorkerDeployment.
-type TemporalConnectionReference struct {
-	// Name of the TemporalConnection resource.
+// ConnectionReference contains the name of a Connection resource
+// in the same namespace as the WorkerDeployment.
+type ConnectionReference struct {
+	// Name of the Connection resource.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 }
 
 type WorkerOptions struct {
-	// The name of a TemporalConnection in the same namespace as the TemporalWorkerDeployment.
-	TemporalConnectionRef TemporalConnectionReference `json:"connectionRef"`
+	// The name of a Connection in the same namespace as the WorkerDeployment.
+	ConnectionRef ConnectionReference `json:"connectionRef"`
 	// The Temporal namespace for the worker to connect to.
 	// +kubebuilder:validation:MinLength=1
 	TemporalNamespace string `json:"temporalNamespace"`
@@ -47,8 +47,8 @@ type WorkerOptions struct {
 	UnsafeCustomBuildID string `json:"unsafeCustomBuildID,omitempty"`
 }
 
-// TemporalWorkerDeploymentSpec defines the desired state of TemporalWorkerDeployment
-type TemporalWorkerDeploymentSpec struct {
+// WorkerDeploymentSpec defines the desired state of WorkerDeployment
+type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
 	// worker versions. When omitted (nil), the controller creates versioned Deployments
@@ -57,7 +57,7 @@ type TemporalWorkerDeploymentSpec struct {
 	// (https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#migrating-deployments-and-statefulsets-to-horizontal-autoscaling).
 	// The controller still scales drained versions (and inactive versions that are not
 	// the rollout target) to zero regardless.
-	// This field makes TemporalWorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
+	// This field makes WorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
@@ -90,7 +90,7 @@ type TemporalWorkerDeploymentSpec struct {
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
-// Condition reason constants for TemporalWorkerDeployment.
+// Condition reason constants for WorkerDeployment.
 //
 // These strings appear in status.conditions[].reason and are part of the CRD's
 // status API. Operators, monitoring rules, and scripts may depend on them.
@@ -115,12 +115,12 @@ const (
 	// the ramping version and is receiving a configured percentage of new workflows.
 	ReasonRamping = "Ramping"
 
-	// ReasonTemporalConnectionNotFound is set on ConditionProgressing=False when the
-	// referenced TemporalConnection resource cannot be found.
-	ReasonTemporalConnectionNotFound = "TemporalConnectionNotFound"
+	// ReasonConnectionNotFound is set on ConditionProgressing=False when the
+	// referenced Connection resource cannot be found.
+	ReasonConnectionNotFound = "ConnectionNotFound"
 
 	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the credential
-	// secret referenced by the TemporalConnection is misconfigured. This covers:
+	// secret referenced by the Connection is misconfigured. This covers:
 	// (1) the secret reference has an empty name, (2) the named Kubernetes Secret
 	// cannot be fetched or has an unexpected type, and (3) the mTLS certificate in
 	// the secret is expired or about to expire.
@@ -142,7 +142,7 @@ const (
 	ReasonInvalidSpec = "InvalidSpec"
 
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
-	ReasonTemporalConnectionHealthy = "TemporalConnectionHealthy"
+	ReasonConnectionHealthy = "ConnectionHealthy"
 )
 
 // VersionStatus indicates the status of a version.
@@ -179,8 +179,8 @@ const (
 	VersionStatusDrained VersionStatus = "Drained"
 )
 
-// TemporalWorkerDeploymentStatus defines the observed state of TemporalWorkerDeployment
-type TemporalWorkerDeploymentStatus struct {
+// WorkerDeploymentStatus defines the observed state of WorkerDeployment
+type WorkerDeploymentStatus struct {
 	// Remember, status should be able to be reconstituted from the state of the world,
 	// so it's generally not a good idea to read from the status of the root object.
 	// Instead, you should reconstruct it every run.
@@ -220,7 +220,7 @@ type TemporalWorkerDeploymentStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	VersionCount int32 `json:"versionCount,omitempty"`
 
-	// Conditions represent the latest available observations of the TemporalWorkerDeployment's current state.
+	// Conditions represent the latest available observations of the WorkerDeployment's current state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
@@ -441,31 +441,31 @@ type ManualRolloutStrategy struct{}
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=twd;twdeployment;tworkerdeployment
+// +kubebuilder:resource:shortName=wd;wdeployment
 //+kubebuilder:printcolumn:name="Current",type="string",JSONPath=".status.currentVersion.buildID",description="Current build ID"
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
 //+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="name cannot be more than 63 characters"
 
-// TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
-type TemporalWorkerDeployment struct {
+// WorkerDeployment is the Schema for the workerdeployments API
+type WorkerDeployment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TemporalWorkerDeploymentSpec   `json:"spec,omitempty"`
-	Status TemporalWorkerDeploymentStatus `json:"status,omitempty"`
+	Spec   WorkerDeploymentSpec   `json:"spec,omitempty"`
+	Status WorkerDeploymentStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// TemporalWorkerDeploymentList contains a list of TemporalWorkerDeployment
-type TemporalWorkerDeploymentList struct {
+// WorkerDeploymentList contains a list of WorkerDeployment
+type WorkerDeploymentList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []TemporalWorkerDeployment `json:"items"`
+	Items           []WorkerDeployment `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&TemporalWorkerDeployment{}, &TemporalWorkerDeploymentList{})
+	SchemeBuilder.Register(&WorkerDeployment{}, &WorkerDeploymentList{})
 }

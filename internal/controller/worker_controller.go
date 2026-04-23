@@ -46,9 +46,9 @@ const (
 	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by temporalWorkerDeploymentRef.name.
 	wrtWorkerRefKey = ".spec.temporalWorkerDeploymentRef.name"
 
-	// finalizerName is the finalizer added to TemporalWorkerDeployment and TemporalConnection
+	// finalizerName is the finalizer added to WorkerDeployment and Connection
 	// resources to prevent deletion before cleanup actions are taken. On TWD resources, it
-	// ensures Temporal server-side versioning data is cleaned up. On TemporalConnection
+	// ensures Temporal server-side versioning data is cleaned up. On Connection
 	// resources, it prevents deletion while any TWD still references the connection.
 	finalizerName = "temporal.io/delete-protection"
 
@@ -76,7 +76,7 @@ func getTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, er
 	return "", errors.New("TLS secret name is not set")
 }
 
-func resolveAuthSecretName(tc *temporaliov1alpha1.TemporalConnection) (clientpool.AuthMode, string, error) {
+func resolveAuthSecretName(tc *temporaliov1alpha1.Connection) (clientpool.AuthMode, string, error) {
 	if tc.Spec.MutualTLSSecretRef != nil {
 		name, err := getTLSSecretName(tc.Spec.MutualTLSSecretRef)
 		return clientpool.AuthModeTLS, name, err
@@ -87,8 +87,8 @@ func resolveAuthSecretName(tc *temporaliov1alpha1.TemporalConnection) (clientpoo
 	return clientpool.AuthModeNoCredentials, "", nil
 }
 
-// TemporalWorkerDeploymentReconciler reconciles a TemporalWorkerDeployment object
-type TemporalWorkerDeploymentReconciler struct {
+// WorkerDeploymentReconciler reconciles a WorkerDeployment object
+type WorkerDeploymentReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
@@ -111,11 +111,11 @@ type TemporalWorkerDeploymentReconciler struct {
 	MaxDeploymentVersionsIneligibleForDeletion int32
 }
 
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=connections,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=connections/finalizers,verbs=update
 // +kubebuilder:rbac:groups=temporal.io,resources=workerresourcetemplates,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups=temporal.io,resources=workerresourcetemplates/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
@@ -130,7 +130,7 @@ type TemporalWorkerDeploymentReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
-func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// TODO(Shivam): Monitor if the time taken for a successful reconciliation loop is closing in on 5 minutes. If so, we
 	// may need to increase the timeout value.
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -140,10 +140,10 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	l.V(1).Info("Running Reconcile loop")
 
 	// Fetch the worker deployment
-	var workerDeploy temporaliov1alpha1.TemporalWorkerDeployment
+	var workerDeploy temporaliov1alpha1.WorkerDeployment
 	if err := r.Get(ctx, req.NamespacedName, &workerDeploy); err != nil {
 		if !apierrors.IsNotFound(err) {
-			l.Error(err, "unable to fetch TemporalWorkerDeployment")
+			l.Error(err, "unable to fetch WorkerDeployment")
 			return ctrl.Result{}, err
 		}
 		// TWD not found: set Ready=False on any WRTs that reference it so users get a
@@ -153,12 +153,19 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, r.markWRTsTWDNotFound(ctx, req.NamespacedName)
 	}
 
+	// Migration: if a deprecated TemporalWorkerDeployment with the same name/namespace
+	// exists and has not yet been migrated, transfer ownership of its child Deployments
+	// and WorkerResourceTemplates to this WorkerDeployment.
+	if err := r.migrateFromDeprecatedTWD(ctx, l, &workerDeploy); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Handle deletion: clean up Temporal server-side versioning data before allowing
 	// the CRD to be deleted. Without this, stale build ID routing persists in Temporal
 	// and prevents unversioned workers from picking up tasks on the same task queue.
 	if !workerDeploy.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
-			l.Info("TemporalWorkerDeployment is being deleted, running cleanup")
+			l.Info("WorkerDeployment is being deleted, running cleanup")
 			if err := r.handleDeletion(ctx, l, &workerDeploy); err != nil {
 				elapsed := time.Since(workerDeploy.DeletionTimestamp.Time)
 				if elapsed < deletionCleanupTimeout {
@@ -170,9 +177,9 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 					"elapsed", elapsed.Round(time.Second), "timeout", deletionCleanupTimeout)
 			}
 
-			// Remove our finalizer from the TemporalConnection if no other TWDs reference it.
+			// Remove our finalizer from the Connection if no other TWDs reference it.
 			if err := r.removeConnectionFinalizerIfUnused(ctx, l, &workerDeploy); err != nil {
-				l.Error(err, "failed to remove finalizer from TemporalConnection")
+				l.Error(err, "failed to remove finalizer from Connection")
 				return ctrl.Result{}, err
 			}
 
@@ -196,7 +203,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
-		l.Error(err, "TemporalWorkerDeployment defaulter failed")
+		l.Error(err, "WorkerDeployment defaulter failed")
 		return ctrl.Result{}, err
 	}
 
@@ -206,28 +213,28 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonInvalidSpec,
-			fmt.Sprintf("Invalid TemporalWorkerDeployment spec: %v", err),
+			fmt.Sprintf("Invalid WorkerDeployment spec: %v", err),
 			err.Error())
 		return ctrl.Result{}, nil
 	}
 
-	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
+	// Note: ConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
 
 	// Fetch the connection parameters
-	var temporalConnection temporaliov1alpha1.TemporalConnection
+	var temporalConnection temporaliov1alpha1.Connection
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name,
+		Name:      workerDeploy.Spec.WorkerOptions.ConnectionRef.Name,
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
-		l.Error(err, "unable to fetch TemporalConnection")
+		l.Error(err, "unable to fetch Connection")
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
-			temporaliov1alpha1.ReasonTemporalConnectionNotFound,
-			fmt.Sprintf("Unable to fetch TemporalConnection %q: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err),
-			fmt.Sprintf("TemporalConnection %q not found: %v", workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name, err))
+			temporaliov1alpha1.ReasonConnectionNotFound,
+			fmt.Sprintf("Unable to fetch Connection %q: %v", workerDeploy.Spec.WorkerOptions.ConnectionRef.Name, err),
+			fmt.Sprintf("Connection %q not found: %v", workerDeploy.Spec.WorkerOptions.ConnectionRef.Name, err))
 		return ctrl.Result{}, err
 	}
 
-	// Ensure our finalizer is on the TemporalConnection so it cannot be deleted
+	// Ensure our finalizer is on the Connection so it cannot be deleted
 	// while this TWD still references it. This guarantees the connection is available
 	// during TWD deletion cleanup.
 	if err := r.ensureConnectionFinalizer(ctx, l, &temporalConnection); err != nil {
@@ -240,7 +247,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		l.Error(err, "unable to resolve auth secret name")
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonAuthSecretInvalid,
-			fmt.Sprintf("Unable to resolve auth secret from TemporalConnection %q: %v", temporalConnection.Name, err),
+			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", temporalConnection.Name, err),
 			fmt.Sprintf("Unable to resolve auth secret: %v", err))
 		return ctrl.Result{}, err
 	}
@@ -334,7 +341,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	//                 (defaults were already set above, but have to be set again after status update)
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
-		l.Error(err, "TemporalWorkerDeployment defaulter failed")
+		l.Error(err, "WorkerDeployment defaulter failed")
 		return ctrl.Result{}, err
 	}
 
@@ -383,18 +390,115 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 }
 
 // markWRTsTWDNotFound sets Ready=False/TWDNotFound on all WorkerResourceTemplates that reference
-// a TemporalWorkerDeployment that could not be found. This covers the case where the WRT is
+// a WorkerDeployment that could not be found. This covers the case where the WRT is
+// migrateFromDeprecatedTWD checks for a TemporalWorkerDeployment stub with the
+// same name/namespace as wd. If one exists and has not yet been migrated, it
+// transfers ownership of child Deployments and WorkerResourceTemplates from the
+// deprecated TWD to wd, then labels the TWD as migrated.
+func (r *WorkerDeploymentReconciler) migrateFromDeprecatedTWD(ctx context.Context, l logr.Logger, wd *temporaliov1alpha1.WorkerDeployment) error {
+	var twd temporaliov1alpha1.TemporalWorkerDeployment
+	if err := r.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: wd.Namespace}, &twd); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // no deprecated TWD, nothing to migrate
+		}
+		return err
+	}
+	if twd.Labels[deprecatedTWDMigratedLabel] == "true" {
+		return nil // already migrated
+	}
+
+	l.Info("migrating ownership from deprecated TemporalWorkerDeployment")
+
+	wdRef := metav1.OwnerReference{
+		APIVersion:         temporaliov1alpha1.GroupVersion.String(),
+		Kind:               "WorkerDeployment",
+		Name:               wd.Name,
+		UID:                wd.UID,
+		Controller:         ptr(true),
+		BlockOwnerDeletion: ptr(true),
+	}
+
+	// Patch ownerRefs on child Deployments owned by the deprecated TWD.
+	var allDeploys appsv1.DeploymentList
+	if err := r.List(ctx, &allDeploys, client.InNamespace(wd.Namespace)); err != nil {
+		return err
+	}
+	for i := range allDeploys.Items {
+		dep := &allDeploys.Items[i]
+		if !hasTWDOwner(dep.OwnerReferences, twd.UID) {
+			continue
+		}
+		patch := client.MergeFrom(dep.DeepCopy())
+		dep.OwnerReferences = replaceOwnerRef(dep.OwnerReferences, twd.UID, wdRef)
+		if err := r.Patch(ctx, dep, patch); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("patching Deployment %s ownerRef: %w", dep.Name, err)
+		}
+	}
+
+	// Patch ownerRefs on WorkerResourceTemplates.
+	var wrtList temporaliov1alpha1.WorkerResourceTemplateList
+	if err := r.List(ctx, &wrtList, client.InNamespace(wd.Namespace)); err != nil {
+		return err
+	}
+	for i := range wrtList.Items {
+		wrt := &wrtList.Items[i]
+		if !hasTWDOwner(wrt.OwnerReferences, twd.UID) {
+			continue
+		}
+		patch := client.MergeFrom(wrt.DeepCopy())
+		wrt.OwnerReferences = replaceOwnerRef(wrt.OwnerReferences, twd.UID, wdRef)
+		if err := r.Patch(ctx, wrt, patch); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("patching WorkerResourceTemplate %s ownerRef: %w", wrt.Name, err)
+		}
+	}
+
+	// Label the deprecated TWD as migrated.
+	twdPatch := client.MergeFrom(twd.DeepCopy())
+	if twd.Labels == nil {
+		twd.Labels = make(map[string]string)
+	}
+	twd.Labels[deprecatedTWDMigratedLabel] = "true"
+	if err := r.Patch(ctx, &twd, twdPatch); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("labelling deprecated TemporalWorkerDeployment as migrated: %w", err)
+	}
+
+	l.Info("migration from deprecated TemporalWorkerDeployment complete")
+	return nil
+}
+
+func hasTWDOwner(refs []metav1.OwnerReference, uid types.UID) bool {
+	for _, r := range refs {
+		if r.UID == uid {
+			return true
+		}
+	}
+	return false
+}
+
+func replaceOwnerRef(refs []metav1.OwnerReference, oldUID types.UID, newRef metav1.OwnerReference) []metav1.OwnerReference {
+	out := make([]metav1.OwnerReference, len(refs))
+	copy(out, refs)
+	for i, r := range out {
+		if r.UID == oldUID {
+			out[i] = newRef
+		}
+	}
+	return out
+}
+
+func ptr[T any](v T) *T { return &v }
+
 // created before the TWD exists, or where the TWD was deleted before the controller set an owner
 // reference on the WRT (which would otherwise cause Kubernetes GC to delete the WRT).
 // Returns an error if the List or any status update fails so the caller can requeue.
-func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Context, twd types.NamespacedName) error {
+func (r *WorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Context, twd types.NamespacedName) error {
 	l := log.FromContext(ctx)
 	var wrtList temporaliov1alpha1.WorkerResourceTemplateList
 	if err := r.List(ctx, &wrtList,
 		client.InNamespace(twd.Namespace),
 		client.MatchingFields{wrtWorkerRefKey: twd.Name},
 	); err != nil {
-		return fmt.Errorf("list WorkerResourceTemplates referencing missing TemporalWorkerDeployment %q: %w", twd.Name, err)
+		return fmt.Errorf("list WorkerResourceTemplates referencing missing WorkerDeployment %q: %w", twd.Name, err)
 	}
 	var errs []error
 	for i := range wrtList.Items {
@@ -402,12 +506,12 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 		meta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
 			Type:               temporaliov1alpha1.ConditionReady,
 			Status:             metav1.ConditionFalse,
-			Reason:             temporaliov1alpha1.ReasonWRTTWDNotFound,
-			Message:            fmt.Sprintf("TemporalWorkerDeployment %q not found", twd.Name),
+			Reason:             temporaliov1alpha1.ReasonWRTWDNotFound,
+			Message:            fmt.Sprintf("WorkerDeployment %q not found", twd.Name),
 			ObservedGeneration: wrt.Generation,
 		})
 		if err := r.Status().Update(ctx, wrt); err != nil {
-			l.Error(err, "unable to update WorkerResourceTemplate status for missing TemporalWorkerDeployment", "wrt", wrt.Name, "twd", twd.Name)
+			l.Error(err, "unable to update WorkerResourceTemplate status for missing WorkerDeployment", "wrt", wrt.Name, "twd", twd.Name)
 			errs = append(errs, fmt.Errorf("update status for WorkerResourceTemplate %s/%s: %w", wrt.Namespace, wrt.Name, err))
 		}
 	}
@@ -415,27 +519,27 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 }
 
 // handleDeletion cleans up Temporal server-side deployment versioning data when
-// a TemporalWorkerDeployment CRD is deleted. This prevents stale build ID routing
+// a WorkerDeployment CRD is deleted. This prevents stale build ID routing
 // from blocking unversioned workers on the same task queue.
 //
 // The cleanup sequence:
 //  1. Set the current version to "unversioned" (empty BuildID) so new tasks route to unversioned workers
 //  2. Delete all non-current/non-ramping versions (drained/inactive ones)
 //  3. The deployment itself will be garbage collected by Temporal once all versions are removed
-func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
+func (r *WorkerDeploymentReconciler) handleDeletion(
 	ctx context.Context,
 	l logr.Logger,
-	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 ) error {
 	// Resolve Temporal connection.
-	// The TemporalConnection is guaranteed to exist because we hold a finalizer on it
+	// The Connection is guaranteed to exist because we hold a finalizer on it
 	// that prevents deletion while any TWD references it.
-	var temporalConnection temporaliov1alpha1.TemporalConnection
+	var temporalConnection temporaliov1alpha1.Connection
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name,
+		Name:      workerDeploy.Spec.WorkerOptions.ConnectionRef.Name,
 		Namespace: workerDeploy.Namespace,
 	}, &temporalConnection); err != nil {
-		return fmt.Errorf("unable to fetch TemporalConnection: %w", err)
+		return fmt.Errorf("unable to fetch Connection: %w", err)
 	}
 
 	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
@@ -542,9 +646,9 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
 	return nil
 }
 
-// setCondition sets a condition on the TemporalWorkerDeployment status.
-func (r *TemporalWorkerDeploymentReconciler) setCondition(
-	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+// setCondition sets a condition on the WorkerDeployment status.
+func (r *WorkerDeploymentReconciler) setCondition(
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	conditionType string,
 	status metav1.ConditionStatus,
 	reason, message string,
@@ -561,11 +665,11 @@ func (r *TemporalWorkerDeploymentReconciler) setCondition(
 // syncConditions sets Ready and Progressing based on the current rollout state.
 // It must be called at the end of a successful reconcile (no errors) so that
 // Progressing/Ready reflect the latest Temporal version status.
-func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.TemporalWorkerDeployment) {
-	// Deprecated: set TemporalConnectionHealthy=True on all successful reconciles for v1.3.x compat.
-	r.setCondition(twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, //nolint:staticcheck // backward compat
-		metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy, //nolint:staticcheck // backward compat
-		"TemporalConnection is healthy and auth secret is resolved")
+func (r *WorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.WorkerDeployment) {
+	// Deprecated: set ConnectionHealthy=True on all successful reconciles for v1.3.x compat.
+	r.setCondition(twd, temporaliov1alpha1.ConditionConnectionHealthy, //nolint:staticcheck // backward compat
+		metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy, //nolint:staticcheck // backward compat
+		"Connection is healthy and auth secret is resolved")
 
 	switch twd.Status.TargetVersion.Status {
 	case temporaliov1alpha1.VersionStatusCurrent:
@@ -606,9 +710,9 @@ func (r *TemporalWorkerDeploymentReconciler) syncConditions(twd *temporaliov1alp
 // recordWarningAndSetBlocked emits a warning event, sets Progressing=False and Ready=False
 // with the given reason, and persists the status immediately. Called on all error paths that
 // block reconciliation progress.
-func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetBlocked(
+func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	ctx context.Context,
-	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	reason string,
 	eventMessage string,
 	conditionMessage string,
@@ -616,47 +720,47 @@ func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, reason, eventMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, reason, conditionMessage)
-	// Deprecated: set TemporalConnectionHealthy=False for v1.3.x compat, but only for
+	// Deprecated: set ConnectionHealthy=False for v1.3.x compat, but only for
 	// reasons that actually indicate connection/auth issues. Plan generation and execution
 	// failures are unrelated to connection health and should not trigger this condition.
 	switch reason {
-	case temporaliov1alpha1.ReasonTemporalConnectionNotFound,
+	case temporaliov1alpha1.ReasonConnectionNotFound,
 		temporaliov1alpha1.ReasonAuthSecretInvalid,
 		temporaliov1alpha1.ReasonTemporalClientCreationFailed,
 		temporaliov1alpha1.ReasonTemporalStateFetchFailed:
-		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage) //nolint:staticcheck // backward compat
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage) //nolint:staticcheck // backward compat
 	}
 	_ = r.Status().Update(ctx, workerDeploy)
 }
 
-// ensureConnectionFinalizer adds our finalizer to the TemporalConnection so it
+// ensureConnectionFinalizer adds our finalizer to the Connection so it
 // cannot be deleted while this TWD still needs it for cleanup.
-func (r *TemporalWorkerDeploymentReconciler) ensureConnectionFinalizer(
+func (r *WorkerDeploymentReconciler) ensureConnectionFinalizer(
 	ctx context.Context,
 	l logr.Logger,
-	tc *temporaliov1alpha1.TemporalConnection,
+	tc *temporaliov1alpha1.Connection,
 ) error {
 	if !controllerutil.ContainsFinalizer(tc, finalizerName) {
-		l.Info("Adding finalizer to TemporalConnection", "connection", tc.Name)
+		l.Info("Adding finalizer to Connection", "connection", tc.Name)
 		controllerutil.AddFinalizer(tc, finalizerName)
 		if err := r.Update(ctx, tc); err != nil {
-			return fmt.Errorf("unable to add finalizer to TemporalConnection %q: %w", tc.Name, err)
+			return fmt.Errorf("unable to add finalizer to Connection %q: %w", tc.Name, err)
 		}
 	}
 	return nil
 }
 
-// removeConnectionFinalizerIfUnused removes our finalizer from the TemporalConnection
+// removeConnectionFinalizerIfUnused removes our finalizer from the Connection
 // if no other TWDs (besides the one being deleted) still reference it.
-func (r *TemporalWorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
+func (r *WorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
 	ctx context.Context,
 	l logr.Logger,
-	deletingTWD *temporaliov1alpha1.TemporalWorkerDeployment,
+	deletingTWD *temporaliov1alpha1.WorkerDeployment,
 ) error {
-	connectionName := deletingTWD.Spec.WorkerOptions.TemporalConnectionRef.Name
+	connectionName := deletingTWD.Spec.WorkerOptions.ConnectionRef.Name
 
 	// List all TWDs in the same namespace
-	var twds temporaliov1alpha1.TemporalWorkerDeploymentList
+	var twds temporaliov1alpha1.WorkerDeploymentList
 	if err := r.List(ctx, &twds, client.InNamespace(deletingTWD.Namespace)); err != nil {
 		return fmt.Errorf("unable to list TWDs: %w", err)
 	}
@@ -667,15 +771,15 @@ func (r *TemporalWorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
 		if twd.Name == deletingTWD.Name {
 			continue
 		}
-		if twd.Spec.WorkerOptions.TemporalConnectionRef.Name == connectionName {
-			l.Info("TemporalConnection still referenced by another TWD, keeping finalizer",
+		if twd.Spec.WorkerOptions.ConnectionRef.Name == connectionName {
+			l.Info("Connection still referenced by another TWD, keeping finalizer",
 				"connection", connectionName, "referencedBy", twd.Name)
 			return nil
 		}
 	}
 
 	// No other TWDs reference this connection, remove the finalizer
-	var tc temporaliov1alpha1.TemporalConnection
+	var tc temporaliov1alpha1.Connection
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      connectionName,
 		Namespace: deletingTWD.Namespace,
@@ -683,14 +787,14 @@ func (r *TemporalWorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
 		if apierrors.IsNotFound(err) {
 			return nil // already gone
 		}
-		return fmt.Errorf("unable to fetch TemporalConnection %q: %w", connectionName, err)
+		return fmt.Errorf("unable to fetch Connection %q: %w", connectionName, err)
 	}
 
 	if controllerutil.ContainsFinalizer(&tc, finalizerName) {
-		l.Info("Removing finalizer from TemporalConnection", "connection", connectionName)
+		l.Info("Removing finalizer from Connection", "connection", connectionName)
 		controllerutil.RemoveFinalizer(&tc, finalizerName)
 		if err := r.Update(ctx, &tc); err != nil {
-			return fmt.Errorf("unable to remove finalizer from TemporalConnection %q: %w", connectionName, err)
+			return fmt.Errorf("unable to remove finalizer from Connection %q: %w", connectionName, err)
 		}
 	}
 
@@ -698,7 +802,7 @@ func (r *TemporalWorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
 		// grab the job object, extract the owner...
 		deploy := rawObj.(*appsv1.Deployment)
@@ -709,7 +813,7 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 		}
 		// ...make sure it's a TemporalWorker...
 		// TODO(jlegrone): double check apiGVStr has the correct value
-		if owner.APIVersion != apiGVStr || owner.Kind != "TemporalWorkerDeployment" {
+		if owner.APIVersion != apiGVStr || owner.Kind != "WorkerDeployment" {
 			return nil
 		}
 
@@ -726,17 +830,21 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 			mgr.GetLogger().Error(errors.New("error indexing WorkerResourceTemplates"), "could not convert raw object", rawObj)
 			return nil
 		}
-		return []string{wrt.Spec.TemporalWorkerDeploymentRef.Name}
+		return []string{wrt.Spec.EffectiveWorkerDeploymentName()}
 	}); err != nil {
 		return err
 	}
 
 	recoverPanic := !r.DisableRecoverPanic
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&temporaliov1alpha1.TemporalWorkerDeployment{}).
+		For(&temporaliov1alpha1.WorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
-		Watches(&temporaliov1alpha1.TemporalConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
+		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
 		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT)).
+		// Watch deprecated TemporalWorkerDeployments so migration runs when a matching WD is created.
+		Watches(&temporaliov1alpha1.TemporalWorkerDeployment{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+			return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}}}
+		})).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 			RecoverPanic:            &recoverPanic,
@@ -746,7 +854,7 @@ func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) 
 
 // reconcileRequestForWRT returns a reconcile.Request to reconcile the TWD associated with the
 // supplied WRT.
-func (r *TemporalWorkerDeploymentReconciler) reconcileRequestForWRT(ctx context.Context, wrt client.Object) []reconcile.Request {
+func (r *WorkerDeploymentReconciler) reconcileRequestForWRT(ctx context.Context, wrt client.Object) []reconcile.Request {
 	wrtObj, ok := wrt.(*temporaliov1alpha1.WorkerResourceTemplate)
 	if !ok {
 		return nil
@@ -754,25 +862,25 @@ func (r *TemporalWorkerDeploymentReconciler) reconcileRequestForWRT(ctx context.
 	return []reconcile.Request{
 		{
 			NamespacedName: types.NamespacedName{
-				Name:      wrtObj.Spec.TemporalWorkerDeploymentRef.Name,
+				Name:      wrtObj.Spec.EffectiveWorkerDeploymentName(),
 				Namespace: wrt.GetNamespace(),
 			},
 		},
 	}
 }
 
-func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {
+func (r *WorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {
 	var requests []reconcile.Request
 
 	// Find all TWDs in same namespace that reference this TC
-	var twds temporaliov1alpha1.TemporalWorkerDeploymentList
+	var twds temporaliov1alpha1.WorkerDeploymentList
 	if err := r.List(ctx, &twds, client.InNamespace(tc.GetNamespace())); err != nil {
 		return requests
 	}
 
 	// Filter to ones using this connection
 	for _, twd := range twds.Items {
-		if twd.Spec.WorkerOptions.TemporalConnectionRef.Name == tc.GetName() {
+		if twd.Spec.WorkerOptions.ConnectionRef.Name == tc.GetName() {
 			// Enqueue a reconcile request for this TWD
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
