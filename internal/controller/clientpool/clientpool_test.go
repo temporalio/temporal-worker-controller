@@ -93,7 +93,7 @@ func makeOpts(hostPort string) NewClientOptions {
 	return NewClientOptions{
 		TemporalNamespace: "default",
 		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+		Spec: temporaliov1alpha1.ConnectionSpec{
 			HostPort: hostPort,
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{
 				Name: "test-tls-secret",
@@ -252,7 +252,7 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 	opts := NewClientOptions{
 		TemporalNamespace: "default",
 		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+		Spec: temporaliov1alpha1.ConnectionSpec{
 			HostPort:        "localhost:7233",
 			APIKeySecretRef: apiKeySelector,
 		},
