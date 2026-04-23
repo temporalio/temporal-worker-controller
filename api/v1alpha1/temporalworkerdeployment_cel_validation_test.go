@@ -69,6 +69,21 @@ var _ = Describe("TemporalWorkerDeployment CRD CEL validation", func() {
 		Expect(err.Error()).To(ContainSubstring("steps are required for Progressive rollout"))
 	})
 
+	It("rejects more than 20 Progressive steps", func() {
+		steps := make([]RolloutStep, 21)
+		for i := range steps {
+			steps[i] = RolloutStep{
+				RampPercentage: i + 1,
+				PauseDuration:  metav1.Duration{Duration: time.Minute},
+			}
+		}
+		twd := baseTWD("prog-too-many-steps")
+		twd.Spec.RolloutStrategy = RolloutStrategy{Strategy: UpdateProgressive, Steps: steps}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Too many"))
+	})
+
 	It("rejects a Progressive step with pauseDuration less than 30s", func() {
 		twd := baseTWD("short-pause")
 		twd.Spec.RolloutStrategy = RolloutStrategy{
