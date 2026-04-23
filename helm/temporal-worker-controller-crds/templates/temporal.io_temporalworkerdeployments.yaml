@@ -114,6 +114,7 @@ spec:
                       x-kubernetes-validations:
                       - message: pause duration must be at least 30s
                         rule: duration(self.pauseDuration) >= duration('30s')
+                    maxItems: 20
                     type: array
                   strategy:
                     enum:
@@ -128,13 +129,6 @@ spec:
                 - message: steps are required for Progressive rollout
                   rule: self.strategy != 'Progressive' || (has(self.steps) && size(self.steps)
                     > 0)
-                - message: rampPercentage must increase between each step
-                  rule: self.strategy != 'Progressive' || !has(self.steps) || self.steps.size()
-                    <= 1 || (self.steps.map(s, s.rampPercentage).isSorted() && self.steps.map(s,
-                    s.rampPercentage).all(v, self.steps.filter(s, s.rampPercentage
-                    == v).size() == 1))
-                - message: only one of input or inputFrom may be set
-                  rule: '!has(self.gate) || !(has(self.gate.input) && has(self.gate.inputFrom))'
                 - message: exactly one of configMapKeyRef or secretKeyRef must be
                     set
                   rule: '!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef)

@@ -380,8 +380,6 @@ type GateInputSource struct {
 
 // RolloutStrategy defines strategy to apply during next rollout
 // +kubebuilder:validation:XValidation:rule="self.strategy != 'Progressive' || (has(self.steps) && size(self.steps) > 0)",message="steps are required for Progressive rollout"
-// +kubebuilder:validation:XValidation:rule="self.strategy != 'Progressive' || !has(self.steps) || self.steps.size() <= 1 || (self.steps.map(s, s.rampPercentage).isSorted() && self.steps.map(s, s.rampPercentage).all(v, self.steps.filter(s, s.rampPercentage == v).size() == 1))",message="rampPercentage must increase between each step"
-// +kubebuilder:validation:XValidation:rule="!has(self.gate) || !(has(self.gate.input) && has(self.gate.inputFrom))",message="only one of input or inputFrom may be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef) != has(self.gate.inputFrom.secretKeyRef))",message="exactly one of configMapKeyRef or secretKeyRef must be set"
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
@@ -397,6 +395,7 @@ type RolloutStrategy struct {
 
 	// Steps to execute progressive rollouts. Only required when strategy is "Progressive".
 	// +optional
+	// +kubebuilder:validation:MaxItems=20
 	Steps []RolloutStep `json:"steps,omitempty" protobuf:"bytes,3,rep,name=steps"`
 }
 
