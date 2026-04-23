@@ -249,8 +249,8 @@ func (cp *ClientPool) ParseClientSecret(
 	// Check the secret type
 	switch authMode {
 	case AuthModeTLS:
-		if secret.Type != corev1.SecretTypeTLS {
-			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls", secret.Name)
+		if secret.Type != corev1.SecretTypeTLS && secret.Type != corev1.SecretTypeOpaque {
+			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls or Opaque", secret.Name)
 			return nil, nil, nil, err
 		}
 		return cp.fetchClientUsingMTLSSecret(secret, opts)
