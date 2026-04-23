@@ -14,6 +14,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"go.temporal.io/api/serviceerror"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -242,6 +243,14 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		getControllerIdentity(),
 	)
 	if err != nil {
+		var rateLimitErr *serviceerror.ResourceExhausted
+		if errors.As(err, &rateLimitErr) {
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+				temporaliov1alpha1.ReasonTemporalStateFetchFailed,
+				fmt.Sprintf("Rate limited fetching Temporal worker deployment state: %v", err),
+				fmt.Sprintf("Rate limited by Temporal server: %v", err))
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonTemporalStateFetchFailed,
 			fmt.Sprintf("Unable to get Temporal worker deployment state: %v", err),
