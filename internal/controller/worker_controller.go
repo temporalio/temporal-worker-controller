@@ -139,15 +139,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// TODO(carlydf): Handle warnings once we have some, handle ValidateUpdate once it is different from ValidateCreate
-	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
-		l.Error(err, "invalid TemporalWorkerDeployment")
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: 5 * time.Minute, // user needs time to fix this, if it changes, it will be re-queued immediately
-		}, nil
-	}
-
 	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
 
 	// Fetch the connection parameters

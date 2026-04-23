@@ -399,27 +399,6 @@ func TestReconcile_TWDNotFound_NoEvent(t *testing.T) {
 	assert.Empty(t, drainEvents(recorder), "no events should be emitted when TWD is not found")
 }
 
-func TestReconcile_ValidationFailure_NoEventEmitted(t *testing.T) {
-	// Progressive strategy with no steps is invalid; the reconciler requeues without emitting events.
-	twd := makeTWD("test-worker", "default", "my-connection")
-	twd.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
-		Strategy: temporaliov1alpha1.UpdateProgressive,
-		Steps:    nil,
-	}
-	tc := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
-	r, recorder := newTestReconciler([]client.Object{twd, tc})
-
-	result, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
-	})
-
-	require.NoError(t, err)
-	assert.NotZero(t, result.RequeueAfter, "should requeue on validation failure")
-	events := drainEvents(recorder)
-	assertNoEventEmitted(t, events, temporaliov1alpha1.ReasonTemporalConnectionNotFound)
-	assertNoEventEmitted(t, events, temporaliov1alpha1.ReasonTemporalClientCreationFailed)
-}
-
 // TestReconcile_TemporalConnectionNotFound covers all three related assertions: event emission,
 // event message content, and condition update.
 func TestReconcile_TemporalConnectionNotFound(t *testing.T) {
