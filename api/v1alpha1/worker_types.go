@@ -135,6 +135,12 @@ const (
 	// controller cannot query the current worker deployment state from Temporal.
 	ReasonTemporalStateFetchFailed = "TemporalStateFetchFailed"
 
+	// ReasonInvalidSpec is set on ConditionReady=False and ConditionProgressing=False
+	// when the spec fails validation that the CRD schema cannot enforce (e.g. rampPercentage
+	// ordering, gate input/inputFrom exclusivity). Reconciliation retries every 5 minutes
+	// while the spec remains invalid. Users should correct the spec.
+	ReasonInvalidSpec = "InvalidSpec"
+
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
 	ReasonTemporalConnectionHealthy = "TemporalConnectionHealthy"
 )

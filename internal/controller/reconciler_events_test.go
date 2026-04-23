@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -397,6 +398,39 @@ func TestReconcile_TWDNotFound_NoEvent(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, drainEvents(recorder), "no events should be emitted when TWD is not found")
+}
+
+// TestReconcile_InvalidSpec_EmitsEventAndSetsCondition verifies that spec validation
+// errors not enforceable by the CRD schema (e.g. rampPercentage ordering) surface as
+// a Warning event and a blocked condition rather than being silently requeued.
+func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
+	twd := makeTWD("test-worker", "default", "my-connection")
+	twd.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
+		Strategy: temporaliov1alpha1.UpdateProgressive,
+		Steps: []temporaliov1alpha1.RolloutStep{
+			{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: time.Minute}},
+			{RampPercentage: 10, PauseDuration: metav1.Duration{Duration: time.Minute}}, // decreasing — invalid
+		},
+	}
+	tc := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
+	r, recorder := newTestReconciler([]client.Object{twd, tc})
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+
+	require.NoError(t, err)
+	assert.NotZero(t, result.RequeueAfter, "should requeue after 5m on invalid spec")
+
+	events := drainEvents(recorder)
+	assertEventEmitted(t, events, temporaliov1alpha1.ReasonInvalidSpec)
+
+	var updated temporaliov1alpha1.TemporalWorkerDeployment
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
+	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
+	require.NotNil(t, cond, "Progressing condition should be set")
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, temporaliov1alpha1.ReasonInvalidSpec, cond.Reason)
 }
 
 // TestReconcile_TemporalConnectionNotFound covers all three related assertions: event emission,

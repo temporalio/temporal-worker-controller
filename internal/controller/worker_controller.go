@@ -139,6 +139,17 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
+	// Fallback validation for spec constraints the CRD schema cannot enforce (rampPercentage
+	// ordering, gate input/inputFrom exclusivity). When the optional TWD webhook is disabled
+	// these checks would otherwise go unreported; this surfaces them as a condition and event.
+	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+			temporaliov1alpha1.ReasonInvalidSpec,
+			fmt.Sprintf("Invalid TemporalWorkerDeployment spec: %v", err),
+			err.Error())
+		return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Minute}, nil
+	}
+
 	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
 
 	// Fetch the connection parameters
