@@ -149,7 +149,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	}))), k8sClient)
 
 	// Set up controller
-	reconciler := &controller.TemporalWorkerDeploymentReconciler{
+	reconciler := &controller.WorkerDeploymentReconciler{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
 		TemporalClientPool:  clientPool,

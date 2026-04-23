@@ -31,8 +31,8 @@ func TestGeneratePlan(t *testing.T) {
 	testCases := []struct {
 		name                             string
 		k8sState                         *k8s.DeploymentState
-		status                           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec                             *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		status                           *temporaliov1alpha1.WorkerDeploymentStatus
+		spec                             *temporaliov1alpha1.WorkerDeploymentSpec
 		state                            *temporal.TemporalWorkerState
 		config                           *Config
 		expectDelete                     int
@@ -55,7 +55,7 @@ func TestGeneratePlan(t *testing.T) {
 				DeploymentsByTime: []*appsv1.Deployment{},
 				DeploymentRefs:    map[string]*corev1.ObjectReference{},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -76,7 +76,7 @@ func TestGeneratePlan(t *testing.T) {
 					createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "456",
@@ -104,7 +104,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: &metav1.Duration{Duration: 0},
 					DeleteDelay:    &metav1.Duration{Duration: 0},
@@ -130,7 +130,7 @@ func TestGeneratePlan(t *testing.T) {
 					"123": {Name: "test-123"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -146,7 +146,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(2); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -171,7 +171,7 @@ func TestGeneratePlan(t *testing.T) {
 					"456": {Name: "test-456"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -202,7 +202,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{
@@ -226,7 +226,7 @@ func TestGeneratePlan(t *testing.T) {
 				DeploymentsByTime: []*appsv1.Deployment{},
 				DeploymentRefs:    map[string]*corev1.ObjectReference{},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -243,7 +243,7 @@ func TestGeneratePlan(t *testing.T) {
 					return r
 				}(),
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -260,7 +260,7 @@ func TestGeneratePlan(t *testing.T) {
 				DeploymentsByTime: []*appsv1.Deployment{},
 				DeploymentRefs:    map[string]*corev1.ObjectReference{},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				VersionCount: 5,
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -277,7 +277,7 @@ func TestGeneratePlan(t *testing.T) {
 					return r
 				}(),
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -295,7 +295,7 @@ func TestGeneratePlan(t *testing.T) {
 					"456": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -311,7 +311,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -329,7 +329,7 @@ func TestGeneratePlan(t *testing.T) {
 					"789": createDeploymentWithExpiredConnectionSpecHash(1),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -354,7 +354,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -371,7 +371,7 @@ func TestGeneratePlan(t *testing.T) {
 					"456": createDeploymentWithExpiredConnectionSpecHash(1),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -387,7 +387,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -406,7 +406,7 @@ func TestGeneratePlan(t *testing.T) {
 				DeploymentsByTime: []*appsv1.Deployment{},
 				DeploymentRefs:    map[string]*corev1.ObjectReference{},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "build-a",
@@ -415,7 +415,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{},
@@ -437,7 +437,7 @@ func TestGeneratePlan(t *testing.T) {
 				DeploymentsByTime: []*appsv1.Deployment{},
 				DeploymentRefs:    map[string]*corev1.ObjectReference{},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "build-a",
@@ -446,7 +446,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state:                       &temporal.TemporalWorkerState{},
@@ -469,7 +469,7 @@ func TestGeneratePlan(t *testing.T) {
 					"newbuild": {Name: "test-newbuild"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "newbuild",
@@ -488,7 +488,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{
@@ -516,7 +516,7 @@ func TestGeneratePlan(t *testing.T) {
 					"newbuild": {Name: "test-newbuild"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "newbuild",
@@ -535,7 +535,7 @@ func TestGeneratePlan(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{
@@ -555,7 +555,7 @@ func TestGeneratePlan(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.status == nil {
-				tc.status = &temporaliov1alpha1.TemporalWorkerDeploymentStatus{}
+				tc.status = &temporaliov1alpha1.WorkerDeploymentStatus{}
 			}
 			maxV := defaults.MaxVersionsIneligibleForDeletion
 			if tc.maxVersionsIneligibleForDeletion != nil {
@@ -594,8 +594,8 @@ func TestGetDeleteDeployments(t *testing.T) {
 	testCases := []struct {
 		name                      string
 		k8sState                  *k8s.DeploymentState
-		status                    *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec                      *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		status                    *temporaliov1alpha1.WorkerDeploymentStatus
+		spec                      *temporaliov1alpha1.WorkerDeploymentSpec
 		config                    *Config
 		expectDeletes             int
 		foundDeploymentInTemporal bool
@@ -607,7 +607,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					"123": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 					{
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -621,7 +621,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					DeleteDelay: &metav1.Duration{Duration: 4 * time.Hour},
 				},
@@ -640,7 +640,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					"456": createDeploymentWithDefaultConnectionSpecHash(0),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 					{
 						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -654,7 +654,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					DeleteDelay: &metav1.Duration{Duration: 4 * time.Hour},
 				},
@@ -671,7 +671,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					"456": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -689,7 +689,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectDeletes:             1,
@@ -703,7 +703,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					"456": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -721,7 +721,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectDeletes:             0,
@@ -743,8 +743,8 @@ func TestGetScaleDeployments(t *testing.T) {
 	testCases := []struct {
 		name     string
 		k8sState *k8s.DeploymentState
-		status   *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec     *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		status   *temporaliov1alpha1.WorkerDeploymentStatus
+		spec     *temporaliov1alpha1.WorkerDeploymentSpec
 		state    *temporal.TemporalWorkerState
 		// map of build id to scaled replicas
 		expectScales map[string]uint32
@@ -756,7 +756,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"123": createDeploymentWithDefaultConnectionSpecHash(1),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -772,7 +772,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(2); return &r }(),
 			},
 			expectScales: map[string]uint32{"test-123": 2},
@@ -785,7 +785,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"456": createDeploymentWithDefaultConnectionSpecHash(2),
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -806,7 +806,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: &metav1.Duration{Duration: 0},
 				},
@@ -824,7 +824,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"a": {Name: "test-a"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -842,7 +842,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
 			expectScales: map[string]uint32{"test-a": 0},
@@ -857,7 +857,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"b": {Name: "test-b"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "b",
@@ -866,7 +866,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
 			state: &temporal.TemporalWorkerState{
@@ -884,7 +884,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"a": {Name: "test-a"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "a",
@@ -902,7 +902,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(3); return &r }(),
 			},
 			expectScales: map[string]uint32{"test-a": 3},
@@ -918,7 +918,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"old": {Name: "test-old"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "old",
@@ -935,7 +935,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			// spec.Replicas == nil means HPA controls replicas
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{},
 			expectScales: map[string]uint32{"test-old": 1},
 		},
 		{
@@ -953,7 +953,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"new": {Name: "test-new"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -962,7 +962,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{},
 			expectScales: map[string]uint32{},
 		},
 		{
@@ -975,7 +975,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"old": {Name: "test-old"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "old",
@@ -991,7 +991,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec:         &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{},
 			expectScales: map[string]uint32{},
 		},
 		{
@@ -1004,7 +1004,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					"b": {Name: "test-b"},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "a",
@@ -1025,7 +1025,7 @@ func TestGetScaleDeployments(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: &metav1.Duration{
 						Duration: 4 * time.Hour, // Longer than 1 hour
@@ -1069,8 +1069,8 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{}},
 		},
 	}
-	spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{} // spec.Replicas == nil
-	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.TemporalConnectionSpec{})
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{} // spec.Replicas == nil
+	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
 }
@@ -1078,14 +1078,14 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 func TestShouldCreateDeployment(t *testing.T) {
 	testCases := []struct {
 		name                             string
-		status                           *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec                             *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		status                           *temporaliov1alpha1.WorkerDeploymentStatus
+		spec                             *temporaliov1alpha1.WorkerDeploymentSpec
 		expectCreates                    bool
 		maxVersionsIneligibleForDeletion *int32 // set by env if non-nil, else default 75
 	}{
 		{
 			name: "existing deployment should not create",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -1094,14 +1094,14 @@ func TestShouldCreateDeployment(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates: false,
 		},
 		{
 			name: "target version without deployment should create",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "b",
@@ -1110,14 +1110,14 @@ func TestShouldCreateDeployment(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates: true,
 		},
 		{
 			name: "should not create when version limit ineligible for deletion is reached (default limit)",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -1134,7 +1134,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 					return r
 				}(),
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates:                    false,
@@ -1142,7 +1142,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 		},
 		{
 			name: "should not create when version limit ineligible for deletion is reached (custom limit)",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "new",
@@ -1159,7 +1159,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 					return r
 				}(),
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates:                    false,
@@ -1167,7 +1167,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 		},
 		{
 			name: "should create when below version limit",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				VersionCount: 4,
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
@@ -1184,7 +1184,7 @@ func TestShouldCreateDeployment(t *testing.T) {
 					return r
 				}(),
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			expectCreates:                    true,
@@ -1207,13 +1207,13 @@ func TestShouldCreateDeployment(t *testing.T) {
 func TestGetTestWorkflows(t *testing.T) {
 	testCases := []struct {
 		name            string
-		status          *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		status          *temporaliov1alpha1.WorkerDeploymentStatus
 		config          *Config
 		expectWorkflows int
 	}{
 		{
 			name: "gate workflow needed",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1248,7 +1248,7 @@ func TestGetTestWorkflows(t *testing.T) {
 		},
 		{
 			name: "no gate workflow",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1267,7 +1267,7 @@ func TestGetTestWorkflows(t *testing.T) {
 		},
 		{
 			name: "gate workflow with empty task queues",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "123",
@@ -1287,7 +1287,7 @@ func TestGetTestWorkflows(t *testing.T) {
 		},
 		{
 			name: "all test workflows already running",
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1332,8 +1332,8 @@ func TestGetVersionConfigDiff(t *testing.T) {
 	testCases := []struct {
 		name              string
 		strategy          temporaliov1alpha1.RolloutStrategy
-		status            *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec              *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		status            *temporaliov1alpha1.WorkerDeploymentStatus
+		spec              *temporaliov1alpha1.WorkerDeploymentSpec
 		state             *temporal.TemporalWorkerState
 		expectConfig      bool
 		expectSetCurrent  bool
@@ -1344,7 +1344,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:      "test/namespace.123",
@@ -1359,7 +1359,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					},
 				},
 			},
-			spec:             &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			spec:             &temporaliov1alpha1.WorkerDeploymentSpec{},
 			expectConfig:     true,
 			expectSetCurrent: true,
 		},
@@ -1376,7 +1376,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1397,7 +1397,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					},
 				},
 			},
-			spec:              &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			spec:              &temporaliov1alpha1.WorkerDeploymentSpec{},
 			expectConfig:      true,
 			expectSetCurrent:  false,
 			expectRampPercent: int32Ptr(25),
@@ -1407,7 +1407,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1435,7 +1435,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					},
 				},
 			},
-			spec:             &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			spec:             &temporaliov1alpha1.WorkerDeploymentSpec{},
 			state:            &temporal.TemporalWorkerState{RampingBuildID: "456"},
 			expectConfig:     true,
 			expectSetCurrent: false,
@@ -1445,7 +1445,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			strategy: temporaliov1alpha1.RolloutStrategy{
 				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "789",
@@ -1470,7 +1470,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					},
 				},
 			},
-			spec:              &temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+			spec:              &temporaliov1alpha1.WorkerDeploymentSpec{},
 			expectConfig:      true,
 			expectSetCurrent:  true,
 			expectRampPercent: func() *int32 { f := int32(0); return &f }(),
@@ -1484,7 +1484,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 					{RampPercentage: 1, PauseDuration: metav1Duration(30 * time.Second)},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:      "123",
@@ -1534,7 +1534,7 @@ func TestGetVersionConfigDiff(t *testing.T) {
 func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 	testCases := map[string]struct {
 		strategy          temporaliov1alpha1.RolloutStrategy
-		status            *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		status            *temporaliov1alpha1.WorkerDeploymentStatus
 		state             *temporal.TemporalWorkerState
 		expectConfig      bool
 		expectSetCurrent  bool
@@ -1549,7 +1549,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					{RampPercentage: 75, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1583,7 +1583,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					{RampPercentage: 25, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1612,7 +1612,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1647,7 +1647,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 30 * time.Minute}},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1680,7 +1680,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					{RampPercentage: 50, PauseDuration: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1716,7 +1716,7 @@ func TestGetVersionConfig_ProgressiveRolloutEdgeCases(t *testing.T) {
 					},
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1886,7 +1886,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 	testCases := []struct {
 		name         string
 		strategy     temporaliov1alpha1.RolloutStrategy
-		status       *temporaliov1alpha1.TemporalWorkerDeploymentStatus
+		status       *temporaliov1alpha1.WorkerDeploymentStatus
 		state        *temporal.TemporalWorkerState
 		expectConfig bool
 	}{
@@ -1898,7 +1898,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					WorkflowType: "TestWorkflow",
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1932,7 +1932,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					WorkflowType: "TestWorkflow",
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -1966,7 +1966,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					WorkflowType: "TestWorkflow",
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -2000,7 +2000,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					WorkflowType: "TestWorkflow",
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -2036,7 +2036,7 @@ func TestGetVersionConfig_GateWorkflowValidation(t *testing.T) {
 					WorkflowType: "TestWorkflow",
 				},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID: "123",
@@ -2076,8 +2076,8 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 		name           string
 		k8sState       *k8s.DeploymentState
 		config         *Config
-		status         *temporaliov1alpha1.TemporalWorkerDeploymentStatus
-		spec           *temporaliov1alpha1.TemporalWorkerDeploymentSpec
+		status         *temporaliov1alpha1.WorkerDeploymentStatus
+		spec           *temporaliov1alpha1.WorkerDeploymentSpec
 		state          *temporal.TemporalWorkerState
 		expectDeletes  int
 		expectScales   int
@@ -2097,7 +2097,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "a",
@@ -2142,7 +2142,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: &metav1.Duration{Duration: 1 * time.Hour},
 					DeleteDelay:    &metav1.Duration{Duration: 24 * time.Hour},
@@ -2163,7 +2163,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
-			status: &temporaliov1alpha1.TemporalWorkerDeploymentStatus{
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
 						BuildID:    "a",
@@ -2184,7 +2184,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 					},
 				},
 			},
-			spec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: &metav1.Duration{Duration: 2 * time.Hour},
 					DeleteDelay:    &metav1.Duration{Duration: 24 * time.Hour},
@@ -2271,7 +2271,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 		name                 string
 		buildID              string
 		existingDeployment   *appsv1.Deployment
-		newConnection        temporaliov1alpha1.TemporalConnectionSpec
+		newConnection        temporaliov1alpha1.ConnectionSpec
 		expectUpdate         bool
 		expectSecretName     string
 		expectHostPortEnv    string
@@ -2281,7 +2281,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			name:               "non-existing deployment does not result in an update",
 			buildID:            "non-existent",
 			existingDeployment: nil,
-			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+			newConnection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           "new-host:7233",
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			},
@@ -2292,12 +2292,12 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			buildID: "v1",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v1",
-				temporaliov1alpha1.TemporalConnectionSpec{
+				temporaliov1alpha1.ConnectionSpec{
 					HostPort:           defaultHostPort(),
 					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
-			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+			newConnection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           defaultHostPort(),
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 			},
@@ -2308,19 +2308,19 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			buildID: "v2",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v2",
-				temporaliov1alpha1.TemporalConnectionSpec{
+				temporaliov1alpha1.ConnectionSpec{
 					HostPort:           defaultHostPort(),
 					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
-			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+			newConnection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           defaultHostPort(),
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			},
 			expectUpdate:      true,
 			expectSecretName:  "new-secret",
 			expectHostPortEnv: defaultHostPort(),
-			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.ConnectionSpec{
 				HostPort:           defaultHostPort(),
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			}),
@@ -2330,19 +2330,19 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			buildID: "v3",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v3",
-				temporaliov1alpha1.TemporalConnectionSpec{
+				temporaliov1alpha1.ConnectionSpec{
 					HostPort:           defaultHostPort(),
 					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
-			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+			newConnection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           "new-host:7233",
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 			},
 			expectUpdate:      true,
 			expectSecretName:  defaultMutualTLSSecret(),
 			expectHostPortEnv: "new-host:7233",
-			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.ConnectionSpec{
 				HostPort:           "new-host:7233",
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 			}),
@@ -2352,19 +2352,19 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			buildID: "v4",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v4",
-				temporaliov1alpha1.TemporalConnectionSpec{
+				temporaliov1alpha1.ConnectionSpec{
 					HostPort:           defaultHostPort(),
 					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
-			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+			newConnection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           "new-host:7233",
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			},
 			expectUpdate:      true,
 			expectSecretName:  "new-secret",
 			expectHostPortEnv: "new-host:7233",
-			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.ConnectionSpec{
 				HostPort:           "new-host:7233",
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "new-secret"},
 			}),
@@ -2374,19 +2374,19 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			buildID: "v5",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v5",
-				temporaliov1alpha1.TemporalConnectionSpec{
+				temporaliov1alpha1.ConnectionSpec{
 					HostPort:           defaultHostPort(),
 					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 				},
 			),
-			newConnection: temporaliov1alpha1.TemporalConnectionSpec{
+			newConnection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           defaultHostPort(),
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: ""},
 			},
 			expectUpdate:      true,
 			expectSecretName:  "", // Should not update secret volume when empty
 			expectHostPortEnv: defaultHostPort(),
-			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.TemporalConnectionSpec{
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.ConnectionSpec{
 				HostPort:           defaultHostPort(),
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: ""},
 			}),
@@ -2451,8 +2451,8 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 		name               string
 		buildID            string
 		existingDeployment *appsv1.Deployment
-		newSpec            *temporaliov1alpha1.TemporalWorkerDeploymentSpec
-		connection         temporaliov1alpha1.TemporalConnectionSpec
+		newSpec            *temporaliov1alpha1.WorkerDeploymentSpec
+		connection         temporaliov1alpha1.ConnectionSpec
 		expectUpdate       bool
 		expectImage        string
 	}{
@@ -2468,7 +2468,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			name:               "no update when buildID is not explicitly set (auto-generated buildID)",
 			buildID:            "v1",
 			existingDeployment: createDeploymentForDriftTest(1, "v1", "old-image:v1"),
-			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
@@ -2489,7 +2489,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			name:               "same image does not trigger update when buildID is set",
 			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
-			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
@@ -2510,7 +2510,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			name:               "different image triggers update when buildID is set",
 			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "old-image:v1"),
-			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
@@ -2532,7 +2532,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			name:               "replicas-only change does not trigger update (handled by scaling logic)",
 			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
-			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(3), // Changed from 1 to 3
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
@@ -2557,7 +2557,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			buildID: "stable-build-id",
 			existingDeployment: createDeploymentForDriftTestWithEnv(1, "stable-build-id", "my-image:v1",
 				[]corev1.EnvVar{{Name: "MY_VAR", Value: "old-value"}}),
-			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
@@ -2583,7 +2583,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			name:               "backwards compat: no hash annotation means no update",
 			buildID:            "stable-build-id",
 			existingDeployment: createDeploymentWithoutHashAnnotation(1, "stable-build-id", "old-image:v1"),
-			newSpec: &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
@@ -2846,17 +2846,17 @@ func rolloutStep(ramp int32, d time.Duration) temporaliov1alpha1.RolloutStep {
 	}
 }
 
-// Helper function to create a default TemporalConnectionSpec used for testing purposes
-func createDefaultConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
-	return temporaliov1alpha1.TemporalConnectionSpec{
+// Helper function to create a default ConnectionSpec used for testing purposes
+func createDefaultConnectionSpec() temporaliov1alpha1.ConnectionSpec {
+	return temporaliov1alpha1.ConnectionSpec{
 		HostPort:           defaultHostPort(),
 		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
 	}
 }
 
-// Helper function to create a TemporalConnectionSpec with an outdated secret
-func createOutdatedConnectionSpec() temporaliov1alpha1.TemporalConnectionSpec {
-	return temporaliov1alpha1.TemporalConnectionSpec{
+// Helper function to create a ConnectionSpec with an outdated secret
+func createOutdatedConnectionSpec() temporaliov1alpha1.ConnectionSpec {
+	return temporaliov1alpha1.ConnectionSpec{
 		HostPort:           defaultHostPort(),
 		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "outdated-secret"},
 	}
@@ -2870,9 +2870,9 @@ func defaultMutualTLSSecret() string {
 	return "default-secret"
 }
 
-// createDefaultWorkerSpec creates a default TemporalWorkerDeploymentSpec for testing
-func createDefaultWorkerSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
-	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+// createDefaultWorkerSpec creates a default WorkerDeploymentSpec for testing
+func createDefaultWorkerSpec() *temporaliov1alpha1.WorkerDeploymentSpec {
+	return &temporaliov1alpha1.WorkerDeploymentSpec{
 		Template: corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
@@ -2890,8 +2890,8 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.TemporalWorkerDeploymentSpec 
 }
 
 // createWorkerSpecWithBuildID creates a worker spec with an explicit UnsafeCustomBuildID set
-func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.TemporalWorkerDeploymentSpec {
-	return &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.WorkerDeploymentSpec {
+	return &temporaliov1alpha1.WorkerDeploymentSpec{
 		Replicas: int32Ptr(1),
 		Template: corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
@@ -2911,7 +2911,7 @@ func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.TemporalWor
 }
 
 // createTestDeploymentWithConnection creates a test deployment with the specified connection spec
-func createTestDeploymentWithConnection(deploymentName, buildID string, connection temporaliov1alpha1.TemporalConnectionSpec) *appsv1.Deployment {
+func createTestDeploymentWithConnection(deploymentName, buildID string, connection temporaliov1alpha1.ConnectionSpec) *appsv1.Deployment {
 	return k8s.NewDeploymentWithOwnerRef(
 		&metav1.TypeMeta{},
 		&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
@@ -3182,7 +3182,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "nil-raw", Namespace: "default"},
 					Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-						TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+						WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 						Template:                    runtime.RawExtension{Raw: nil},
 					},
 				},
@@ -3316,7 +3316,7 @@ func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.Work
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
 			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -3359,7 +3359,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 	wrt := temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -3397,7 +3397,7 @@ func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temp
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
 			Template:                    runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -3412,7 +3412,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 	wrt := temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-hpa", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 			Template:                    runtime.RawExtension{Raw: hpaRaw},
 		},
 	}
@@ -3459,7 +3459,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		wrt2 := temporaliov1alpha1.WorkerResourceTemplate{
 			ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
 			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+				WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 				Template:                    runtime.RawExtension{Raw: pdbRaw},
 			},
 		}
@@ -3493,7 +3493,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		badWRT := temporaliov1alpha1.WorkerResourceTemplate{
 			ObjectMeta: metav1.ObjectMeta{Name: "bad-wrt", Namespace: "default"},
 			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+				WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 				Template:                    runtime.RawExtension{Raw: []byte(`not json`)},
 			},
 		}
@@ -3539,7 +3539,7 @@ func TestGetWRTOwnerRefPatches(t *testing.T) {
 	t.Run("WRT already owned by this TWD is skipped", func(t *testing.T) {
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
 			newWRT("already-owned", metav1.OwnerReference{
-				APIVersion: "temporal.io/v1alpha1", Kind: "TemporalWorkerDeployment",
+				APIVersion: "temporal.io/v1alpha1", Kind: "WorkerDeployment",
 				Name: twdName, UID: twdUID, Controller: func() *bool { b := true; return &b }(),
 			}),
 			newWRT("needs-ref"),

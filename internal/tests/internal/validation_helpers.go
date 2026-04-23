@@ -27,7 +27,7 @@ var (
 )
 
 // waitForExpectedTargetDeployment waits for a deployment to be created
-func waitForExpectedTargetDeployment(t *testing.T, twd *temporaliov1alpha1.TemporalWorkerDeployment, env testhelpers.TestEnv, timeout time.Duration) {
+func waitForExpectedTargetDeployment(t *testing.T, twd *temporaliov1alpha1.WorkerDeployment, env testhelpers.TestEnv, timeout time.Duration) {
 	ctx := context.Background()
 	deadline := time.Now().Add(timeout)
 	deploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
@@ -171,13 +171,13 @@ func verifyTemporalStateMatchesStatusEventually(
 	t *testing.T,
 	ctx context.Context,
 	ts *temporaltest.TestServer,
-	twd *temporaliov1alpha1.TemporalWorkerDeployment,
-	expectedDeploymentStatus temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	twd *temporaliov1alpha1.WorkerDeployment,
+	expectedDeploymentStatus temporaliov1alpha1.WorkerDeploymentStatus,
 	timeout time.Duration,
 	interval time.Duration,
 ) {
 	if twd == nil {
-		t.Fatalf("TemporalWorkerDeployment cannot be nil")
+		t.Fatalf("WorkerDeployment cannot be nil")
 	}
 	if expectedDeploymentStatus.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered ||
 		expectedDeploymentStatus.TargetVersion.Status == "" {
@@ -275,13 +275,13 @@ func verifyTemporalStateMatchesStatusEventually(
 }
 
 // TODO(carlydf): check version task queues and reduce code repetition
-func verifyTemporalWorkerDeploymentStatusEventually(
+func verifyWorkerDeploymentStatusEventually(
 	t *testing.T,
 	ctx context.Context,
 	env testhelpers.TestEnv,
 	twdName,
 	namespace string,
-	expectedDeploymentStatus *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	expectedDeploymentStatus *temporaliov1alpha1.WorkerDeploymentStatus,
 	timeout time.Duration,
 	interval time.Duration,
 ) {
@@ -289,7 +289,7 @@ func verifyTemporalWorkerDeploymentStatusEventually(
 		t.Fatalf("expected deployment status cannot be nil")
 	}
 	eventually(t, timeout, interval, func() error {
-		var twd temporaliov1alpha1.TemporalWorkerDeployment
+		var twd temporaliov1alpha1.WorkerDeployment
 		if err := env.K8sClient.Get(ctx, types.NamespacedName{
 			Name:      twdName,
 			Namespace: namespace,
@@ -436,7 +436,7 @@ func waitForCondition(
 ) {
 	t.Helper()
 	eventually(t, timeout, interval, func() error {
-		var twd temporaliov1alpha1.TemporalWorkerDeployment
+		var twd temporaliov1alpha1.WorkerDeployment
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: twdName, Namespace: namespace}, &twd); err != nil {
 			return fmt.Errorf("failed to get TWD: %w", err)
 		}
@@ -549,7 +549,7 @@ func waitForWRTStatusApplied(
 }
 
 // assertWRTControllerOwnerRef asserts that the named WRT has a controller owner reference
-// pointing to the TemporalWorkerDeployment named twdName.
+// pointing to the WorkerDeployment named twdName.
 func assertWRTControllerOwnerRef(
 	t *testing.T,
 	ctx context.Context,
@@ -562,7 +562,7 @@ func assertWRTControllerOwnerRef(
 		t.Fatalf("failed to re-fetch WRT: %v", err)
 	}
 	for _, ref := range wrt.OwnerReferences {
-		if ref.Kind == "TemporalWorkerDeployment" && ref.Name == twdName && ref.Controller != nil && *ref.Controller {
+		if ref.Kind == "WorkerDeployment" && ref.Name == twdName && ref.Controller != nil && *ref.Controller {
 			t.Logf("WRT correctly has controller owner reference to TWD %q", twdName)
 			return
 		}

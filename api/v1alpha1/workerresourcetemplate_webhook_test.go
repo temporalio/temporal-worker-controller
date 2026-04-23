@@ -25,7 +25,7 @@ func newWRT(name, temporalWorkerDeploymentRefName string, embeddedObj map[string
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{
 				Name: temporalWorkerDeploymentRefName,
 			},
 			Template: runtime.RawExtension{Raw: raw},
@@ -93,7 +93,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 			obj: &temporaliov1alpha1.WorkerResourceTemplate{
 				ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 				Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-					TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+					WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 					Template:                    runtime.RawExtension{Raw: nil},
 				},
 			},
@@ -425,17 +425,17 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 
 func TestWorkerResourceTemplate_ValidateUpdate_Immutability(t *testing.T) {
 	tests := map[string]struct {
-		oldTemporalWorkerDeploymentRef string
-		newTemporalWorkerDeploymentRef string
+		oldWorkerDeploymentRef string
+		newWorkerDeploymentRef string
 		errorMsg                       string
 	}{
 		"same temporalWorkerDeploymentRef is valid": {
-			oldTemporalWorkerDeploymentRef: "my-worker",
-			newTemporalWorkerDeploymentRef: "my-worker",
+			oldWorkerDeploymentRef: "my-worker",
+			newWorkerDeploymentRef: "my-worker",
 		},
 		"changing temporalWorkerDeploymentRef is forbidden": {
-			oldTemporalWorkerDeploymentRef: "my-worker",
-			newTemporalWorkerDeploymentRef: "different-worker",
+			oldWorkerDeploymentRef: "my-worker",
+			newWorkerDeploymentRef: "different-worker",
 			errorMsg:                       "temporalWorkerDeploymentRef.name is immutable",
 		},
 	}
@@ -445,8 +445,8 @@ func TestWorkerResourceTemplate_ValidateUpdate_Immutability(t *testing.T) {
 			ctx := context.Background()
 			v := newValidatorNoAPI()
 
-			oldWRT := newWRT("my-hpa", tc.oldTemporalWorkerDeploymentRef, validHPAObject())
-			newWRT := newWRT("my-hpa", tc.newTemporalWorkerDeploymentRef, validHPAObject())
+			oldWRT := newWRT("my-hpa", tc.oldWorkerDeploymentRef, validHPAObject())
+			newWRT := newWRT("my-hpa", tc.newWorkerDeploymentRef, validHPAObject())
 
 			_, err := v.ValidateUpdate(ctx, oldWRT, newWRT)
 
@@ -506,7 +506,7 @@ func TestWorkerResourceTemplate_ValidateDelete_NilRaw(t *testing.T) {
 	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "my-worker"},
+			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 			Template:                    runtime.RawExtension{Raw: nil},
 		},
 	}
@@ -573,6 +573,108 @@ func TestWorkerResourceTemplate_AllowedKinds(t *testing.T) {
 	}))
 	require.Error(t, err, "Deployment should be rejected when AllowedKinds is empty (deny-all)")
 	assert.Contains(t, err.Error(), `kind "Deployment" is not in the allowed list`)
+}
+
+// ─── Dual-field (workerDeploymentRef / temporalWorkerDeploymentRef) tests ─────
+
+// newWRTWithDeprecatedRef builds a WRT that uses the old temporalWorkerDeploymentRef field.
+func newWRTWithDeprecatedRef(name, ref string, embeddedObj map[string]interface{}) *temporaliov1alpha1.WorkerResourceTemplate {
+	raw, _ := json.Marshal(embeddedObj)
+	return &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: ref},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+}
+
+func TestWorkerResourceTemplate_DeprecatedRefEmitsWarning(t *testing.T) {
+	ctx := context.Background()
+	v := newValidatorNoAPI()
+
+	wrt := newWRTWithDeprecatedRef("my-hpa", "my-worker", validHPAObject())
+	warnings, err := v.ValidateCreate(ctx, wrt)
+
+	require.NoError(t, err)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "deprecated")
+}
+
+func TestWorkerResourceTemplate_BothRefsRejected(t *testing.T) {
+	ctx := context.Background()
+	v := newValidatorNoAPI()
+
+	raw, _ := json.Marshal(validHPAObject())
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "both-refs", Namespace: "default"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef:         temporaliov1alpha1.WorkerDeploymentReference{Name: "new-worker"},
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "old-worker"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+	_, err := v.ValidateCreate(ctx, wrt)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only one of workerDeploymentRef or temporalWorkerDeploymentRef may be set")
+}
+
+func TestWorkerResourceTemplate_NeitherRefRejected(t *testing.T) {
+	ctx := context.Background()
+	v := newValidatorNoAPI()
+
+	raw, _ := json.Marshal(validHPAObject())
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "no-ref", Namespace: "default"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			Template: runtime.RawExtension{Raw: raw},
+		},
+	}
+	_, err := v.ValidateCreate(ctx, wrt)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workerDeploymentRef must be set")
+}
+
+func TestWorkerResourceTemplate_ValidateUpdate_DeprecatedFieldImmutability(t *testing.T) {
+	tests := map[string]struct {
+		oldObj   *temporaliov1alpha1.WorkerResourceTemplate
+		newObj   *temporaliov1alpha1.WorkerResourceTemplate
+		wantErr  string
+	}{
+		"deprecated→deprecated same name is valid": {
+			oldObj:  newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
+			newObj:  newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
+		},
+		"deprecated→new with same effective name is valid": {
+			oldObj: newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
+			newObj: newWRT("hpa", "worker-a", validHPAObject()),
+		},
+		"deprecated→deprecated name change is forbidden": {
+			oldObj:  newWRTWithDeprecatedRef("hpa", "worker-a", validHPAObject()),
+			newObj:  newWRTWithDeprecatedRef("hpa", "worker-b", validHPAObject()),
+			wantErr: "temporalWorkerDeploymentRef.name is immutable",
+		},
+		"new→deprecated name change is forbidden": {
+			oldObj:  newWRT("hpa", "worker-a", validHPAObject()),
+			newObj:  newWRTWithDeprecatedRef("hpa", "worker-b", validHPAObject()),
+			wantErr: "temporalWorkerDeploymentRef.name is immutable",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			v := newValidatorNoAPI()
+			_, err := v.ValidateUpdate(ctx, tc.oldObj, tc.newObj)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestWorkerResourceTemplate_MultipleErrors(t *testing.T) {

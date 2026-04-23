@@ -4,7 +4,7 @@
 
 package v1alpha1
 
-// Integration tests for CRD-level CEL validation rules on TemporalWorkerDeployment.
+// Integration tests for CRD-level CEL validation rules on WorkerDeployment.
 //
 // These tests hit a real kube-apiserver (via envtest) so they verify that the
 // x-kubernetes-validations blocks in the generated CRD manifest are syntactically
@@ -21,7 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var _ = Describe("TemporalWorkerDeployment CRD CEL validation", func() {
+var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 	var ns string
 
 	BeforeEach(func() {
@@ -29,13 +29,13 @@ var _ = Describe("TemporalWorkerDeployment CRD CEL validation", func() {
 	})
 
 	// baseTWD returns a minimal valid TWD in the given namespace.
-	baseTWD := func(name string) *TemporalWorkerDeployment {
-		return &TemporalWorkerDeployment{
+	baseTWD := func(name string) *WorkerDeployment {
+		return &WorkerDeployment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: ns,
 			},
-			Spec: TemporalWorkerDeploymentSpec{
+			Spec: WorkerDeploymentSpec{
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{Name: "worker", Image: "worker:latest"}},
@@ -43,7 +43,7 @@ var _ = Describe("TemporalWorkerDeployment CRD CEL validation", func() {
 				},
 				RolloutStrategy: RolloutStrategy{Strategy: UpdateAllAtOnce},
 				WorkerOptions: WorkerOptions{
-					TemporalConnectionRef: TemporalConnectionReference{Name: "my-connection"},
+					ConnectionRef: ConnectionReference{Name: "my-connection"},
 					TemporalNamespace:     "default",
 				},
 			},

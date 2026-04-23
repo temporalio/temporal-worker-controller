@@ -48,39 +48,39 @@ func newTestScheme() *runtime.Scheme {
 	return s
 }
 
-// newTestReconciler creates a TemporalWorkerDeploymentReconciler with a fake client and recorder.
-func newTestReconciler(objs []client.Object) (*TemporalWorkerDeploymentReconciler, *record.FakeRecorder) {
+// newTestReconciler creates a WorkerDeploymentReconciler with a fake client and recorder.
+func newTestReconciler(objs []client.Object) (*WorkerDeploymentReconciler, *record.FakeRecorder) {
 	return newTestReconcilerWithInterceptors(objs, interceptor.Funcs{})
 }
 
 // newTestReconcilerWithInterceptors creates a reconciler with a fake client that uses custom interceptors.
-func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.Funcs) (*TemporalWorkerDeploymentReconciler, *record.FakeRecorder) {
+func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.Funcs) (*WorkerDeploymentReconciler, *record.FakeRecorder) {
 	scheme := newTestScheme()
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&temporaliov1alpha1.TemporalWorkerDeployment{}).
+		WithStatusSubresource(&temporaliov1alpha1.WorkerDeployment{}).
 		WithIndex(&appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
 			deploy := rawObj.(*appsv1.Deployment)
 			owner := metav1.GetControllerOf(deploy)
 			if owner == nil {
 				return nil
 			}
-			if owner.APIVersion != temporaliov1alpha1.GroupVersion.String() || owner.Kind != "TemporalWorkerDeployment" {
+			if owner.APIVersion != temporaliov1alpha1.GroupVersion.String() || owner.Kind != "WorkerDeployment" {
 				return nil
 			}
 			return []string{owner.Name}
 		}).
 		WithIndex(&temporaliov1alpha1.WorkerResourceTemplate{}, wrtWorkerRefKey, func(rawObj client.Object) []string {
 			wrt := rawObj.(*temporaliov1alpha1.WorkerResourceTemplate)
-			return []string{wrt.Spec.TemporalWorkerDeploymentRef.Name}
+			return []string{wrt.Spec.EffectiveWorkerDeploymentName()}
 		}).
 		WithInterceptorFuncs(funcs).
 		Build()
 
 	recorder := record.NewFakeRecorder(10)
 
-	r := &TemporalWorkerDeploymentReconciler{
+	r := &WorkerDeploymentReconciler{
 		Client:              fakeClient,
 		Scheme:              scheme,
 		TemporalClientPool:  clientpool.New(nil, fakeClient),
@@ -92,21 +92,21 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 	return r, recorder
 }
 
-// makeTWD creates a minimal TemporalWorkerDeployment for testing.
-func makeTWD(name, namespace, connectionName string) *temporaliov1alpha1.TemporalWorkerDeployment {
+// makeTWD creates a minimal WorkerDeployment for testing.
+func makeTWD(name, namespace, connectionName string) *temporaliov1alpha1.WorkerDeployment {
 	replicas := int32(1)
 	progressDeadline := int32(600)
-	return &temporaliov1alpha1.TemporalWorkerDeployment{
+	return &temporaliov1alpha1.WorkerDeployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: temporaliov1alpha1.GroupVersion.String(),
-			Kind:       "TemporalWorkerDeployment",
+			Kind:       "WorkerDeployment",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Namespace:  namespace,
 			Generation: 1,
 		},
-		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
 			Replicas:                &replicas,
 			ProgressDeadlineSeconds: &progressDeadline,
 			Template: corev1.PodTemplateSpec{
@@ -120,7 +120,7 @@ func makeTWD(name, namespace, connectionName string) *temporaliov1alpha1.Tempora
 				},
 			},
 			WorkerOptions: temporaliov1alpha1.WorkerOptions{
-				TemporalConnectionRef: temporaliov1alpha1.TemporalConnectionReference{
+				ConnectionRef: temporaliov1alpha1.ConnectionReference{
 					Name: connectionName,
 				},
 				TemporalNamespace: testTemporalNamespace,
@@ -136,18 +136,18 @@ func makeTWD(name, namespace, connectionName string) *temporaliov1alpha1.Tempora
 	}
 }
 
-// makeNoCredsTemporalConnection creates a minimal TemporalConnection for testing.
-func makeNoCredsTemporalConnection(name, namespace, hostPort string) *temporaliov1alpha1.TemporalConnection {
-	return &temporaliov1alpha1.TemporalConnection{
+// makeNoCredsConnection creates a minimal Connection for testing.
+func makeNoCredsConnection(name, namespace, hostPort string) *temporaliov1alpha1.Connection {
+	return &temporaliov1alpha1.Connection{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: temporaliov1alpha1.GroupVersion.String(),
-			Kind:       "TemporalConnection",
+			Kind:       "Connection",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+		Spec: temporaliov1alpha1.ConnectionSpec{
 			HostPort: hostPort,
 		},
 	}
@@ -273,7 +273,7 @@ func newStubTemporalClient(execErr error) *stubTemporalClient {
 	}
 }
 
-// noCredsPoolKey returns the ClientPoolKey for a no-credentials TemporalConnection.
+// noCredsPoolKey returns the ClientPoolKey for a no-credentials Connection.
 func noCredsPoolKey(hostPort, temporalNamespace string) clientpool.ClientPoolKey {
 	return clientpool.ClientPoolKey{
 		HostPort:   hostPort,
@@ -333,7 +333,7 @@ func TestSetCondition(t *testing.T) {
 func TestSyncConditions(t *testing.T) {
 	r, _ := newTestReconciler(nil)
 
-	assertCondition := func(t *testing.T, twd *temporaliov1alpha1.TemporalWorkerDeployment, condType string, status metav1.ConditionStatus, reason string) {
+	assertCondition := func(t *testing.T, twd *temporaliov1alpha1.WorkerDeployment, condType string, status metav1.ConditionStatus, reason string) {
 		t.Helper()
 		cond := meta.FindStatusCondition(twd.Status.Conditions, condType)
 		require.NotNil(t, cond, "condition %s should be set", condType)
@@ -349,7 +349,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
+		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
 		assertCondition(t, twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)                     //nolint:staticcheck // backward compat
 	})
 
@@ -361,7 +361,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
+		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
 	})
 
 	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
@@ -372,7 +372,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
+		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
 	})
 
 	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
@@ -383,7 +383,7 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)
 		// Deprecated conditions
-		assertCondition(t, twd, temporaliov1alpha1.ConditionTemporalConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonTemporalConnectionHealthy) //nolint:staticcheck // backward compat
+		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
 	})
 }
 
@@ -412,7 +412,7 @@ func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
 			{RampPercentage: 10, PauseDuration: metav1.Duration{Duration: time.Minute}}, // decreasing — invalid
 		},
 	}
-	tc := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
+	tc := makeNoCredsConnection("my-connection", "default", "localhost:7233")
 	r, recorder := newTestReconciler([]client.Object{twd, tc})
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -425,7 +425,7 @@ func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
 	events := drainEvents(recorder)
 	assertEventEmitted(t, events, temporaliov1alpha1.ReasonInvalidSpec)
 
-	var updated temporaliov1alpha1.TemporalWorkerDeployment
+	var updated temporaliov1alpha1.WorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
 	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
 	require.NotNil(t, cond, "Progressing condition should be set")
@@ -433,9 +433,9 @@ func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
 	assert.Equal(t, temporaliov1alpha1.ReasonInvalidSpec, cond.Reason)
 }
 
-// TestReconcile_TemporalConnectionNotFound covers all three related assertions: event emission,
+// TestReconcile_ConnectionNotFound covers all three related assertions: event emission,
 // event message content, and condition update.
-func TestReconcile_TemporalConnectionNotFound(t *testing.T) {
+func TestReconcile_ConnectionNotFound(t *testing.T) {
 	connName := "nonexistent-connection"
 	twd := makeTWD("test-worker", "default", connName)
 	r, recorder := newTestReconciler([]client.Object{twd})
@@ -447,30 +447,30 @@ func TestReconcile_TemporalConnectionNotFound(t *testing.T) {
 	require.Error(t, err)
 
 	events := drainEvents(recorder)
-	assertEventEmitted(t, events, temporaliov1alpha1.ReasonTemporalConnectionNotFound)
+	assertEventEmitted(t, events, temporaliov1alpha1.ReasonConnectionNotFound)
 	for _, event := range events {
-		if strings.Contains(event, temporaliov1alpha1.ReasonTemporalConnectionNotFound) {
+		if strings.Contains(event, temporaliov1alpha1.ReasonConnectionNotFound) {
 			assert.Contains(t, event, connName, "event message should include the missing connection name")
 			assert.Contains(t, event, "Warning")
 		}
 	}
 
-	var updated temporaliov1alpha1.TemporalWorkerDeployment
+	var updated temporaliov1alpha1.WorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
 	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
 	require.NotNil(t, cond, "Progressing condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
-	assert.Equal(t, temporaliov1alpha1.ReasonTemporalConnectionNotFound, cond.Reason)
+	assert.Equal(t, temporaliov1alpha1.ReasonConnectionNotFound, cond.Reason)
 	assert.Contains(t, cond.Message, connName)
 	// Deprecated condition
-	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
-	require.NotNil(t, connHealthy, "deprecated TemporalConnectionHealthy condition should be set")
+	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
+	require.NotNil(t, connHealthy, "deprecated ConnectionHealthy condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, connHealthy.Status)
 }
 
-// TestReconcile_TemporalConnectionUnhealthy verifies that credential configuration
+// TestReconcile_ConnectionUnhealthy verifies that credential configuration
 // errors (regardless of auth type) emit ReasonAuthSecretInvalid and set the
-// TemporalConnectionHealthy condition to False.
+// ConnectionHealthy condition to False.
 //
 // ReasonAuthSecretInvalid fires for two distinct failure modes:
 //   - resolveAuthSecretName: the secret ref exists but has an empty name (spec validation gap)
@@ -479,17 +479,17 @@ func TestReconcile_TemporalConnectionNotFound(t *testing.T) {
 // ReasonTemporalClientCreationFailed fires only when DialAndUpsertClient fails (network/Temporal
 // error). That path requires a live server and is covered by the integration test
 // conditions-client-creation-failed.
-func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
+func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 	cases := []struct {
 		name           string
-		setupConn      func(*temporaliov1alpha1.TemporalConnection)
+		setupConn      func(*temporaliov1alpha1.Connection)
 		expectedReason string
 	}{
 		{
 			// Secret name is non-empty but the k8s Secret doesn't exist; ParseClientSecret
 			// returns a not-found error, which is reported as AuthSecretInvalid (not ClientCreationFailed).
 			name: "MissingTLSSecret_AuthSecretInvalid",
-			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
+			setupConn: func(tc *temporaliov1alpha1.Connection) {
 				tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: "missing-tls-secret"}
 			},
 			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
@@ -497,7 +497,7 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 		{
 			// Same as above for API key auth.
 			name: "MissingAPIKeySecret_AuthSecretInvalid",
-			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
+			setupConn: func(tc *temporaliov1alpha1.Connection) {
 				tc.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: "missing-api-key-secret"},
 					Key:                  "api-key",
@@ -508,7 +508,7 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 		{
 			// Secret ref is present but name is empty; resolveAuthSecretName returns an error.
 			name: "MalformedTLSSecret_AuthSecretInvalid",
-			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
+			setupConn: func(tc *temporaliov1alpha1.Connection) {
 				tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: ""}
 			},
 			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
@@ -516,7 +516,7 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 		{
 			// Same as above for API key auth.
 			name: "MalformedAPIKeySecret_AuthSecretInvalid",
-			setupConn: func(tc *temporaliov1alpha1.TemporalConnection) {
+			setupConn: func(tc *temporaliov1alpha1.Connection) {
 				tc.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: ""},
 					Key:                  "api-key",
@@ -528,7 +528,7 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			conn := makeNoCredsTemporalConnection("my-connection", "default", "localhost:7233")
+			conn := makeNoCredsConnection("my-connection", "default", "localhost:7233")
 			tc.setupConn(conn)
 			twd := makeTWD("test-worker", conn.Namespace, conn.Name)
 			r, recorder := newTestReconciler([]client.Object{twd, conn})
@@ -540,15 +540,15 @@ func TestReconcile_TemporalConnectionUnhealthy(t *testing.T) {
 			require.Error(t, err)
 			assertEventEmitted(t, drainEvents(recorder), tc.expectedReason)
 
-			var updated temporaliov1alpha1.TemporalWorkerDeployment
+			var updated temporaliov1alpha1.WorkerDeployment
 			require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
 			cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
 			require.NotNil(t, cond)
 			assert.Equal(t, metav1.ConditionFalse, cond.Status)
 			assert.Equal(t, tc.expectedReason, cond.Reason)
 			// Deprecated condition
-			connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
-			require.NotNil(t, connHealthy, "deprecated TemporalConnectionHealthy condition should be set")
+			connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
+			require.NotNil(t, connHealthy, "deprecated ConnectionHealthy condition should be set")
 			assert.Equal(t, metav1.ConditionFalse, connHealthy.Status)
 		})
 	}
@@ -561,7 +561,7 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 	k8sNamespace := "default"
 	hostPort := "localhost:7233"
 
-	tc := makeNoCredsTemporalConnection("my-conn", k8sNamespace, hostPort)
+	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
 
 	listCallCount := 0
@@ -588,15 +588,15 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 	assertEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
 
 	// Verifying that ConditionProgressing=False is set
-	var updated temporaliov1alpha1.TemporalWorkerDeployment
+	var updated temporaliov1alpha1.WorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
 	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
 	require.NotNil(t, cond, "Progressing condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	assert.Equal(t, ReasonPlanGenerationFailed, cond.Reason)
-	// PlanGenerationFailed is not a connection issue — TemporalConnectionHealthy must not be set.
-	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
-	assert.Nil(t, connHealthy, "TemporalConnectionHealthy should not be set for plan generation failures")
+	// PlanGenerationFailed is not a connection issue — ConnectionHealthy must not be set.
+	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
+	assert.Nil(t, connHealthy, "ConnectionHealthy should not be set for plan generation failures")
 }
 
 // TestReconcile_PlanExecutionFailed_EmitsEvent injects a Create failure so that
@@ -606,7 +606,7 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 	k8sNamespace := "default"
 	hostPort := "localhost:7233"
 
-	tc := makeNoCredsTemporalConnection("my-conn", k8sNamespace, hostPort)
+	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
 
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
@@ -630,15 +630,15 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 	require.Error(t, err)
 	assertEventEmitted(t, drainEvents(recorder), ReasonPlanExecutionFailed)
 
-	var updated temporaliov1alpha1.TemporalWorkerDeployment
+	var updated temporaliov1alpha1.WorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
 	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
 	require.NotNil(t, cond, "Progressing condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	assert.Equal(t, ReasonPlanExecutionFailed, cond.Reason)
-	// PlanExecutionFailed is not a connection issue — TemporalConnectionHealthy must not be set.
-	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionTemporalConnectionHealthy) //nolint:staticcheck // backward compat
-	assert.Nil(t, connHealthy, "TemporalConnectionHealthy should not be set for plan execution failures")
+	// PlanExecutionFailed is not a connection issue — ConnectionHealthy must not be set.
+	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
+	assert.Nil(t, connHealthy, "ConnectionHealthy should not be set for plan execution failures")
 }
 
 // TestReconcile_DescribeWorkerDeploymentNotFound verifies that when the gRPC
@@ -648,7 +648,7 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	k8sNamespace := "default"
 	hostPort := "localhost:7233"
 
-	tc := makeNoCredsTemporalConnection("my-conn", k8sNamespace, hostPort)
+	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
 
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{})

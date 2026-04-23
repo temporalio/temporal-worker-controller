@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
+func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 	tests := map[string]struct {
 		obj      runtime.Object
 		errorMsg string
@@ -33,10 +33,10 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 					Name: "test",
 				},
 			},
-			errorMsg: "expected a TemporalWorkerDeployment",
+			errorMsg: "expected a WorkerDeployment",
 		},
 		"ramp value for step <= previous step": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
 					{5, metav1.Duration{Duration: time.Minute}},
@@ -55,7 +55,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
+			webhook := &temporaliov1alpha1.WorkerDeployment{}
 
 			assertAdmission := func(warnings admission.Warnings, err error) {
 				if tc.errorMsg != "" {
@@ -76,7 +76,7 @@ func TestTemporalWorkerDeployment_ValidateCreate(t *testing.T) {
 	}
 }
 
-func TestTemporalWorkerDeployment_ValidateUpdate(t *testing.T) {
+func TestWorkerDeployment_ValidateUpdate(t *testing.T) {
 	tests := map[string]struct {
 		oldObj   runtime.Object
 		newObj   runtime.Object
@@ -91,7 +91,7 @@ func TestTemporalWorkerDeployment_ValidateUpdate(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
+			webhook := &temporaliov1alpha1.WorkerDeployment{}
 
 			warnings, err := webhook.ValidateUpdate(ctx, tc.oldObj, tc.newObj)
 
@@ -108,11 +108,11 @@ func TestTemporalWorkerDeployment_ValidateUpdate(t *testing.T) {
 	}
 }
 
-func TestTemporalWorkerDeployment_ValidateDelete(t *testing.T) {
+func TestWorkerDeployment_ValidateDelete(t *testing.T) {
 	ctx := context.Background()
-	webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
+	webhook := &temporaliov1alpha1.WorkerDeployment{}
 
-	obj := &temporaliov1alpha1.TemporalWorkerDeployment{
+	obj := &temporaliov1alpha1.WorkerDeployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "worker",
 		},
@@ -125,14 +125,14 @@ func TestTemporalWorkerDeployment_ValidateDelete(t *testing.T) {
 	assert.Nil(t, warnings)
 }
 
-func TestTemporalWorkerDeployment_Default(t *testing.T) {
+func TestWorkerDeployment_Default(t *testing.T) {
 	tests := map[string]struct {
 		obj      runtime.Object
-		expected func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment)
+		expected func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment)
 	}{
 		"sets default sunset strategy delays": {
 			obj: testhelpers.MakeTWDWithName("default-sunset-delays", ""),
-			expected: func(t *testing.T, obj *temporaliov1alpha1.TemporalWorkerDeployment) {
+			expected: func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment) {
 				require.NotNil(t, obj.Spec.SunsetStrategy.ScaledownDelay)
 				assert.Equal(t, time.Hour, obj.Spec.SunsetStrategy.ScaledownDelay.Duration)
 				require.NotNil(t, obj.Spec.SunsetStrategy.DeleteDelay)
@@ -144,12 +144,12 @@ func TestTemporalWorkerDeployment_Default(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			webhook := &temporaliov1alpha1.TemporalWorkerDeployment{}
+			webhook := &temporaliov1alpha1.WorkerDeployment{}
 
 			err := webhook.Default(ctx, tc.obj)
 			require.NoError(t, err)
 
-			obj, ok := tc.obj.(*temporaliov1alpha1.TemporalWorkerDeployment)
+			obj, ok := tc.obj.(*temporaliov1alpha1.WorkerDeployment)
 			require.True(t, ok)
 
 			tc.expected(t, obj)

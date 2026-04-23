@@ -101,11 +101,11 @@ func TestIsDeploymentHealthy(t *testing.T) {
 func TestGetDeploymentState(t *testing.T) {
 	ctx := context.Background()
 
-	// Create test TemporalWorkerDeployment owner
-	owner := &temporaliov1alpha1.TemporalWorkerDeployment{
+	// Create test WorkerDeployment owner
+	owner := &temporaliov1alpha1.WorkerDeployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "temporal.io/v1alpha1",
-			Kind:       "TemporalWorkerDeployment",
+			Kind:       "WorkerDeployment",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-worker",
@@ -126,7 +126,7 @@ func TestGetDeploymentState(t *testing.T) {
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: "temporal.io/v1alpha1",
-					Kind:       "TemporalWorkerDeployment",
+					Kind:       "WorkerDeployment",
 					Name:       "test-worker",
 					UID:        "test-owner-uid",
 					Controller: func() *bool { b := true; return &b }(),
@@ -146,7 +146,7 @@ func TestGetDeploymentState(t *testing.T) {
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: "temporal.io/v1alpha1",
-					Kind:       "TemporalWorkerDeployment",
+					Kind:       "WorkerDeployment",
 					Name:       "test-worker",
 					UID:        "test-owner-uid",
 					Controller: func() *bool { b := true; return &b }(),
@@ -163,7 +163,7 @@ func TestGetDeploymentState(t *testing.T) {
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: "temporal.io/v1alpha1",
-					Kind:       "TemporalWorkerDeployment",
+					Kind:       "WorkerDeployment",
 					Name:       "test-worker",
 					UID:        "test-owner-uid",
 					Controller: func() *bool { b := true; return &b }(),
@@ -187,7 +187,7 @@ func TestGetDeploymentState(t *testing.T) {
 			if owner == nil {
 				return nil
 			}
-			if owner.APIVersion != "temporal.io/v1alpha1" || owner.Kind != "TemporalWorkerDeployment" {
+			if owner.APIVersion != "temporal.io/v1alpha1" || owner.Kind != "WorkerDeployment" {
 				return nil
 			}
 			return []string{owner.Name}
@@ -221,14 +221,14 @@ func TestGenerateBuildID(t *testing.T) {
 	digest := "a428de44a9059f31a59237a5881c2d2cffa93757d99026156e4ea544577ab7f3"
 	tests := []struct {
 		name            string
-		generateInputs  func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment)
+		generateInputs  func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment)
 		expectedPrefix  string
 		expectedHashLen int
 		expectEquality  bool // if true, both build ids should be equal
 	}{
 		{
 			name: "same image different pod specs",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				img := "my.test_image"
 				pod1 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "1"}, "")
 				pod2 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "2"}, "")
@@ -243,7 +243,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "same pod specs different TWD spec",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				img := "my.test_image"
 				pod := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, nil, "")
 				twd1 := testhelpers.MakeTWD("", "", 1, pod, nil, nil, nil)
@@ -256,7 +256,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "no containers",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				twd := testhelpers.MakeTWD("", "", 1, testhelpers.MakePodSpec(nil, nil, ""), nil, nil, nil)
 				return twd, nil // only check 1 result, no need to compare
 			},
@@ -266,7 +266,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "empty image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "")
 				return twd, nil // only check 1 result, no need to compare
 			},
@@ -276,7 +276,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "tagged digest image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				taggedDigestImg := "docker.io/library/busybox:latest@sha256:" + digest
 				twd := testhelpers.MakeTWDWithImage("", "", taggedDigestImg)
 				return twd, nil // only check 1 result, no need to compare
@@ -287,7 +287,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "tagged named image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				taggedNamedImg := "docker.io/library/busybox:latest"
 				twd := testhelpers.MakeTWDWithImage("", "", taggedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
@@ -298,7 +298,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "digested image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				digestedImg := "docker.io@sha256:" + digest
 				twd := testhelpers.MakeTWDWithImage("", "", digestedImg)
 				return twd, nil // only check 1 result, no need to compare
@@ -309,7 +309,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "digested named image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				digestedNamedImg := "docker.io/library/busybo@sha256:" + digest
 				twd := testhelpers.MakeTWDWithImage("", "", digestedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
@@ -320,7 +320,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "named image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				namedImg := "docker.io/library/busybox"
 				twd := testhelpers.MakeTWDWithImage("", "", namedImg)
 				return twd, nil // only check 1 result, no need to compare
@@ -331,7 +331,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "illegal chars image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				illegalCharsImg := "this.is.my_weird/image"
 				twd := testhelpers.MakeTWDWithImage("", "", illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
@@ -342,7 +342,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "long image",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				longImg := "ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage" // 101 chars
 				twd := testhelpers.MakeTWDWithImage("", "", longImg)
 				return twd, nil // only check 1 result, no need to compare
@@ -353,7 +353,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "spec buildID override",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "manual-override-v1"
 				return twd, nil
@@ -367,7 +367,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "spec buildID override stability",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				// Two TWDs with DIFFERENT images but SAME buildID
 				twd1 := testhelpers.MakeTWDWithImage("", "", "image-v1")
 				twd1.Spec.WorkerOptions.UnsafeCustomBuildID = "stable-id"
@@ -382,7 +382,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "spec buildID override with long value is truncated",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				// 72 char buildID - should be truncated to 63
 				longBuildID := "this-is-a-very-long-build-id-value-that-exceeds-63-characters-limit"
 				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
@@ -395,7 +395,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "spec buildID override with empty value falls back to hash",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "" // empty UnsafeCustomBuildID
 				return twd, nil
@@ -406,7 +406,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "spec buildID override with only invalid chars falls back to hash",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image2")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "###$$$%%%" // all invalid chars
 				return twd, nil
@@ -417,7 +417,7 @@ func TestGenerateBuildID(t *testing.T) {
 		},
 		{
 			name: "spec buildID override trims leading and trailing separators",
-			generateInputs: func() (*temporaliov1alpha1.TemporalWorkerDeployment, *temporaliov1alpha1.TemporalWorkerDeployment) {
+			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "---my-build-id---" // leading/trailing dashes
 				return twd, nil
@@ -528,13 +528,13 @@ func TestComputeVersionedDeploymentName(t *testing.T) {
 }
 
 func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T) {
-	// Integration test showing the naming pipeline from TemporalWorkerDeployment to final K8s Deployment name
-	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
+	// Integration test showing the naming pipeline from WorkerDeployment to final K8s Deployment name
+	twd := &temporaliov1alpha1.WorkerDeployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "hello-world",
 			Namespace: "demo",
 		},
-		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -547,7 +547,7 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 		},
 	}
 
-	// Test the full pipeline: TemporalWorkerDeployment -> worker deployment name -> versioned deployment name
+	// Test the full pipeline: WorkerDeployment -> worker deployment name -> versioned deployment name
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(twd)
 	buildID := k8s.ComputeBuildID(twd)
 	versionedName := k8s.ComputeVersionedDeploymentName(twd.Name, buildID)
@@ -560,7 +560,7 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 
 // TestNewDeploymentWithPodAnnotations tests that every new pod created has a connection spec hash annotation
 func TestNewDeploymentWithPodAnnotations(t *testing.T) {
-	connection := temporaliov1alpha1.TemporalConnectionSpec{
+	connection := temporaliov1alpha1.ConnectionSpec{
 		HostPort:           "localhost:7233",
 		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-secret"},
 	}
@@ -568,7 +568,7 @@ func TestNewDeploymentWithPodAnnotations(t *testing.T) {
 	deployment := k8s.NewDeploymentWithOwnerRef(
 		&metav1.TypeMeta{},
 		&metav1.ObjectMeta{Name: "test", Namespace: "default"},
-		&temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+		&temporaliov1alpha1.WorkerDeploymentSpec{},
 		"test-deployment",
 		"build123",
 		connection,
@@ -582,7 +582,7 @@ func TestNewDeploymentWithPodAnnotations(t *testing.T) {
 
 func TestComputeConnectionSpecHash(t *testing.T) {
 	t.Run("generates non-empty hash for valid connection spec", func(t *testing.T) {
-		spec := temporaliov1alpha1.TemporalConnectionSpec{
+		spec := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-tls-secret"},
 		}
@@ -593,7 +593,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("returns empty hash when hostport is empty", func(t *testing.T) {
-		spec := temporaliov1alpha1.TemporalConnectionSpec{
+		spec := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "secret"},
 		}
@@ -603,7 +603,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("is deterministic - same input produces same hash", func(t *testing.T) {
-		spec := temporaliov1alpha1.TemporalConnectionSpec{
+		spec := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-secret"},
 		}
@@ -615,11 +615,11 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("different hostports produce different hashes", func(t *testing.T) {
-		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "same-secret"},
 		}
-		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec2 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "different-host:7233",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "same-secret"},
 		}
@@ -631,11 +631,11 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("different mTLS secrets produce different hashes", func(t *testing.T) {
-		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "secret1"},
 		}
-		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec2 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "secret2"},
 		}
@@ -647,11 +647,11 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("empty mTLS secret vs non-empty produce different hashes", func(t *testing.T) {
-		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
 			MutualTLSSecretRef: nil,
 		}
-		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec2 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "some-secret"},
 		}
@@ -664,13 +664,13 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("different API key secrets produce different hashes", func(t *testing.T) {
-		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "secret1"},
 				Key:                  "api-key1"},
 		}
-		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec2 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "secret2"},
@@ -683,11 +683,11 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("empty API key secret vs non-empty produce different hashes", func(t *testing.T) {
-		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:        "localhost:7233",
 			APIKeySecretRef: nil,
 		}
-		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec2 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
@@ -701,13 +701,13 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 	})
 
 	t.Run("same API key secret name produce the same hash", func(t *testing.T) {
-		spec1 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
 				Key:                  "api-key"},
 		}
-		spec2 := temporaliov1alpha1.TemporalConnectionSpec{
+		spec2 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
@@ -826,12 +826,12 @@ func TestComputePodTemplateSpecHash(t *testing.T) {
 
 func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) {
 	tests := map[string]struct {
-		connection        temporaliov1alpha1.TemporalConnectionSpec
+		connection        temporaliov1alpha1.ConnectionSpec
 		expectedEnvVars   map[string]string
 		unexpectedEnvVars []string
 	}{
 		"without mTLS": {
-			connection: temporaliov1alpha1.TemporalConnectionSpec{
+			connection: temporaliov1alpha1.ConnectionSpec{
 				HostPort: "localhost:7233",
 			},
 			expectedEnvVars: map[string]string{
@@ -843,7 +843,7 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 			unexpectedEnvVars: []string{"TEMPORAL_TLS", "TEMPORAL_TLS_CLIENT_KEY_PATH", "TEMPORAL_TLS_CLIENT_CERT_PATH"},
 		},
 		"with mTLS": {
-			connection: temporaliov1alpha1.TemporalConnectionSpec{
+			connection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           "mtls.localhost:7233",
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-tls-secret"},
 			},
@@ -862,7 +862,7 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
@@ -970,24 +970,24 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	// Test that the environment variables injected by the controller
 	// can be parsed by the official Temporal SDK envconfig package
 	tests := map[string]struct {
-		connection temporaliov1alpha1.TemporalConnectionSpec
+		connection temporaliov1alpha1.ConnectionSpec
 		namespace  string
 	}{
 		"without TLS": {
-			connection: temporaliov1alpha1.TemporalConnectionSpec{
+			connection: temporaliov1alpha1.ConnectionSpec{
 				HostPort: "test.temporal.example:9999",
 			},
 			namespace: "test-namespace-no-tls",
 		},
 		"with TLS": {
-			connection: temporaliov1alpha1.TemporalConnectionSpec{
+			connection: temporaliov1alpha1.ConnectionSpec{
 				HostPort:           "mtls.temporal.example:8888",
 				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: "test-tls-secret"},
 			},
 			namespace: "test-namespace-with-tls",
 		},
 		"with API key": {
-			connection: temporaliov1alpha1.TemporalConnectionSpec{
+			connection: temporaliov1alpha1.ConnectionSpec{
 				HostPort: "test.temporal.example:9999",
 				APIKeySecretRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: "test-api-key-secret"},
@@ -999,7 +999,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			spec := &temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{

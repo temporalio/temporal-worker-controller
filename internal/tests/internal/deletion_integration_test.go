@@ -1,14 +1,14 @@
 package internal
 
-// Tests that deleting a TemporalWorkerDeployment CRD correctly cleans up
+// Tests that deleting a WorkerDeployment CRD correctly cleans up
 // Temporal server-side versioning data and handles edge cases like the
-// TemporalConnection being deleted simultaneously by Helm.
+// Connection being deleted simultaneously by Helm.
 //
 // Covered:
 //   - TWD deletion sets current version to unversioned on Temporal server
-//   - TWD deletion removes finalizer from TemporalConnection when no other TWDs reference it
+//   - TWD deletion removes finalizer from Connection when no other TWDs reference it
 //   - TWD is fully deleted from K8s after cleanup (finalizer removed)
-//   - TWD deletion with TemporalConnection deleted simultaneously (Helm race condition) still succeeds
+//   - TWD deletion with Connection deleted simultaneously (Helm race condition) still succeeds
 
 import (
 	"context"
@@ -64,7 +64,7 @@ func testDeletionSetsCurrentToUnversioned(
 	// Build a TWD using the standard builder pattern
 	tc := testhelpers.NewTestCase().
 		WithInput(
-			testhelpers.NewTemporalWorkerDeploymentBuilder().
+			testhelpers.NewWorkerDeploymentBuilder().
 				WithAllAtOnceStrategy().
 				WithTargetTemplate("v1.0"),
 		).
@@ -77,18 +77,18 @@ func testDeletionSetsCurrentToUnversioned(
 
 	twd := tc.GetTWD()
 
-	// Create a TemporalConnection
-	temporalConnection := &temporaliov1alpha1.TemporalConnection{
+	// Create a Connection
+	temporalConnection := &temporaliov1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
+			Name:      twd.Spec.WorkerOptions.ConnectionRef.Name,
 			Namespace: namespace,
 		},
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+		Spec: temporaliov1alpha1.ConnectionSpec{
 			HostPort: ts.GetFrontendHostPort(),
 		},
 	}
 	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to create TemporalConnection: %v", err)
+		t.Fatalf("failed to create Connection: %v", err)
 	}
 
 	// Create the TWD
@@ -133,7 +133,7 @@ func testDeletionSetsCurrentToUnversioned(
 	t.Log("TWD is reconciled with a current version set")
 
 	// Verify the TWD has our finalizer
-	var twdBeforeDelete temporaliov1alpha1.TemporalWorkerDeployment
+	var twdBeforeDelete temporaliov1alpha1.WorkerDeployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdBeforeDelete); err != nil {
 		t.Fatalf("failed to get TWD: %v", err)
 	}
@@ -149,14 +149,14 @@ func testDeletionSetsCurrentToUnversioned(
 	}
 
 	// Delete the TWD
-	t.Log("Deleting the TemporalWorkerDeployment")
+	t.Log("Deleting the WorkerDeployment")
 	if err := k8sClient.Delete(ctx, &twdBeforeDelete); err != nil {
 		t.Fatalf("failed to delete TWD: %v", err)
 	}
 
 	// Verify the TWD is eventually deleted (finalizer ran and was removed)
 	eventually(t, 60*time.Second, 2*time.Second, func() error {
-		var check temporaliov1alpha1.TemporalWorkerDeployment
+		var check temporaliov1alpha1.WorkerDeployment
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &check)
 		if err != nil {
 			return nil // not found = deleted
@@ -188,7 +188,7 @@ func testDeletionSetsCurrentToUnversioned(
 }
 
 // testDeletionRemovesConnectionFinalizer verifies that when a TWD is deleted,
-// the controller removes its finalizer from the TemporalConnection, allowing
+// the controller removes its finalizer from the Connection, allowing
 // the connection to be deleted by K8s. This tests the Helm race condition fix.
 func testDeletionRemovesConnectionFinalizer(
 	t *testing.T,
@@ -203,7 +203,7 @@ func testDeletionRemovesConnectionFinalizer(
 	// Build a TWD with manual strategy (simpler, no need to reach current version)
 	tc := testhelpers.NewTestCase().
 		WithInput(
-			testhelpers.NewTemporalWorkerDeploymentBuilder().
+			testhelpers.NewWorkerDeploymentBuilder().
 				WithManualStrategy().
 				WithTargetTemplate("v1.0"),
 		).
@@ -215,18 +215,18 @@ func testDeletionRemovesConnectionFinalizer(
 
 	twd := tc.GetTWD()
 
-	// Create a TemporalConnection
-	temporalConnection := &temporaliov1alpha1.TemporalConnection{
+	// Create a Connection
+	temporalConnection := &temporaliov1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
+			Name:      twd.Spec.WorkerOptions.ConnectionRef.Name,
 			Namespace: namespace,
 		},
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+		Spec: temporaliov1alpha1.ConnectionSpec{
 			HostPort: ts.GetFrontendHostPort(),
 		},
 	}
 	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to create TemporalConnection: %v", err)
+		t.Fatalf("failed to create Connection: %v", err)
 	}
 
 	// Create the TWD
@@ -234,9 +234,9 @@ func testDeletionRemovesConnectionFinalizer(
 		t.Fatalf("failed to create TWD: %v", err)
 	}
 
-	// Wait for the finalizer to be added to both TWD and TemporalConnection
+	// Wait for the finalizer to be added to both TWD and Connection
 	eventually(t, 30*time.Second, time.Second, func() error {
-		var check temporaliov1alpha1.TemporalWorkerDeployment
+		var check temporaliov1alpha1.WorkerDeployment
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &check); err != nil {
 			return err
 		}
@@ -249,7 +249,7 @@ func testDeletionRemovesConnectionFinalizer(
 	})
 
 	eventually(t, 30*time.Second, time.Second, func() error {
-		var check temporaliov1alpha1.TemporalConnection
+		var check temporaliov1alpha1.Connection
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: temporalConnection.Name, Namespace: namespace}, &check); err != nil {
 			return err
 		}
@@ -258,30 +258,30 @@ func testDeletionRemovesConnectionFinalizer(
 				return nil
 			}
 		}
-		return fmt.Errorf("TemporalConnection finalizer %q not yet added", deletionFinalizerName)
+		return fmt.Errorf("Connection finalizer %q not yet added", deletionFinalizerName)
 	})
 	t.Log("Both finalizers are in place")
 
 	// Simulate Helm deleting both resources simultaneously by deleting the
-	// TemporalConnection first, then the TWD. The connection should be blocked
+	// Connection first, then the TWD. The connection should be blocked
 	// by the finalizer until the TWD cleanup removes it.
 	if err := k8sClient.Delete(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to delete TemporalConnection: %v", err)
+		t.Fatalf("failed to delete Connection: %v", err)
 	}
-	t.Log("TemporalConnection deletion requested (blocked by finalizer)")
+	t.Log("Connection deletion requested (blocked by finalizer)")
 
 	// Verify the connection is NOT yet deleted (finalizer holds it)
-	var connCheck temporaliov1alpha1.TemporalConnection
+	var connCheck temporaliov1alpha1.Connection
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: temporalConnection.Name, Namespace: namespace}, &connCheck); err != nil {
-		t.Fatalf("TemporalConnection should still exist (held by finalizer), but got: %v", err)
+		t.Fatalf("Connection should still exist (held by finalizer), but got: %v", err)
 	}
 	if connCheck.DeletionTimestamp.IsZero() {
-		t.Fatal("TemporalConnection should have DeletionTimestamp set")
+		t.Fatal("Connection should have DeletionTimestamp set")
 	}
-	t.Log("Verified: TemporalConnection is in Terminating state (held by finalizer)")
+	t.Log("Verified: Connection is in Terminating state (held by finalizer)")
 
 	// Now delete the TWD
-	var latestTwd temporaliov1alpha1.TemporalWorkerDeployment
+	var latestTwd temporaliov1alpha1.WorkerDeployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &latestTwd); err != nil {
 		t.Fatalf("failed to get TWD: %v", err)
 	}
@@ -291,7 +291,7 @@ func testDeletionRemovesConnectionFinalizer(
 
 	// Verify the TWD is eventually deleted
 	eventually(t, 60*time.Second, 2*time.Second, func() error {
-		var check temporaliov1alpha1.TemporalWorkerDeployment
+		var check temporaliov1alpha1.WorkerDeployment
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &check)
 		if err != nil {
 			return nil // deleted
@@ -300,15 +300,15 @@ func testDeletionRemovesConnectionFinalizer(
 	})
 	t.Log("TWD deleted successfully")
 
-	// Verify the TemporalConnection is also eventually deleted
+	// Verify the Connection is also eventually deleted
 	// (controller removed the finalizer during TWD cleanup, K8s can now delete it)
 	eventually(t, 60*time.Second, 2*time.Second, func() error {
-		var check temporaliov1alpha1.TemporalConnection
+		var check temporaliov1alpha1.Connection
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: temporalConnection.Name, Namespace: namespace}, &check)
 		if err != nil {
 			return nil // deleted
 		}
-		return errors.New("TemporalConnection still exists after TWD cleanup")
+		return errors.New("Connection still exists after TWD cleanup")
 	})
-	t.Log("TemporalConnection deleted successfully (finalizer was removed by TWD cleanup)")
+	t.Log("Connection deleted successfully (finalizer was removed by TWD cleanup)")
 }
