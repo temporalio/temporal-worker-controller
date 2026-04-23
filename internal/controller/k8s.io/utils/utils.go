@@ -22,37 +22,13 @@ package utils
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
-	"hash"
 	"hash/fnv"
 
-	"github.com/davecgh/go-spew/spew"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 )
-
-// The config MUST NOT be changed because that could change the result of a hash operation
-var prettyPrintConfigForHash = &spew.ConfigState{
-	Indent:                  " ",
-	SortKeys:                true,
-	DisableMethods:          true,
-	SpewKeys:                true,
-	DisablePointerAddresses: true,
-	DisableCapacities:       true,
-}
-
-// dumpForHash keeps the original Spew.Sprintf format to ensure the same checksum
-func dumpForHash(a interface{}) string {
-	return prettyPrintConfigForHash.Sprintf("%#v", a)
-}
-
-// deepHashObject writes specified object to hash using the spew library
-// which follows pointers and prints actual values of the nested objects
-// ensuring the hash does not change when a pointer changes.
-func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
-	hasher.Reset()
-	fmt.Fprintf(hasher, "%v", dumpForHash(objectToWrite))
-}
 
 // ComputeHash returns a hash value calculated from pod template and
 // a collisionCount to avoid hash collision. The hash will be safe encoded to
@@ -62,7 +38,10 @@ func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
 // Copied from https://github.com/kubernetes/kubernetes/blob/86fec81606b579cc478a30656c29ddb400a72dc6/pkg/controller/controller_utils.go#L1174
 func ComputeHash(template *corev1.PodTemplateSpec, collisionCount *int32, short bool) string {
 	podTemplateSpecHasher := fnv.New32a()
-	deepHashObject(podTemplateSpecHasher, *template)
+	// json.Marshal on corev1.PodTemplateSpec never returns an error; omitempty keeps
+	// the output stable across k8s API upgrades that only add optional fields.
+	data, _ := json.Marshal(*template)
+	_, _ = podTemplateSpecHasher.Write(data)
 
 	// Add collisionCount in the hash if it exists.
 	if collisionCount != nil {
