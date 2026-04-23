@@ -135,6 +135,12 @@ const (
 	// controller cannot query the current worker deployment state from Temporal.
 	ReasonTemporalStateFetchFailed = "TemporalStateFetchFailed"
 
+	// ReasonInvalidSpec is set on ConditionReady=False and ConditionProgressing=False
+	// when the spec fails validation that the CRD schema cannot enforce (e.g. rampPercentage
+	// ordering, gate input/inputFrom exclusivity). Reconciliation resumes automatically
+	// when the user corrects the spec and applies it.
+	ReasonInvalidSpec = "InvalidSpec"
+
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
 	ReasonTemporalConnectionHealthy = "TemporalConnectionHealthy"
 )
@@ -379,6 +385,8 @@ type GateInputSource struct {
 }
 
 // RolloutStrategy defines strategy to apply during next rollout
+// +kubebuilder:validation:XValidation:rule="self.strategy != 'Progressive' || (has(self.steps) && size(self.steps) > 0)",message="steps are required for Progressive rollout"
+// +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef) != has(self.gate.inputFrom.secretKeyRef))",message="exactly one of configMapKeyRef or secretKeyRef must be set"
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
 	// Valid values are:
@@ -393,6 +401,7 @@ type RolloutStrategy struct {
 
 	// Steps to execute progressive rollouts. Only required when strategy is "Progressive".
 	// +optional
+	// +kubebuilder:validation:MaxItems=20
 	Steps []RolloutStep `json:"steps,omitempty" protobuf:"bytes,3,rep,name=steps"`
 }
 
@@ -413,6 +422,7 @@ type SunsetStrategy struct {
 
 type AllAtOnceRolloutStrategy struct{}
 
+// +kubebuilder:validation:XValidation:rule="duration(self.pauseDuration) >= duration('30s')",message="pause duration must be at least 30s"
 type RolloutStep struct {
 	// RampPercentage indicates what percentage of new workflow executions should be
 	// routed to the new worker deployment version while this step is active.
@@ -436,6 +446,7 @@ type ManualRolloutStrategy struct{}
 //+kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetVersion.buildID",description="Target build ID"
 //+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
+// +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="name cannot be more than 63 characters"
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API
 type TemporalWorkerDeployment struct {
