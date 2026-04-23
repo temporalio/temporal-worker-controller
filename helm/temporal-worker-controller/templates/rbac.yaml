@@ -63,6 +63,14 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-role
 rules:
+  # GENERATED RULES BEGIN - do not edit; run 'make manifests' to update
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
   - apiGroups:
       - ""
     resources:
@@ -89,6 +97,12 @@ rules:
       - deployments/scale
     verbs:
       - update
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
   - apiGroups:
       - temporal.io
     resources:
@@ -119,6 +133,7 @@ rules:
       - temporal.io
     resources:
       - temporalworkerdeployments/status
+      - workerresourcetemplates/status
     verbs:
       - get
       - patch
@@ -130,30 +145,10 @@ rules:
     verbs:
       - get
       - list
+      - patch
+      - update
       - watch
-      - patch
-      - update
-  - apiGroups:
-      - temporal.io
-    resources:
-      - workerresourcetemplates/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - ""
-    resources:
-      - events
-    verbs:
-      - create
-      - patch
-  - apiGroups:
-      - authorization.k8s.io
-    resources:
-      - subjectaccessreviews
-    verbs:
-      - create
+  # GENERATED RULES END
   # Rules for managing resources attached via WorkerResourceTemplate.
   # Driven entirely by workerResourceTemplate.allowedResources in values.yaml.
   {{- range .Values.workerResourceTemplate.allowedResources }}
