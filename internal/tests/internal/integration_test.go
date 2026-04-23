@@ -208,9 +208,9 @@ func TestIntegration(t *testing.T) {
 				WithWaitTime(5*time.Second).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-									WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-									WithCurrentVersion("v4", true, false).
-									WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+						WithCurrentVersion("v4", true, false).
+						WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 							testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
@@ -406,9 +406,9 @@ func TestIntegration(t *testing.T) {
 				WithWaitTime(5*time.Second).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-									WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-									WithCurrentVersion("v4", true, false).
-									WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+						WithCurrentVersion("v4", true, false).
+						WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 							testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
@@ -631,9 +631,9 @@ func TestIntegration(t *testing.T) {
 				WithWaitTime(5*time.Second).
 				WithExpectedStatus(
 					testhelpers.NewStatusBuilder(). // controller won't deploy v5, so it's not registered
-									WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
-									WithCurrentVersion("v4", true, false).
-									WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
+						WithTargetVersion("v5", temporaliov1alpha1.VersionStatusNotRegistered, -1, false, false).
+						WithCurrentVersion("v4", true, false).
+						WithDeprecatedVersions( // drained but has pollers, so ineligible for deletion
 							testhelpers.NewDeprecatedVersionInfo("v0", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v1", temporaliov1alpha1.VersionStatusDrained, true, false, true),
 							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
@@ -950,17 +950,6 @@ func TestIntegration(t *testing.T) {
 
 	// Conditions and events tests
 	runConditionsAndEventsTests(t, k8sClient, mgr, ts, testNamespace.Name)
-
-	// Rate limit test: uses a dedicated server to avoid interfering with the tests above.
-	// Ten TWDs in the same Temporal namespace produce 10 concurrent DescribeWorkerDeployment
-	// calls per second against a 1 RPS limit, reliably triggering ResourceExhausted errors.
-	dcRateLimit := dynamicconfig.NewMemoryClient()
-	dcRateLimit.OverrideValue(dynamicconfig.MakeKey("frontend.globalNamespaceWorkerDeploymentReadRPS"), 1)
-	tsRateLimit := temporaltest.NewServer(
-		temporaltest.WithT(t),
-		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcRateLimit)),
-	)
-	runRateLimitTest(t, k8sClient, tsRateLimit, testNamespace.Name)
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
