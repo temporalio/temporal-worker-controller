@@ -38,7 +38,6 @@ func TestIntegration(t *testing.T) {
 	dc.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusVisibilityGracePeriod"), testDrainageVisibilityGracePeriod)
 	dc.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusRefreshInterval"), testDrainageRefreshInterval)
 	dc.OverrideValue(dynamicconfig.MakeKey("matching.maxVersionsInDeployment"), testMaxVersionsInDeployment)
-	dc.OverrideValue(dynamicconfig.MakeKey("frontend.globalNamespaceWorkerDeploymentReadRPS"), 1)
 	dc.OverrideValue(dynamicconfig.MakeKey("history.enableVersionReactivationSignals"), false)
 	ts := temporaltest.NewServer(
 		temporaltest.WithT(t),
