@@ -44,17 +44,16 @@ spec:
               template:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
-              temporalWorkerDeploymentRef:
-                properties:
-                  name:
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                    type: string
-                required:
-                - name
+              workerDeploymentRef:
+                description: References the WorkerDeployment to attach this resource to.
                 type: object
+                x-kubernetes-preserve-unknown-fields: true
+              temporalWorkerDeploymentRef:
+                description: Deprecated. Use workerDeploymentRef instead.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
             required:
             - template
-            - temporalWorkerDeploymentRef
             type: object
           status:
             properties:

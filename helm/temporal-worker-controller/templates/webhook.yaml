@@ -50,12 +50,11 @@ webhooks:
     sideEffects: None
 {{- if .Values.webhook.enabled }}
 ---
-# ValidatingWebhookConfiguration for TemporalWorkerDeployment.
-# Optional — controlled by webhook.enabled in values.yaml.
+# MutatingWebhookConfiguration for WorkerDeployment (sets defaults).
 apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
+kind: MutatingWebhookConfiguration
 metadata:
-  name: {{ .Release.Name }}-twd-validating-webhook-configuration
+  name: {{ .Release.Name }}-wd-mutating-webhook-configuration
   labels:
     app.kubernetes.io/component: webhook
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
@@ -64,7 +63,7 @@ metadata:
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ .Release.Name }}-serving-cert
   {{- end }}
 webhooks:
-  - name: vtemporalworkerdeployment.kb.io
+  - name: mworkerdeployment.kb.io
     admissionReviewVersions: ["v1"]
     clientConfig:
       {{- if and (not .Values.certmanager.enabled) .Values.certmanager.caBundle }}
@@ -73,12 +72,43 @@ webhooks:
       service:
         name: {{ .Release.Name }}-webhook-service
         namespace: {{ .Release.Namespace }}
-        path: /validate-temporal-io-temporal-io-v1alpha1-temporalworkerdeployment
+        path: /mutate-temporal-io-v1alpha1-workerdeployment
     failurePolicy: Fail
     rules:
       - apiGroups: ["temporal.io"]
         apiVersions: ["v1alpha1"]
         operations: ["CREATE", "UPDATE"]
-        resources: ["temporalworkerdeployments"]
+        resources: ["workerdeployments"]
+    sideEffects: None
+---
+# ValidatingWebhookConfiguration for WorkerDeployment.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ .Release.Name }}-wd-validating-webhook-configuration
+  labels:
+    app.kubernetes.io/component: webhook
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  {{- if .Values.certmanager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ .Release.Name }}-serving-cert
+  {{- end }}
+webhooks:
+  - name: vworkerdeployment.kb.io
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      {{- if and (not .Values.certmanager.enabled) .Values.certmanager.caBundle }}
+      caBundle: {{ .Values.certmanager.caBundle }}
+      {{- end }}
+      service:
+        name: {{ .Release.Name }}-webhook-service
+        namespace: {{ .Release.Namespace }}
+        path: /validate-temporal-io-v1alpha1-workerdeployment
+    failurePolicy: Fail
+    rules:
+      - apiGroups: ["temporal.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["workerdeployments"]
     sideEffects: None
 {{- end }}

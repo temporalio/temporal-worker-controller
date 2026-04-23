@@ -17,10 +17,6 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Temporal server endpoint
-      jsonPath: .spec.hostPort
-      name: Host
-      type: string
     - description: Age
       jsonPath: .metadata.creationTimestamp
       name: Age
@@ -28,6 +24,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |-
+          TemporalConnection is deprecated. Use Connection instead.
+          New creates are rejected by the validation rule below (requires k8s >= 1.27).
         properties:
           apiVersion:
             type: string
@@ -36,40 +35,46 @@ spec:
           metadata:
             type: object
           spec:
-            properties:
-              apiKeySecretRef:
-                properties:
-                  key:
-                    type: string
-                  name:
-                    default: ""
-                    type: string
-                  optional:
-                    type: boolean
-                required:
-                - key
-                type: object
-                x-kubernetes-map-type: atomic
-              hostPort:
-                pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
-                type: string
-              mutualTLSSecretRef:
-                properties:
-                  name:
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                    type: string
-                required:
-                - name
-                type: object
-            required:
-            - hostPort
-            type: object
-            x-kubernetes-validations:
-            - message: Only one of mutualTLSSecretRef or apiKeySecretRef may be set
-              rule: '!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))'
+            description: Spec is preserved as-is for backward compatibility.
+            x-kubernetes-preserve-unknown-fields: true
           status:
+            description: Status reflects the migration state.
+            properties:
+              conditions:
+                items:
+                  description: Condition from the Kubernetes meta/v1 API.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: TemporalConnection is deprecated and no longer supported. Create
+            a Connection instead.
+          rule: oldSelf != null
     served: true
     storage: true
     subresources:
