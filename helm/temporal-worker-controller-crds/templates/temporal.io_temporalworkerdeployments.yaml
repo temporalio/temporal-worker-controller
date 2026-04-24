@@ -111,6 +111,10 @@ spec:
                       - pauseDuration
                       - rampPercentage
                       type: object
+                      x-kubernetes-validations:
+                      - message: pause duration must be at least 30s
+                        rule: duration(self.pauseDuration) >= duration('30s')
+                    maxItems: 20
                     type: array
                   strategy:
                     enum:
@@ -121,6 +125,14 @@ spec:
                 required:
                 - strategy
                 type: object
+                x-kubernetes-validations:
+                - message: steps are required for Progressive rollout
+                  rule: self.strategy != 'Progressive' || (has(self.steps) && size(self.steps)
+                    > 0)
+                - message: exactly one of configMapKeyRef or secretKeyRef must be
+                    set
+                  rule: '!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef)
+                    != has(self.gate.inputFrom.secretKeyRef))'
               sunset:
                 properties:
                   deleteDelay:
@@ -4180,6 +4192,9 @@ spec:
             - targetVersion
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: name cannot be more than 63 characters
+          rule: size(self.metadata.name) <= 63
     served: true
     storage: true
     subresources:
