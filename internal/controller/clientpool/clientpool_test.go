@@ -270,26 +270,27 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 
 // ─── Tests: ParseClientSecret ─────────────────────────────────────────────────
 
-// TestParseClientSecret_WrongSecretType verifies that presenting a secret of the wrong type
-// (Opaque when TLS is expected) returns an error. This exercises the type-check switch in
-// ParseClientSecret without a real k8s cluster by calling the internal dispatch directly.
-func TestParseClientSecret_WrongSecretType(t *testing.T) {
+// TestParseClientSecret_OpaqueSecretType verifies that an Opaque secret containing tls.crt
+// and tls.key is accepted for mTLS auth. This is the regression test for the fix that
+// relaxed the type check in ParseClientSecret to accept both kubernetes.io/tls and Opaque.
+func TestParseClientSecret_OpaqueSecretType(t *testing.T) {
 	now := time.Now()
 	caCert, caKey, _ := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 
-	wrongTypeSecret := corev1.Secret{
+	opaqueSecret := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "tls-secret", Namespace: "test-ns"},
-		Type:       corev1.SecretTypeOpaque, // wrong type for TLS auth
+		Type:       corev1.SecretTypeOpaque,
 		Data:       map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM},
 	}
 
-	// Replicate the type-check logic from ParseClientSecret directly to verify the error path.
-	// (ParseClientSecret fetches from k8s first; we test the subsequent type check in isolation.)
-	if wrongTypeSecret.Type != corev1.SecretTypeTLS {
-		require.NotEqual(t, corev1.SecretTypeTLS, wrongTypeSecret.Type,
-			"secret with wrong type should be rejected before any auth parsing")
-	}
+	cp := newTestPool()
+	_, key, auth, err := cp.fetchClientUsingMTLSSecret(opaqueSecret, makeOpts("localhost:7233"))
+
+	require.NoError(t, err, "Opaque secret with tls.crt and tls.key should be accepted for mTLS auth")
+	assert.Equal(t, AuthModeTLS, key.AuthMode)
+	assert.Equal(t, AuthModeTLS, auth.mode)
+	assert.NotNil(t, auth.mTLS)
 }
 
 // ─── Tests: DialAndUpsertClient ───────────────────────────────────────────────
