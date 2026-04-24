@@ -79,6 +79,17 @@ func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	}
 }
 
+// EvictClient removes the client for the given key from the pool and closes it.
+// Safe to call when the key is not present.
+func (cp *ClientPool) EvictClient(key ClientPoolKey) {
+	cp.mux.Lock()
+	defer cp.mux.Unlock()
+	if info, ok := cp.clients[key]; ok {
+		info.client.Close()
+		delete(cp.clients, key)
+	}
+}
+
 func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 	cp.mux.RLock()
 	defer cp.mux.RUnlock()

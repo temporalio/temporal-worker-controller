@@ -126,6 +126,7 @@ type mockSDKClient struct {
 
 	// Used to verify that CheckHealth is not called when API Key auth is used.
 	checkHealthCalled bool
+	closed            bool
 }
 
 func (m *mockSDKClient) CheckHealth(_ context.Context, _ *sdkclient.CheckHealthRequest) (*sdkclient.CheckHealthResponse, error) {
@@ -133,7 +134,7 @@ func (m *mockSDKClient) CheckHealth(_ context.Context, _ *sdkclient.CheckHealthR
 	return &sdkclient.CheckHealthResponse{}, nil
 }
 
-func (m *mockSDKClient) Close() {}
+func (m *mockSDKClient) Close() { m.closed = true }
 
 // ─── Tests: fetchClientUsingMTLSSecret ────────────────────────────────────────
 
@@ -353,6 +354,36 @@ func TestDialAndUpsert_NoCredsCallsCheckHealth(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 	assert.True(t, mock.checkHealthCalled, "CheckHealth must be called for no-credentials auth")
+}
+
+// ─── Tests: EvictClient ───────────────────────────────────────────────────────
+
+func TestEvictClient_RemovesAndClosesClient(t *testing.T) {
+	cp := newTestPool()
+	key := ClientPoolKey{
+		HostPort:   "localhost:7233",
+		Namespace:  "default",
+		SecretName: "my-secret",
+		AuthMode:   AuthModeAPIKey,
+	}
+	mock := &mockSDKClient{}
+	cp.SetClientForTesting(key, mock)
+
+	_, ok := cp.GetSDKClient(key)
+	require.True(t, ok, "client should be present before eviction")
+
+	cp.EvictClient(key)
+
+	assert.True(t, mock.closed, "Close should be called on eviction")
+	_, ok = cp.GetSDKClient(key)
+	assert.False(t, ok, "client should be absent after eviction")
+}
+
+func TestEvictClient_NoopWhenKeyAbsent(t *testing.T) {
+	cp := newTestPool()
+	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: AuthModeNoCredentials}
+	// Should not panic when key is not in the pool
+	cp.EvictClient(key)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
