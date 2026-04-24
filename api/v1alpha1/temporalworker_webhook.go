@@ -7,7 +7,6 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -17,10 +16,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-)
-
-const (
-	maxTemporalWorkerDeploymentNameLen = 63
 )
 
 func (r *TemporalWorkerDeployment) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -85,71 +80,37 @@ func (r *TemporalWorkerDeployment) validateForUpdateOrCreate(ctx context.Context
 }
 
 func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Warnings, error) {
-	var allErrs field.ErrorList
-
-	if len(new.GetName()) > maxTemporalWorkerDeploymentNameLen {
-		allErrs = append(allErrs,
-			field.Invalid(field.NewPath("metadata.name"), new.GetName(), fmt.Sprintf("cannot be more than %d characters", maxTemporalWorkerDeploymentNameLen)),
-		)
-	}
-
-	allErrs = append(allErrs, validateRolloutStrategy(new.Spec.RolloutStrategy)...)
-
+	allErrs := validateRolloutStrategy(new.Spec.RolloutStrategy)
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(new, allErrs)
 	}
-
 	return nil, nil
 }
 
+// validateRolloutStrategy checks constraints that the CRD schema cannot enforce:
+// rampPercentage must be strictly increasing across steps, and gate.input and
+// gate.inputFrom are mutually exclusive (gate.input is an unstructured JSON field
+// invisible to CEL). All other rollout constraints are enforced by the CRD CEL rules.
 func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 	var allErrs []*field.Error
 
 	if s.Strategy == UpdateProgressive {
-		rolloutSteps := s.Steps
-		if len(rolloutSteps) == 0 {
-			allErrs = append(allErrs,
-				field.Invalid(field.NewPath("spec.rollout.steps"), rolloutSteps, "steps are required for Progressive rollout"),
-			)
-		}
 		var lastRamp int
-		for i, s := range rolloutSteps {
-			// Check duration >= 30s
-			if s.PauseDuration.Duration < 30*time.Second {
+		for i, step := range s.Steps {
+			if step.RampPercentage <= lastRamp {
 				allErrs = append(allErrs,
-					field.Invalid(field.NewPath(fmt.Sprintf("spec.rollout.steps[%d].pauseDuration", i)), s.PauseDuration.Duration.String(), "pause duration must be at least 30s"),
+					field.Invalid(field.NewPath(fmt.Sprintf("spec.rollout.steps[%d].rampPercentage", i)), step.RampPercentage, "rampPercentage must increase between each step"),
 				)
 			}
-
-			// Check ramp value greater than last
-			if s.RampPercentage <= lastRamp {
-				allErrs = append(allErrs,
-					field.Invalid(field.NewPath(fmt.Sprintf("spec.rollout.steps[%d].rampPercentage", i)), s.RampPercentage, "rampPercentage must increase between each step"),
-				)
-			}
-			lastRamp = s.RampPercentage
+			lastRamp = step.RampPercentage
 		}
 	}
 
-	// Validate gate input fields
-	if s.Gate != nil {
-		gate := s.Gate
-		if gate.Input != nil && gate.InputFrom != nil {
-			allErrs = append(allErrs,
-				field.Invalid(field.NewPath("spec.rollout.gate"), "input & inputFrom",
-					"only one of input or inputFrom may be set"),
-			)
-		}
-		if gate.InputFrom != nil {
-			cm := gate.InputFrom.ConfigMapKeyRef
-			sec := gate.InputFrom.SecretKeyRef
-			if (cm == nil && sec == nil) || (cm != nil && sec != nil) {
-				allErrs = append(allErrs,
-					field.Invalid(field.NewPath("spec.rollout.gate.inputFrom"), gate.InputFrom,
-						"exactly one of configMapKeyRef or secretKeyRef must be set"),
-				)
-			}
-		}
+	if s.Gate != nil && s.Gate.Input != nil && s.Gate.InputFrom != nil {
+		allErrs = append(allErrs,
+			field.Invalid(field.NewPath("spec.rollout.gate"), "input & inputFrom",
+				"only one of input or inputFrom may be set"),
+		)
 	}
 
 	return allErrs

@@ -96,14 +96,17 @@ type TemporalWorkerDeploymentReconciler struct {
 	MaxDeploymentVersionsIneligibleForDeletion int32
 }
 
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
-//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
-//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
-// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=workerresourcetemplates,verbs=get;list;watch;patch;update
+// +kubebuilder:rbac:groups=temporal.io,resources=workerresourcetemplates/status,verbs=get;patch;update
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -140,13 +143,15 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// TODO(carlydf): Handle warnings once we have some, handle ValidateUpdate once it is different from ValidateCreate
+	// Fallback validation for spec constraints the CRD schema cannot enforce (rampPercentage
+	// ordering, gate input/inputFrom exclusivity). When the optional TWD webhook is disabled
+	// these checks would otherwise go unreported; this surfaces them as a condition and event.
 	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
-		l.Error(err, "invalid TemporalWorkerDeployment")
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: 5 * time.Minute, // user needs time to fix this, if it changes, it will be re-queued immediately
-		}, nil
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+			temporaliov1alpha1.ReasonInvalidSpec,
+			fmt.Sprintf("Invalid TemporalWorkerDeployment spec: %v", err),
+			err.Error())
+		return ctrl.Result{}, nil
 	}
 
 	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
