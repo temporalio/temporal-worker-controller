@@ -18,7 +18,7 @@ Temporal's [Worker Versioning](https://docs.temporal.io/production-deployment/wo
 📦 **Automatic version management** - Registers versions with Temporal, manages routing rules, and tracks version lifecycle  
 🎯 **Smart traffic routing** - New workflows automatically get routed to your target worker version  
 🛡️ **Progressive rollouts** - Catch incompatible changes early with small traffic percentages before they spread  
-⚡ **Easy rollbacks** - Instantly route traffic back to a previous version if issues are detected
+⚡ **Easy rollbacks** - Instantly route traffic back to a previous version if issues are detected  
 📈 **Per-version autoscaling** - Attach HPAs or other custom scalers to each versioned Deployment via [`WorkerResourceTemplate`](docs/worker-resource-templates.md)
 
 ## Quick Example
