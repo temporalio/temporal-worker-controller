@@ -74,6 +74,19 @@ jobs:
       - name: Template CRDs chart
         run: helm template test-release helm/temporal-worker-controller-crds
 
+  helm-check-rbac:
+    name: Check Helm RBAC wasn't manually updated
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate and diff
+        run: make manifests && git diff --exit-code helm/temporal-worker-controller/templates/rbac.yaml
+
   helm-validate-succeed:
     name: All Helm Validations Succeed
     needs:
@@ -81,6 +94,7 @@ jobs:
       - helm-template
       - helm-lint-crds
       - helm-template-crds
+      - helm-check-rbac
     runs-on: ubuntu-latest
     if: always()
     env:
