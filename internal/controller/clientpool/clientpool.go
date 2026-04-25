@@ -200,8 +200,11 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts Ne
 		},
 	}
 
+	secretName := opts.Spec.APIKeySecretRef.Name
+	secretKey := opts.Spec.APIKeySecretRef.Key
+	k8sNamespace := opts.K8sNamespace
 	clientOpts.Credentials = sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
-		return string(secret.Data[opts.Spec.APIKeySecretRef.Key]), nil
+		return cp.fetchAPIKeyFromSecret(ctx, secretName, k8sNamespace, secretKey)
 	})
 
 	key := ClientPoolKey{
@@ -325,6 +328,14 @@ func (cp *ClientPool) Close() {
 	}
 
 	cp.clients = make(map[ClientPoolKey]ClientInfo)
+}
+
+func (cp *ClientPool) fetchAPIKeyFromSecret(ctx context.Context, secretName, k8sNamespace, secretKey string) (string, error) {
+	var s corev1.Secret
+	if err := cp.k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: k8sNamespace}, &s); err != nil {
+		return "", fmt.Errorf("failed to read API key secret %q: %w", secretName, err)
+	}
+	return string(s.Data[secretKey]), nil
 }
 
 func calculateCertificateExpirationTime(certBytes []byte, bufferTime time.Duration) (time.Time, error) {
