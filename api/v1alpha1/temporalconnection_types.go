@@ -27,8 +27,10 @@ type TemporalConnectionSpec struct {
 	HostPort string `json:"hostPort"`
 
 	// MutualTLSSecretRef is the name of the Secret that contains the TLS certificate and key
-	// for mutual TLS authentication. The secret must be `type: kubernetes.io/tls` and exist
-	// in the same Kubernetes namespace as the TemporalConnection resource.
+	// for mutual TLS authentication. The secret must be `type: kubernetes.io/tls` or
+	// `type: Opaque` and exist in the same Kubernetes namespace as the TemporalConnection
+	// resource. Opaque secrets are useful when bundling tls.crt, tls.key, and ca.crt into
+	// a single secret (e.g. multi-file cert-manager outputs).
 	//
 	// More information about creating a TLS secret:
 	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets

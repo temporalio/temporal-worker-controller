@@ -38,6 +38,7 @@ func TestIntegration(t *testing.T) {
 	dc.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusVisibilityGracePeriod"), testDrainageVisibilityGracePeriod)
 	dc.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusRefreshInterval"), testDrainageRefreshInterval)
 	dc.OverrideValue(dynamicconfig.MakeKey("matching.maxVersionsInDeployment"), testMaxVersionsInDeployment)
+	dc.OverrideValue(dynamicconfig.MakeKey("history.enableVersionReactivationSignals"), false)
 	ts := temporaltest.NewServer(
 		temporaltest.WithT(t),
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dc)),
@@ -949,6 +950,17 @@ func TestIntegration(t *testing.T) {
 
 	// Conditions and events tests
 	runConditionsAndEventsTests(t, k8sClient, mgr, ts, testNamespace.Name)
+
+	// Rate limit test: uses a dedicated server to avoid interfering with the tests above.
+	// Ten TWDs in the same Temporal namespace produce 10 concurrent DescribeWorkerDeployment
+	// calls per second against a 1 RPS limit, reliably triggering ResourceExhausted errors.
+	dcRateLimit := dynamicconfig.NewMemoryClient()
+	dcRateLimit.OverrideValue(dynamicconfig.MakeKey("frontend.globalNamespaceWorkerDeploymentReadRPS"), 1)
+	tsRateLimit := temporaltest.NewServer(
+		temporaltest.WithT(t),
+		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcRateLimit)),
+	)
+	runRateLimitTest(t, k8sClient, tsRateLimit, testNamespace.Name)
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status

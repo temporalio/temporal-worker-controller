@@ -14,6 +14,9 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"go.temporal.io/api/serviceerror"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -95,14 +98,17 @@ type TemporalWorkerDeploymentReconciler struct {
 	MaxDeploymentVersionsIneligibleForDeletion int32
 }
 
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
-//+kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
-//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
-//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
-// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=workerresourcetemplates,verbs=get;list;watch;patch;update
+// +kubebuilder:rbac:groups=temporal.io,resources=workerresourcetemplates/status,verbs=get;patch;update
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -139,13 +145,15 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// TODO(carlydf): Handle warnings once we have some, handle ValidateUpdate once it is different from ValidateCreate
+	// Fallback validation for spec constraints the CRD schema cannot enforce (rampPercentage
+	// ordering, gate input/inputFrom exclusivity). When the optional TWD webhook is disabled
+	// these checks would otherwise go unreported; this surfaces them as a condition and event.
 	if _, err := workerDeploy.ValidateCreate(ctx, &workerDeploy); err != nil {
-		l.Error(err, "invalid TemporalWorkerDeployment")
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: 5 * time.Minute, // user needs time to fix this, if it changes, it will be re-queued immediately
-		}, nil
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+			temporaliov1alpha1.ReasonInvalidSpec,
+			fmt.Sprintf("Invalid TemporalWorkerDeployment spec: %v", err),
+			err.Error())
+		return ctrl.Result{}, nil
 	}
 
 	// Note: TemporalConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
@@ -176,12 +184,13 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Get or update temporal client for connection
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
+	clientPoolKey := clientpool.ClientPoolKey{
 		HostPort:   temporalConnection.Spec.HostPort,
 		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		SecretName: secretName,
 		AuthMode:   authMode,
-	})
+	}
+	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
 	if !ok {
 		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
@@ -237,6 +246,17 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		getControllerIdentity(),
 	)
 	if err != nil {
+		if isAccessDeniedErr(err) {
+			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
+		var rateLimitErr *serviceerror.ResourceExhausted
+		if errors.As(err, &rateLimitErr) {
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+				temporaliov1alpha1.ReasonTemporalStateFetchFailed,
+				fmt.Sprintf("Rate limited fetching Temporal worker deployment state: %v", err),
+				fmt.Sprintf("Rate limited by Temporal server: %v", err))
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonTemporalStateFetchFailed,
 			fmt.Sprintf("Unable to get Temporal worker deployment state: %v", err),
@@ -272,6 +292,9 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// Execute the plan, handling any errors
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
+		if isAccessDeniedErr(err) {
+			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanExecutionFailed,
 			fmt.Sprintf("Unable to execute reconciliation plan: %v", err),
@@ -510,4 +533,12 @@ func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context
 	}
 
 	return requests
+}
+
+func isAccessDeniedErr(err error) bool {
+	var permDenied *serviceerror.PermissionDenied
+	if errors.As(err, &permDenied) {
+		return true
+	}
+	return grpcstatus.Code(err) == codes.Unauthenticated
 }
