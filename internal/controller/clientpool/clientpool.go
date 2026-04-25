@@ -189,7 +189,7 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	return &clientOpts, &key, &auth, nil
 }
 
-func (cp *ClientPool) fetchClientUsingAPIKeySecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
+func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
@@ -274,7 +274,7 @@ func (cp *ClientPool) ParseClientSecret(
 			err := fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
 			return nil, nil, nil, err
 		}
-		return cp.fetchClientUsingAPIKeySecret(secret, opts)
+		return cp.fetchClientUsingAPIKeySecret(opts)
 
 	case AuthModeNoCredentials:
 		return cp.fetchClientUsingNoCredentials(opts)

@@ -274,7 +274,7 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 		},
 	}
 
-	clientOpts, key, auth, err := cp.fetchClientUsingAPIKeySecret(secret, opts)
+	clientOpts, key, auth, err := cp.fetchClientUsingAPIKeySecret(opts)
 
 	require.NoError(t, err)
 	assert.Equal(t, AuthModeAPIKey, key.AuthMode)
