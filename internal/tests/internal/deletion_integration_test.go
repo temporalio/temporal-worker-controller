@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const deletionFinalizerName = "temporal.io/delete-protection"
@@ -35,16 +34,15 @@ const deletionFinalizerName = "temporal.io/delete-protection"
 func runDeletionTests(
 	t *testing.T,
 	k8sClient client.Client,
-	mgr manager.Manager,
 	ts *temporaltest.TestServer,
 	testNamespace string,
 ) {
 	t.Run("deletion-sets-current-to-unversioned", func(t *testing.T) {
-		testDeletionSetsCurrentToUnversioned(t, k8sClient, mgr, ts, testNamespace)
+		testDeletionSetsCurrentToUnversioned(t, k8sClient, ts, testNamespace)
 	})
 
 	t.Run("deletion-removes-connection-finalizer", func(t *testing.T) {
-		testDeletionRemovesConnectionFinalizer(t, k8sClient, mgr, ts, testNamespace)
+		testDeletionRemovesConnectionFinalizer(t, k8sClient, ts, testNamespace)
 	})
 }
 
@@ -54,7 +52,6 @@ func runDeletionTests(
 func testDeletionSetsCurrentToUnversioned(
 	t *testing.T,
 	k8sClient client.Client,
-	mgr manager.Manager,
 	ts *temporaltest.TestServer,
 	namespace string,
 ) {
@@ -109,12 +106,6 @@ func testDeletionSetsCurrentToUnversioned(
 	})
 
 	// Start workers so the version registers on the Temporal server
-	env := testhelpers.TestEnv{
-		K8sClient:  k8sClient,
-		Mgr:        mgr,
-		Ts:         ts,
-		Connection: temporalConnection,
-	}
 	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, namespace)
 	defer handleStopFuncs(workerStopFuncs)
 
@@ -182,9 +173,6 @@ func testDeletionSetsCurrentToUnversioned(
 	} else {
 		t.Log("Verified: current version is unversioned after TWD deletion")
 	}
-
-	// Suppress unused variable warning for env
-	_ = env
 }
 
 // testDeletionRemovesConnectionFinalizer verifies that when a TWD is deleted,
@@ -193,7 +181,6 @@ func testDeletionSetsCurrentToUnversioned(
 func testDeletionRemovesConnectionFinalizer(
 	t *testing.T,
 	k8sClient client.Client,
-	mgr manager.Manager,
 	ts *temporaltest.TestServer,
 	namespace string,
 ) {
