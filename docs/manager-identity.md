@@ -1,4 +1,4 @@
-# Ownership Transfer in the Worker Controller
+# Manager Identity and Ownership Transfer in the Worker Controller
 
 ## Problem
 
