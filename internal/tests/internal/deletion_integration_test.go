@@ -160,37 +160,48 @@ func testDeletionSetsCurrentToUnversioned(
 		return fmt.Errorf("v2.0 (buildID=%s) not yet visible in Temporal deployment", buildIDv2)
 	})
 
-	// Set v2.0 as the ramping version to exercise the clear-ramping path on deletion.
-	// The AllAtOnce controller may have already promoted v2.0 to current by the time we get
-	// here, so we first revert to v1.0 as current (pushing v2.0 back to inactive) then set
-	// v2.0 as ramping.
-	descResp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+	// Create a client matching the controller's ManagerIdentity so we can revert the
+	// current version when the AllAtOnce controller has already promoted v2.0.
+	controllerClient, err := sdkclient.Dial(sdkclient.Options{
+		HostPort:  ts.GetFrontendHostPort(),
+		Namespace: ts.GetDefaultNamespace(),
+		Identity:  "temporal-worker-controller",
+	})
 	if err != nil {
-		t.Fatalf("failed to describe deployment before setting ramping version: %v", err)
+		t.Fatalf("failed to create controller-identity client: %v", err)
 	}
-	if descResp.Info.RoutingConfig.CurrentVersion != nil && descResp.Info.RoutingConfig.CurrentVersion.BuildID == buildIDv2 {
-		// v2.0 is already current; revert to v1.0 so we can set v2.0 as ramping.
-		t.Logf("v2.0 is already current; reverting to v1.0 as current before setting v2.0 as ramping")
-		if _, err := deploymentHandle.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-			BuildID:                 buildID,
-			ConflictToken:           descResp.ConflictToken,
-			IgnoreMissingTaskQueues: true,
-		}); err != nil {
-			t.Fatalf("failed to revert current version to v1.0: %v", err)
-		}
-		descResp, err = deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+	defer controllerClient.Close()
+	controllerHandle := controllerClient.WorkerDeploymentClient().GetHandle(workerDeploymentName)
+
+	// Set v2.0 as the ramping version to exercise the clear-ramping path on deletion.
+	// The AllAtOnce controller races to promote v2.0 to current; retry until we win:
+	// if v2.0 is already current, revert to v1.0 using the controller identity, then retry.
+	eventually(t, 30*time.Second, time.Second, func() error {
+		descResp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
 		if err != nil {
-			t.Fatalf("failed to re-describe deployment after reverting current version: %v", err)
+			return err
 		}
-	}
-	if _, err := deploymentHandle.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-		BuildID:       buildIDv2,
-		Percentage:    50,
-		ConflictToken: descResp.ConflictToken,
-		Identity:      "test",
-	}); err != nil {
-		t.Fatalf("failed to set v2.0 as ramping version: %v", err)
-	}
+		if descResp.Info.RoutingConfig.CurrentVersion != nil && descResp.Info.RoutingConfig.CurrentVersion.BuildID == buildIDv2 {
+			t.Logf("v2.0 is already current; reverting to v1.0 before setting v2.0 as ramping")
+			if _, err := controllerHandle.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
+				BuildID:                 buildID,
+				ConflictToken:           descResp.ConflictToken,
+				IgnoreMissingTaskQueues: true,
+			}); err != nil {
+				return fmt.Errorf("revert to v1.0: %w", err)
+			}
+			return fmt.Errorf("reverted to v1.0, retrying")
+		}
+		if _, err := deploymentHandle.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+			BuildID:       buildIDv2,
+			Percentage:    50,
+			ConflictToken: descResp.ConflictToken,
+			Identity:      "test",
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
 	t.Logf("Set v2.0 (buildID=%s) as ramping version at 50%%", buildIDv2)
 
 	// Verify the TWD has our finalizer
