@@ -415,9 +415,10 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 // from blocking unversioned workers on the same task queue.
 //
 // The cleanup sequence:
-//  1. Set the current version to "unversioned" (empty BuildID) so new tasks route to unversioned workers
-//  2. Delete all non-current/non-ramping versions (drained/inactive ones)
-//  3. The deployment itself will be garbage collected by Temporal once all versions are removed
+//  1. Clear the ramping version (must happen first to avoid a split-traffic window)
+//  2. Set the current version to "unversioned" (empty BuildID) so new tasks route to unversioned workers
+//  3. Delete all registered versions (with SkipDrainage since the TWD is being removed entirely)
+//  4. Delete the deployment record itself once all versions are gone
 func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
 	ctx context.Context,
 	l logr.Logger,
