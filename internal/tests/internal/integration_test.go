@@ -961,6 +961,10 @@ func TestIntegration(t *testing.T) {
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcRateLimit)),
 	)
 	runRateLimitTest(t, k8sClient, tsRateLimit, testNamespace.Name)
+
+	// Deletion cleanup tests — use short poller TTL server so active pollers expire
+	// in 1s rather than the default 5 minutes, keeping test runtime reasonable.
+	runDeletionTests(t, k8sClient, tsShortTTL, testNamespace.Name)
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
