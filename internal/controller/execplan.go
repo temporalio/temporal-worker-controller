@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -184,7 +185,16 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 }
 
 func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
-	return vcfg.ManagerIdentity == ""
+	existing := vcfg.ManagerIdentity
+	if existing == "" {
+		return true // unclaimed
+	}
+	if existing == defaults.ControllerIdentity {
+		return true // pre-Helm hardcoded default
+	}
+	// Pre-cluster-UID Helm format was "release/namespace"; new format is
+	// "release/namespace/{uid}". Reclaim if ours is a longer version of theirs.
+	return strings.HasPrefix(getControllerIdentity(), existing+"/")
 }
 
 func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
