@@ -57,9 +57,8 @@ affinity: {}
 # More than one replica is required for high availability.
 replicas: 2
 
-# Opt out of these resources if you want to disable the
-# auth proxy (https://github.com/brancz/kube-rbac-proxy)
-# which protects your /metrics endpoint.
+# deprecated. disable authenticated metrics endpoint access with the
+# metrics.disableAuth value.
 authProxy:
   enabled: true
 
@@ -67,9 +66,19 @@ metrics:
   enabled: true
   port: 8080
   # Set to true if you want your controller-manager to expose the /metrics
-  # endpoint w/o any authn/z. If false, creates an HTTP proxy sidecar container
-  # for the controller manager which performs RBAC authorization against the
-  # Kubernetes API using SubjectAccessReviews.
+  # endpoint w/o any authn/z.
+  #
+  # If false (the default), a kube-rbac-proxy sidecar
+  # (https://github.com/brancz/kube-rbac-proxy) is injected into the manager
+  # pod. It listens on HTTPS port 8443 and proxies to the manager's metrics
+  # endpoint on localhost, authorizing each request via Kubernetes
+  # SubjectAccessReviews. The manager binds metrics to 127.0.0.1 so it is only
+  # reachable through the proxy.
+  #
+  # Set to true when network-level controls already restrict access
+  # (NetworkPolicy, service mesh, same-namespace Prometheus), your scraper
+  # cannot present a bearer token, or simplicity is preferred (e.g.
+  # dev/staging).
   disableAuth: false
 
 namespace:

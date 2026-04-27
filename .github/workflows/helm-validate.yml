@@ -47,7 +47,6 @@ jobs:
       - name: Template with auth proxy disabled
         run: |
           helm template test-release helm/temporal-worker-controller \
-            --set authProxy.enabled=false \
             --set metrics.disableAuth=true
 
   helm-lint-crds:
