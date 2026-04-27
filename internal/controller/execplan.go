@@ -212,7 +212,7 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
 		// This should never happen, but this is the extra fallback in case somehow
 		// the check in main() and Reconcile() are not sufficient.
-		return fmt.Errorf("CONTROLLER_IDENTITY is not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field")
+		return errors.New("CONTROLLER_IDENTITY is not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field")
 	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,

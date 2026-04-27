@@ -138,7 +138,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// main() is not in the call path. main() is kept as the primary check for
 	// faster feedback in normal Helm-based deployments.
 	if getControllerIdentity() == "" {
-		return ctrl.Result{}, fmt.Errorf("CONTROLLER_IDENTITY environment variable is not set")
+		return ctrl.Result{}, errors.New("CONTROLLER_IDENTITY environment variable is not set")
 	}
 
 	l.V(1).Info("Running Reconcile loop")

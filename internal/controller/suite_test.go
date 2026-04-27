@@ -28,7 +28,7 @@ var k8sClient client.Client
 var testEnv *envtest.Environment
 
 func TestMain(m *testing.M) {
-	os.Setenv(IdentityEnvKey, "test-controller-identity")
+	_ = os.Setenv(IdentityEnvKey, "test-controller-identity")
 	os.Exit(m.Run())
 }
 
