@@ -152,7 +152,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		// clear signal rather than a silent no-op. No requeue for the not-found itself —
 		// the next reconcile fires naturally when the TWD is created. If the List or
 		// status updates fail (transient API errors), return the error to requeue with backoff.
-		return ctrl.Result{}, r.markWRTsTWDNotFound(ctx, req.NamespacedName)
+		return ctrl.Result{}, r.markWRTsWDNotFound(ctx, req.NamespacedName)
 	}
 
 	// Migration: if a deprecated TemporalWorkerDeployment with the same name/namespace
@@ -488,19 +488,19 @@ func replaceOwnerRef(refs []metav1.OwnerReference, oldUID types.UID, newRef meta
 
 func ptr[T any](v T) *T { return &v }
 
-// markWRTsTWDNotFound sets Ready=False/TWDNotFound on all WorkerResourceTemplates that reference
+// markWRTsWDNotFound sets Ready=False/WDNotFound on all WorkerResourceTemplates that reference
 // a WorkerDeployment that could not be found. This covers the case where the WRT is
-// created before the TWD exists, or where the TWD was deleted before the controller set an owner
+// created before the WD exists, or where the WD was deleted before the controller set an owner
 // reference on the WRT (which would otherwise cause Kubernetes GC to delete the WRT).
 // Returns an error if the List or any status update fails so the caller can requeue.
-func (r *WorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Context, twd types.NamespacedName) error {
+func (r *WorkerDeploymentReconciler) markWRTsWDNotFound(ctx context.Context, wd types.NamespacedName) error {
 	l := log.FromContext(ctx)
 	var wrtList temporaliov1alpha1.WorkerResourceTemplateList
 	if err := r.List(ctx, &wrtList,
-		client.InNamespace(twd.Namespace),
-		client.MatchingFields{wrtWorkerRefKey: twd.Name},
+		client.InNamespace(wd.Namespace),
+		client.MatchingFields{wrtWorkerRefKey: wd.Name},
 	); err != nil {
-		return fmt.Errorf("list WorkerResourceTemplates referencing missing WorkerDeployment %q: %w", twd.Name, err)
+		return fmt.Errorf("list WorkerResourceTemplates referencing missing WorkerDeployment %q: %w", wd.Name, err)
 	}
 	var errs []error
 	for i := range wrtList.Items {
@@ -509,11 +509,12 @@ func (r *WorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Context, tw
 			Type:               temporaliov1alpha1.ConditionReady,
 			Status:             metav1.ConditionFalse,
 			Reason:             temporaliov1alpha1.ReasonWRTWDNotFound,
-			Message:            fmt.Sprintf("WorkerDeployment %q not found", twd.Name),
+			Message:            fmt.Sprintf("WorkerDeployment %q not found", wd.Name),
 			ObservedGeneration: wrt.Generation,
 		})
 		if err := r.Status().Update(ctx, wrt); err != nil {
-			l.Error(err, "unable to update WorkerResourceTemplate status for missing WorkerDeployment", "wrt", wrt.Name, "twd", twd.Name)
+			l.Error(err, "unable to update WorkerResourceTemplate status for missing WorkerDeployment",
+				"WorkerResourceTemplate", wrt.Name, "WorkerDeployment", wd.Name)
 			errs = append(errs, fmt.Errorf("update status for WorkerResourceTemplate %s/%s: %w", wrt.Namespace, wrt.Name, err))
 		}
 	}
