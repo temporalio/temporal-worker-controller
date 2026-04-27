@@ -206,10 +206,16 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	vcfg *planner.VersionConfig,
 ) error {
+	identity := getControllerIdentity()
+	if identity == "" {
+		// Passing an empty identity to SetManagerIdentity clears the field on the
+		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
+		return fmt.Errorf("CONTROLLER_IDENTITY is not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field")
+	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
 		ConflictToken: vcfg.ConflictToken,
-		Identity:      getControllerIdentity(),
+		Identity:      identity,
 	})
 	if err != nil {
 		l.Error(err, "unable to claim manager identity")
@@ -217,7 +223,7 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 			"Failed to claim manager identity: %v", err)
 		return err
 	}
-	l.Info("claimed manager identity", "identity", getControllerIdentity())
+	l.Info("claimed manager identity", "identity", identity)
 	// Use the updated conflict token for the subsequent routing config change.
 	vcfg.ConflictToken = resp.ConflictToken
 	return nil
