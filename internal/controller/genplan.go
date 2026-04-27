@@ -60,6 +60,7 @@ type startWorkflowConfig struct {
 }
 
 // generatePlan creates a plan for the controller to execute
+//
 //nolint:revive // cognitive complexity acceptable given breadth of plan logic
 func (r *WorkerDeploymentReconciler) generatePlan(
 	ctx context.Context,
