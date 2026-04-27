@@ -10,10 +10,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"go.temporal.io/api/serviceerror"
+	sdkclient "go.temporal.io/sdk/client"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -41,6 +47,12 @@ const (
 
 	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by temporalWorkerDeploymentRef.name.
 	wrtWorkerRefKey = ".spec.temporalWorkerDeploymentRef.name"
+
+	// finalizerName is the finalizer added to TemporalWorkerDeployment and TemporalConnection
+	// resources to prevent deletion before cleanup actions are taken. On TWD resources, it
+	// ensures Temporal server-side versioning data is cleaned up. On TemporalConnection
+	// resources, it prevents deletion while any TWD still references the connection.
+	finalizerName = "temporal.io/delete-protection"
 )
 
 // getAPIKeySecretName extracts the secret name from a SecretKeySelector
@@ -98,7 +110,8 @@ type TemporalWorkerDeploymentReconciler struct {
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
@@ -136,6 +149,40 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, r.markWRTsTWDNotFound(ctx, req.NamespacedName)
 	}
 
+	// Handle deletion: clean up Temporal server-side versioning data before allowing
+	// the CRD to be deleted. Without this, stale build ID routing persists in Temporal
+	// and prevents unversioned workers from picking up tasks on the same task queue.
+	if !workerDeploy.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
+			l.Info("TemporalWorkerDeployment is being deleted, running cleanup")
+			if err := r.handleDeletion(ctx, l, &workerDeploy); err != nil {
+				l.Error(err, "failed to clean up Temporal server-side deployment data, will retry")
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+
+			// Remove our finalizer from the TemporalConnection if no other TWDs reference it.
+			if err := r.removeConnectionFinalizerIfUnused(ctx, l, &workerDeploy); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// Cleanup succeeded, remove the finalizer so K8s can delete the resource
+			controllerutil.RemoveFinalizer(&workerDeploy, finalizerName)
+			if err := r.Update(ctx, &workerDeploy); err != nil {
+				return ctrl.Result{}, err
+			}
+			l.Info("Temporal server-side cleanup complete, finalizer removed")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Ensure finalizer is present on non-deleted resources
+	if !controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
+		controllerutil.AddFinalizer(&workerDeploy, finalizerName)
+		if err := r.Update(ctx, &workerDeploy); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	// TODO(jlegrone): Set defaults via webhook rather than manually
 	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
 		l.Error(err, "TemporalWorkerDeployment defaulter failed")
@@ -169,6 +216,13 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
+	// Ensure our finalizer is on the TemporalConnection so it cannot be deleted
+	// while this TWD still references it. This guarantees the connection is available
+	// during TWD deletion cleanup.
+	if err := r.ensureConnectionFinalizer(ctx, l, &temporalConnection); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Get the Auth Mode and Secret Name
 	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
 	if err != nil {
@@ -181,12 +235,13 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Get or update temporal client for connection
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
+	clientPoolKey := clientpool.ClientPoolKey{
 		HostPort:   temporalConnection.Spec.HostPort,
 		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		SecretName: secretName,
 		AuthMode:   authMode,
-	})
+	}
+	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
 	if !ok {
 		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
@@ -242,6 +297,17 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 		getControllerIdentity(),
 	)
 	if err != nil {
+		if isAccessDeniedErr(err) {
+			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
+		var rateLimitErr *serviceerror.ResourceExhausted
+		if errors.As(err, &rateLimitErr) {
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+				temporaliov1alpha1.ReasonTemporalStateFetchFailed,
+				fmt.Sprintf("Rate limited fetching Temporal worker deployment state: %v", err),
+				fmt.Sprintf("Rate limited by Temporal server: %v", err))
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonTemporalStateFetchFailed,
 			fmt.Sprintf("Unable to get Temporal worker deployment state: %v", err),
@@ -277,6 +343,9 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	// Execute the plan, handling any errors
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
+		if isAccessDeniedErr(err) {
+			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanExecutionFailed,
 			fmt.Sprintf("Unable to execute reconciliation plan: %v", err),
@@ -339,6 +408,144 @@ func (r *TemporalWorkerDeploymentReconciler) markWRTsTWDNotFound(ctx context.Con
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// handleDeletion cleans up Temporal server-side deployment versioning data when
+// a TemporalWorkerDeployment CRD is deleted. This prevents stale build ID routing
+// from blocking unversioned workers on the same task queue.
+//
+// The cleanup sequence:
+//  1. Clear the ramping version (must happen first to avoid a split-traffic window)
+//  2. Set the current version to "unversioned" (empty BuildID) so new tasks route to unversioned workers
+//  3. Delete all registered versions (with SkipDrainage since the TWD is being removed entirely)
+//  4. Delete the deployment record itself once all versions are gone
+func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+) error {
+	// Resolve Temporal connection.
+	// The TemporalConnection is guaranteed to exist because we hold a finalizer on it
+	// that prevents deletion while any TWD references it.
+	var temporalConnection temporaliov1alpha1.TemporalConnection
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      workerDeploy.Spec.WorkerOptions.TemporalConnectionRef.Name,
+		Namespace: workerDeploy.Namespace,
+	}, &temporalConnection); err != nil {
+		return fmt.Errorf("unable to fetch TemporalConnection: %w", err)
+	}
+
+	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
+	if err != nil {
+		return fmt.Errorf("unable to resolve auth secret name: %w", err)
+	}
+
+	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
+		HostPort:   temporalConnection.Spec.HostPort,
+		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		SecretName: secretName,
+		AuthMode:   authMode,
+	})
+	if !ok {
+		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
+			K8sNamespace:      workerDeploy.Namespace,
+			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+			Spec:              temporalConnection.Spec,
+			Identity:          getControllerIdentity(),
+		})
+		if err != nil {
+			return fmt.Errorf("unable to parse Temporal auth secret: %w", err)
+		}
+		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
+		if err != nil {
+			return fmt.Errorf("unable to create TemporalClient: %w", err)
+		}
+		temporalClient = c
+	}
+
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(workerDeploymentName)
+
+	// Describe the deployment to get current state
+	resp, err := deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+	if err != nil {
+		var notFound *serviceerror.NotFound
+		if errors.As(err, &notFound) {
+			l.Info("Worker Deployment not found on Temporal server, nothing to clean up")
+			return nil
+		}
+		return fmt.Errorf("unable to describe worker deployment: %w", err)
+	}
+
+	routingConfig := resp.Info.RoutingConfig
+
+	// Step 1: Clear the ramping version first. This must happen before setting
+	// current to unversioned to avoid a window where traffic is split between
+	// unversioned workers and the ramping version.
+	if routingConfig.RampingVersion != nil {
+		l.Info("Clearing ramping version", "buildID", routingConfig.RampingVersion.BuildID)
+		if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+			BuildID:    "",
+			Percentage: 0,
+			Identity:   getControllerIdentity(),
+		}); err != nil {
+			return fmt.Errorf("unable to clear ramping version: %w", err)
+		}
+		l.Info("Successfully cleared ramping version")
+
+		// Re-describe to get a fresh ConflictToken after the ramping change.
+		resp, err = deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+		if err != nil {
+			return fmt.Errorf("unable to re-describe worker deployment after clearing ramping version: %w", err)
+		}
+	} else {
+		l.Info("No ramping version set, skipping clear ramping version")
+	}
+
+	// Step 2: Set current version to unversioned (empty BuildID) so tasks route to unversioned workers.
+	// This is the critical step that unblocks task dispatch.
+	if routingConfig.CurrentVersion != nil {
+		l.Info("Setting current version to unversioned", "previousBuildID", routingConfig.CurrentVersion.BuildID)
+		if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
+			BuildID:                 "", // empty = unversioned
+			ConflictToken:           resp.ConflictToken,
+			Identity:                getControllerIdentity(),
+			IgnoreMissingTaskQueues: true,
+		}); err != nil {
+			return fmt.Errorf("unable to set current version to unversioned: %w", err)
+		}
+		l.Info("Successfully set current version to unversioned")
+	} else {
+		l.Info("No current version set, skipping unversioned redirect")
+	}
+
+	// Step 3: Delete versions that are eligible. Versions that are still draining
+	// are force-deleted with SkipDrainage since the TWD is being removed entirely.
+	// If any version fails to delete (e.g. active pollers), return an error so the
+	// reconciler requeues. Pollers disappear once pods terminate and the next
+	// reconciliation will succeed.
+	for _, version := range resp.Info.VersionSummaries {
+		buildID := version.Version.BuildID
+		l.Info("Deleting worker deployment version", "buildID", buildID)
+		if _, err := deploymentHandler.DeleteVersion(ctx, sdkclient.WorkerDeploymentDeleteVersionOptions{
+			BuildID:      buildID,
+			SkipDrainage: true,
+			Identity:     getControllerIdentity(),
+		}); err != nil {
+			return fmt.Errorf("unable to delete version %s (will retry): %w", buildID, err)
+		}
+	}
+
+	// Step 4: Delete the deployment itself. This only succeeds if all versions are gone.
+	l.Info("Attempting to delete worker deployment from Temporal server", "name", workerDeploymentName)
+	if _, err := temporalClient.WorkerDeploymentClient().Delete(ctx, sdkclient.WorkerDeploymentDeleteOptions{
+		Name:     workerDeploymentName,
+		Identity: getControllerIdentity(),
+	}); err != nil {
+		return fmt.Errorf("unable to delete worker deployment %s (will retry): %w", workerDeploymentName, err)
+	}
+
+	return nil
 }
 
 // setCondition sets a condition on the TemporalWorkerDeployment status.
@@ -428,6 +635,74 @@ func (r *TemporalWorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	_ = r.Status().Update(ctx, workerDeploy)
 }
 
+// ensureConnectionFinalizer adds our finalizer to the TemporalConnection so it
+// cannot be deleted while this TWD still needs it for cleanup.
+func (r *TemporalWorkerDeploymentReconciler) ensureConnectionFinalizer(
+	ctx context.Context,
+	l logr.Logger,
+	tc *temporaliov1alpha1.TemporalConnection,
+) error {
+	if !controllerutil.ContainsFinalizer(tc, finalizerName) {
+		l.Info("Adding finalizer to TemporalConnection", "connection", tc.Name)
+		controllerutil.AddFinalizer(tc, finalizerName)
+		if err := r.Update(ctx, tc); err != nil {
+			return fmt.Errorf("unable to add finalizer to TemporalConnection %q: %w", tc.Name, err)
+		}
+	}
+	return nil
+}
+
+// removeConnectionFinalizerIfUnused removes our finalizer from the TemporalConnection
+// if no other TWDs (besides the one being deleted) still reference it.
+func (r *TemporalWorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
+	ctx context.Context,
+	l logr.Logger,
+	deletingTWD *temporaliov1alpha1.TemporalWorkerDeployment,
+) error {
+	connectionName := deletingTWD.Spec.WorkerOptions.TemporalConnectionRef.Name
+
+	// List all TWDs in the same namespace
+	var twds temporaliov1alpha1.TemporalWorkerDeploymentList
+	if err := r.List(ctx, &twds, client.InNamespace(deletingTWD.Namespace)); err != nil {
+		return fmt.Errorf("unable to list TWDs: %w", err)
+	}
+
+	// Check if any other TWD (not the one being deleted) references this connection
+	for i := range twds.Items {
+		twd := &twds.Items[i]
+		if twd.Name == deletingTWD.Name {
+			continue
+		}
+		if twd.Spec.WorkerOptions.TemporalConnectionRef.Name == connectionName {
+			l.Info("TemporalConnection still referenced by another TWD, keeping finalizer",
+				"connection", connectionName, "referencedBy", twd.Name)
+			return nil
+		}
+	}
+
+	// No other TWDs reference this connection, remove the finalizer
+	var tc temporaliov1alpha1.TemporalConnection
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      connectionName,
+		Namespace: deletingTWD.Namespace,
+	}, &tc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // already gone
+		}
+		return fmt.Errorf("unable to fetch TemporalConnection %q: %w", connectionName, err)
+	}
+
+	if controllerutil.ContainsFinalizer(&tc, finalizerName) {
+		l.Info("Removing finalizer from TemporalConnection", "connection", connectionName)
+		controllerutil.RemoveFinalizer(&tc, finalizerName)
+		if err := r.Update(ctx, &tc); err != nil {
+			return fmt.Errorf("unable to remove finalizer from TemporalConnection %q: %w", connectionName, err)
+		}
+	}
+
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *TemporalWorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
@@ -515,4 +790,12 @@ func (r *TemporalWorkerDeploymentReconciler) findTWDsUsingConnection(ctx context
 	}
 
 	return requests
+}
+
+func isAccessDeniedErr(err error) bool {
+	var permDenied *serviceerror.PermissionDenied
+	if errors.As(err, &permDenied) {
+		return true
+	}
+	return grpcstatus.Code(err) == codes.Unauthenticated
 }
