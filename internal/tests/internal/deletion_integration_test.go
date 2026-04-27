@@ -172,8 +172,8 @@ func testDeletionSetsCurrentToUnversioned(
 		// v2.0 is already current; revert to v1.0 so we can set v2.0 as ramping.
 		t.Logf("v2.0 is already current; reverting to v1.0 as current before setting v2.0 as ramping")
 		if _, err := deploymentHandle.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-			BuildID:                buildID,
-			ConflictToken:          descResp.ConflictToken,
+			BuildID:                 buildID,
+			ConflictToken:           descResp.ConflictToken,
 			IgnoreMissingTaskQueues: true,
 		}); err != nil {
 			t.Fatalf("failed to revert current version to v1.0: %v", err)
