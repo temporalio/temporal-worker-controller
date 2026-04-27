@@ -491,6 +491,12 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
 			return fmt.Errorf("unable to clear ramping version: %w", err)
 		}
 		l.Info("Successfully cleared ramping version")
+
+		// Re-describe to get a fresh ConflictToken after the ramping change.
+		resp, err = deploymentHandler.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+		if err != nil {
+			return fmt.Errorf("unable to re-describe worker deployment after clearing ramping version: %w", err)
+		}
 	} else {
 		l.Info("No ramping version set, skipping clear ramping version")
 	}
