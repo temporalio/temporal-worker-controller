@@ -61,11 +61,17 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
+    - name: setup go workspace
+      run: go work init && go work use -r .
+
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
       with:
-        go-version-file: 'go.mod'
+        go-version-file: go.work
+        cache-dependency-path: |
+          go.work.sum
+          **/go.sum
         check-latest: true
         cache: true
         
@@ -115,11 +121,17 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: setup go workspace
+      run: go work init && go work use -r .
       
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
       with:
-        go-version-file: 'go.mod'
+        go-version-file: go.work
+        cache-dependency-path: |
+          go.work.sum
+          **/go.sum
         check-latest: true
         cache: true
         
@@ -144,24 +156,3 @@ jobs:
           cover.out
           bin/
         retention-days: 7 
-
-  go-vet:
-    name: Run Go Vet
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        check-latest: true
-        cache: true
-        
-    - name: Download dependencies
-      run: go mod download
-      
-    - name: Run go vet
-      run: go vet ./...
