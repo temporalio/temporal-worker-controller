@@ -58,8 +58,9 @@ func getControllerVersion() string {
 }
 
 // getControllerIdentity returns the identity from environment variable (set by Helm).
-// Returns empty string if the variable is not set — callers should treat that as a
-// misconfiguration; main() enforces this at startup.
+// Returns empty string if unset. main() enforces this at startup, so an empty return
+// in normal operation means the controller was run outside of Helm without the env var,
+// or a test did not configure it.
 func getControllerIdentity() string {
 	return os.Getenv(IdentityEnvKey)
 }
