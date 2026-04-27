@@ -43,7 +43,6 @@ jobs:
             --set namespace.create=true \
             > /tmp/rendered-namespace.yaml
           helm template test-release helm/temporal-worker-controller \
-            --set authProxy.enabled=false \
             --set metrics.disableAuth=true \
             > /tmp/rendered-no-auth.yaml
 

@@ -121,7 +121,8 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Whether to enable the auth proxy"
+          "description": "Whether to enable the auth proxy",
+          "deprecated": true
         }
       }
     },

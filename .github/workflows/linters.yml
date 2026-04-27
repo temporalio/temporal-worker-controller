@@ -15,6 +15,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
           check-latest: true
+          cache: true
 
       - name: lint actions
         run: |
@@ -33,6 +34,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
           check-latest: true
+          cache: true
 
       - name: format golang import statements
         run: |
@@ -58,6 +60,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
           check-latest: true
+          cache: true
 
       - name: lint code
         run: |
@@ -72,12 +75,29 @@ jobs:
             exit 1
           fi
 
+  go-vet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+          cache: true
+
+      - name: Run go vet
+        run: go vet ./...
+
   linters-succeed:
     name: All Linters Succeed
     needs:
       - lint-actions
       - fmt-imports
       - golangci
+      - go-vet
     runs-on: ubuntu-latest
     if: always()
     env:

@@ -12,4 +12,7 @@ certs
 cover.out
 
 .claude
-config
+configinternal/demo/worker
+internal/demo/helloworld/worker
+go.work
+go.work.sum

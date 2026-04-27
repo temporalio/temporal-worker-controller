@@ -17,7 +17,7 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Referenced TemporalWorkerDeployment
+    - description: Referenced WorkerDeployment
       jsonPath: .spec.temporalWorkerDeploymentRef.name
       name: Worker
       type: string
@@ -44,14 +44,22 @@ spec:
               template:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
-              workerDeploymentRef:
-                description: References the WorkerDeployment to attach this resource to.
-                type: object
-                x-kubernetes-preserve-unknown-fields: true
               temporalWorkerDeploymentRef:
-                description: Deprecated. Use workerDeploymentRef instead.
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
                 type: object
-                x-kubernetes-preserve-unknown-fields: true
+              workerDeploymentRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
             required:
             - template
             type: object

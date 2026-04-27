@@ -16,17 +16,9 @@ spec:
     singular: temporalconnection
   scope: Namespaced
   versions:
-  - additionalPrinterColumns:
-    - description: Age
-      jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
-    name: v1alpha1
+  - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: |-
-          TemporalConnection is deprecated. Use Connection instead.
-          New creates are rejected by the validation rule below (requires k8s >= 1.27).
         properties:
           apiVersion:
             type: string
@@ -35,28 +27,37 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec is preserved as-is for backward compatibility.
+            type: object
             x-kubernetes-preserve-unknown-fields: true
           status:
-            description: Status reflects the migration state.
             properties:
               conditions:
                 items:
-                  description: Condition from the Kubernetes meta/v1 API.
                   properties:
                     lastTransitionTime:
                       format: date-time
                       type: string
                     message:
+                      maxLength: 32768
                       type: string
                     observedGeneration:
                       format: int64
+                      minimum: 0
                       type: integer
                     reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       type: string
                     status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
                       type: string
                     type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                       type: string
                   required:
                   - lastTransitionTime
@@ -71,10 +72,6 @@ spec:
                 x-kubernetes-list-type: map
             type: object
         type: object
-        x-kubernetes-validations:
-        - message: TemporalConnection is deprecated and no longer supported. Create
-            a Connection instead.
-          rule: oldSelf != null
     served: true
     storage: true
     subresources:

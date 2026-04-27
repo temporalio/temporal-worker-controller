@@ -103,11 +103,11 @@ rules:
       - subjectaccessreviews
     verbs:
       - create
-  # Primary (new) resource types
   - apiGroups:
       - temporal.io
     resources:
       - connections
+      - workerresourcetemplates
     verbs:
       - get
       - list
@@ -118,6 +118,7 @@ rules:
       - temporal.io
     resources:
       - connections/finalizers
+      - workerdeployments/finalizers
     verbs:
       - update
   - apiGroups:
@@ -135,60 +136,11 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
-      - workerdeployments/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - temporal.io
-    resources:
       - workerdeployments/status
       - workerresourcetemplates/status
     verbs:
       - get
       - patch
-      - update
-  - apiGroups:
-      - temporal.io
-    resources:
-      - workerresourcetemplates
-    verbs:
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  # Deprecated resource types (migration window — remove in v1.8.0)
-  - apiGroups:
-      - temporal.io
-    resources:
-      - temporalconnections
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - temporal.io
-    resources:
-      - temporalworkerdeployments
-    verbs:
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - temporal.io
-    resources:
-      - temporalworkerdeployments/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - temporal.io
-    resources:
-      - temporalworkerdeployments/finalizers
-    verbs:
       - update
   # GENERATED RULES END
   # Rules for managing resources attached via WorkerResourceTemplate.

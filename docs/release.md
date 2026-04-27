@@ -62,3 +62,8 @@ Kubernetes resources in the `templates/` directory.
 The patch version of the Semantic Version string for the Chart Release is
 bumped when we release a new Application Release and update the `Chart.yaml`'s
 `appVersion` field to point to a new Application Release.
+
+We will *always* cut a new Chart Release patch version for each new Application
+Release. However, the Chart Release patch version may not be cut at the exact
+same *time* as the Application Release. In this way, we can test the Helm Chart
+release process in isolation from the Application release process.
