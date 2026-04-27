@@ -217,9 +217,8 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 		//      hostname), producing junk in the Temporal audit trail.
 		//
 		// main() enforces that CONTROLLER_IDENTITY is set before the reconcile loop
-		// starts, so reaching here should be impossible in normal operation. It could
-		// happen if the controller is run outside of Helm without the env var set, or
-		// if a test does not configure it.
+		// starts, but that check is bypassed if the reconciler is used as a library
+		// (e.g. embedded in another controller manager or in tests without the env var).
 		return fmt.Errorf("CONTROLLER_IDENTITY is not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field")
 	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{

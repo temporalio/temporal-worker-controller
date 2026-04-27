@@ -58,9 +58,9 @@ func getControllerVersion() string {
 }
 
 // getControllerIdentity returns the identity from environment variable (set by Helm).
-// Returns empty string if unset. main() enforces this at startup, so an empty return
-// in normal operation means the controller was run outside of Helm without the env var,
-// or a test did not configure it.
+// Returns empty string if unset. main() enforces this at startup, but that check is
+// bypassed if the reconciler is used as a library (e.g. embedded in another controller
+// manager or in tests). An empty return means the env var was not set before starting.
 func getControllerIdentity() string {
 	return os.Getenv(IdentityEnvKey)
 }
