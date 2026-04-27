@@ -59,18 +59,9 @@ spec:
       - name: manager
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion)}}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
-        {{- $clusterUID := "" -}}
-        {{- if .Values.clusterID -}}
-          {{- $clusterUID = .Values.clusterID -}}
-        {{- else -}}
-          {{- $ns := (lookup "v1" "Namespace" "" "kube-system") -}}
-          {{- if $ns -}}
-            {{- $clusterUID = $ns.metadata.uid -}}
-          {{- end -}}
-        {{- end }}
         env:
         - name: CONTROLLER_IDENTITY
-          value: "{{ .Release.Name }}/{{ .Release.Namespace }}/{{ $clusterUID }}"
+          value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
         - name: CONTROLLER_VERSION
           value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
         # POD_NAMESPACE and SERVICE_ACCOUNT_NAME are populated automatically by

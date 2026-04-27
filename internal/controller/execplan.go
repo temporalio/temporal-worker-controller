@@ -194,8 +194,9 @@ func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *pl
 	if existing == defaults.DeprecatedDefaultControllerIdentity {
 		return true // pre-Helm hardcoded default
 	}
-	// Pre-cluster-UID Helm format was "release/namespace"; new format is
-	// "release/namespace/{uid}". Reclaim if ours is a longer version of theirs.
+	// Pre-cluster-UID format was "release/namespace"; new format is
+	// "release/namespace/{namespace-uid}" (UID appended by main() at startup).
+	// Reclaim if ours is a longer version of theirs.
 	return strings.HasPrefix(getControllerIdentity(), existing+"/")
 }
 

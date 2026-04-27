@@ -57,15 +57,6 @@ affinity: {}
 # More than one replica is required for high availability.
 replicas: 2
 
-# clusterID is included in the controller identity to prevent controllers installed in
-# different clusters from conflicting over the same Temporal Worker Deployments.
-# In almost all cases, leave this unset: during helm install/upgrade against a live
-# cluster, the kube-system namespace UID is auto-detected and used automatically.
-# Only set this manually if you are rendering manifests offline (helm template | kubectl
-# apply), where live cluster lookup is unavailable. Choosing a non-unique value defeats
-# the purpose of this field.
-clusterID: ""
-
 # deprecated. disable authenticated metrics endpoint access with the
 # metrics.disableAuth value.
 authProxy:

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"os"
@@ -13,7 +14,9 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"go.temporal.io/sdk/log"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -114,6 +117,20 @@ func main() {
 
 	if os.Getenv(controller.IdentityEnvKey) == "" {
 		setupLog.Error(nil, "CONTROLLER_IDENTITY environment variable must be set")
+		os.Exit(1)
+	}
+	podNamespace := os.Getenv("POD_NAMESPACE")
+	if podNamespace == "" {
+		setupLog.Error(nil, "POD_NAMESPACE environment variable must be set")
+		os.Exit(1)
+	}
+	var ns corev1.Namespace
+	if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Name: podNamespace}, &ns); err != nil {
+		setupLog.Error(err, "unable to fetch namespace UID for controller identity")
+		os.Exit(1)
+	}
+	if err := os.Setenv(controller.IdentityEnvKey, os.Getenv(controller.IdentityEnvKey)+"/"+string(ns.UID)); err != nil {
+		setupLog.Error(err, "unable to set CONTROLLER_IDENTITY")
 		os.Exit(1)
 	}
 
