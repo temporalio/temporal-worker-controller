@@ -233,8 +233,8 @@ func TestGenerateBuildID(t *testing.T) {
 				pod1 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "1"}, "")
 				pod2 := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, map[string]string{"pod": "2"}, "")
 
-				twd1 := testhelpers.MakeTWD("", "", 1, pod1, nil, nil, nil)
-				twd2 := testhelpers.MakeTWD("", "", 1, pod2, nil, nil, nil)
+				twd1 := testhelpers.MakeWD("", "", 1, pod1, nil, nil, nil)
+				twd2 := testhelpers.MakeWD("", "", 1, pod2, nil, nil, nil)
 				return twd1, twd2
 			},
 			expectedPrefix:  "my.test_image",
@@ -246,8 +246,8 @@ func TestGenerateBuildID(t *testing.T) {
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				img := "my.test_image"
 				pod := testhelpers.MakePodSpec([]corev1.Container{{Image: img}}, nil, "")
-				twd1 := testhelpers.MakeTWD("", "", 1, pod, nil, nil, nil)
-				twd2 := testhelpers.MakeTWD("", "", 2, pod, nil, nil, nil)
+				twd1 := testhelpers.MakeWD("", "", 1, pod, nil, nil, nil)
+				twd2 := testhelpers.MakeWD("", "", 2, pod, nil, nil, nil)
 				return twd1, twd2
 			},
 			expectedPrefix:  "my.test_image",
@@ -257,7 +257,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "no containers",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
-				twd := testhelpers.MakeTWD("", "", 1, testhelpers.MakePodSpec(nil, nil, ""), nil, nil, nil)
+				twd := testhelpers.MakeWD("", "", 1, testhelpers.MakePodSpec(nil, nil, ""), nil, nil, nil)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",
@@ -267,7 +267,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "empty image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
-				twd := testhelpers.MakeTWDWithImage("", "", "")
+				twd := testhelpers.MakeWDWithImage("", "", "")
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "",
@@ -278,7 +278,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "tagged digest image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				taggedDigestImg := "docker.io/library/busybox:latest@sha256:" + digest
-				twd := testhelpers.MakeTWDWithImage("", "", taggedDigestImg)
+				twd := testhelpers.MakeWDWithImage("", "", taggedDigestImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "latest",
@@ -289,7 +289,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "tagged named image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				taggedNamedImg := "docker.io/library/busybox:latest"
-				twd := testhelpers.MakeTWDWithImage("", "", taggedNamedImg)
+				twd := testhelpers.MakeWDWithImage("", "", taggedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "latest",
@@ -300,7 +300,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "digested image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				digestedImg := "docker.io@sha256:" + digest
-				twd := testhelpers.MakeTWDWithImage("", "", digestedImg)
+				twd := testhelpers.MakeWDWithImage("", "", digestedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  digest[:k8s.MaxBuildIDLen-5],
@@ -311,7 +311,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "digested named image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				digestedNamedImg := "docker.io/library/busybo@sha256:" + digest
-				twd := testhelpers.MakeTWDWithImage("", "", digestedNamedImg)
+				twd := testhelpers.MakeWDWithImage("", "", digestedNamedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  digest[:k8s.MaxBuildIDLen-5],
@@ -322,7 +322,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "named image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				namedImg := "docker.io/library/busybox"
-				twd := testhelpers.MakeTWDWithImage("", "", namedImg)
+				twd := testhelpers.MakeWDWithImage("", "", namedImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "library-busybox",
@@ -333,7 +333,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "illegal chars image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				illegalCharsImg := "this.is.my_weird/image"
-				twd := testhelpers.MakeTWDWithImage("", "", illegalCharsImg)
+				twd := testhelpers.MakeWDWithImage("", "", illegalCharsImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  "this.is.my_weird-image",
@@ -344,7 +344,7 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "long image",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				longImg := "ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage" // 101 chars
-				twd := testhelpers.MakeTWDWithImage("", "", longImg)
+				twd := testhelpers.MakeWDWithImage("", "", longImg)
 				return twd, nil // only check 1 result, no need to compare
 			},
 			expectedPrefix:  k8s.TruncateString("ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage_ThisIsAVeryLongHumanReadableImage"[:k8s.MaxBuildIDLen-5], -1),
@@ -354,7 +354,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "spec buildID override",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
-				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
+				twd := testhelpers.MakeWDWithImage("", "", "some-image")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "manual-override-v1"
 				return twd, nil
 			},
@@ -369,10 +369,10 @@ func TestGenerateBuildID(t *testing.T) {
 			name: "spec buildID override stability",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				// Two TWDs with DIFFERENT images but SAME buildID
-				twd1 := testhelpers.MakeTWDWithImage("", "", "image-v1")
+				twd1 := testhelpers.MakeWDWithImage("", "", "image-v1")
 				twd1.Spec.WorkerOptions.UnsafeCustomBuildID = "stable-id"
 
-				twd2 := testhelpers.MakeTWDWithImage("", "", "image-v2")
+				twd2 := testhelpers.MakeWDWithImage("", "", "image-v2")
 				twd2.Spec.WorkerOptions.UnsafeCustomBuildID = "stable-id"
 				return twd1, twd2
 			},
@@ -385,7 +385,7 @@ func TestGenerateBuildID(t *testing.T) {
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
 				// 72 char buildID - should be truncated to 63
 				longBuildID := "this-is-a-very-long-build-id-value-that-exceeds-63-characters-limit"
-				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
+				twd := testhelpers.MakeWDWithImage("", "", "some-image")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = longBuildID
 				return twd, nil
 			},
@@ -396,7 +396,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "spec buildID override with empty value falls back to hash",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
-				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image")
+				twd := testhelpers.MakeWDWithImage("", "", "fallback-image")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "" // empty UnsafeCustomBuildID
 				return twd, nil
 			},
@@ -407,7 +407,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "spec buildID override with only invalid chars falls back to hash",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
-				twd := testhelpers.MakeTWDWithImage("", "", "fallback-image2")
+				twd := testhelpers.MakeWDWithImage("", "", "fallback-image2")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "###$$$%%%" // all invalid chars
 				return twd, nil
 			},
@@ -418,7 +418,7 @@ func TestGenerateBuildID(t *testing.T) {
 		{
 			name: "spec buildID override trims leading and trailing separators",
 			generateInputs: func() (*temporaliov1alpha1.WorkerDeployment, *temporaliov1alpha1.WorkerDeployment) {
-				twd := testhelpers.MakeTWDWithImage("", "", "some-image")
+				twd := testhelpers.MakeWDWithImage("", "", "some-image")
 				twd.Spec.WorkerOptions.UnsafeCustomBuildID = "---my-build-id---" // leading/trailing dashes
 				return twd, nil
 			},

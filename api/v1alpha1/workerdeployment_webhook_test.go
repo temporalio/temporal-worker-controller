@@ -25,7 +25,7 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 		errorMsg string
 	}{
 		"valid temporal worker deployment": {
-			obj: testhelpers.MakeTWDWithName("valid-worker", ""),
+			obj: testhelpers.MakeWDWithName("valid-worker", ""),
 		},
 		"invalid object type": {
 			obj: &corev1.Pod{
@@ -36,7 +36,7 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "expected a WorkerDeployment",
 		},
 		"ramp value for step <= previous step": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeTWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("prog-rollout-decreasing-ramps", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
 				obj.Spec.RolloutStrategy.Strategy = temporaliov1alpha1.UpdateProgressive
 				obj.Spec.RolloutStrategy.Steps = []temporaliov1alpha1.RolloutStep{
 					{5, metav1.Duration{Duration: time.Minute}},
@@ -84,7 +84,7 @@ func TestWorkerDeployment_ValidateUpdate(t *testing.T) {
 	}{
 		"valid update": {
 			oldObj: nil,
-			newObj: testhelpers.MakeTWDWithName("valid-worker", ""),
+			newObj: testhelpers.MakeWDWithName("valid-worker", ""),
 		},
 	}
 
@@ -131,7 +131,7 @@ func TestWorkerDeployment_Default(t *testing.T) {
 		expected func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment)
 	}{
 		"sets default sunset strategy delays": {
-			obj: testhelpers.MakeTWDWithName("default-sunset-delays", ""),
+			obj: testhelpers.MakeWDWithName("default-sunset-delays", ""),
 			expected: func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment) {
 				require.NotNil(t, obj.Spec.SunsetStrategy.ScaledownDelay)
 				assert.Equal(t, time.Hour, obj.Spec.SunsetStrategy.ScaledownDelay.Duration)

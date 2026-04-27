@@ -22,7 +22,7 @@ type WorkerDeploymentBuilder struct {
 // NewWorkerDeploymentBuilder creates a new builder with sensible defaults
 func NewWorkerDeploymentBuilder() *WorkerDeploymentBuilder {
 	return &WorkerDeploymentBuilder{
-		twd: MakeTWDWithName("", ""),
+		twd: MakeWDWithName("", ""),
 	}
 }
 
