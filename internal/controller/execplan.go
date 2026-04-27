@@ -289,6 +289,7 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 	return nil
 }
 
+//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
 func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
 	if err := r.executeK8sOperations(ctx, l, workerDeploy, p); err != nil {
 		return err

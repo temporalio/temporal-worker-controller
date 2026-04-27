@@ -130,6 +130,8 @@ type WorkerDeploymentReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
+//
+//nolint:revive // cyclomatic complexity acceptable for a top-level reconcile loop
 func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// TODO(Shivam): Monitor if the time taken for a successful reconciliation loop is closing in on 5 minutes. If so, we
 	// may need to increase the timeout value.
@@ -389,8 +391,6 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}, nil
 }
 
-// markWRTsTWDNotFound sets Ready=False/TWDNotFound on all WorkerResourceTemplates that reference
-// a WorkerDeployment that could not be found. This covers the case where the WRT is
 // migrateFromDeprecatedTWD checks for a TemporalWorkerDeployment stub with the
 // same name/namespace as wd. If one exists and has not yet been migrated, it
 // transfers ownership of child Deployments and WorkerResourceTemplates from the
@@ -488,6 +488,8 @@ func replaceOwnerRef(refs []metav1.OwnerReference, oldUID types.UID, newRef meta
 
 func ptr[T any](v T) *T { return &v }
 
+// markWRTsTWDNotFound sets Ready=False/TWDNotFound on all WorkerResourceTemplates that reference
+// a WorkerDeployment that could not be found. This covers the case where the WRT is
 // created before the TWD exists, or where the TWD was deleted before the controller set an owner
 // reference on the WRT (which would otherwise cause Kubernetes GC to delete the WRT).
 // Returns an error if the List or any status update fails so the caller can requeue.
@@ -841,7 +843,9 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
 		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT)).
-		// Watch deprecated TemporalWorkerDeployments so migration runs when a matching WD is created.
+		// Watch deprecated TemporalWorkerDeployments so that any modification to an existing TWD
+		// (e.g. a status update before migration completes) triggers a reconcile of the matching WD
+		// and causes migrateFromDeprecatedTWD to run.
 		Watches(&temporaliov1alpha1.TemporalWorkerDeployment{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 			return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}}}
 		})).
