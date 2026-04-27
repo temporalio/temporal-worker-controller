@@ -162,7 +162,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 			// Remove our finalizer from the TemporalConnection if no other TWDs reference it.
 			if err := r.removeConnectionFinalizerIfUnused(ctx, l, &workerDeploy); err != nil {
-				l.Error(err, "failed to remove finalizer from TemporalConnection")
 				return ctrl.Result{}, err
 			}
 

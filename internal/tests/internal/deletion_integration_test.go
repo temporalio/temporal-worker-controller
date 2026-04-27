@@ -123,6 +123,58 @@ func testDeletionSetsCurrentToUnversioned(
 	})
 	t.Log("TWD is reconciled with a current version set")
 
+	// Update the TWD to target v2.0, creating a second version to use as a ramping version.
+	// This exercises the ramping-version clear path in handleDeletion.
+	var twdForUpdate temporaliov1alpha1.TemporalWorkerDeployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdForUpdate); err != nil {
+		t.Fatalf("failed to get TWD for v2.0 update: %v", err)
+	}
+	twdForUpdate.Spec.Template.Spec.Containers[0].Image = "v2.0"
+	buildIDv2 := k8s.ComputeBuildID(&twdForUpdate)
+	deploymentNameV2 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv2)
+	if err := k8sClient.Update(ctx, &twdForUpdate); err != nil {
+		t.Fatalf("failed to update TWD to v2.0: %v", err)
+	}
+
+	// Wait for the controller to create the v2.0 K8s Deployment
+	eventually(t, 30*time.Second, time.Second, func() error {
+		var dep appsv1.Deployment
+		return k8sClient.Get(ctx, types.NamespacedName{Name: deploymentNameV2, Namespace: namespace}, &dep)
+	})
+
+	// Start v2.0 workers so they register with the Temporal server
+	workerStopFuncsV2 := applyDeployment(t, ctx, k8sClient, deploymentNameV2, namespace)
+	defer handleStopFuncs(workerStopFuncsV2)
+
+	// Wait for v2.0 to appear as a version in the Temporal deployment
+	eventually(t, 60*time.Second, 2*time.Second, func() error {
+		resp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+		if err != nil {
+			return err
+		}
+		for _, v := range resp.Info.VersionSummaries {
+			if v.Version.BuildID == buildIDv2 {
+				return nil
+			}
+		}
+		return fmt.Errorf("v2.0 (buildID=%s) not yet visible in Temporal deployment", buildIDv2)
+	})
+
+	// Set v2.0 as the ramping version so we exercise the clear-ramping path on deletion
+	descResp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+	if err != nil {
+		t.Fatalf("failed to describe deployment before setting ramping version: %v", err)
+	}
+	if _, err := deploymentHandle.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+		BuildID:       buildIDv2,
+		Percentage:    50,
+		ConflictToken: descResp.ConflictToken,
+		Identity:      "test",
+	}); err != nil {
+		t.Fatalf("failed to set v2.0 as ramping version: %v", err)
+	}
+	t.Logf("Set v2.0 (buildID=%s) as ramping version at 50%%", buildIDv2)
+
 	// Verify the TWD has our finalizer
 	var twdBeforeDelete temporaliov1alpha1.TemporalWorkerDeployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdBeforeDelete); err != nil {
@@ -172,6 +224,13 @@ func testDeletionSetsCurrentToUnversioned(
 			resp.Info.RoutingConfig.CurrentVersion.BuildID)
 	} else {
 		t.Log("Verified: current version is unversioned after TWD deletion")
+	}
+
+	if resp.Info.RoutingConfig.RampingVersion != nil {
+		t.Errorf("expected ramping version to be nil after TWD deletion, got buildID=%q",
+			resp.Info.RoutingConfig.RampingVersion.BuildID)
+	} else {
+		t.Log("Verified: ramping version is cleared after TWD deletion")
 	}
 }
 
