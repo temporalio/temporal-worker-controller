@@ -950,6 +950,21 @@ func TestIntegration(t *testing.T) {
 
 	// Conditions and events tests
 	runConditionsAndEventsTests(t, k8sClient, mgr, ts, testNamespace.Name)
+
+	// Rate limit test: uses a dedicated server to avoid interfering with the tests above.
+	// Ten TWDs in the same Temporal namespace produce 10 concurrent DescribeWorkerDeployment
+	// calls per second against a 1 RPS limit, reliably triggering ResourceExhausted errors.
+	dcRateLimit := dynamicconfig.NewMemoryClient()
+	dcRateLimit.OverrideValue(dynamicconfig.MakeKey("frontend.globalNamespaceWorkerDeploymentReadRPS"), 1)
+	tsRateLimit := temporaltest.NewServer(
+		temporaltest.WithT(t),
+		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcRateLimit)),
+	)
+	runRateLimitTest(t, k8sClient, tsRateLimit, testNamespace.Name)
+
+	// Deletion cleanup tests — use short poller TTL server so active pollers expire
+	// in 1s rather than the default 5 minutes, keeping test runtime reasonable.
+	runDeletionTests(t, k8sClient, tsShortTTL, testNamespace.Name)
 }
 
 // testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status

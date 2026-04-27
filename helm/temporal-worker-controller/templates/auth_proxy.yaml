@@ -1,4 +1,5 @@
-{{- if .Values.authProxy.enabled -}}
+{{- if .Values.metrics.enabled }}
+{{- if not .Values.metrics.disableAuth -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -62,4 +63,5 @@ spec:
   selector:
     {{- include "temporal-worker-controller.selectorLabels" . | nindent 4 }}
 ---
+{{- end -}}
 {{- end }}

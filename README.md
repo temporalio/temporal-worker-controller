@@ -145,6 +145,7 @@ The Temporal Worker Controller eliminates this operational overhead by automatin
 
 | Document                                                    | Description                                                           |
 |-------------------------------------------------------------|-----------------------------------------------------------------------|
+| [Releases](docs/release.md)                                 | How we version and release the controller and Helm Chart              |
 | [Migration Guide](docs/migration-to-versioned.md)           | Step-by-step guide for migrating from traditional deployments         |
 | [Reversion Guide](docs/migration-to-unversioned.md)         | Step-by-step guide for migrating back to unversioned deployment       |
 | [CD Rollouts](docs/cd-rollouts.md)                          | Helm, kubectl, ArgoCD, and Flux integration for steady-state rollouts |
