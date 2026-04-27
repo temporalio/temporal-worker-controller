@@ -8,7 +8,6 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	sdkclient "go.temporal.io/sdk/client"
@@ -129,7 +128,7 @@ func setCurrentVersion(
 	eventually(t, 60*time.Second, time.Second, func() error {
 		_, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 			BuildID:  buildID,
-			Identity: defaults.ControllerIdentity,
+			Identity: testControllerIdentity,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to set build '%s' as current of worker deployment %s: %w", buildID, workerDeploymentName, err)
@@ -157,7 +156,7 @@ func setRampingVersion(
 		_, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 			BuildID:    buildID,
 			Percentage: rampPercentage,
-			Identity:   defaults.ControllerIdentity,
+			Identity:   testControllerIdentity,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to set build '%s' as ramping of worker deployment %s: %w", buildID, workerDeploymentName, err)

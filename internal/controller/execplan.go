@@ -189,7 +189,9 @@ func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *pl
 	if existing == "" {
 		return true // unclaimed
 	}
-	if existing == defaults.ControllerIdentity {
+	// Handle Worker Deployments that were controller-managed before we
+	// started recording the cluster-UID in the manager identity.
+	if existing == defaults.DeprecatedDefaultControllerIdentity {
 		return true // pre-Helm hardcoded default
 	}
 	// Pre-cluster-UID Helm format was "release/namespace"; new format is
