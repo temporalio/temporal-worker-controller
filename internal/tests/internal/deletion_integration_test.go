@@ -58,17 +58,13 @@ func testDeletionSetsCurrentToUnversioned(
 	ctx := context.Background()
 	testName := "del-cleanup"
 
-	// Build a TWD using the standard builder pattern
+	// Use Manual strategy so the controller does not race to promote v2.0 to current
+	// while the test is setting it up as a ramping version.
 	tc := testhelpers.NewTestCase().
 		WithInput(
 			testhelpers.NewTemporalWorkerDeploymentBuilder().
-				WithAllAtOnceStrategy().
+				WithManualStrategy().
 				WithTargetTemplate("v1.0"),
-		).
-		WithExpectedStatus(
-			testhelpers.NewStatusBuilder().
-				WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
-				WithCurrentVersion("v1.0", true, false),
 		).
 		BuildWithValues(testName, namespace, ts.GetDefaultNamespace())
 
@@ -109,19 +105,12 @@ func testDeletionSetsCurrentToUnversioned(
 	workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, namespace)
 	defer handleStopFuncs(workerStopFuncs)
 
-	// Wait until the version becomes current on the Temporal server
+	// Manual strategy does not auto-promote, so set v1.0 as current explicitly.
+	// setCurrentVersion uses defaults.ControllerIdentity so handleDeletion can later
+	// update versioning state without a ManagerIdentity mismatch.
 	deploymentHandle := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
-	eventually(t, 60*time.Second, 2*time.Second, func() error {
-		resp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
-		if err != nil {
-			return err
-		}
-		if resp.Info.RoutingConfig.CurrentVersion == nil {
-			return errors.New("current version not set yet")
-		}
-		return nil
-	})
-	t.Log("TWD is reconciled with a current version set")
+	setCurrentVersion(t, ctx, ts, workerDeploymentName, buildID)
+	t.Log("v1.0 set as current version")
 
 	// Update the TWD to target v2.0, creating a second version to use as a ramping version.
 	// This exercises the ramping-version clear path in handleDeletion.
@@ -160,48 +149,8 @@ func testDeletionSetsCurrentToUnversioned(
 		return fmt.Errorf("v2.0 (buildID=%s) not yet visible in Temporal deployment", buildIDv2)
 	})
 
-	// Create a client matching the controller's ManagerIdentity so we can revert the
-	// current version when the AllAtOnce controller has already promoted v2.0.
-	controllerClient, err := sdkclient.Dial(sdkclient.Options{
-		HostPort:  ts.GetFrontendHostPort(),
-		Namespace: ts.GetDefaultNamespace(),
-		Identity:  "temporal-worker-controller",
-	})
-	if err != nil {
-		t.Fatalf("failed to create controller-identity client: %v", err)
-	}
-	defer controllerClient.Close()
-	controllerHandle := controllerClient.WorkerDeploymentClient().GetHandle(workerDeploymentName)
-
 	// Set v2.0 as the ramping version to exercise the clear-ramping path on deletion.
-	// The AllAtOnce controller races to promote v2.0 to current; retry until we win:
-	// if v2.0 is already current, revert to v1.0 using the controller identity, then retry.
-	eventually(t, 30*time.Second, time.Second, func() error {
-		descResp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
-		if err != nil {
-			return err
-		}
-		if descResp.Info.RoutingConfig.CurrentVersion != nil && descResp.Info.RoutingConfig.CurrentVersion.BuildID == buildIDv2 {
-			t.Logf("v2.0 is already current; reverting to v1.0 before setting v2.0 as ramping")
-			if _, err := controllerHandle.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
-				BuildID:                 buildID,
-				ConflictToken:           descResp.ConflictToken,
-				IgnoreMissingTaskQueues: true,
-			}); err != nil {
-				return fmt.Errorf("revert to v1.0: %w", err)
-			}
-			return fmt.Errorf("reverted to v1.0, retrying")
-		}
-		if _, err := deploymentHandle.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-			BuildID:       buildIDv2,
-			Percentage:    50,
-			ConflictToken: descResp.ConflictToken,
-			Identity:      "test",
-		}); err != nil {
-			return err
-		}
-		return nil
-	})
+	setRampingVersion(t, ctx, ts, workerDeploymentName, buildIDv2, 50)
 	t.Logf("Set v2.0 (buildID=%s) as ramping version at 50%%", buildIDv2)
 
 	// Verify the TWD has our finalizer
