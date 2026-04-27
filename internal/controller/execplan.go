@@ -208,17 +208,10 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 ) error {
 	identity := getControllerIdentity()
 	if identity == "" {
-		// An empty identity is dangerous here for two distinct reasons:
-		//   1. SetManagerIdentity: passing empty clears the ManagerIdentity field on
-		//      the Worker Deployment, leaving it ownerless and claimable by any other
-		//      controller. This guard exists specifically to prevent that.
-		//   2. Write operations (SetCurrentVersion, SetRampingVersion, etc.): passing
-		//      empty Identity causes the SDK to substitute its own default (typically
-		//      hostname), producing junk in the Temporal audit trail.
-		//
-		// main() enforces that CONTROLLER_IDENTITY is set before the reconcile loop
-		// starts, but that check is bypassed if the reconciler is used as a library
-		// (e.g. embedded in another controller manager or in tests without the env var).
+		// Passing an empty identity to SetManagerIdentity clears the field on the
+		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
+		// This should never happen, but this is the extra fallback in case somehow
+		// the check in main() and Reconcile() are not sufficient.
 		return fmt.Errorf("CONTROLLER_IDENTITY is not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field")
 	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
