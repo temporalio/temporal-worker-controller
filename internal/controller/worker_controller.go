@@ -814,7 +814,7 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		if owner == nil {
 			return nil
 		}
-		// ...make sure it's a TemporalWorker...
+		// ...make sure it's a WorkerDeployment...
 		// TODO(jlegrone): double check apiGVStr has the correct value
 		if owner.APIVersion != apiGVStr || owner.Kind != "WorkerDeployment" {
 			return nil
