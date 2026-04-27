@@ -56,7 +56,7 @@ func (r *DeprecatedTWDReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			message = "A WorkerDeployment with the same name exists. Migration is in progress."
 		case apierrors.IsNotFound(err):
 			reason = "Deprecated"
-			message = "TemporalWorkerDeployment is deprecated. Create a WorkerDeployment with the same spec to migrate."
+			message = "TemporalWorkerDeployment is deprecated. Create a WorkerDeployment with the same name and spec to migrate."
 		default:
 			return ctrl.Result{}, err
 		}

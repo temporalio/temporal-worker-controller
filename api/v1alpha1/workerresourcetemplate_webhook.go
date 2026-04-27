@@ -148,11 +148,11 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	warnings = append(warnings, specWarnings...)
 	allErrs = append(allErrs, specErrs...)
 
-	// Immutability: temporalWorkerDeploymentRef.name must not change on update
+	// Immutability: workerDeploymentRef.name (effective) must not change on update
 	if oldWRT != nil && oldWRT.Spec.EffectiveWorkerDeploymentName() != newWRT.Spec.EffectiveWorkerDeploymentName() {
 		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec").Child("temporalWorkerDeploymentRef").Child("name"),
-			"temporalWorkerDeploymentRef.name is immutable and cannot be changed after creation",
+			field.NewPath("spec").Child("workerDeploymentRef").Child("name"),
+			"workerDeploymentRef.name is immutable and cannot be changed after creation",
 		))
 	}
 
