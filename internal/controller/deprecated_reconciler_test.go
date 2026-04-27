@@ -170,7 +170,7 @@ func TestMigrateFromDeprecatedTWD_TransfersOwnerRefs(t *testing.T) {
 			}},
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: name},
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: name},
 			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}

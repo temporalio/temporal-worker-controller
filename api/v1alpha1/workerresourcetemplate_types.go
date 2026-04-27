@@ -17,12 +17,12 @@ type WorkerDeploymentReference struct {
 type WorkerResourceTemplateSpec struct {
 	// WorkerDeploymentRef references the WorkerDeployment to attach this resource to.
 	// +optional
-	WorkerDeploymentRef WorkerDeploymentReference `json:"workerDeploymentRef,omitempty"`
+	WorkerDeploymentRef *WorkerDeploymentReference `json:"workerDeploymentRef,omitempty"`
 
 	// TemporalWorkerDeploymentRef is deprecated. Use WorkerDeploymentRef instead.
 	// Will be removed in a future release.
 	// +optional
-	TemporalWorkerDeploymentRef WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
+	TemporalWorkerDeploymentRef *WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
 
 	// Template is the Kubernetes resource template applied per active Build ID.
 	// Must include apiVersion, kind, and spec. metadata.name and metadata.namespace
@@ -141,10 +141,13 @@ type WorkerResourceTemplateList struct {
 // of WorkerDeploymentRef / TemporalWorkerDeploymentRef is set, preferring the
 // new field. Returns an empty string if neither is set.
 func (s *WorkerResourceTemplateSpec) EffectiveWorkerDeploymentName() string {
-	if s.WorkerDeploymentRef.Name != "" {
+	if s.WorkerDeploymentRef != nil {
 		return s.WorkerDeploymentRef.Name
 	}
-	return s.TemporalWorkerDeploymentRef.Name
+	if s.TemporalWorkerDeploymentRef != nil {
+		return s.TemporalWorkerDeploymentRef.Name
+	}
+	return ""
 }
 
 func init() {

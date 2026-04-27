@@ -3182,7 +3182,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "nil-raw", Namespace: "default"},
 					Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-						WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+						WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 						Template:            runtime.RawExtension{Raw: nil},
 					},
 				},
@@ -3316,7 +3316,7 @@ func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.Work
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
 			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -3359,7 +3359,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 	wrt := temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -3397,7 +3397,7 @@ func createTestWRTWithInvalidTemplate(name, workerDeploymentRefName string) temp
 			Namespace: "default",
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
 			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -3412,7 +3412,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 	wrt := temporaliov1alpha1.WorkerResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-hpa", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 			Template:            runtime.RawExtension{Raw: hpaRaw},
 		},
 	}
@@ -3459,7 +3459,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		wrt2 := temporaliov1alpha1.WorkerResourceTemplate{
 			ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
 			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-				WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+				WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 				Template:            runtime.RawExtension{Raw: pdbRaw},
 			},
 		}
@@ -3493,7 +3493,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		badWRT := temporaliov1alpha1.WorkerResourceTemplate{
 			ObjectMeta: metav1.ObjectMeta{Name: "bad-wrt", Namespace: "default"},
 			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-				WorkerDeploymentRef: temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+				WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
 				Template:            runtime.RawExtension{Raw: []byte(`not json`)},
 			},
 		}

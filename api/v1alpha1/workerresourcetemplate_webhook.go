@@ -188,20 +188,28 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 	var warnings admission.Warnings
 
 	// Exactly one of workerDeploymentRef / temporalWorkerDeploymentRef must be set.
-	if spec.WorkerDeploymentRef.Name != "" && spec.TemporalWorkerDeploymentRef.Name != "" {
+	wdRefName := ""
+	if spec.WorkerDeploymentRef != nil {
+		wdRefName = spec.WorkerDeploymentRef.Name
+	}
+	twdRefName := ""
+	if spec.TemporalWorkerDeploymentRef != nil {
+		twdRefName = spec.TemporalWorkerDeploymentRef.Name
+	}
+	if wdRefName != "" && twdRefName != "" {
 		allErrs = append(allErrs, field.Invalid(
 			field.NewPath("spec"),
 			"workerDeploymentRef & temporalWorkerDeploymentRef",
 			"only one of workerDeploymentRef or temporalWorkerDeploymentRef may be set",
 		))
 	}
-	if spec.WorkerDeploymentRef.Name == "" && spec.TemporalWorkerDeploymentRef.Name == "" {
+	if wdRefName == "" && twdRefName == "" {
 		allErrs = append(allErrs, field.Required(
 			field.NewPath("spec").Child("workerDeploymentRef"),
 			"workerDeploymentRef must be set (or temporalWorkerDeploymentRef for migration compatibility)",
 		))
 	}
-	if spec.TemporalWorkerDeploymentRef.Name != "" {
+	if twdRefName != "" {
 		warnings = append(warnings, "spec.temporalWorkerDeploymentRef is deprecated; use spec.workerDeploymentRef instead")
 	}
 	if len(allErrs) > 0 {

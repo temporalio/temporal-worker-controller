@@ -45,8 +45,8 @@ const (
 	deployOwnerKey = ".metadata.controller"
 	buildIDLabel   = "temporal.io/build-id"
 
-	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by temporalWorkerDeploymentRef.name.
-	wrtWorkerRefKey = ".spec.temporalWorkerDeploymentRef.name"
+	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by effective workerDeploymentRef name.
+	wrtWorkerRefKey = ".spec.workerDeploymentRef.name"
 
 	// finalizerName is the finalizer added to TemporalWorkerDeployment and TemporalConnection
 	// resources to prevent deletion before cleanup actions are taken. On TWD resources, it
