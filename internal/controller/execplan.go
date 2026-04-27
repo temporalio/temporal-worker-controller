@@ -275,8 +275,8 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 		},
 		MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 			UpsertEntries: map[string]interface{}{
-				controllerIdentityMetadataKey: getControllerIdentity(),
-				controllerVersionMetadataKey:  getControllerVersion(),
+				IdentityMetadataKey: getControllerIdentity(),
+				VersionMetadataKey:  getControllerVersion(),
 			},
 		},
 	}); err != nil { // would be cool to do this atomically with the update

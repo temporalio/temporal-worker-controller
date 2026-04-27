@@ -16,6 +16,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/api/taskqueue/v1"
@@ -95,12 +96,13 @@ func getRepoRoot(t *testing.T) string {
 func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Manager, *clientpool.ClientPool, func()) {
 	// Set faster reconcile interval for testing
 	t.Setenv("RECONCILE_INTERVAL", "1s")
+	t.Setenv(controller.IdentityEnvKey, defaults.ControllerIdentity)
 	if kubeAssets := os.Getenv("KUBEBUILDER_ASSETS"); kubeAssets == "" {
 		t.Skip("Skipping because KUBEBUILDER_ASSETS not set")
 	}
 
 	// set max versions value for testing
-	t.Setenv(controller.ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey, fmt.Sprintf("%d", testMaxVersionsIneligibleForDeletion))
+	t.Setenv(controller.MaxDeploymentVersionsIneligibleForDeletionEnvKey, fmt.Sprintf("%d", testMaxVersionsIneligibleForDeletion))
 
 	// Setup kubebuilder assets for IDE testing
 	if err := setupKubebuilderAssets(); err != nil {
