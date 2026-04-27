@@ -478,7 +478,24 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
 
 	routingConfig := resp.Info.RoutingConfig
 
-	// Step 1: Set current version to unversioned (empty BuildID) so tasks route to unversioned workers.
+	// Step 1: Clear the ramping version first. This must happen before setting
+	// current to unversioned to avoid a window where traffic is split between
+	// unversioned workers and the ramping version.
+	if routingConfig.RampingVersion != nil {
+		l.Info("Clearing ramping version", "buildID", routingConfig.RampingVersion.BuildID)
+		if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
+			BuildID:    "",
+			Percentage: 0,
+			Identity:   getControllerIdentity(),
+		}); err != nil {
+			return fmt.Errorf("unable to clear ramping version: %w", err)
+		}
+		l.Info("Successfully cleared ramping version")
+	} else {
+		l.Info("No ramping version set, skipping clear ramping version")
+	}
+
+	// Step 2: Set current version to unversioned (empty BuildID) so tasks route to unversioned workers.
 	// This is the critical step that unblocks task dispatch.
 	if routingConfig.CurrentVersion != nil {
 		l.Info("Setting current version to unversioned", "previousBuildID", routingConfig.CurrentVersion.BuildID)
@@ -493,20 +510,6 @@ func (r *TemporalWorkerDeploymentReconciler) handleDeletion(
 		l.Info("Successfully set current version to unversioned")
 	} else {
 		l.Info("No current version set, skipping unversioned redirect")
-	}
-
-	// Step 2: If there's a ramping version, clear it.
-	if routingConfig.RampingVersion != nil {
-		l.Info("Clearing ramping version", "buildID", routingConfig.RampingVersion.BuildID)
-		if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
-			BuildID:    "",
-			Percentage: 0,
-			Identity:   getControllerIdentity(),
-		}); err != nil {
-			l.Info("Failed to clear ramping version (may have been cleared by SetCurrentVersion)", "error", err)
-		}
-	} else {
-		l.Info("No ramping version set, skipping clear ramping version")
 	}
 
 	// Step 3: Delete versions that are eligible. Versions that are still draining
