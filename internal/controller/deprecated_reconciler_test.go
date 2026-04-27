@@ -72,7 +72,7 @@ func TestDeprecatedTWDReconciler_ConditionDeprecated(t *testing.T) {
 func TestDeprecatedTWDReconciler_ConditionWorkerDeploymentExists(t *testing.T) {
 	// WorkerDeployment with same name exists, TWD not yet migrated → Reason="WorkerDeploymentExists"
 	twd := makeTWDStub("my-worker", "default", nil)
-	wd := makeTWD("my-worker", "default", "my-conn")
+	wd := makeWD("my-worker", "default", "my-conn")
 	r := newDeprecatedTWDReconciler(twd, wd)
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -124,7 +124,7 @@ func TestMigrateFromDeprecatedTWD_TransfersOwnerRefs(t *testing.T) {
 
 	twd := makeTWDStub(name, namespace, nil)
 	twd.UID = twdUID
-	wd := makeTWD(name, namespace, "my-conn")
+	wd := makeWD(name, namespace, "my-conn")
 
 	// Deployment owned by the deprecated TWD.
 	dep := &appsv1.Deployment{
@@ -212,7 +212,7 @@ func TestMigrateFromDeprecatedTWD_SkipsIfAlreadyMigrated(t *testing.T) {
 		deprecatedTWDMigratedLabel: "true",
 	})
 	twd.UID = "old-uid"
-	wd := makeTWD("my-worker", "default", "my-conn")
+	wd := makeWD("my-worker", "default", "my-conn")
 
 	scheme := newTestScheme()
 	fakeClient := fake.NewClientBuilder().
@@ -232,7 +232,7 @@ func TestMigrateFromDeprecatedTWD_SkipsIfAlreadyMigrated(t *testing.T) {
 
 func TestMigrateFromDeprecatedTWD_NoTWD(t *testing.T) {
 	// No deprecated TWD exists → no-op.
-	wd := makeTWD("my-worker", "default", "my-conn")
+	wd := makeWD("my-worker", "default", "my-conn")
 
 	scheme := newTestScheme()
 	fakeClient := fake.NewClientBuilder().
@@ -253,7 +253,7 @@ func TestMigrateFromDeprecatedTWD_UnrelatedDeploymentUntouched(t *testing.T) {
 
 	twd := makeTWDStub("my-worker", namespace, nil)
 	twd.UID = twdUID
-	wd := makeTWD("my-worker", namespace, "my-conn")
+	wd := makeWD("my-worker", namespace, "my-conn")
 
 	unrelated := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{

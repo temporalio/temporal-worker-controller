@@ -92,8 +92,8 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 	return r, recorder
 }
 
-// makeTWD creates a minimal WorkerDeployment for testing.
-func makeTWD(name, namespace, connectionName string) *temporaliov1alpha1.WorkerDeployment {
+// makeWD creates a minimal WorkerDeployment for testing.
+func makeWD(name, namespace, connectionName string) *temporaliov1alpha1.WorkerDeployment {
 	replicas := int32(1)
 	progressDeadline := int32(600)
 	return &temporaliov1alpha1.WorkerDeployment{
@@ -289,7 +289,7 @@ func TestSetCondition(t *testing.T) {
 	r, _ := newTestReconciler(nil)
 
 	t.Run("SetsNewCondition", func(t *testing.T) {
-		twd := makeTWD("test-worker", "default", "my-connection")
+		twd := makeWD("test-worker", "default", "my-connection")
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "TestReason", "Test message")
 
 		require.Len(t, twd.Status.Conditions, 1)
@@ -301,7 +301,7 @@ func TestSetCondition(t *testing.T) {
 	})
 
 	t.Run("UpdatesExistingCondition", func(t *testing.T) {
-		twd := makeTWD("test-worker", "default", "my-connection")
+		twd := makeWD("test-worker", "default", "my-connection")
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "InitialReason", "Initial message")
 		require.Len(t, twd.Status.Conditions, 1)
 
@@ -314,7 +314,7 @@ func TestSetCondition(t *testing.T) {
 	})
 
 	t.Run("MultipleDifferentConditions", func(t *testing.T) {
-		twd := makeTWD("test-worker", "default", "my-connection")
+		twd := makeWD("test-worker", "default", "my-connection")
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, "TestReason", "All good")
 		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, "TestReason", "Not progressing")
 
@@ -342,7 +342,7 @@ func TestSyncConditions(t *testing.T) {
 	}
 
 	t.Run("ReadyWhenVersionIsCurrent", func(t *testing.T) {
-		twd := makeTWD("test-worker", "default", "my-connection")
+		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
 		r.syncConditions(twd)
 
@@ -354,7 +354,7 @@ func TestSyncConditions(t *testing.T) {
 	})
 
 	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
-		twd := makeTWD("test-worker", "default", "my-connection")
+		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
 		r.syncConditions(twd)
 
@@ -365,7 +365,7 @@ func TestSyncConditions(t *testing.T) {
 	})
 
 	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
-		twd := makeTWD("test-worker", "default", "my-connection")
+		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
 		r.syncConditions(twd)
 
@@ -376,7 +376,7 @@ func TestSyncConditions(t *testing.T) {
 	})
 
 	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
-		twd := makeTWD("test-worker", "default", "my-connection")
+		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusNotRegistered
 		r.syncConditions(twd)
 
@@ -404,7 +404,7 @@ func TestReconcile_TWDNotFound_NoEvent(t *testing.T) {
 // errors not enforceable by the CRD schema (e.g. rampPercentage ordering) surface as
 // a Warning event and a blocked condition rather than being silently requeued.
 func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
-	twd := makeTWD("test-worker", "default", "my-connection")
+	twd := makeWD("test-worker", "default", "my-connection")
 	twd.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
 		Strategy: temporaliov1alpha1.UpdateProgressive,
 		Steps: []temporaliov1alpha1.RolloutStep{
@@ -437,7 +437,7 @@ func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
 // event message content, and condition update.
 func TestReconcile_ConnectionNotFound(t *testing.T) {
 	connName := "nonexistent-connection"
-	twd := makeTWD("test-worker", "default", connName)
+	twd := makeWD("test-worker", "default", connName)
 	r, recorder := newTestReconciler([]client.Object{twd})
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -530,7 +530,7 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			conn := makeNoCredsConnection("my-connection", "default", "localhost:7233")
 			tc.setupConn(conn)
-			twd := makeTWD("test-worker", conn.Namespace, conn.Name)
+			twd := makeWD("test-worker", conn.Namespace, conn.Name)
 			r, recorder := newTestReconciler([]client.Object{twd, conn})
 
 			_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -562,7 +562,7 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 	hostPort := "localhost:7233"
 
 	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
-	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
+	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
 	listCallCount := 0
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
@@ -607,7 +607,7 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 	hostPort := "localhost:7233"
 
 	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
-	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
+	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
 		Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
@@ -649,7 +649,7 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	hostPort := "localhost:7233"
 
 	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
-	twd := makeTWD("test-worker", k8sNamespace, tc.Name)
+	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{})
 
@@ -675,7 +675,7 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 
 func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 	namespace := "default"
-	twd := makeTWD("test-worker", namespace, "my-conn")
+	twd := makeWD("test-worker", namespace, "my-conn")
 
 	cases := []struct {
 		name           string
@@ -754,7 +754,7 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 
 func TestStartTestWorkflows_StartFailed_EmitsEvent(t *testing.T) {
 	namespace := "default"
-	twd := makeTWD("test-worker", namespace, "my-conn")
+	twd := makeWD("test-worker", namespace, "my-conn")
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
 
 	p := &plan{
@@ -808,7 +808,7 @@ func TestUpdateVersionConfig_EmitsEventOnFailure(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			namespace := "default"
-			twd := makeTWD("test-worker", namespace, "my-conn")
+			twd := makeWD("test-worker", namespace, "my-conn")
 			r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
 
 			p := &plan{WorkerDeploymentName: twd.Name, UpdateVersionConfig: tc.config}
