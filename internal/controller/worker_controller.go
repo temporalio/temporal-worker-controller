@@ -148,9 +148,9 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			l.Error(err, "unable to fetch WorkerDeployment")
 			return ctrl.Result{}, err
 		}
-		// TWD not found: set Ready=False on any WRTs that reference it so users get a
+		// WD not found: set Ready=False on any WRTs that reference it so users get a
 		// clear signal rather than a silent no-op. No requeue for the not-found itself —
-		// the next reconcile fires naturally when the TWD is created. If the List or
+		// the next reconcile fires naturally when the WD is created. If the List or
 		// status updates fail (transient API errors), return the error to requeue with backoff.
 		return ctrl.Result{}, r.markWRTsWDNotFound(ctx, req.NamespacedName)
 	}
