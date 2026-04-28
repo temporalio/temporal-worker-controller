@@ -11,8 +11,6 @@ spec:
     kind: Connection
     listKind: ConnectionList
     plural: connections
-    shortNames:
-    - conn
     singular: connection
   scope: Namespaced
   versions:

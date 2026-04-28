@@ -18,7 +18,7 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: Referenced WorkerDeployment
-      jsonPath: .spec.temporalWorkerDeploymentRef.name
+      jsonPath: .spec.workerDeploymentRef.name
       name: Worker
       type: string
     - description: Kind of resource that is being templated

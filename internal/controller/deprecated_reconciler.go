@@ -21,10 +21,6 @@ const (
 // IMPORTANT: this reconciler must NEVER call Temporal APIs or manage k8s
 // Deployments. Doing so would race with the WorkerDeploymentReconciler for
 // resources that share the same Temporal deployment name.
-//
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
 type DeprecatedTWDReconciler struct {
 	client.Client
 }

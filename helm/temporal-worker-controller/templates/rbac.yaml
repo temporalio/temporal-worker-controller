@@ -107,6 +107,7 @@ rules:
       - temporal.io
     resources:
       - connections
+      - temporalworkerdeployments
       - workerresourcetemplates
     verbs:
       - get
@@ -118,8 +119,19 @@ rules:
       - temporal.io
     resources:
       - connections/finalizers
+      - temporalworkerdeployments/finalizers
       - workerdeployments/finalizers
     verbs:
+      - update
+  - apiGroups:
+      - temporal.io
+    resources:
+      - temporalworkerdeployments/status
+      - workerdeployments/status
+      - workerresourcetemplates/status
+    verbs:
+      - get
+      - patch
       - update
   - apiGroups:
       - temporal.io
@@ -133,15 +145,6 @@ rules:
       - patch
       - update
       - watch
-  - apiGroups:
-      - temporal.io
-    resources:
-      - workerdeployments/status
-      - workerresourcetemplates/status
-    verbs:
-      - get
-      - patch
-      - update
   # GENERATED RULES END
   # Rules for managing resources attached via WorkerResourceTemplate.
   # Driven entirely by workerResourceTemplate.allowedResources in values.yaml.

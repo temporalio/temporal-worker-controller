@@ -107,6 +107,9 @@ type WorkerDeploymentReconciler struct {
 	MaxDeploymentVersionsIneligibleForDeletion int32
 }
 
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/finalizers,verbs=update

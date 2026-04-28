@@ -152,8 +152,8 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate ClusterRole and CustomResourceDefinition objects.
 	GOWORK=off GO111MODULE=on $(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true paths=./api/... paths=./internal/... paths=./cmd/... \
-    output:crd:artifacts:config=helm/temporal-worker-controller-crds/templates
-	python3 hack/sync-rbac-rules.py
+	    output:crd:artifacts:config=helm/temporal-worker-controller-crds/templates \
+	    output:rbac:stdout | python3 hack/sync-rbac-rules.py
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
