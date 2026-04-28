@@ -198,6 +198,12 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
+	// TODO(jlegrone): Set defaults via webhook rather than manually
+	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
+		l.Error(err, "WorkerDeployment defaulter failed")
+		return ctrl.Result{}, err
+	}
+
 	// Fallback validation for spec constraints the CRD schema cannot enforce (rampPercentage
 	// ordering, gate input/inputFrom exclusivity). When the optional TWD webhook is disabled
 	// these checks would otherwise go unreported; this surfaces them as a condition and event.
@@ -212,11 +218,11 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Note: ConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
 
 	// Fetch the connection parameters
-	var temporalConnection temporaliov1alpha1.Connection
+	var connection temporaliov1alpha1.Connection
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      workerDeploy.Spec.WorkerOptions.ConnectionRef.Name,
 		Namespace: workerDeploy.Namespace,
-	}, &temporalConnection); err != nil {
+	}, &connection); err != nil {
 		l.Error(err, "unable to fetch Connection")
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonConnectionNotFound,
@@ -226,33 +232,26 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Ensure our finalizer is on the Connection so it cannot be deleted
-	// while this TWD still references it. This guarantees the connection is available
-	// during TWD deletion cleanup.
-	if err := r.ensureConnectionFinalizer(ctx, l, &temporalConnection); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Ensure our finalizer is on the TemporalConnection so it cannot be deleted
-	// while this TWD still references it. This guarantees the connection is available
-	// during TWD deletion cleanup.
-	if err := r.ensureConnectionFinalizer(ctx, l, &temporalConnection); err != nil {
+	// while this WD still references it. This guarantees the connection is available
+	// during WD deletion cleanup.
+	if err := r.ensureConnectionFinalizer(ctx, l, &connection); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// Get the Auth Mode and Secret Name
-	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
+	authMode, secretName, err := resolveAuthSecretName(&connection)
 	if err != nil {
 		l.Error(err, "unable to resolve auth secret name")
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonAuthSecretInvalid,
-			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", temporalConnection.Name, err),
+			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", connection.Name, err),
 			fmt.Sprintf("Unable to resolve auth secret: %v", err))
 		return ctrl.Result{}, err
 	}
 
 	// Get or update temporal client for connection
 	clientPoolKey := clientpool.ClientPoolKey{
-		HostPort:   temporalConnection.Spec.HostPort,
+		HostPort:   connection.Spec.HostPort,
 		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		SecretName: secretName,
 		AuthMode:   authMode,
@@ -262,14 +261,14 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
 			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-			Spec:              temporalConnection.Spec,
+			Spec:              connection.Spec,
 			Identity:          getControllerIdentity(),
 		})
 		if err != nil {
 			l.Error(err, "invalid Temporal auth secret")
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonAuthSecretInvalid,
-				fmt.Sprintf("Invalid Temporal auth secret for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
+				fmt.Sprintf("Invalid Temporal auth secret for %s:%s: %v", connection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
 				fmt.Sprintf("Invalid auth secret: %v", err))
 			return ctrl.Result{}, err
 		}
@@ -279,7 +278,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			l.Error(err, "unable to create TemporalClient")
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonTemporalClientCreationFailed,
-				fmt.Sprintf("Unable to create Temporal client for %s:%s: %v", temporalConnection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
+				fmt.Sprintf("Unable to create Temporal client for %s:%s: %v", connection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
 				fmt.Sprintf("Failed to connect to Temporal: %v", err))
 			return ctrl.Result{}, err
 		}
@@ -341,7 +340,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	workerDeploy.Status = *status
 
 	// Generate a plan to get to desired spec from current status
-	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec, temporalState)
+	plan, err := r.generatePlan(ctx, l, &workerDeploy, connection.Spec, temporalState)
 	if err != nil {
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanGenerationFailed,
