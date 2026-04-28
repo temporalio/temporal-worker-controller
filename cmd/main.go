@@ -103,6 +103,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "TemporalWorkerDeployment")
 		os.Exit(1)
 	}
+	if err = (&controller.DeprecatedTCReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TemporalConnection")
+		os.Exit(1)
+	}
 	if err = temporaliov1alpha1.NewWorkerResourceTemplateValidator(mgr).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "WorkerResourceTemplate")
 		os.Exit(1)

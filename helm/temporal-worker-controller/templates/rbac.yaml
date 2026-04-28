@@ -126,6 +126,15 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
+      - temporalconnections
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - temporalconnections/status
       - temporalworkerdeployments/status
       - workerdeployments/status
       - workerresourcetemplates/status
