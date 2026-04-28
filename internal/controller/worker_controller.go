@@ -232,11 +232,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
-	// TODO(jlegrone): Set defaults via webhook rather than manually
-	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
-		l.Error(err, "WorkerDeployment defaulter failed")
-		return ctrl.Result{}, err
-	}
+	workerDeploy.Spec.ApplyDefaults()
 
 	// Fallback validation for spec constraints the CRD schema cannot enforce (rampPercentage
 	// ordering, gate input/inputFrom exclusivity). When the optional TWD webhook is disabled
@@ -380,12 +376,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	status.Conditions = workerDeploy.Status.Conditions
 	workerDeploy.Status = *status
 
-	// TODO(jlegrone): Set defaults via webhook rather than manually
-	//                 (defaults were already set above, but have to be set again after status update)
-	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
-		l.Error(err, "WorkerDeployment defaulter failed")
-		return ctrl.Result{}, err
-	}
+	workerDeploy.Spec.ApplyDefaults()
 
 	// Generate a plan to get to desired spec from current status
 	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec, temporalState)

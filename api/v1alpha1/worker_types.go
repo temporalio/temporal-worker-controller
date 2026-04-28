@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -464,6 +465,17 @@ type WorkerDeploymentList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []WorkerDeployment `json:"items"`
+}
+
+// ApplyDefaults fills in nil delay fields with package-level defaults.
+// Called by the controller on every reconcile; there is no mutating webhook for WorkerDeployment.
+func (s *WorkerDeploymentSpec) ApplyDefaults() {
+	if s.SunsetStrategy.ScaledownDelay == nil {
+		s.SunsetStrategy.ScaledownDelay = &metav1.Duration{Duration: defaults.ScaledownDelay}
+	}
+	if s.SunsetStrategy.DeleteDelay == nil {
+		s.SunsetStrategy.DeleteDelay = &metav1.Duration{Duration: defaults.DeleteDelay}
+	}
 }
 
 func init() {
