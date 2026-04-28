@@ -18,6 +18,8 @@ type WorkerDeploymentReference struct {
 // +kubebuilder:validation:XValidation:rule="!(has(self.workerDeploymentRef) && has(self.temporalWorkerDeploymentRef))",message="only one of workerDeploymentRef or temporalWorkerDeploymentRef may be set"
 type WorkerResourceTemplateSpec struct {
 	// WorkerDeploymentRef references the WorkerDeployment to attach this resource to.
+	// Will be required when TemporalWorkerDeploymentRef is removed. Until then, CEL
+	// validation will enforce that exactly one of these fields is set.
 	// +optional
 	WorkerDeploymentRef *WorkerDeploymentReference `json:"workerDeploymentRef,omitempty"`
 
