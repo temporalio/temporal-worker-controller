@@ -188,10 +188,10 @@ func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *pl
 	if existing == "" {
 		return true // unclaimed
 	}
-	// In the next release, the namespace UID will be included in the controller identity.
-	// To support smooth rollback, in this release, we will detect the future format and
-	// treat that as a reclaimable claim.
-	if existing == getControllerIdentityWithNamespaceUID() {
+
+	// Handle Worker Deployments that were controller-managed before we
+	// started recording the cluster-UID in the manager identity
+	if existing == getDeprecatedControllerIdentity() {
 		return true
 	}
 	return false
@@ -205,6 +205,14 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 	vcfg *planner.VersionConfig,
 ) error {
 	identity := getControllerIdentity()
+	if identity == "" {
+		// Passing an empty identity to SetManagerIdentity clears the field on the
+		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
+		// This should never happen, but this is the extra fallback in case somehow
+		// the check in main() and Reconcile() are not sufficient.
+		return errors.New(fmt.Sprintf("%s and %s are not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field",
+			IdentityEnvKey, IdentitySuffixEnvKey))
+	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
 		ConflictToken: vcfg.ConflictToken,

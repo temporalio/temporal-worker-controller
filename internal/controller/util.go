@@ -58,21 +58,24 @@ func getControllerVersion() string {
 	return "unknown"
 }
 
-// getControllerIdentity returns the identity from environment variable (set by Helm).
-// Returns empty string if unset. main() enforces this at startup, but that check is
-// bypassed if the reconciler is used as a library (e.g. embedded in another controller
-// manager or in tests). An empty return means the env var was not set before starting.
-func getControllerIdentity() string {
+// getDeprecatedControllerIdentity is used for smooth identity reclamation when rolling
+// forward to the new identity format.
+func getDeprecatedControllerIdentity() string {
 	if identity := os.Getenv(IdentityEnvKey); identity != "" {
 		return identity
 	}
-	return defaults.ToBeDeprecatedDefaultControllerIdentity
+	return defaults.DeprecatedDefaultControllerIdentity
 }
 
-// getControllerIdentityWithNamespaceUID returns the identity which will be used in the
-// next release. Used in this release for smooth rollback identity reclamation.
-func getControllerIdentityWithNamespaceUID() string {
-	return getControllerIdentity() + "/" + os.Getenv(IdentitySuffixEnvKey)
+// getControllerIdentity returns the identity with controller env var and namespace uid suffix.
+// Presence of both are ensured by main() and in Reconcile() for users of the controller as a library.
+func getControllerIdentity() string {
+	id := os.Getenv(IdentityEnvKey)
+	suffix := os.Getenv(IdentitySuffixEnvKey)
+	if id != "" && suffix != "" {
+		return id + "/" + suffix
+	}
+	return ""
 }
 
 func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {

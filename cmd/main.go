@@ -121,6 +121,10 @@ func main() {
 		setupLog.Error(nil, "POD_NAMESPACE environment variable must be set")
 		os.Exit(1)
 	}
+	if os.Getenv(controller.IdentityEnvKey) == "" {
+		setupLog.Error(nil, "CONTROLLER_IDENTITY environment variable must be set")
+		os.Exit(1)
+	}
 	var ns corev1.Namespace
 	if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Name: podNamespace}, &ns); err != nil {
 		setupLog.Error(err, "unable to fetch namespace UID for controller identity suffix")
