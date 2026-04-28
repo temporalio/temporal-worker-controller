@@ -40,8 +40,10 @@ type TemporalConnectionSpec struct {
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
 type TemporalConnectionStatus struct {
-	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true
