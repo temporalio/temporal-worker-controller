@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
-"""Sync RBAC rules from controller-gen stdout into the Helm ClusterRole template.
+"""Sync rules from config/rbac/role.yaml into the Helm ClusterRole template.
 
 The Helm template must contain:
   # GENERATED RULES BEGIN
   ...
   # GENERATED RULES END
 markers inside its ClusterRole rules section.  Everything between the markers
-is replaced with the rules emitted by controller-gen (indented by two spaces).
-
-Usage: controller-gen ... output:rbac:stdout | python3 hack/sync-rbac-rules.py
+is replaced with the rules from config/rbac/role.yaml (indented by two spaces).
 """
 import re
 import sys
 
+ROLE_YAML = "config/rbac/role.yaml"
 HELM_RBAC = "helm/temporal-worker-controller/templates/rbac.yaml"
 BEGIN_MARKER = "  # GENERATED RULES BEGIN"
 END_MARKER = "  # GENERATED RULES END"
 
 
-def extract_rules_text(content):
+def extract_rules_text(path):
+    with open(path) as f:
+        content = f.read()
     idx = content.find("\nrules:\n")
     if idx == -1:
-        print("ERROR: 'rules:' not found in controller-gen output", file=sys.stderr)
+        print(f"ERROR: 'rules:' not found in {path}", file=sys.stderr)
         sys.exit(1)
     rules_body = content[idx + len("\nrules:\n"):]
     # Indent lines relative to the `rules:` key in the Helm template.
@@ -56,10 +57,9 @@ def update_helm(path, rules_text):
     updated = pattern.sub(r"\g<1>" + rules_text + r"\g<3>", content)
     with open(path, "w") as f:
         f.write(updated)
-    print(f"Synced RBAC rules into {HELM_RBAC}")
+    print(f"Synced RBAC rules from {ROLE_YAML} → {HELM_RBAC}")
 
 
 if __name__ == "__main__":
-    content = sys.stdin.read()
-    rules = extract_rules_text(content)
+    rules = extract_rules_text(ROLE_YAML)
     update_helm(HELM_RBAC, rules)
