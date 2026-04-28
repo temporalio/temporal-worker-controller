@@ -198,40 +198,6 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
-	// Handle deletion: clean up Temporal server-side versioning data before allowing
-	// the CRD to be deleted. Without this, stale build ID routing persists in Temporal
-	// and prevents unversioned workers from picking up tasks on the same task queue.
-	if !workerDeploy.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
-			l.Info("TemporalWorkerDeployment is being deleted, running cleanup")
-			if err := r.handleDeletion(ctx, l, &workerDeploy); err != nil {
-				l.Error(err, "failed to clean up Temporal server-side deployment data, will retry")
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-			}
-
-			// Remove our finalizer from the TemporalConnection if no other TWDs reference it.
-			if err := r.removeConnectionFinalizerIfUnused(ctx, l, &workerDeploy); err != nil {
-				return ctrl.Result{}, err
-			}
-
-			// Cleanup succeeded, remove the finalizer so K8s can delete the resource
-			controllerutil.RemoveFinalizer(&workerDeploy, finalizerName)
-			if err := r.Update(ctx, &workerDeploy); err != nil {
-				return ctrl.Result{}, err
-			}
-			l.Info("Temporal server-side cleanup complete, finalizer removed")
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// Ensure finalizer is present on non-deleted resources
-	if !controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
-		controllerutil.AddFinalizer(&workerDeploy, finalizerName)
-		if err := r.Update(ctx, &workerDeploy); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
 	// Fallback validation for spec constraints the CRD schema cannot enforce (rampPercentage
 	// ordering, gate input/inputFrom exclusivity). When the optional TWD webhook is disabled
 	// these checks would otherwise go unreported; this surfaces them as a condition and event.
