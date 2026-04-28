@@ -123,11 +123,11 @@ func main() {
 	}
 	var ns corev1.Namespace
 	if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Name: podNamespace}, &ns); err != nil {
-		setupLog.Error(err, "unable to fetch namespace UID for controller identity")
+		setupLog.Error(err, "unable to fetch namespace UID for controller identity suffix")
 		os.Exit(1)
 	}
-	if err := os.Setenv(controller.NamespaceUIDEnvKey, string(ns.UID)); err != nil {
-		setupLog.Error(err, fmt.Sprintf("unable to set %s", controller.NamespaceUIDEnvKey))
+	if err := os.Setenv(controller.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
+		setupLog.Error(err, fmt.Sprintf("unable to set %s", controller.IdentitySuffixEnvKey))
 		os.Exit(1)
 	}
 

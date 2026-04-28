@@ -36,7 +36,7 @@ const (
 
 	VersionEnvKey                                    = "CONTROLLER_VERSION"
 	IdentityEnvKey                                   = "CONTROLLER_IDENTITY"
-	NamespaceUIDEnvKey                               = "NAMESPACE_UID"
+	IdentitySuffixEnvKey                             = "CONTROLLER_IDENTITY_SUFFIX"
 	MaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 
 	serverDeleteVersionIdentity = "try-delete-for-add-version"
@@ -72,7 +72,7 @@ func getControllerIdentity() string {
 // getControllerIdentityWithNamespaceUID returns the identity which will be used in the
 // next release. Used in this release for smooth rollback identity reclamation.
 func getControllerIdentityWithNamespaceUID() string {
-	return getControllerIdentity() + "/" + os.Getenv(NamespaceUIDEnvKey)
+	return getControllerIdentity() + "/" + os.Getenv(IdentitySuffixEnvKey)
 }
 
 func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
