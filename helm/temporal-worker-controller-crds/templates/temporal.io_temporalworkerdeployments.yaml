@@ -4215,8 +4215,7 @@ spec:
             WorkerDeployment instead.
           rule: oldSelf != null
     deprecated: true
-    deprecationWarning: TemporalWorkerDeployment is deprecated and will be removed
-      in v1.8. Use WorkerDeployment instead.
+    deprecationWarning: TemporalWorkerDeployment is deprecated. Use WorkerDeployment instead.
     served: true
     storage: true
     subresources:

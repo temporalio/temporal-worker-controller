@@ -75,8 +75,7 @@ spec:
             instead.
           rule: oldSelf != null
     deprecated: true
-    deprecationWarning: TemporalConnection is deprecated and will be removed in v1.8.
-      Use Connection instead.
+    deprecationWarning: TemporalConnection is deprecated. Use Connection instead.
     served: true
     storage: true
     subresources:
