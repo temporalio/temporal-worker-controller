@@ -16,7 +16,16 @@ spec:
     singular: temporalconnection
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: Temporal server endpoint
+      jsonPath: .spec.hostPort
+      name: Host
+      type: string
+    - description: Age
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -27,51 +36,47 @@ spec:
           metadata:
             type: object
           spec:
-            type: object
-            x-kubernetes-preserve-unknown-fields: true
-          status:
             properties:
-              conditions:
-                items:
-                  properties:
-                    lastTransitionTime:
-                      format: date-time
-                      type: string
-                    message:
-                      maxLength: 32768
-                      type: string
-                    observedGeneration:
-                      format: int64
-                      minimum: 0
-                      type: integer
-                    reason:
-                      maxLength: 1024
-                      minLength: 1
-                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
-                      type: string
-                    status:
-                      enum:
-                      - "True"
-                      - "False"
-                      - Unknown
-                      type: string
-                    type:
-                      maxLength: 316
-                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
-                      type: string
-                  required:
-                  - lastTransitionTime
-                  - message
-                  - reason
-                  - status
-                  - type
-                  type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
+              apiKeySecretRef:
+                properties:
+                  key:
+                    type: string
+                  name:
+                    default: ""
+                    type: string
+                  optional:
+                    type: boolean
+                required:
+                - key
+                type: object
+                x-kubernetes-map-type: atomic
+              hostPort:
+                pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
+                type: string
+              mutualTLSSecretRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - hostPort
+            type: object
+            x-kubernetes-validations:
+            - message: Only one of mutualTLSSecretRef or apiKeySecretRef may be set
+              rule: '!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))'
+          status:
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: TemporalConnection is deprecated and cannot be created. Use Connection
+            instead.
+          rule: oldSelf != null
+    deprecated: true
+    deprecationWarning: TemporalConnection is deprecated and will be removed in v1.8.
+      Use Connection instead.
     served: true
     storage: true
     subresources:
