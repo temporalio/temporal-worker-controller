@@ -63,6 +63,13 @@ spec:
             required:
             - template
             type: object
+            x-kubernetes-validations:
+            - message: workerDeploymentRef must be set (or temporalWorkerDeploymentRef
+                for migration compatibility)
+              rule: has(self.workerDeploymentRef) || has(self.temporalWorkerDeploymentRef)
+            - message: only one of workerDeploymentRef or temporalWorkerDeploymentRef
+                may be set
+              rule: '!(has(self.workerDeploymentRef) && has(self.temporalWorkerDeploymentRef))'
           status:
             properties:
               conditions:

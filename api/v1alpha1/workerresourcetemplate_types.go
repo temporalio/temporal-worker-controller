@@ -14,6 +14,8 @@ type WorkerDeploymentReference struct {
 }
 
 // WorkerResourceTemplateSpec defines the desired state of WorkerResourceTemplate.
+// +kubebuilder:validation:XValidation:rule="has(self.workerDeploymentRef) || has(self.temporalWorkerDeploymentRef)",message="workerDeploymentRef must be set (or temporalWorkerDeploymentRef for migration compatibility)"
+// +kubebuilder:validation:XValidation:rule="!(has(self.workerDeploymentRef) && has(self.temporalWorkerDeploymentRef))",message="only one of workerDeploymentRef or temporalWorkerDeploymentRef may be set"
 type WorkerResourceTemplateSpec struct {
 	// WorkerDeploymentRef references the WorkerDeployment to attach this resource to.
 	// +optional
