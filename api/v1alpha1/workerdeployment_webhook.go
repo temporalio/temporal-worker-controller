@@ -24,6 +24,8 @@ func (r *WorkerDeployment) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
+// +kubebuilder:webhook:path=/mutate-temporal-io-v1alpha1-workerdeployment,mutating=true,failurePolicy=fail,sideEffects=None,groups=temporal.io.temporal.io,resources=workerdeployments,verbs=create;update,versions=v1alpha1,name=mworkerdeployment.kb.io,admissionReviewVersions=v1
+
 var _ webhook.CustomDefaulter = &WorkerDeployment{}
 var _ webhook.CustomValidator = &WorkerDeployment{}
 
