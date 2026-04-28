@@ -29,6 +29,9 @@ How to install and upgrade the Temporal Worker Controller Custom Resource Defini
 ### [Limits](limits.md)
 Technical constraints and limitations of the Temporal Worker Controller system, including maximum field lengths and other operational boundaries.
 
+### [CRD Rename Migration Guide](migration-crd-rename.md)
+How to migrate from the deprecated `TemporalWorkerDeployment` and `TemporalConnection` CRDs to the new `WorkerDeployment` and `Connection` CRDs introduced in Chart Version v0.27.0 / App Version v1.7.0. Includes zero-downtime step-by-step migration instructions.
+
 ### [Migration Guide](migration-to-versioned.md)
 Comprehensive guide for migrating from existing unversioned worker deployment systems to the Temporal Worker Controller. Includes step-by-step instructions, configuration mapping, and common patterns.
 See [Migration to Unversioned](migration-to-unversioned.md) for how to migrate back to an unversioned deployment system.

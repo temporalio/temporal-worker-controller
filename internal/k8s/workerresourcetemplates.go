@@ -86,7 +86,7 @@ func RenderWorkerResourceTemplate(
 		return nil, fmt.Errorf("failed to unmarshal spec.template: %w", err)
 	}
 
-	twdName := wrt.Spec.TemporalWorkerDeploymentRef.Name
+	twdName := wrt.Spec.EffectiveWorkerDeploymentName()
 	selectorLabels := ComputeSelectorLabels(twdName, buildID)
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
@@ -108,7 +108,7 @@ func RenderWorkerResourceTemplate(
 	}
 
 	// Step 3: set metadata using Unstructured typed methods.
-	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.TemporalWorkerDeploymentRef.Name, wrt.Name, buildID)
+	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, buildID)
 	obj.SetName(resourceName)
 	obj.SetNamespace(wrt.Namespace)
 

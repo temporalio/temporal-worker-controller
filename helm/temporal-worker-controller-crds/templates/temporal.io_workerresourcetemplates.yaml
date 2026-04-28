@@ -17,8 +17,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Referenced TemporalWorkerDeployment
-      jsonPath: .spec.temporalWorkerDeploymentRef.name
+    - description: Referenced WorkerDeployment
+      jsonPath: .spec.workerDeploymentRef.name
       name: Worker
       type: string
     - description: Kind of resource that is being templated
@@ -52,10 +52,24 @@ spec:
                 required:
                 - name
                 type: object
+              workerDeploymentRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
             required:
             - template
-            - temporalWorkerDeploymentRef
             type: object
+            x-kubernetes-validations:
+            - message: workerDeploymentRef must be set (or temporalWorkerDeploymentRef
+                for migration compatibility)
+              rule: has(self.workerDeploymentRef) || has(self.temporalWorkerDeploymentRef)
+            - message: only one of workerDeploymentRef or temporalWorkerDeploymentRef
+                may be set
+              rule: '!(has(self.workerDeploymentRef) && has(self.temporalWorkerDeploymentRef))'
           status:
             properties:
               conditions:

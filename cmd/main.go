@@ -80,7 +80,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.TemporalWorkerDeploymentReconciler{
+	if err = (&controller.WorkerDeploymentReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		TemporalClientPool: clientpool.New(
@@ -94,7 +94,19 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("temporal-worker-controller"),
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
+		os.Exit(1)
+	}
+	if err = (&controller.DeprecatedTWDReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TemporalWorkerDeployment")
+		os.Exit(1)
+	}
+	if err = (&controller.DeprecatedTCReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TemporalConnection")
 		os.Exit(1)
 	}
 	if err = temporaliov1alpha1.NewWorkerResourceTemplateValidator(mgr).SetupWebhookWithManager(mgr); err != nil {

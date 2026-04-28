@@ -18,22 +18,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-func (r *TemporalWorkerDeployment) SetupWebhookWithManager(mgr ctrl.Manager) error {
+func (r *WorkerDeployment) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(r).
 		Complete()
 }
 
-//+kubebuilder:webhook:path=/mutate-temporal-io-temporal-io-v1alpha1-temporalworkerdeployment,mutating=true,failurePolicy=fail,sideEffects=None,groups=temporal.io.temporal.io,resources=temporalworkers,verbs=create;update,versions=v1alpha1,name=mtemporalworker.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-temporal-io-v1alpha1-workerdeployment,mutating=true,failurePolicy=fail,sideEffects=None,groups=temporal.io,resources=workerdeployments,verbs=create;update,versions=v1alpha1,name=mworkerdeployment.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomDefaulter = &TemporalWorkerDeployment{}
-var _ webhook.CustomValidator = &TemporalWorkerDeployment{}
+var _ webhook.CustomDefaulter = &WorkerDeployment{}
+var _ webhook.CustomValidator = &WorkerDeployment{}
 
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the type
-func (r *TemporalWorkerDeployment) Default(ctx context.Context, obj runtime.Object) error {
-	dep, ok := obj.(*TemporalWorkerDeployment)
+func (r *WorkerDeployment) Default(ctx context.Context, obj runtime.Object) error {
+	dep, ok := obj.(*WorkerDeployment)
 	if !ok {
-		return apierrors.NewBadRequest("expected a TemporalWorkerDeployment")
+		return apierrors.NewBadRequest("expected a WorkerDeployment")
 	}
 
 	if err := dep.Spec.Default(ctx); err != nil {
@@ -43,7 +43,7 @@ func (r *TemporalWorkerDeployment) Default(ctx context.Context, obj runtime.Obje
 	return nil
 }
 
-func (s *TemporalWorkerDeploymentSpec) Default(ctx context.Context) error {
+func (s *WorkerDeploymentSpec) Default(ctx context.Context) error {
 	if s.SunsetStrategy.ScaledownDelay == nil {
 		s.SunsetStrategy.ScaledownDelay = &v1.Duration{Duration: defaults.ScaledownDelay}
 	}
@@ -56,30 +56,30 @@ func (s *TemporalWorkerDeploymentSpec) Default(ctx context.Context) error {
 }
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type
-func (r *TemporalWorkerDeployment) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+func (r *WorkerDeployment) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	return r.validateForUpdateOrCreate(ctx, obj)
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type
-func (r *TemporalWorkerDeployment) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
+func (r *WorkerDeployment) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
 	return r.validateForUpdateOrCreate(ctx, newObj)
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type
-func (r *TemporalWorkerDeployment) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+func (r *WorkerDeployment) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }
 
-func (r *TemporalWorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	dep, ok := obj.(*TemporalWorkerDeployment)
+func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	dep, ok := obj.(*WorkerDeployment)
 	if !ok {
-		return nil, apierrors.NewBadRequest("expected a TemporalWorkerDeployment")
+		return nil, apierrors.NewBadRequest("expected a WorkerDeployment")
 	}
 
 	return validateForUpdateOrCreate(nil, dep)
 }
 
-func validateForUpdateOrCreate(old, new *TemporalWorkerDeployment) (admission.Warnings, error) {
+func validateForUpdateOrCreate(old, new *WorkerDeployment) (admission.Warnings, error) {
 	allErrs := validateRolloutStrategy(new.Spec.RolloutStrategy)
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(new, allErrs)
@@ -116,6 +116,6 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 	return allErrs
 }
 
-func newInvalidErr(dep *TemporalWorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
+func newInvalidErr(dep *WorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
 	return apierrors.NewInvalid(dep.GroupVersionKind().GroupKind(), dep.GetName(), errs)
 }

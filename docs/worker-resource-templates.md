@@ -12,7 +12,7 @@ This is also the recommended mechanism for metric-based or backlog-based autosca
 
 ## How it works
 
-1. You create a `WorkerResourceTemplate` that references a `TemporalWorkerDeployment` and contains the resource spec in `spec.template`.
+1. You create a `WorkerResourceTemplate` that references a `WorkerDeployment` and contains the resource spec in `spec.template`.
 2. The validating webhook checks that you have permission to manage that resource type yourself (SubjectAccessReview), and that the resource kind is on the allowed list (see below).
 3. On each reconcile loop, the controller renders one copy of `spec.template` per worker version with a running Deployment, injects fields (see below), and applies it via Server-Side Apply.
 4. Each per-version copy is deleted by the controller when its corresponding Kubernetes Deployment is deleted per the sunset policy.
@@ -24,11 +24,11 @@ The controller auto-injects two fields when you set them to `{}` (empty object) 
 - If you omit the field entirely, nothing is injected.
 - If you set a non-empty value, the webhook rejects the `WorkerResourceTemplate` because the controller owns these fields.
 
-| Field | Scope | Injected value |
-|-------|-------|---------------|
-| `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}` |
-| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <twdName>}` |
-| `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{temporal_worker_deployment_name: <ns>_<twd-name>, temporal_worker_build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
+| Field | Scope | Injected value                                                                                                              |
+|-------|-------|-----------------------------------------------------------------------------------------------------------------------------|
+| `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
+| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`                                                  |
+| `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{temporal_worker_deployment_name: <ns>_<wd-name>, temporal_worker_build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
 
 `scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
 
@@ -40,7 +40,7 @@ The webhook rejects any template that hardcodes `temporal_worker_deployment_name
 
 ## Resource naming
 
-Each per-Build-ID copy is given a unique, DNS-safe name derived from the `(twdName, wrtName, buildID)` triple. Names are capped at 47 characters to be safe for all Kubernetes resource types, including Deployment (which has pod-naming constraints that effectively limit Deployment names to ~47 characters). The name always ends with an 8-character hash of the full triple, so uniqueness is guaranteed even when the human-readable prefix is truncated.
+Each per-Build-ID copy is given a unique, DNS-safe name derived from the `(wdName, wrtName, buildID)` triple. Names are capped at 47 characters to be safe for all Kubernetes resource types, including Deployment (which has pod-naming constraints that effectively limit Deployment names to ~47 characters). The name always ends with an 8-character hash of the full triple, so uniqueness is guaranteed even when the human-readable prefix is truncated.
 
 Use `kubectl get <kind>` after a reconcile to see the created resources and their names.
 
@@ -102,8 +102,8 @@ metadata:
   name: my-worker-hpa
   namespace: my-namespace
 spec:
-  # Reference the TemporalWorkerDeployment to attach to.
-  temporalWorkerDeploymentRef:
+  # Reference the WorkerDeployment to attach to.
+  workerDeploymentRef:
     name: my-worker
 
   # The resource template. The controller creates one copy per worker version
@@ -150,7 +150,7 @@ metadata:
   name: my-worker-pdb
   namespace: my-namespace
 spec:
-  temporalWorkerDeploymentRef:
+  workerDeploymentRef:
     name: my-worker
   template:
     apiVersion: policy/v1
@@ -165,7 +165,7 @@ spec:
 ## Checking status
 
 ```bash
-# See all WorkerResourceTemplates and which TWD they reference
+# See all WorkerResourceTemplates and which WorkerDeployment they reference
 kubectl get WorkerResourceTemplate -n my-namespace
 
 # See per-Build-ID apply status

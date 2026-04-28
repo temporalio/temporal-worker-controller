@@ -19,11 +19,11 @@ import (
 )
 
 // wrtTestCases returns WRT integration tests as a slice of testCase entries that run through
-// the standard testTemporalWorkerDeploymentCreation runner.
+// the standard testWorkerDeploymentCreation runner.
 //
 // Each entry:
 //   - Sets up a fresh TWD (AllAtOnce v1.0 → Current) via the shared runner, which confirms the
-//     TWD has reached its expected status via verifyTemporalWorkerDeploymentStatusEventually and
+//     TWD has reached its expected status via verifyWorkerDeploymentStatusEventually and
 //     verifyTemporalStateMatchesStatusEventually.
 //   - Uses WithValidatorFunction to exercise WRT-specific behaviour after those checks pass.
 //
@@ -39,7 +39,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-owner-ref",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -72,7 +72,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-matchlabels-injection",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -112,7 +112,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-multiple-wrts-same-twd",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -165,7 +165,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-metric-selector-injection",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -233,7 +233,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-multiple-active-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithTargetTemplate("v1.0").
 						WithStatus(
@@ -288,7 +288,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-scaletargetref-empty-object-sentinel",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -354,7 +354,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-apply-failure",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -390,7 +390,7 @@ func wrtTestCases() []testCase {
 			name: "wrt-ssa-idempotency",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -425,7 +425,7 @@ func wrtTestCases() []testCase {
 
 					// Trigger extra reconcile loops by patching the TWD annotation.
 					// With RECONCILE_INTERVAL=1s, waiting 4s gives ~4 additional loops.
-					var currentTWD temporaliov1alpha1.TemporalWorkerDeployment
+					var currentTWD temporaliov1alpha1.WorkerDeployment
 					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &currentTWD); err != nil {
 						t.Fatalf("failed to get TWD: %v", err)
 					}
@@ -494,8 +494,8 @@ func makeWRTWithRaw(name, namespace, workerDeploymentRefName string, raw []byte)
 			Namespace: namespace,
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: workerDeploymentRefName},
-			Template:                    runtime.RawExtension{Raw: raw},
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
+			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
 }
