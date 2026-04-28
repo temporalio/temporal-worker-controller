@@ -12,7 +12,6 @@ const (
 	ServerMaxVersions                = 100
 	MaxVersionsIneligibleForDeletion = int32(ServerMaxVersions * 0.75)
 
-	// DeprecatedDefaultControllerIdentity is no longer used but kept to detect if a Worker Deployment
-	// was using it before, so that we can claim ownership with the new identity format.
-	DeprecatedDefaultControllerIdentity = "temporal-worker-controller"
+	// ToBeDeprecatedDefaultControllerIdentity will stop being used in the next release.
+	ToBeDeprecatedDefaultControllerIdentity = "temporal-worker-controller"
 )

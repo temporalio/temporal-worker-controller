@@ -135,13 +135,6 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 
 	l := log.FromContext(ctx)
 
-	// Fallback identity check for when the reconciler is used as a library and
-	// main() is not in the call path. main() is kept as the primary check for
-	// faster feedback in normal Helm-based deployments.
-	if getControllerIdentity() == "" {
-		return ctrl.Result{}, errors.New("CONTROLLER_IDENTITY environment variable is not set")
-	}
-
 	l.V(1).Info("Running Reconcile loop")
 
 	// Fetch the worker deployment

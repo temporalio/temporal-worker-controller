@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -115,10 +116,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if os.Getenv(controller.IdentityEnvKey) == "" {
-		setupLog.Error(nil, "CONTROLLER_IDENTITY environment variable must be set")
-		os.Exit(1)
-	}
 	podNamespace := os.Getenv("POD_NAMESPACE")
 	if podNamespace == "" {
 		setupLog.Error(nil, "POD_NAMESPACE environment variable must be set")
@@ -129,8 +126,8 @@ func main() {
 		setupLog.Error(err, "unable to fetch namespace UID for controller identity")
 		os.Exit(1)
 	}
-	if err := os.Setenv(controller.IdentityEnvKey, os.Getenv(controller.IdentityEnvKey)+"/"+string(ns.UID)); err != nil {
-		setupLog.Error(err, "unable to set CONTROLLER_IDENTITY")
+	if err := os.Setenv(controller.NamespaceUIDEnvKey, string(ns.UID)); err != nil {
+		setupLog.Error(err, fmt.Sprintf("unable to set %s", controller.NamespaceUIDEnvKey))
 		os.Exit(1)
 	}
 

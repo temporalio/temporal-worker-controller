@@ -36,6 +36,7 @@ const (
 
 	VersionEnvKey                                    = "CONTROLLER_VERSION"
 	IdentityEnvKey                                   = "CONTROLLER_IDENTITY"
+	NamespaceUIDEnvKey                               = "NAMESPACE_UID"
 	MaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 
 	serverDeleteVersionIdentity = "try-delete-for-add-version"
@@ -62,7 +63,16 @@ func getControllerVersion() string {
 // bypassed if the reconciler is used as a library (e.g. embedded in another controller
 // manager or in tests). An empty return means the env var was not set before starting.
 func getControllerIdentity() string {
-	return os.Getenv(IdentityEnvKey)
+	if identity := os.Getenv(IdentityEnvKey); identity != "" {
+		return identity
+	}
+	return defaults.ToBeDeprecatedDefaultControllerIdentity
+}
+
+// getControllerIdentityWithNamespaceUID returns the identity which will be used in the
+// next release. Used in this release for smooth rollback identity reclamation.
+func getControllerIdentityWithNamespaceUID() string {
+	return getControllerIdentity() + "/" + os.Getenv(NamespaceUIDEnvKey)
 }
 
 func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {

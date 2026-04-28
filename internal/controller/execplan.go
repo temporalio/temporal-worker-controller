@@ -15,7 +15,6 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -189,15 +188,13 @@ func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *pl
 	if existing == "" {
 		return true // unclaimed
 	}
-	// Handle Worker Deployments that were controller-managed before we
-	// started recording the cluster-UID in the manager identity.
-	if existing == defaults.DeprecatedDefaultControllerIdentity {
-		return true // pre-Helm hardcoded default
+	// In the next release, the namespace UID will be included in the controller identity.
+	// To support smooth rollback, in this release, we will detect the future format and
+	// treat that as a reclaimable claim.
+	if existing == getControllerIdentityWithNamespaceUID() {
+		return true
 	}
-	// Pre-cluster-UID format was "release/namespace"; new format is
-	// "release/namespace/{namespace-uid}" (UID appended by main() at startup).
-	// Reclaim if ours is a longer version of theirs.
-	return strings.HasPrefix(getControllerIdentity(), existing+"/")
+	return false
 }
 
 func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
@@ -208,13 +205,6 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 	vcfg *planner.VersionConfig,
 ) error {
 	identity := getControllerIdentity()
-	if identity == "" {
-		// Passing an empty identity to SetManagerIdentity clears the field on the
-		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
-		// This should never happen, but this is the extra fallback in case somehow
-		// the check in main() and Reconcile() are not sufficient.
-		return errors.New("CONTROLLER_IDENTITY is not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field")
-	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
 		ConflictToken: vcfg.ConflictToken,
