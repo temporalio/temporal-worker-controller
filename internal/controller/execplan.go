@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -184,7 +185,19 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 }
 
 func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
-	return vcfg.ManagerIdentity == ""
+	existing := vcfg.ManagerIdentity
+	if existing == "" {
+		return true // unclaimed
+	}
+	// Handle Worker Deployments that were controller-managed before we
+	// started recording the cluster-UID in the manager identity.
+	if existing == defaults.DeprecatedDefaultControllerIdentity {
+		return true // pre-Helm hardcoded default
+	}
+	// Pre-cluster-UID format was "release/namespace"; new format is
+	// "release/namespace/{namespace-uid}" (UID appended by main() at startup).
+	// Reclaim if ours is a longer version of theirs.
+	return strings.HasPrefix(getControllerIdentity(), existing+"/")
 }
 
 func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
@@ -194,10 +207,18 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	vcfg *planner.VersionConfig,
 ) error {
+	identity := getControllerIdentity()
+	if identity == "" {
+		// Passing an empty identity to SetManagerIdentity clears the field on the
+		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
+		// This should never happen, but this is the extra fallback in case somehow
+		// the check in main() and Reconcile() are not sufficient.
+		return errors.New("CONTROLLER_IDENTITY is not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field")
+	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
 		ConflictToken: vcfg.ConflictToken,
-		Identity:      getControllerIdentity(),
+		Identity:      identity,
 	})
 	if err != nil {
 		l.Error(err, "unable to claim manager identity")
@@ -205,7 +226,7 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 			"Failed to claim manager identity: %v", err)
 		return err
 	}
-	l.Info("claimed manager identity", "identity", getControllerIdentity())
+	l.Info("claimed manager identity", "identity", identity)
 	// Use the updated conflict token for the subsequent routing config change.
 	vcfg.ConflictToken = resp.ConflictToken
 	return nil
@@ -275,8 +296,8 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 		},
 		MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 			UpsertEntries: map[string]interface{}{
-				controllerIdentityMetadataKey: getControllerIdentity(),
-				controllerVersionMetadataKey:  getControllerVersion(),
+				IdentityMetadataKey: getControllerIdentity(),
+				VersionMetadataKey:  getControllerVersion(),
 			},
 		},
 	}); err != nil { // would be cool to do this atomically with the update
