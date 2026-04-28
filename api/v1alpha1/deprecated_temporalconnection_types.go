@@ -1,0 +1,75 @@
+// Unless explicitly stated otherwise all files in this repository are licensed under the MIT License.
+//
+// This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+
+// TemporalConnectionSpec defines the desired state of TemporalConnection
+// +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))",message="Only one of mutualTLSSecretRef or apiKeySecretRef may be set"
+type TemporalConnectionSpec struct {
+	// The host and port of the Temporal server.
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
+	HostPort string `json:"hostPort"`
+
+	// MutualTLSSecretRef is the name of the Secret that contains the TLS certificate and key
+	// for mutual TLS authentication. The secret must be `type: kubernetes.io/tls` or
+	// `type: Opaque` and exist in the same Kubernetes namespace as the TemporalConnection
+	// resource. Opaque secrets are useful when bundling tls.crt, tls.key, and ca.crt into
+	// a single secret (e.g. multi-file cert-manager outputs).
+	//
+	// More information about creating a TLS secret:
+	// https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets
+	// +optional
+	MutualTLSSecretRef *SecretReference `json:"mutualTLSSecretRef,omitempty"`
+
+	// APIKeySecretRef selects the Secret key that contains the API key used for authentication.
+	// The Secret must be `type: kubernetes.io/opaque` and exist in the same Kubernetes namespace as
+	// the TemporalConnection resource. This is a corev1.SecretKeySelector and encodes both:
+	//   - LocalObjectReference.Name: the name of the Secret resource
+	//   - Key: the data key within Secret.Data whose value is the API key token
+	// +optional
+	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
+}
+
+// TemporalConnectionStatus defines the observed state of TemporalConnection
+type TemporalConnectionStatus struct {
+	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+}
+
+//+kubebuilder:object:root=true
+//+kubebuilder:subresource:status
+//+kubebuilder:resource:shortName=tconn
+//+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server endpoint"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
+// +kubebuilder:validation:XValidation:rule="oldSelf != null",message="TemporalConnection is deprecated and cannot be created. Use Connection instead."
+// +kubebuilder:deprecatedversion:warning="TemporalConnection is deprecated. Use Connection instead."
+
+// TemporalConnection is the Schema for the temporalconnections API
+type TemporalConnection struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   TemporalConnectionSpec   `json:"spec,omitempty"`
+	Status TemporalConnectionStatus `json:"status,omitempty"`
+}
+
+//+kubebuilder:object:root=true
+
+// TemporalConnectionList contains a list of TemporalConnection
+type TemporalConnectionList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []TemporalConnection `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&TemporalConnection{}, &TemporalConnectionList{})
+}

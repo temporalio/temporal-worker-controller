@@ -25,6 +25,8 @@ spec:
       jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    deprecated: true
+    deprecationWarning: TemporalConnection is deprecated. Use Connection instead.
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -74,8 +76,6 @@ spec:
         - message: TemporalConnection is deprecated and cannot be created. Use Connection
             instead.
           rule: oldSelf != null
-    deprecated: true
-    deprecationWarning: TemporalConnection is deprecated. Use Connection instead.
     served: true
     storage: true
     subresources:

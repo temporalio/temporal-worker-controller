@@ -35,6 +35,9 @@ spec:
       jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    deprecated: true
+    deprecationWarning: TemporalWorkerDeployment is deprecated. Use WorkerDeployment
+      instead.
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -4214,8 +4217,6 @@ spec:
         - message: TemporalWorkerDeployment is deprecated and cannot be created. Use
             WorkerDeployment instead.
           rule: oldSelf != null
-    deprecated: true
-    deprecationWarning: TemporalWorkerDeployment is deprecated. Use WorkerDeployment instead.
     served: true
     storage: true
     subresources:
