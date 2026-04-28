@@ -184,7 +184,17 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 }
 
 func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
-	return vcfg.ManagerIdentity == ""
+	existing := vcfg.ManagerIdentity
+	if existing == "" {
+		return true // unclaimed
+	}
+	// In the next release, the namespace UID will be included in the controller identity.
+	// To support smooth rollback, in this release, we will detect the future format and
+	// treat that as a reclaimable claim.
+	if existing == getControllerIdentityWithNamespaceUID() {
+		return true
+	}
+	return false
 }
 
 func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
@@ -194,10 +204,11 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	vcfg *planner.VersionConfig,
 ) error {
+	identity := getControllerIdentity()
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
 		ConflictToken: vcfg.ConflictToken,
-		Identity:      getControllerIdentity(),
+		Identity:      identity,
 	})
 	if err != nil {
 		l.Error(err, "unable to claim manager identity")
@@ -205,7 +216,7 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 			"Failed to claim manager identity: %v", err)
 		return err
 	}
-	l.Info("claimed manager identity", "identity", getControllerIdentity())
+	l.Info("claimed manager identity", "identity", identity)
 	// Use the updated conflict token for the subsequent routing config change.
 	vcfg.ConflictToken = resp.ConflictToken
 	return nil
@@ -275,8 +286,8 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 		},
 		MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 			UpsertEntries: map[string]interface{}{
-				controllerIdentityMetadataKey: getControllerIdentity(),
-				controllerVersionMetadataKey:  getControllerVersion(),
+				IdentityMetadataKey: getControllerIdentity(),
+				VersionMetadataKey:  getControllerVersion(),
 			},
 		},
 	}); err != nil { // would be cool to do this atomically with the update

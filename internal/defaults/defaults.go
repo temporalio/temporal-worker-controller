@@ -11,5 +11,7 @@ const (
 	DeleteDelay                      = 24 * time.Hour
 	ServerMaxVersions                = 100
 	MaxVersionsIneligibleForDeletion = int32(ServerMaxVersions * 0.75)
-	ControllerIdentity               = "temporal-worker-controller"
+
+	// ToBeDeprecatedDefaultControllerIdentity will stop being used in the next release.
+	ToBeDeprecatedDefaultControllerIdentity = "temporal-worker-controller"
 )

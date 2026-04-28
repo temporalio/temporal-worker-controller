@@ -33,7 +33,7 @@ Technical constraints and limitations of the Temporal Worker Controller system, 
 Comprehensive guide for migrating from existing unversioned worker deployment systems to the Temporal Worker Controller. Includes step-by-step instructions, configuration mapping, and common patterns.
 See [Migration to Unversioned](migration-to-unversioned.md) for how to migrate back to an unversioned deployment system.
 
-### [Ownership](ownership.md)
+### [Ownership](manager-identity.md)
 How the controller gets permission to manage a Worker Deployment, how a human client can take or give back control.
 
 ### [WorkerResourceTemplate](worker-resource-templates.md)

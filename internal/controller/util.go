@@ -31,12 +31,13 @@ const (
 )
 
 const (
-	controllerIdentityMetadataKey = "temporal.io/controller"
-	controllerVersionMetadataKey  = "temporal.io/controller-version"
+	IdentityMetadataKey = "temporal.io/controller"
+	VersionMetadataKey  = "temporal.io/controller-version"
 
-	controllerVersionEnvKey                                    = "CONTROLLER_VERSION"
-	controllerIdentityEnvKey                                   = "CONTROLLER_IDENTITY"
-	ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
+	VersionEnvKey                                    = "CONTROLLER_VERSION"
+	IdentityEnvKey                                   = "CONTROLLER_IDENTITY"
+	IdentitySuffixEnvKey                             = "CONTROLLER_IDENTITY_SUFFIX"
+	MaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 
 	serverDeleteVersionIdentity = "try-delete-for-add-version"
 )
@@ -51,22 +52,31 @@ func getControllerVersion() string {
 		return Version
 	}
 	// Fall back to environment variable (set by Helm from image.tag)
-	if version := os.Getenv(controllerVersionEnvKey); version != "" {
+	if version := os.Getenv(VersionEnvKey); version != "" {
 		return version
 	}
 	return "unknown"
 }
 
-// getControllerIdentity returns the identity from environment variable (set by Helm)
+// getControllerIdentity returns the identity from environment variable (set by Helm).
+// Returns empty string if unset. main() enforces this at startup, but that check is
+// bypassed if the reconciler is used as a library (e.g. embedded in another controller
+// manager or in tests). An empty return means the env var was not set before starting.
 func getControllerIdentity() string {
-	if identity := os.Getenv(controllerIdentityEnvKey); identity != "" {
+	if identity := os.Getenv(IdentityEnvKey); identity != "" {
 		return identity
 	}
-	return defaults.ControllerIdentity
+	return defaults.ToBeDeprecatedDefaultControllerIdentity
+}
+
+// getControllerIdentityWithNamespaceUID returns the identity which will be used in the
+// next release. Used in this release for smooth rollback identity reclamation.
+func getControllerIdentityWithNamespaceUID() string {
+	return getControllerIdentity() + "/" + os.Getenv(IdentitySuffixEnvKey)
 }
 
 func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
-	if maxStr := os.Getenv(ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey); maxStr != "" {
+	if maxStr := os.Getenv(MaxDeploymentVersionsIneligibleForDeletionEnvKey); maxStr != "" {
 		i, err := strconv.Atoi(maxStr)
 		if err == nil {
 			return int32(i)
