@@ -8,60 +8,63 @@ Starting with Chart Version v0.27.0 (App Version v1.7.0), the Temporal Worker Co
 | `TemporalConnection` | `Connection` |
 | `WorkerResourceTemplate.spec.temporalWorkerDeploymentRef` | `WorkerResourceTemplate.spec.workerDeploymentRef` |
 
-In v1.7, the old CRD kinds are **not actively managed**: existing objects are not reconciled, new objects of these kinds cannot be created, and they will never become `Ready`. The deprecated CRDs exist only to support migration of resources already on your cluster. They will be removed in v1.8.
+In App Version v1.7, the old CRD kinds are **not actively managed**: new objects of these kinds cannot be created, and existing objects will never become `Ready` or reconcile with Temporal Server state. The deprecated CRDs exist only to support migration of resources already in your cluster.
 
 ## Why the rename?
 
 The `Temporal` prefix was redundant — all resources in the `temporal.io` API group are already scoped to Temporal. The shorter names are consistent with Kubernetes naming conventions and reduce verbosity in manifests and CLI commands.
+After this release, the Worker Controller will be Generally Available (GA), which means no more breaking changes will be introduced. We wanted to make this transition before GA, and make it as clean as possible.
 
-## What happens to existing resources?
+## What happens to deprecated resources in App Version v1.7?
+Existing `TemporalWorkerDeployment` and `TemporalConnection` objects remain in your cluster but are no longer reconciled against Temporal server state. The controller will not manage worker versions, route traffic, or connect to Temporal on behalf of these resources. New resources of these kinds cannot be created.
 
-Existing `TemporalWorkerDeployment` and `TemporalConnection` objects remain on your cluster but are no longer actively reconciled. The controller will not manage worker versions, route traffic, or connect to Temporal on behalf of these resources. New resources of these kinds cannot be created.
+The deprecated resources will have a `Ready=False` status condition set by a migration helper controller. The condition progresses through three states:
 
-The deprecated resources will have a `Ready=False` status condition set by a migration helper controller:
-
+**Before migration** — if no `WorkerDeployment` with the same name exists:
 ```
-TemporalWorkerDeployment foo:
-  Ready=False reason=Deprecated
-  message: "TemporalWorkerDeployment is deprecated. Create a WorkerDeployment with the same name and spec to migrate."
-```
-
-Once a corresponding `WorkerDeployment` with the same name exists in the same namespace, the condition updates to:
-
-```
-  Ready=False reason=MigratedToWorkerDeployment
-  message: "Migration complete. Delete this TemporalWorkerDeployment."
+Ready=False reason=Deprecated
+message: "TemporalWorkerDeployment is deprecated. Create a WorkerDeployment with the same name and spec to migrate."
 ```
 
-The same pattern applies to `TemporalConnection` → `Connection`.
+**Migration in progress** — a `WorkerDeployment` with the same name exists, and the controller is transferring ownership of child `Deployments` and `WorkerResourceTemplates` from the old owner to the new one:
+```
+Ready=False reason=WorkerDeploymentExists
+message: "A WorkerDeployment with the same name exists. Migration is in progress."
+```
+
+**Migration complete** — ownership transfer is done (the controller labels the `TemporalWorkerDeployment` with `temporal.io/migrated-to-wd: "true"` once all child resources have been re-owned):
+```
+Ready=False reason=MigratedToWorkerDeployment
+message: "Migration complete. Delete this TemporalWorkerDeployment."
+```
+
+For `TemporalConnection`, the same `Deprecated` → `MigratedToConnection` pattern applies (there is no ownership transfer step, so there is no intermediate state).
 
 ## Migration steps
 
-### Step 1: Migrate TemporalConnection resources
+The order below matters for zero downtime. The key principle is that new `WorkerDeployment` and `Connection` resources must exist on the cluster **before** upgrading the controller. When the controller starts, it immediately picks up the new resources and transfers ownership of running `Deployments` from the old resources to the new ones so that workers are never unmanaged.
 
-For each `TemporalConnection` in your cluster, create a corresponding `Connection` with the same name, namespace, and spec:
+### Step 1: Upgrade the CRDs chart
 
-**Before:**
-```yaml
-apiVersion: temporal.io/v1alpha1
-kind: TemporalConnection
-metadata:
-  name: production-temporal
-  namespace: my-namespace
-spec:
-  hostPort: "production.abc123.tmprl.cloud:7233"
-  apiKeySecretRef:
-    name: temporal-api-key
-    key: api-key
+```bash
+helm upgrade temporal-worker-controller-crds \
+  oci://docker.io/temporalio/temporal-worker-controller-crds \
+  --version <new-version> \
+  --namespace temporal-system
 ```
 
-**After (same namespace, same name, same spec):**
+This installs the new `WorkerDeployment` and `Connection` CRDs and marks the old `TemporalWorkerDeployment` and `TemporalConnection` CRDs as deprecated. Existing resources and the running v1.6 controller are unaffected — the deprecation only blocks creating new resources of those kinds. Updates and deletes of existing resources continue to work normally.
+
+### Step 2: Create Connection resources
+
+For each `TemporalConnection` in your cluster, create a `Connection` with the same name, namespace, and spec:
+
 ```yaml
 apiVersion: temporal.io/v1alpha1
 kind: Connection
 metadata:
-  name: production-temporal
-  namespace: my-namespace
+  name: production-temporal      # same name
+  namespace: my-namespace        # same namespace
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
   apiKeySecretRef:
@@ -69,45 +72,17 @@ spec:
     key: api-key
 ```
 
-Apply the new `Connection` resource. The old `TemporalConnection` can coexist on the cluster during migration.
+The old `TemporalConnection` and new `Connection` coexist safely at this point. Do not delete the old one yet, the running controller still references it.
 
-Once the `Connection` is in place and referenced by all `WorkerDeployment` resources, delete the old `TemporalConnection`:
+### Step 3: Create WorkerDeployment resources
 
-```bash
-kubectl delete temporalconnection production-temporal -n my-namespace
-```
+For each `TemporalWorkerDeployment`, create a `WorkerDeployment` with the same name, namespace, and spec:
 
-### Step 2: Migrate TemporalWorkerDeployment resources
-
-For each `TemporalWorkerDeployment`, create a corresponding `WorkerDeployment` with the same name and spec, updating the `connectionRef` to use the new `Connection` kind:
-
-**Before:**
-```yaml
-apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
-metadata:
-  name: my-worker
-  namespace: my-namespace
-spec:
-  workerOptions:
-    connectionRef:
-      name: production-temporal
-    temporalNamespace: production
-  rollout:
-    strategy: AllAtOnce
-  template:
-    spec:
-      containers:
-        - name: worker
-          image: my-worker:v1.2.3
-```
-
-**After:**
 ```yaml
 apiVersion: temporal.io/v1alpha1
 kind: WorkerDeployment
 metadata:
-  name: my-worker
+  name: my-worker                # same name as the TemporalWorkerDeployment
   namespace: my-namespace
 spec:
   workerOptions:
@@ -123,79 +98,63 @@ spec:
           image: my-worker:v1.2.3
 ```
 
-> **Important**: The new `WorkerDeployment` must have the **same name** as the `TemporalWorkerDeployment` it replaces. The controller uses `{namespace}/{name}` as the Temporal Worker Deployment name; changing the name would create a distinct Temporal Worker Deployment.
+> **The name must match exactly.** The controller derives the Temporal Worker Deployment name from `{namespace}/{name}`. A different name creates a new, distinct Temporal Worker Deployment.
 
-Apply the new `WorkerDeployment`. The controller will immediately begin managing it. Because the name is the same, it connects to the same Temporal Worker Deployment that was already managed by the old resource.
+The v1.6 controller ignores these new resources. No pods are started or stopped at this point.
 
-Once the new `WorkerDeployment` is healthy and you have verified the controller is reconciling it correctly (check `status.conditions`), delete the old `TemporalWorkerDeployment`:
+### Step 4: Upgrade the controller
+
+```bash
+helm upgrade temporal-worker-controller \
+  oci://docker.io/temporalio/temporal-worker-controller \
+  --version <new-version> \
+  --namespace temporal-system
+```
+
+When the v1.7 controller starts, it:
+
+1. Finds each `WorkerDeployment` and the `TemporalWorkerDeployment` with the same name
+2. Transfers ownership of the existing running Kubernetes `Deployment` resources from the old owner to the new one (no pods are restarted)
+3. Begins managing the `WorkerDeployment` normally
+4. Sets migration conditions on the `TemporalWorkerDeployment` (see [What happens to existing resources?](#what-happens-to-existing-resources) above)
+
+Workers are continuously managed throughout.
+
+### Step 5: Verify and delete old resources
+
+Wait for each `WorkerDeployment` to be ready:
+
+```bash
+kubectl wait workerdeployment/my-worker \
+  --for=condition=Ready \
+  --timeout=5m \
+  --namespace my-namespace
+```
+
+Confirm the old `TemporalWorkerDeployment` shows `MigratedToWorkerDeployment`:
+
+```bash
+kubectl get temporalworkerdeployment my-worker -n my-namespace -o jsonpath='{.status.conditions}'
+```
+
+Then delete the old resources:
 
 ```bash
 kubectl delete temporalworkerdeployment my-worker -n my-namespace
+kubectl delete temporalconnection production-temporal -n my-namespace
 ```
 
-### Step 3: Migrate WorkerResourceTemplate references
+### Step 6: Update WorkerResourceTemplate references (if applicable)
 
-If you use `WorkerResourceTemplate`, update the `spec.temporalWorkerDeploymentRef` field to `spec.workerDeploymentRef`:
+If you use `WorkerResourceTemplate`, update `spec.temporalWorkerDeploymentRef` to `spec.workerDeploymentRef`. Both fields are accepted in v1.7 and can be updated at any point after Step 4 without affecting running workers.
+`spec.temporalWorkerDeploymentRef` is deprecated and will be removed in a future release.
 
-**Before:**
 ```yaml
-apiVersion: temporal.io/v1alpha1
-kind: WorkerResourceTemplate
-metadata:
-  name: my-worker-hpa
-  namespace: my-namespace
 spec:
-  temporalWorkerDeploymentRef:
+  workerDeploymentRef:       # was: temporalWorkerDeploymentRef
     name: my-worker
-  template:
-    ...
 ```
 
-**After:**
-```yaml
-apiVersion: temporal.io/v1alpha1
-kind: WorkerResourceTemplate
-metadata:
-  name: my-worker-hpa
-  namespace: my-namespace
-spec:
-  workerDeploymentRef:
-    name: my-worker
-  template:
-    ...
-```
+### Step 7: Update manifests and tooling
 
-Both `temporalWorkerDeploymentRef` and `workerDeploymentRef` are accepted in v1.7. The controller uses whichever is set. If both are set, `workerDeploymentRef` takes precedence.
-
-### Step 4: Update manifests and tooling
-
-Update any manifests, Helm charts, GitOps configs, or scripts that reference the old CRD kinds or field names:
-
-```bash
-# Find all manifests still using old kind names
-grep -r "kind: TemporalWorkerDeployment" .
-grep -r "kind: TemporalConnection" .
-grep -r "temporalWorkerDeploymentRef" .
-
-# Find kubectl invocations using old resource names
-grep -r "temporalworkerdeployment" .
-grep -r "temporalconnection" .
-```
-
-Common kubectl shorthand updates:
-
-| Old | New |
-|---|---|
-| `kubectl get temporalworkerdeployment` | `kubectl get workerdeployment` |
-| `kubectl get temporalconnection` | `kubectl get connection` |
-| `kubectl describe temporalworkerdeployment <name>` | `kubectl describe workerdeployment <name>` |
-
-## Timeline
-
-| Version | Status |
-|---|---|
-| v1.6 and earlier | Only `TemporalWorkerDeployment` and `TemporalConnection` exist |
-| **v1.7** | `WorkerDeployment` and `Connection` introduced; deprecated resources still work with migration guidance via status conditions |
-| v1.8 (planned) | `TemporalWorkerDeployment` and `TemporalConnection` CRDs removed; `temporalWorkerDeploymentRef` field removed |
-
-Complete the migration before upgrading to v1.8.
+Update any manifests, Helm charts, GitOps configs, or scripts that reference the old CRD kinds or field names.

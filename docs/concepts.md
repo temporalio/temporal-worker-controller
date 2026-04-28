@@ -16,9 +16,9 @@ A logical grouping in Temporal that represents a collection of workers that are 
 ### `WorkerDeployment` CRD
 The Kubernetes Custom Resource Definition that manages one Temporal Worker Deployment. This is the primary resource you interact with when using the Temporal Worker Controller.
 
-> **Note:** This CRD was named `TemporalWorkerDeployment` in v1.6 and earlier. In v1.7, no new `TemporalWorkerDeployment`
+> **Note:** This CRD was named `TemporalWorkerDeployment` in Chart Version v0.26.0 and earlier. In Chart Version v0.27.0, no new `TemporalWorkerDeployment`
 > resources can be created, and existing ones must be migrated to `WorkerDeployment`. See the [CRD rename migration guide](migration-crd-rename.md).
-> The old `TemporalWorkerDeployment` CRD will be removed in v1.8.
+> The old `TemporalWorkerDeployment` CRD will be removed in a future release.
 
 **Key characteristics:**
 - One `WorkerDeployment` Custom Resource per Temporal Worker Deployment
