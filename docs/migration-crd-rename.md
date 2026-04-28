@@ -1,6 +1,6 @@
 # CRD Rename Migration Guide
 
-Starting with v1.7, the Temporal Worker Controller renames its two primary CRDs and one field reference:
+Starting with Chart Version v0.27.0 (App Version v1.7.0), the Temporal Worker Controller renames its two primary CRDs and one field reference:
 
 | Old name | New name |
 |---|---|
@@ -8,7 +8,7 @@ Starting with v1.7, the Temporal Worker Controller renames its two primary CRDs 
 | `TemporalConnection` | `Connection` |
 | `WorkerResourceTemplate.spec.temporalWorkerDeploymentRef` | `WorkerResourceTemplate.spec.workerDeploymentRef` |
 
-The old CRDs and field remain fully functional in v1.7. They will be removed in v1.8.
+In v1.7, the old CRD kinds are **not actively managed**: existing objects are not reconciled, new objects of these kinds cannot be created, and they will never become `Ready`. The deprecated CRDs exist only to support migration of resources already on your cluster. They will be removed in v1.8.
 
 ## Why the rename?
 
@@ -16,7 +16,7 @@ The `Temporal` prefix was redundant — all resources in the `temporal.io` API g
 
 ## What happens to existing resources?
 
-The controller watches both old and new CRD kinds simultaneously. Existing `TemporalWorkerDeployment` and `TemporalConnection` objects continue to work without any manual intervention in v1.7.
+Existing `TemporalWorkerDeployment` and `TemporalConnection` objects remain on your cluster but are no longer actively reconciled. The controller will not manage worker versions, route traffic, or connect to Temporal on behalf of these resources. New resources of these kinds cannot be created.
 
 The deprecated resources will have a `Ready=False` status condition set by a migration helper controller:
 
@@ -69,7 +69,7 @@ spec:
     key: api-key
 ```
 
-Apply the new `Connection` resource. You can run both the old `TemporalConnection` and new `Connection` simultaneously — the controller uses whichever the `WorkerDeployment` (or `TemporalWorkerDeployment`) references.
+Apply the new `Connection` resource. The old `TemporalConnection` can coexist on the cluster during migration.
 
 Once the `Connection` is in place and referenced by all `WorkerDeployment` resources, delete the old `TemporalConnection`:
 
