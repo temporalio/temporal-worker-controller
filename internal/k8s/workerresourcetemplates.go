@@ -72,8 +72,9 @@ func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string 
 //
 // Processing order:
 //  1. Unmarshal spec.template into an Unstructured
-//  2. Auto-inject scaleTargetRef and matchLabels (Layer 1)
-//  3. Set metadata (name, namespace, labels, owner reference)
+//  2. Substitute __TEMPORAL_*__ tokens in every string leaf
+//  3. Auto-inject scaleTargetRef and matchLabels (Layer 1)
+//  4. Set metadata (name, namespace, labels, owner reference)
 func RenderWorkerResourceTemplate(
 	wrt *temporaliov1alpha1.WorkerResourceTemplate,
 	deployment *appsv1.Deployment,
@@ -87,6 +88,12 @@ func RenderWorkerResourceTemplate(
 	}
 
 	twdName := wrt.Spec.TemporalWorkerDeploymentRef.Name
+
+	// Token substitution runs first so structured injection downstream never
+	// sees unresolved tokens. Tokens are string-presence-driven — templates
+	// that don't contain them are untouched.
+	SubstituteTemporalTokens(obj.Object, BuildTemporalTokens(wrt.Namespace, twdName, buildID, temporalNamespace))
+
 	selectorLabels := ComputeSelectorLabels(twdName, buildID)
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels

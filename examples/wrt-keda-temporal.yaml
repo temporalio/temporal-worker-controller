@@ -1,0 +1,94 @@
+# WorkerResourceTemplate — per-version KEDA ScaledObject (native Temporal scaler)
+#
+# Uses KEDA's built-in `type: temporal` trigger (KEDA >= 2.17), which queries
+# Temporal's gRPC API directly for per-version task queue backlog. Avoids the
+# Prometheus layer entirely — no metric pipeline, no scrape-interval lag, and
+# native understanding of Worker Deployments versioning via the `buildId` field.
+#
+# When to prefer this over the Prometheus trigger:
+#   - Your metrics pipeline doesn't reliably emit `temporal_worker_build_id`
+#     as a label (many pipelines drop or rename it).
+#   - You want a shorter scale-up signal path (no scrape → TSDB → eval loop).
+#   - You don't want worker autoscaling coupled to your metrics stack.
+#
+# Prerequisites:
+#   1. KEDA >= 2.17 installed in the cluster.
+#   2. Add ScaledObject to the controller's allowedResources in Helm values:
+#        workerResourceTemplate:
+#          allowedResources:
+#            - kinds: ["HorizontalPodAutoscaler"]
+#              apiGroups: ["autoscaling"]
+#              resources: ["horizontalpodautoscalers"]
+#            - kinds: ["ScaledObject"]
+#              apiGroups: ["keda.sh"]
+#              resources: ["scaledobjects"]
+#   3. A KEDA TriggerAuthentication (or ClusterTriggerAuthentication) in the
+#      same namespace providing Temporal credentials — mTLS cert/key for
+#      self-hosted, or an API key for Temporal Cloud. See
+#      https://keda.sh/docs/latest/scalers/temporal/#authentication-parameters
+#      for the full spec. A minimal mTLS example:
+#
+#        apiVersion: keda.sh/v1alpha1
+#        kind: TriggerAuthentication
+#        metadata:
+#          name: temporal-cloud-mtls-auth
+#          namespace: default
+#        spec:
+#          secretTargetRef:
+#            - parameter: cert
+#              name: temporal-cloud-mtls-tls
+#              key: tls.crt
+#            - parameter: key
+#              name: temporal-cloud-mtls-tls
+#              key: tls.key
+#
+# Token substitution (controller-side at render time):
+#   __TEMPORAL_NAMESPACE__       → the Temporal namespace
+#   __TEMPORAL_WORKER_BUILD_ID__ → the active Build ID
+#
+# The __TEMPORAL_WORKER_DEPLOYMENT_NAME__ token is still available but not
+# needed here — per-version scoping is done via the `buildId` metadata field,
+# not via a metric label.
+#
+# Apply:
+#   kubectl apply -f examples/wrt-keda-temporal.yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-keda-temporal
+  namespace: default
+spec:
+  temporalWorkerDeploymentRef:
+    name: helloworld
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      # {} tells the controller to inject the versioned Deployment reference.
+      scaleTargetRef: {}
+      minReplicaCount: 1
+      maxReplicaCount: 30
+      pollingInterval: 15
+      cooldownPeriod: 120
+      triggers:
+        - type: temporal
+          metadata:
+            # For Temporal Cloud, the endpoint is <namespace>.tmprl.cloud:7233.
+            # For self-hosted, point at your frontend service.
+            endpoint: helloworld-namespace.xxxxx.tmprl.cloud:7233
+            namespace: __TEMPORAL_NAMESPACE__
+            taskQueue: helloworld-task-queue
+            buildId: __TEMPORAL_WORKER_BUILD_ID__
+            # Scale up when more than 10 queued tasks are waiting per replica.
+            targetQueueSize: "10"
+            # Scale on both workflow and activity task queues.
+            queueTypes: "workflow,activity"
+          authenticationRef:
+            name: temporal-cloud-mtls-auth
+      advanced:
+        horizontalPodAutoscalerConfig:
+          behavior:
+            scaleDown:
+              stabilizationWindowSeconds: 300
+            scaleUp:
+              stabilizationWindowSeconds: 30
