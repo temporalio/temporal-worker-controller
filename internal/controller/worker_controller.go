@@ -837,7 +837,7 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	// Index WorkerResourceTemplate by spec.temporalWorkerDeploymentRef.name for efficient listing.
+	// Index WorkerResourceTemplate by EffectiveWorkerDeploymentName() for efficient listing.
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &temporaliov1alpha1.WorkerResourceTemplate{}, wrtWorkerRefKey, func(rawObj client.Object) []string {
 		wrt, ok := rawObj.(*temporaliov1alpha1.WorkerResourceTemplate)
 		if !ok {

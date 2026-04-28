@@ -68,12 +68,12 @@ func testDeletionSetsCurrentToUnversioned(
 		).
 		BuildWithValues(testName, namespace, ts.GetDefaultNamespace())
 
-	WD := tc.GetTWD()
+	wd := tc.GetTWD()
 
 	// Create a Connection
 	Connection := &temporaliov1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      WD.Spec.WorkerOptions.ConnectionRef.Name,
+			Name:      wd.Spec.WorkerOptions.ConnectionRef.Name,
 			Namespace: namespace,
 		},
 		Spec: temporaliov1alpha1.ConnectionSpec{
@@ -85,14 +85,14 @@ func testDeletionSetsCurrentToUnversioned(
 	}
 
 	// Create the WD
-	if err := k8sClient.Create(ctx, WD); err != nil {
+	if err := k8sClient.Create(ctx, wd); err != nil {
 		t.Fatalf("failed to create WD: %v", err)
 	}
 
 	// Wait for the child deployment to be created by the controller
-	workerDeploymentName := k8s.ComputeWorkerDeploymentName(WD)
-	buildID := k8s.ComputeBuildID(WD)
-	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(WD.Name, buildID)
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(wd)
+	buildID := k8s.ComputeBuildID(wd)
+	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(wd.Name, buildID)
 
 	eventually(t, 30*time.Second, time.Second, func() error {
 		var dep appsv1.Deployment
@@ -114,14 +114,14 @@ func testDeletionSetsCurrentToUnversioned(
 
 	// Update the WD to target v2.0, creating a second version to use as a ramping version.
 	// This exercises the ramping-version clear path in handleDeletion.
-	var WDForUpdate temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: WD.Name, Namespace: namespace}, &WDForUpdate); err != nil {
+	var wdForUpdate temporaliov1alpha1.WorkerDeployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &wdForUpdate); err != nil {
 		t.Fatalf("failed to get WD for v2.0 update: %v", err)
 	}
-	WDForUpdate.Spec.Template.Spec.Containers[0].Image = "v2.0"
-	buildIDv2 := k8s.ComputeBuildID(&WDForUpdate)
-	deploymentNameV2 := k8s.ComputeVersionedDeploymentName(WD.Name, buildIDv2)
-	if err := k8sClient.Update(ctx, &WDForUpdate); err != nil {
+	wdForUpdate.Spec.Template.Spec.Containers[0].Image = "v2.0"
+	buildIDv2 := k8s.ComputeBuildID(&wdForUpdate)
+	deploymentNameV2 := k8s.ComputeVersionedDeploymentName(wd.Name, buildIDv2)
+	if err := k8sClient.Update(ctx, &wdForUpdate); err != nil {
 		t.Fatalf("failed to update WD to v2.0: %v", err)
 	}
 
@@ -154,12 +154,12 @@ func testDeletionSetsCurrentToUnversioned(
 	t.Logf("Set v2.0 (buildID=%s) as ramping version at 50%%", buildIDv2)
 
 	// Verify the WD has our finalizer
-	var WDBeforeDelete temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: WD.Name, Namespace: namespace}, &WDBeforeDelete); err != nil {
+	var wdBeforeDelete temporaliov1alpha1.WorkerDeployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &wdBeforeDelete); err != nil {
 		t.Fatalf("failed to get WD: %v", err)
 	}
 	hasFinalizer := false
-	for _, f := range WDBeforeDelete.Finalizers {
+	for _, f := range wdBeforeDelete.Finalizers {
 		if f == deletionFinalizerName {
 			hasFinalizer = true
 			break
@@ -171,14 +171,14 @@ func testDeletionSetsCurrentToUnversioned(
 
 	// Delete the WD
 	t.Log("Deleting the WorkerDeployment")
-	if err := k8sClient.Delete(ctx, &WDBeforeDelete); err != nil {
+	if err := k8sClient.Delete(ctx, &wdBeforeDelete); err != nil {
 		t.Fatalf("failed to delete WD: %v", err)
 	}
 
 	// Verify the WD is eventually deleted (finalizer ran and was removed)
 	eventually(t, 60*time.Second, 2*time.Second, func() error {
 		var check temporaliov1alpha1.WorkerDeployment
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: WD.Name, Namespace: namespace}, &check)
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &check)
 		if err != nil {
 			return nil // not found = deleted
 		}
@@ -237,12 +237,12 @@ func testDeletionRemovesConnectionFinalizer(
 		).
 		BuildWithValues(testName, namespace, ts.GetDefaultNamespace())
 
-	WD := tc.GetTWD()
+	wd := tc.GetTWD()
 
 	// Create a Connection
 	Connection := &temporaliov1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      WD.Spec.WorkerOptions.ConnectionRef.Name,
+			Name:      wd.Spec.WorkerOptions.ConnectionRef.Name,
 			Namespace: namespace,
 		},
 		Spec: temporaliov1alpha1.ConnectionSpec{
@@ -254,14 +254,14 @@ func testDeletionRemovesConnectionFinalizer(
 	}
 
 	// Create the WD
-	if err := k8sClient.Create(ctx, WD); err != nil {
+	if err := k8sClient.Create(ctx, wd); err != nil {
 		t.Fatalf("failed to create WD: %v", err)
 	}
 
 	// Wait for the finalizer to be added to both WD and Connection
 	eventually(t, 30*time.Second, time.Second, func() error {
 		var check temporaliov1alpha1.WorkerDeployment
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: WD.Name, Namespace: namespace}, &check); err != nil {
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &check); err != nil {
 			return err
 		}
 		for _, f := range check.Finalizers {
@@ -306,7 +306,7 @@ func testDeletionRemovesConnectionFinalizer(
 
 	// Now delete the WD
 	var latestWD temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: WD.Name, Namespace: namespace}, &latestWD); err != nil {
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &latestWD); err != nil {
 		t.Fatalf("failed to get WD: %v", err)
 	}
 	if err := k8sClient.Delete(ctx, &latestWD); err != nil {
@@ -316,7 +316,7 @@ func testDeletionRemovesConnectionFinalizer(
 	// Verify the WD is eventually deleted
 	eventually(t, 60*time.Second, 2*time.Second, func() error {
 		var check temporaliov1alpha1.WorkerDeployment
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: WD.Name, Namespace: namespace}, &check)
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &check)
 		if err != nil {
 			return nil // deleted
 		}
