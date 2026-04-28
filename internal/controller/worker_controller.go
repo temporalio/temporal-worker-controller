@@ -232,7 +232,6 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
-	workerDeploy.Spec.ApplyDefaults()
 
 	// Fallback validation for spec constraints the CRD schema cannot enforce (rampPercentage
 	// ordering, gate input/inputFrom exclusivity). When the optional TWD webhook is disabled
@@ -376,7 +375,6 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	status.Conditions = workerDeploy.Status.Conditions
 	workerDeploy.Status = *status
 
-	workerDeploy.Spec.ApplyDefaults()
 
 	// Generate a plan to get to desired spec from current status
 	plan, err := r.generatePlan(ctx, l, &workerDeploy, temporalConnection.Spec, temporalState)
