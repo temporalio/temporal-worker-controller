@@ -107,14 +107,16 @@ type WorkerDeploymentReconciler struct {
 	MaxDeploymentVersionsIneligibleForDeletion int32
 }
 
-// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=connections,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=connections/finalizers,verbs=update
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/finalizers,verbs=update
-// +kubebuilder:rbac:groups=temporal.io,resources=connections,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=temporal.io,resources=connections/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
