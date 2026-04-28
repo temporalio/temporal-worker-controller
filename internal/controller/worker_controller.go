@@ -176,7 +176,6 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 			// Remove our finalizer from the Connection if no other WDs reference it.
 			if err := r.removeConnectionFinalizerIfUnused(ctx, l, &workerDeploy); err != nil {
-				l.Error(err, "failed to remove finalizer from Connection")
 				return ctrl.Result{}, err
 			}
 
@@ -338,6 +337,13 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Preserve conditions that were set during this reconciliation
 	status.Conditions = workerDeploy.Status.Conditions
 	workerDeploy.Status = *status
+
+	// TODO(jlegrone): Set defaults via webhook rather than manually
+	//  (defaults were already set above, but have to be set again after status update)
+	if err := workerDeploy.Default(ctx, &workerDeploy); err != nil {
+		l.Error(err, "WorkerDeployment defaulter failed")
+		return ctrl.Result{}, err
+	}
 
 	// Generate a plan to get to desired spec from current status
 	plan, err := r.generatePlan(ctx, l, &workerDeploy, connection.Spec, temporalState)
