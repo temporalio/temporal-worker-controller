@@ -601,7 +601,6 @@ func TestWorkerResourceTemplate_DeprecatedRefEmitsWarning(t *testing.T) {
 	assert.Contains(t, warnings[0], "deprecated")
 }
 
-
 func TestWorkerResourceTemplate_ValidateUpdate_DeprecatedFieldImmutability(t *testing.T) {
 	tests := map[string]struct {
 		oldObj  *temporaliov1alpha1.WorkerResourceTemplate

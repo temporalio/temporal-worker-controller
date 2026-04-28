@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -22,9 +24,37 @@ func (r *WorkerDeployment) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/validate-temporal-io-v1alpha1-workerdeployment,mutating=false,failurePolicy=fail,sideEffects=None,groups=temporal.io,resources=workerdeployments,verbs=create;update,versions=v1alpha1,name=vworkerdeployment.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-temporal-io-v1alpha1-workerdeployment,mutating=true,failurePolicy=fail,sideEffects=None,groups=temporal.io.temporal.io,resources=workerdeployments,verbs=create;update,versions=v1alpha1,name=mtemporalworker.kb.io,admissionReviewVersions=v1
+var _ webhook.CustomDefaulter = &WorkerDeployment{}
 
+// +kubebuilder:webhook:path=/validate-temporal-io-v1alpha1-workerdeployment,mutating=false,failurePolicy=fail,sideEffects=None,groups=temporal.io,resources=workerdeployments,verbs=create;update,versions=v1alpha1,name=vworkerdeployment.kb.io,admissionReviewVersions=v1
 var _ webhook.CustomValidator = &WorkerDeployment{}
+
+// Default implements webhook.CustomDefaulter so a webhook will be registered for the type
+func (r *WorkerDeployment) Default(ctx context.Context, obj runtime.Object) error {
+	dep, ok := obj.(*WorkerDeployment)
+	if !ok {
+		return apierrors.NewBadRequest("expected a WorkerDeployment")
+	}
+
+	if err := dep.Spec.Default(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *WorkerDeploymentSpec) Default(ctx context.Context) error {
+	if s.SunsetStrategy.ScaledownDelay == nil {
+		s.SunsetStrategy.ScaledownDelay = &v1.Duration{Duration: defaults.ScaledownDelay}
+	}
+
+	if s.SunsetStrategy.DeleteDelay == nil {
+		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
+	}
+
+	return nil
+}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type
 func (r *WorkerDeployment) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
