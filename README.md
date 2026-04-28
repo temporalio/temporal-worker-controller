@@ -44,7 +44,7 @@ You define your worker like this:
 ```yaml
 # ✅ Temporal Worker Controller - safe deployments
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: my-worker
 spec:

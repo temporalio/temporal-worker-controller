@@ -94,29 +94,31 @@ If objects on the cluster have spec fields that were added in CRD version N+1 (e
 
 #### Why the controller's write patterns affect the risk
 
-The controller never writes back to TWD spec; it only writes to the status subresource and manages child Kubernetes Deployments. This means the controller itself will not directly trigger spec field pruning. However:
+The controller never writes back to `WorkerDeployment` spec; it only writes to the status subresource and manages child Kubernetes Deployments. This means the controller itself will not directly trigger spec field pruning. However:
 
-- GitOps tools (Flux, ArgoCD), manual `kubectl apply`, or any tooling that writes to the TWD object will trigger pruning on its next sync cycle.
+- GitOps tools (Flux, ArgoCD), manual `kubectl apply`, or any tooling that writes to the WorkerDeployment object will trigger pruning on its next sync cycle.
 - Status: the controller fully reconstitutes status from live cluster state on every reconcile. Status fields added in N+1 will disappear after one reconcile cycle regardless of CRD version. This is expected behavior and not meaningful data loss.
 
 #### How to determine if CRD rollback is safe
 
-Before rolling back CRDs, check whether any `TemporalWorkerDeployment` objects on the cluster are using fields that exist in the newer CRD version but not the older one:
+Before rolling back CRDs, check whether any `WorkerDeployment` objects on the cluster are using fields that exist in the newer CRD version but not the older one:
 
 ```bash
 # Replace <field-added-in-newer-version> with the field name(s) introduced in the version you are rolling back from
-kubectl get temporalworkerdeployments -A -o yaml | grep <field-added-in-newer-version>
+kubectl get workerdeployments -A -o yaml | grep <field-added-in-newer-version>
 ```
 
 If the output is empty, no objects are using those fields and rollback is safe. If output is non-empty, rolling back the CRD will cause silent data loss on the next write to those objects.
 
 ## Migration Guide for Existing Users
 
+### Migrating from crds/ directory (Chart Version v0.12.0 and earlier)
+
 If you are upgrading from a chart version that shipped CRDs in the `crds/` directory (Controller Helm Chart v0.12.0 and earlier), follow these steps.
 
 When upgrading to the new chart version, Helm will **not** delete the existing CRDs — they remain on the cluster untouched. The controller continues working normally. The CRDs become temporarily "orphaned" from Helm tracking, which is fine.
 
-### One-Time Migration
+#### One-Time Migration
 
 ```bash
 # Step 1: Upgrade the main chart as usual (CRDs on the cluster are untouched)
@@ -149,3 +151,7 @@ helm install temporal-worker-controller-crds \
 ```
 
 After this migration, follow the standard upgrade and rollback instructions above for all future releases.
+
+### Migrating from TemporalWorkerDeployment/TemporalConnection CRDs (Chart Version v0.26.0 and earlier)
+
+See the [CRD rename migration guide](migration-crd-rename.md) for step-by-step instructions to migrate from the old CRD names (`TemporalWorkerDeployment`, `TemporalConnection`) to the new names (`WorkerDeployment`, `Connection`) introduced in Chart Version v0.27.0 (App Version v1.7.0).
