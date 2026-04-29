@@ -11,6 +11,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -53,7 +54,67 @@ func conditionReason(conditions []metav1.Condition, condType string) string {
 // ─── DeprecatedTWDReconciler: three condition states ─────────────────────────
 
 func TestDeprecatedTWDReconciler_ConditionDeprecated(t *testing.T) {
-	// No WorkerDeployment with same name → Reason="Deprecated"
+	// No WorkerDeployment with same name → Reason="Deprecated".
+	// First reconcile adds the finalizer; second reconcile sets the condition.
+	twd := makeTWDStub("my-worker", "default", nil)
+	r := newDeprecatedTWDReconciler(twd)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "my-worker", Namespace: "default"}}
+	_, err := r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	var got temporaliov1alpha1.TemporalWorkerDeployment
+	require.NoError(t, r.Get(context.Background(), req.NamespacedName, &got))
+
+	assert.Equal(t, "Deprecated", conditionReason(got.Status.Conditions, "Ready"))
+	assert.Equal(t, metav1.ConditionFalse, got.Status.Conditions[0].Status)
+}
+
+func TestDeprecatedTWDReconciler_ConditionWorkerDeploymentExists(t *testing.T) {
+	// WorkerDeployment with same name exists, TWD not yet migrated → Reason="WorkerDeploymentExists".
+	// First reconcile adds the finalizer; second reconcile sets the condition.
+	twd := makeTWDStub("my-worker", "default", nil)
+	wd := makeWD("my-worker", "default", "my-conn")
+	r := newDeprecatedTWDReconciler(twd, wd)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "my-worker", Namespace: "default"}}
+	_, err := r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	var got temporaliov1alpha1.TemporalWorkerDeployment
+	require.NoError(t, r.Get(context.Background(), req.NamespacedName, &got))
+
+	assert.Equal(t, "WorkerDeploymentExists", conditionReason(got.Status.Conditions, "Ready"))
+}
+
+func TestDeprecatedTWDReconciler_ConditionMigratedToWorkerDeployment(t *testing.T) {
+	// TWD carries migrated label → Reason="MigratedToWorkerDeployment".
+	// First reconcile adds the finalizer; second reconcile sets the condition.
+	twd := makeTWDStub("my-worker", "default", map[string]string{
+		deprecatedTWDMigratedLabel: "true",
+	})
+	r := newDeprecatedTWDReconciler(twd)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "my-worker", Namespace: "default"}}
+	_, err := r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	var got temporaliov1alpha1.TemporalWorkerDeployment
+	require.NoError(t, r.Get(context.Background(), req.NamespacedName, &got))
+
+	assert.Equal(t, "MigratedToWorkerDeployment", conditionReason(got.Status.Conditions, "Ready"))
+}
+
+// ─── DeprecatedTWDReconciler: migration-guard finalizer ──────────────────────
+
+func TestDeprecatedTWDReconciler_AddsFinalizer(t *testing.T) {
+	// No finalizer present, not being deleted → finalizer must be added.
 	twd := makeTWDStub("my-worker", "default", nil)
 	r := newDeprecatedTWDReconciler(twd)
 
@@ -64,14 +125,18 @@ func TestDeprecatedTWDReconciler_ConditionDeprecated(t *testing.T) {
 
 	var got temporaliov1alpha1.TemporalWorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "my-worker", Namespace: "default"}, &got))
-
-	assert.Equal(t, "Deprecated", conditionReason(got.Status.Conditions, "Ready"))
-	assert.Equal(t, metav1.ConditionFalse, got.Status.Conditions[0].Status)
+	assert.Contains(t, got.Finalizers, deprecatedMigrationFinalizer)
 }
 
-func TestDeprecatedTWDReconciler_ConditionWorkerDeploymentExists(t *testing.T) {
-	// WorkerDeployment with same name exists, TWD not yet migrated → Reason="WorkerDeploymentExists"
+func TestDeprecatedTWDReconciler_BlocksDeletionWithoutMigratedLabel(t *testing.T) {
+	// DeletionTimestamp set, finalizer present, migrated label absent → finalizer
+	// must stay and condition must indicate pending migration.
+	// Even if a matching WorkerDeployment exists, label absence is authoritative.
+	now := metav1.Now()
 	twd := makeTWDStub("my-worker", "default", nil)
+	twd.DeletionTimestamp = &now
+	twd.Finalizers = []string{deprecatedMigrationFinalizer}
+
 	wd := makeWD("my-worker", "default", "my-conn")
 	r := newDeprecatedTWDReconciler(twd, wd)
 
@@ -82,15 +147,20 @@ func TestDeprecatedTWDReconciler_ConditionWorkerDeploymentExists(t *testing.T) {
 
 	var got temporaliov1alpha1.TemporalWorkerDeployment
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "my-worker", Namespace: "default"}, &got))
-
-	assert.Equal(t, "WorkerDeploymentExists", conditionReason(got.Status.Conditions, "Ready"))
+	assert.Contains(t, got.Finalizers, deprecatedMigrationFinalizer, "finalizer must not be removed before migration is confirmed")
+	assert.Equal(t, "DeletingPendingMigration", conditionReason(got.Status.Conditions, "Ready"))
 }
 
-func TestDeprecatedTWDReconciler_ConditionMigratedToWorkerDeployment(t *testing.T) {
-	// TWD carries migrated label → Reason="MigratedToWorkerDeployment"
+func TestDeprecatedTWDReconciler_AllowsDeletionWhenMigratedLabel(t *testing.T) {
+	// DeletionTimestamp set, finalizer present, migrated label present → finalizer
+	// must be removed so Kubernetes can complete the deletion.
+	// The fake client deletes the object once all finalizers are gone.
+	now := metav1.Now()
 	twd := makeTWDStub("my-worker", "default", map[string]string{
 		deprecatedTWDMigratedLabel: "true",
 	})
+	twd.DeletionTimestamp = &now
+	twd.Finalizers = []string{deprecatedMigrationFinalizer}
 	r := newDeprecatedTWDReconciler(twd)
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -99,9 +169,8 @@ func TestDeprecatedTWDReconciler_ConditionMigratedToWorkerDeployment(t *testing.
 	require.NoError(t, err)
 
 	var got temporaliov1alpha1.TemporalWorkerDeployment
-	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "my-worker", Namespace: "default"}, &got))
-
-	assert.Equal(t, "MigratedToWorkerDeployment", conditionReason(got.Status.Conditions, "Ready"))
+	err = r.Get(context.Background(), types.NamespacedName{Name: "my-worker", Namespace: "default"}, &got)
+	assert.True(t, apierrors.IsNotFound(err), "object must be gone once finalizer is removed")
 }
 
 func TestDeprecatedTWDReconciler_NotFound(t *testing.T) {

@@ -8,13 +8,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const (
 	// deprecatedTWDMigratedLabel is set on a TemporalWorkerDeployment once its
 	// ownership has been transferred to the corresponding WorkerDeployment.
 	deprecatedTWDMigratedLabel = "temporal.io/migrated-to-wd"
+
+	// deprecatedMigrationFinalizer is placed on TemporalWorkerDeployment and
+	// TemporalConnection resources by the deprecated reconcilers. It prevents
+	// garbage collection until migration to the new CRD kind is confirmed.
+	// The deprecated reconcilers are the only actors that add or remove it.
+	// This is intentionally distinct from the existing "temporal.io/delete-protection"
+	// finalizer, which lives on WorkerDeployment/Connection and triggers Temporal
+	// server-side cleanup — the two finalizers have unrelated lifecycles.
+	deprecatedMigrationFinalizer = "temporal.io/migration-guard"
 )
+
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments,verbs=get;list;watch
 
 // DeprecatedTWDReconciler reconciles TemporalWorkerDeployment stubs.
 //
@@ -32,6 +47,41 @@ func (r *DeprecatedTWDReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	// Handle deletion: if the resource is being deleted and we hold the
+	// migration-guard finalizer, only release it once migration is confirmed
+	// (i.e. the WorkerDeploymentReconciler has set the migrated label).
+	if !twd.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(&twd, deprecatedMigrationFinalizer) {
+		if twd.Labels[deprecatedTWDMigratedLabel] == "true" {
+			controllerutil.RemoveFinalizer(&twd, deprecatedMigrationFinalizer)
+			if err := r.Update(ctx, &twd); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+		// Migration not yet confirmed — block deletion and surface an actionable message.
+		cond := metav1.Condition{
+			Type:               "Ready",
+			Status:             metav1.ConditionFalse,
+			Reason:             "DeletingPendingMigration",
+			Message:            "This TemporalWorkerDeployment is marked for deletion. Create a WorkerDeployment with the same name and spec to complete migration; deletion will proceed automatically once migration is confirmed.",
+			ObservedGeneration: twd.Generation,
+		}
+		setOrReplaceCondition(&twd.Status.Conditions, cond)
+		if err := r.Status().Update(ctx, &twd); err != nil && !apierrors.IsConflict(err) {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Ensure the migration-guard finalizer is present on live resources.
+	if twd.DeletionTimestamp.IsZero() && !controllerutil.ContainsFinalizer(&twd, deprecatedMigrationFinalizer) {
+		controllerutil.AddFinalizer(&twd, deprecatedMigrationFinalizer)
+		if err := r.Update(ctx, &twd); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	var (

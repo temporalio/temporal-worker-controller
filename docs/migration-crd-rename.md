@@ -40,9 +40,21 @@ message: "Migration complete. Delete this TemporalWorkerDeployment."
 
 For `TemporalConnection`, the same `Deprecated` → `MigratedToConnection` pattern applies (there is no ownership transfer step, so there is no intermediate state).
 
-## Migration steps
+## Deletion protection
 
-The order below matters for zero downtime. The key principle is that new `WorkerDeployment` and `Connection` resources must exist on the cluster **before** upgrading the controller. When the controller starts, it immediately picks up the new resources and transfers ownership of running `Deployments` from the old resources to the new ones so that workers are never unmanaged.
+After upgrading to v1.7, the controller adds a `temporal.io/migration-guard` finalizer to every `TemporalWorkerDeployment` and `TemporalConnection`. This finalizer prevents the resource from being fully deleted until migration is confirmed:
+
+- A `TemporalWorkerDeployment` can only be deleted once the controller has labeled it `temporal.io/migrated-to-wd: "true"` (set automatically after ownership transfer completes).
+- A `TemporalConnection` can only be deleted once a `Connection` with the same name exists.
+
+If you delete a deprecated resource before creating its replacement, the resource will enter `Terminating` state and remain there until you create the new resource. Once the matching `WorkerDeployment` or `Connection` is created and migration is confirmed, the finalizer is removed and deletion completes automatically. The condition during this wait will be:
+
+```
+Ready=False reason=DeletingPendingMigration
+message: "This TemporalWorkerDeployment is marked for deletion. Create a WorkerDeployment with the same name and spec to complete migration; deletion will proceed automatically once migration is confirmed."
+```
+
+## Migration steps
 
 ### Step 1: Upgrade the CRDs chart
 
@@ -55,54 +67,7 @@ helm upgrade temporal-worker-controller-crds \
 
 This installs the new `WorkerDeployment` and `Connection` CRDs and marks the old `TemporalWorkerDeployment` and `TemporalConnection` CRDs as deprecated. Existing resources and the running v1.6 controller are unaffected — the deprecation only blocks creating new resources of those kinds. Updates and deletes of existing resources continue to work normally.
 
-### Step 2: Create Connection resources
-
-For each `TemporalConnection` in your cluster, create a `Connection` with the same name, namespace, and spec:
-
-```yaml
-apiVersion: temporal.io/v1alpha1
-kind: Connection
-metadata:
-  name: production-temporal      # same name
-  namespace: my-namespace        # same namespace
-spec:
-  hostPort: "production.abc123.tmprl.cloud:7233"
-  apiKeySecretRef:
-    name: temporal-api-key
-    key: api-key
-```
-
-The old `TemporalConnection` and new `Connection` coexist safely at this point. Do not delete the old one yet, the running controller still references it.
-
-### Step 3: Create WorkerDeployment resources
-
-For each `TemporalWorkerDeployment`, create a `WorkerDeployment` with the same name, namespace, and spec:
-
-```yaml
-apiVersion: temporal.io/v1alpha1
-kind: WorkerDeployment
-metadata:
-  name: my-worker                # same name as the TemporalWorkerDeployment
-  namespace: my-namespace
-spec:
-  workerOptions:
-    connectionRef:
-      name: production-temporal
-    temporalNamespace: production
-  rollout:
-    strategy: AllAtOnce
-  template:
-    spec:
-      containers:
-        - name: worker
-          image: my-worker:v1.2.3
-```
-
-> **The name must match exactly.** The controller derives the Temporal Worker Deployment name from `{namespace}/{name}`. A different name creates a new, distinct Temporal Worker Deployment.
-
-The v1.6 controller ignores these new resources. No pods are started or stopped at this point.
-
-### Step 4: Upgrade the controller
+### Step 2: Upgrade the controller
 
 ```bash
 helm upgrade temporal-worker-controller \
@@ -111,16 +76,20 @@ helm upgrade temporal-worker-controller \
   --namespace temporal-system
 ```
 
-When the v1.7 controller starts, it:
+When the v1.7 controller starts, it adds the `temporal.io/migration-guard` finalizer to all existing `TemporalWorkerDeployment` and `TemporalConnection` resources.
 
-1. Finds each `WorkerDeployment` and the `TemporalWorkerDeployment` with the same name
-2. Transfers ownership of the existing running Kubernetes `Deployment` resources from the old owner to the new one (no pods are restarted)
-3. Begins managing the `WorkerDeployment` normally
-4. Sets migration conditions on the `TemporalWorkerDeployment` (see [What happens to existing resources?](#what-happens-to-existing-resources) above)
+### Step 3: Migrate your resources
 
-Workers are continuously managed throughout.
+In your manifests (Helm values, GitOps configs, or raw YAML), replace the deprecated kind names:
 
-### Step 5: Verify and delete old resources
+- `kind: TemporalWorkerDeployment` → `kind: WorkerDeployment`
+- `kind: TemporalConnection` → `kind: Connection`
+
+No other spec changes are needed — the fields are identical.
+
+> **The name must match exactly.** The controller derives the Temporal Worker Deployment name from `{namespace}/{name}`. A different name creates a new, distinct Temporal Worker Deployment.
+
+Then apply your updated manifests (via `helm upgrade`, `kubectl apply`, or your GitOps toolchain). This simultaneously creates the new resources and marks the old ones for deletion. The migration-guard finalizer holds each deprecated resource in `Terminating` state until the controller confirms ownership transfer is complete, then removes the finalizer and lets the deletion finish. Workers are continuously managed throughout.
 
 Wait for each `WorkerDeployment` to be ready:
 
@@ -131,22 +100,11 @@ kubectl wait workerdeployment/my-worker \
   --namespace my-namespace
 ```
 
-Confirm the old `TemporalWorkerDeployment` shows `MigratedToWorkerDeployment`:
+> **Side-by-side alternative:** If you prefer to keep the old resources running while you create the new ones and verify them first, that is also safe. Create the new `Connection` and `WorkerDeployment` resources, wait for them to be ready, then delete the deprecated resources once you are satisfied.
 
-```bash
-kubectl get temporalworkerdeployment my-worker -n my-namespace -o jsonpath='{.status.conditions}'
-```
+### Step 4: Update WorkerResourceTemplate references (if applicable)
 
-Then delete the old resources:
-
-```bash
-kubectl delete temporalworkerdeployment my-worker -n my-namespace
-kubectl delete temporalconnection production-temporal -n my-namespace
-```
-
-### Step 6: Update WorkerResourceTemplate references (if applicable)
-
-If you use `WorkerResourceTemplate`, update `spec.temporalWorkerDeploymentRef` to `spec.workerDeploymentRef`. Both fields are accepted in v1.7 and can be updated at any point after Step 4 without affecting running workers.
+If you use `WorkerResourceTemplate`, update `spec.temporalWorkerDeploymentRef` to `spec.workerDeploymentRef`. Both fields are accepted in v1.7 and can be updated at any point after Step 2 without affecting running workers.
 `spec.temporalWorkerDeploymentRef` is deprecated and will be removed in a future release.
 
 ```yaml
@@ -155,6 +113,6 @@ spec:
     name: my-worker
 ```
 
-### Step 7: Update manifests and tooling
+### Step 5: Update tooling and scripts
 
-Update any manifests, Helm charts, GitOps configs, or scripts that reference the old CRD kinds or field names.
+Update any scripts, CI/CD pipelines, runbooks, monitoring alerts, or other tooling that references the old CRD kind names (`TemporalWorkerDeployment`, `TemporalConnection`) or their short names (`twd`, `tconn`).
