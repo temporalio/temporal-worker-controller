@@ -122,7 +122,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if os.Getenv(controller.IdentityPrefixEnvKey) == "" {
+	if os.Getenv(controller.IdentityEnvKey) == "" {
 		setupLog.Error(nil, "CONTROLLER_IDENTITY environment variable must be set")
 		os.Exit(1)
 	}
