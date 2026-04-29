@@ -211,7 +211,7 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 		// This should never happen, but this is the extra fallback in case somehow
 		// the check in main() and Reconcile() are not sufficient.
 		return errors.New(fmt.Sprintf("%s and %s are not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field",
-			IdentityEnvKey, IdentitySuffixEnvKey))
+			IdentityPrefixEnvKey, IdentitySuffixEnvKey))
 	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,

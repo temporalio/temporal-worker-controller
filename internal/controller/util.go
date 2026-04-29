@@ -35,7 +35,7 @@ const (
 	VersionMetadataKey  = "temporal.io/controller-version"
 
 	VersionEnvKey                                    = "CONTROLLER_VERSION"
-	IdentityEnvKey                                   = "CONTROLLER_IDENTITY"
+	IdentityPrefixEnvKey                             = "CONTROLLER_IDENTITY"
 	IdentitySuffixEnvKey                             = "CONTROLLER_IDENTITY_SUFFIX"
 	MaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 
@@ -61,7 +61,7 @@ func getControllerVersion() string {
 // getDeprecatedControllerIdentity is used for smooth identity reclamation when rolling
 // forward to the new identity format.
 func getDeprecatedControllerIdentity() string {
-	if identity := os.Getenv(IdentityEnvKey); identity != "" {
+	if identity := os.Getenv(IdentityPrefixEnvKey); identity != "" {
 		return identity
 	}
 	return defaults.DeprecatedDefaultControllerIdentity
@@ -70,7 +70,7 @@ func getDeprecatedControllerIdentity() string {
 // getControllerIdentity returns the identity with controller env var and namespace uid suffix.
 // Presence of both are ensured by main() and in Reconcile() for users of the controller as a library.
 func getControllerIdentity() string {
-	id := os.Getenv(IdentityEnvKey)
+	id := os.Getenv(IdentityPrefixEnvKey)
 	suffix := os.Getenv(IdentitySuffixEnvKey)
 	if id != "" && suffix != "" {
 		return id + "/" + suffix

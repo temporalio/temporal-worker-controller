@@ -140,7 +140,7 @@ func (r *TemporalWorkerDeploymentReconciler) Reconcile(ctx context.Context, req 
 	// faster feedback in normal Helm-based deployments.
 	if getControllerIdentity() == "" {
 		return ctrl.Result{}, errors.New(fmt.Sprintf("%s and %s are not set",
-			IdentityEnvKey, IdentitySuffixEnvKey))
+			IdentityPrefixEnvKey, IdentitySuffixEnvKey))
 	}
 
 	l.V(1).Info("Running Reconcile loop")
