@@ -117,6 +117,7 @@ type WorkerDeploymentReconciler struct {
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
@@ -140,6 +141,15 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	defer cancel()
 
 	l := log.FromContext(ctx)
+
+	// Fallback identity check for when the reconciler is used as a library and
+	// main() is not in the call path. main() is kept as the primary check for
+	// faster feedback in normal Helm-based deployments.
+	if getControllerIdentity() == "" {
+		return ctrl.Result{}, errors.New(fmt.Sprintf("%s and %s are not set",
+			IdentityEnvKey, IdentitySuffixEnvKey))
+	}
+
 	l.V(1).Info("Running Reconcile loop")
 
 	// Fetch the worker deployment

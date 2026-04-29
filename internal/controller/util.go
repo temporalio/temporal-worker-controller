@@ -31,12 +31,13 @@ const (
 )
 
 const (
-	controllerIdentityMetadataKey = "temporal.io/controller"
-	controllerVersionMetadataKey  = "temporal.io/controller-version"
+	IdentityMetadataKey = "temporal.io/controller"
+	VersionMetadataKey  = "temporal.io/controller-version"
 
-	controllerVersionEnvKey                                    = "CONTROLLER_VERSION"
-	controllerIdentityEnvKey                                   = "CONTROLLER_IDENTITY"
-	ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
+	VersionEnvKey                                    = "CONTROLLER_VERSION"
+	IdentityEnvKey                                   = "CONTROLLER_IDENTITY"
+	IdentitySuffixEnvKey                             = "CONTROLLER_IDENTITY_SUFFIX"
+	MaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 
 	serverDeleteVersionIdentity = "try-delete-for-add-version"
 )
@@ -51,22 +52,34 @@ func getControllerVersion() string {
 		return Version
 	}
 	// Fall back to environment variable (set by Helm from image.tag)
-	if version := os.Getenv(controllerVersionEnvKey); version != "" {
+	if version := os.Getenv(VersionEnvKey); version != "" {
 		return version
 	}
 	return "unknown"
 }
 
-// getControllerIdentity returns the identity from environment variable (set by Helm)
-func getControllerIdentity() string {
-	if identity := os.Getenv(controllerIdentityEnvKey); identity != "" {
+// getDeprecatedControllerIdentity is used for smooth identity reclamation when rolling
+// forward to the new identity format.
+func getDeprecatedControllerIdentity() string {
+	if identity := os.Getenv(IdentityEnvKey); identity != "" {
 		return identity
 	}
-	return defaults.ControllerIdentity
+	return defaults.DeprecatedDefaultControllerIdentity
+}
+
+// getControllerIdentity returns the identity with controller env var and namespace uid suffix.
+// Presence of both are ensured by main() and in Reconcile() for users of the controller as a library.
+func getControllerIdentity() string {
+	id := os.Getenv(IdentityEnvKey)
+	suffix := os.Getenv(IdentitySuffixEnvKey)
+	if id != "" && suffix != "" {
+		return id + "/" + suffix
+	}
+	return ""
 }
 
 func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
-	if maxStr := os.Getenv(ControllerMaxDeploymentVersionsIneligibleForDeletionEnvKey); maxStr != "" {
+	if maxStr := os.Getenv(MaxDeploymentVersionsIneligibleForDeletionEnvKey); maxStr != "" {
 		i, err := strconv.Atoi(maxStr)
 		if err == nil {
 			return int32(i)

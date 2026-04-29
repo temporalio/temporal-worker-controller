@@ -184,7 +184,17 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 }
 
 func (r *WorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
-	return vcfg.ManagerIdentity == ""
+	existing := vcfg.ManagerIdentity
+	if existing == "" {
+		return true // unclaimed
+	}
+
+	// Handle Worker Deployments that were controller-managed before we
+	// started recording the cluster-UID in the manager identity
+	if existing == getDeprecatedControllerIdentity() {
+		return true
+	}
+	return false
 }
 
 func (r *WorkerDeploymentReconciler) claimManagerIdentity(
@@ -194,10 +204,19 @@ func (r *WorkerDeploymentReconciler) claimManagerIdentity(
 	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	vcfg *planner.VersionConfig,
 ) error {
+	identity := getControllerIdentity()
+	if identity == "" {
+		// Passing an empty identity to SetManagerIdentity clears the field on the
+		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
+		// This should never happen, but this is the extra fallback in case somehow
+		// the check in main() and Reconcile() are not sufficient.
+		return errors.New(fmt.Sprintf("%s and %s are not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field",
+			IdentityEnvKey, IdentitySuffixEnvKey))
+	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
 		ConflictToken: vcfg.ConflictToken,
-		Identity:      getControllerIdentity(),
+		Identity:      identity,
 	})
 	if err != nil {
 		l.Error(err, "unable to claim manager identity")
@@ -205,7 +224,7 @@ func (r *WorkerDeploymentReconciler) claimManagerIdentity(
 			"Failed to claim manager identity: %v", err)
 		return err
 	}
-	l.Info("claimed manager identity", "identity", getControllerIdentity())
+	l.Info("claimed manager identity", "identity", identity)
 	// Use the updated conflict token for the subsequent routing config change.
 	vcfg.ConflictToken = resp.ConflictToken
 	return nil
@@ -275,8 +294,8 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 		},
 		MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 			UpsertEntries: map[string]interface{}{
-				controllerIdentityMetadataKey: getControllerIdentity(),
-				controllerVersionMetadataKey:  getControllerVersion(),
+				IdentityMetadataKey: getControllerIdentity(),
+				VersionMetadataKey:  getControllerVersion(),
 			},
 		},
 	}); err != nil { // would be cool to do this atomically with the update

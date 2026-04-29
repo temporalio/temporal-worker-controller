@@ -5,6 +5,7 @@
 package controller
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -25,6 +26,12 @@ import (
 var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
+
+func TestMain(m *testing.M) {
+	_ = os.Setenv(IdentityEnvKey, "test-controller-identity")
+	_ = os.Setenv(IdentitySuffixEnvKey, "123")
+	os.Exit(m.Run())
+}
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
