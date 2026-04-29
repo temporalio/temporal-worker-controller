@@ -15,46 +15,9 @@ In App Version v1.7, the old CRD kinds are **not actively managed**: new objects
 The `Temporal` prefix was redundant — all resources in the `temporal.io` API group are already scoped to Temporal. The shorter names are consistent with Kubernetes naming conventions and reduce verbosity in manifests and CLI commands.
 After this release, the Worker Controller will be Generally Available (GA), which means no more breaking changes will be introduced. We wanted to make this transition before GA, and make it as clean as possible.
 
-## What happens to deprecated resources in App Version v1.7?
-Existing `TemporalWorkerDeployment` and `TemporalConnection` objects remain in your cluster but are no longer reconciled against Temporal server state. The controller will not manage worker versions, route traffic, or connect to Temporal on behalf of these resources. New resources of these kinds cannot be created.
-
-The deprecated resources will have a `Ready=False` status condition set by a migration helper controller. The condition progresses through three states:
-
-**Before migration** — if no `WorkerDeployment` with the same name exists:
-```
-Ready=False reason=Deprecated
-message: "TemporalWorkerDeployment is deprecated. Create a WorkerDeployment with the same name and spec to migrate."
-```
-
-**Migration in progress** — a `WorkerDeployment` with the same name exists, and the controller is transferring ownership of child `Deployments` and `WorkerResourceTemplates` from the old owner to the new one:
-```
-Ready=False reason=WorkerDeploymentExists
-message: "A WorkerDeployment with the same name exists. Migration is in progress."
-```
-
-**Migration complete** — ownership transfer is done (the controller labels the `TemporalWorkerDeployment` with `temporal.io/migrated-to-wd: "true"` once all child resources have been re-owned):
-```
-Ready=False reason=MigratedToWorkerDeployment
-message: "Migration complete. Delete this TemporalWorkerDeployment."
-```
-
-For `TemporalConnection`, the same `Deprecated` → `MigratedToConnection` pattern applies (there is no ownership transfer step, so there is no intermediate state).
-
-## Deletion protection
-
-After upgrading to v1.7, the controller adds a `temporal.io/migration-guard` finalizer to every `TemporalWorkerDeployment` and `TemporalConnection`. This finalizer prevents the resource from being fully deleted until migration is confirmed:
-
-- A `TemporalWorkerDeployment` can only be deleted once the controller has labeled it `temporal.io/migrated-to-wd: "true"` (set automatically after ownership transfer completes).
-- A `TemporalConnection` can only be deleted once a `Connection` with the same name exists.
-
-If you delete a deprecated resource before creating its replacement, the resource will enter `Terminating` state and remain there until you create the new resource. Once the matching `WorkerDeployment` or `Connection` is created and migration is confirmed, the finalizer is removed and deletion completes automatically. The condition during this wait will be:
-
-```
-Ready=False reason=DeletingPendingMigration
-message: "This TemporalWorkerDeployment is marked for deletion. Create a WorkerDeployment with the same name and spec to complete migration; deletion will proceed automatically once migration is confirmed."
-```
-
 ## Migration steps
+
+> **Dev / non-production environments:** If you don't need to preserve any worker state, the simplest path is to delete all your `TemporalWorkerDeployment` and `TemporalConnection` resources while the v1.6 controller is still running. At that point no migration-guard finalizer has been added yet, so deletion completes after the v1.6 finalizer completes. Note that all related Worker Deployment state in the Temporal server will also be deleted. Then upgrade the controller and create fresh `WorkerDeployment` and `Connection` resources.
 
 ### Step 1: Upgrade the CRDs chart
 
@@ -76,7 +39,7 @@ helm upgrade temporal-worker-controller \
   --namespace temporal-system
 ```
 
-When the v1.7 controller starts, it adds the `temporal.io/migration-guard` finalizer to all existing `TemporalWorkerDeployment` and `TemporalConnection` resources.
+When the v1.7 controller starts, it adds the `temporal.io/migration-guard` finalizer to all existing `TemporalWorkerDeployment` and `TemporalConnection` resources. See [Deletion protection](#deletion-protection) for what this means.
 
 ### Step 3: Migrate your resources
 
@@ -116,3 +79,43 @@ spec:
 ### Step 5: Update tooling and scripts
 
 Update any scripts, CI/CD pipelines, runbooks, monitoring alerts, or other tooling that references the old CRD kind names (`TemporalWorkerDeployment`, `TemporalConnection`) or their short names (`twd`, `tconn`).
+
+## What happens to deprecated resources in App Version v1.7?
+
+Existing `TemporalWorkerDeployment` and `TemporalConnection` objects remain in your cluster but are no longer reconciled against Temporal server state. The controller will not manage worker versions, route traffic, or connect to Temporal on behalf of these resources. New resources of these kinds cannot be created.
+
+The deprecated resources will have a `Ready=False` status condition set by a migration helper controller. The condition progresses through three states:
+
+**Before migration** — if no `WorkerDeployment` with the same name exists:
+```
+Ready=False reason=Deprecated
+message: "TemporalWorkerDeployment is deprecated. Create a WorkerDeployment with the same name and spec to migrate."
+```
+
+**Migration in progress** — a `WorkerDeployment` with the same name exists, and the controller is transferring ownership of child `Deployments` and `WorkerResourceTemplates` from the old owner to the new one:
+```
+Ready=False reason=WorkerDeploymentExists
+message: "A WorkerDeployment with the same name exists. Migration is in progress."
+```
+
+**Migration complete** — ownership transfer is done (the controller labels the `TemporalWorkerDeployment` with `temporal.io/migrated-to-wd: "true"` once all child resources have been re-owned):
+```
+Ready=False reason=MigratedToWorkerDeployment
+message: "Migration complete. Delete this TemporalWorkerDeployment."
+```
+
+For `TemporalConnection`, the same `Deprecated` → `MigratedToConnection` pattern applies (there is no ownership transfer step, so there is no intermediate state).
+
+## Deletion protection
+
+After upgrading to v1.7, the controller adds a `temporal.io/migration-guard` finalizer to every `TemporalWorkerDeployment` and `TemporalConnection`. This finalizer prevents the resource from being fully deleted until migration is confirmed:
+
+- A `TemporalWorkerDeployment` can only be deleted once the controller has labeled it `temporal.io/migrated-to-wd: "true"` (set automatically after ownership transfer completes).
+- A `TemporalConnection` can only be deleted once a `Connection` with the same name exists.
+
+If you delete a deprecated resource before creating its replacement, the resource will enter `Terminating` state and remain there until you create the new resource. Once the matching `WorkerDeployment` or `Connection` is created and migration is confirmed, the finalizer is removed and deletion completes automatically. The condition during this wait will be:
+
+```
+Ready=False reason=DeletingPendingMigration
+message: "This TemporalWorkerDeployment is marked for deletion. Create a WorkerDeployment with the same name and spec to complete migration; deletion will proceed automatically once migration is confirmed."
+```
