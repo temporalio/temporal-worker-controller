@@ -26,7 +26,7 @@
         },
         "connectionName": {
           "type": "string",
-          "description": "Name of existing TemporalConnection resource (optional)"
+          "description": "Name of existing Connection resource (optional)"
         },
         "address": {
           "type": "string",

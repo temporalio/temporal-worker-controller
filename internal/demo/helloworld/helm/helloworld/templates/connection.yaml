@@ -1,6 +1,6 @@
 {{- if not .Values.temporal.connectionName }}
 apiVersion: temporal.io/v1alpha1
-kind: TemporalConnection
+kind: Connection
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
