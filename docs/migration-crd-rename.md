@@ -1,6 +1,6 @@
 # CRD Rename Migration Guide
 
-Starting with Chart Version v0.27.0 (App Version v1.7.0), the Temporal Worker Controller renames its two primary CRDs and one field reference:
+Starting with Chart Version v0.26.0 (App Version v1.7.0), the Temporal Worker Controller renames its two primary CRDs and one field reference:
 
 | Old name | New name |
 |---|---|
@@ -24,7 +24,7 @@ After this release, the Worker Controller will be Generally Available (GA), whic
 ```bash
 helm upgrade temporal-worker-controller-crds \
   oci://docker.io/temporalio/temporal-worker-controller-crds \
-  --version <new-version> \
+  --version 0.26.0 \
   --namespace temporal-system
 ```
 
@@ -35,7 +35,7 @@ This installs the new `WorkerDeployment` and `Connection` CRDs and marks the old
 ```bash
 helm upgrade temporal-worker-controller \
   oci://docker.io/temporalio/temporal-worker-controller \
-  --version <new-version> \
+  --version 0.26.0 \
   --namespace temporal-system
 ```
 

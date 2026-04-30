@@ -85,7 +85,7 @@ namespace:
   create: false
 
 webhook:
-  # enabled controls the optional TemporalWorkerDeployment validating webhook.
+  # enabled controls the optional WorkerDeployment validating webhook.
   # The WorkerResourceTemplate validating webhook is always enabled and does
   # not require this flag.
   enabled: false

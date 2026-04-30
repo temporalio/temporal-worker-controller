@@ -152,6 +152,6 @@ helm install temporal-worker-controller-crds \
 
 After this migration, follow the standard upgrade and rollback instructions above for all future releases.
 
-### Migrating from TemporalWorkerDeployment/TemporalConnection CRDs (Chart Version v0.26.0 and earlier)
+### Migrating from TemporalWorkerDeployment/TemporalConnection CRDs (Chart Version v0.25.0 and earlier)
 
 See the [CRD rename migration guide](migration-crd-rename.md) for step-by-step instructions to migrate from the old CRD names (`TemporalWorkerDeployment`, `TemporalConnection`) to the new names (`WorkerDeployment`, `Connection`) introduced in Chart Version v0.27.0 (App Version v1.7.0).
