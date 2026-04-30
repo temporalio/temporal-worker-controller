@@ -342,3 +342,128 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	require.True(t, ok, "scaleTargetRef should have been auto-injected")
 	assert.Equal(t, "my-worker-abc123", ref["name"])
 }
+
+func TestRenderWorkerResourceTemplate_SubstitutesTokens(t *testing.T) {
+	template := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"scaleTargetRef": map[string]interface{}{},
+			"minReplicas":    float64(1),
+			"maxReplicas":    float64(10),
+			"description":    "build=__TEMPORAL_WORKER_BUILD_ID__ ns=__TEMPORAL_NAMESPACE__ wd=__TEMPORAL_WORKER_DEPLOYMENT_NAME__",
+		},
+	}
+	raw, err := json.Marshal(template)
+	require.NoError(t, err)
+
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "myhpa", Namespace: "team-ns", UID: types.UID("uid")},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "mywd"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "mywd-abc", Namespace: "team-ns"}}
+
+	got, err := RenderWorkerResourceTemplate(wrt, deploy, "build-xyz", "default.acct")
+	require.NoError(t, err)
+
+	spec, ok := got.Object["spec"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "build=build-xyz ns=default.acct wd=team-ns_mywd", spec["description"])
+}
+
+// validScaledObjectTemplate returns a minimal ScaledObject template suitable for render tests.
+func validScaledObjectTemplate() map[string]interface{} {
+	return map[string]interface{}{
+		"apiVersion": "keda.sh/v1alpha1",
+		"kind":       "ScaledObject",
+		"spec": map[string]interface{}{
+			"scaleTargetRef":  map[string]interface{}{},
+			"minReplicaCount": float64(1),
+			"maxReplicaCount": float64(10),
+			"triggers": []interface{}{
+				map[string]interface{}{
+					"type": "prometheus",
+					"metadata": map[string]interface{}{
+						"serverAddress": "http://prom:9090",
+						"threshold":     "1",
+						"query": `sum(metric{deployment="__TEMPORAL_WORKER_DEPLOYMENT_NAME__",` +
+							`build="__TEMPORAL_WORKER_BUILD_ID__",ns="__TEMPORAL_NAMESPACE__"})`,
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestRenderWorkerResourceTemplate_ScaledObject_InjectsScaleTargetRef(t *testing.T) {
+	raw, err := json.Marshal(validScaledObjectTemplate())
+	require.NoError(t, err)
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "myso", Namespace: "team-ns", UID: types.UID("uid")},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "mywd"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "mywd-abc"}}
+	got, err := RenderWorkerResourceTemplate(wrt, deploy, "build-1", "ns1")
+	require.NoError(t, err)
+
+	spec := got.Object["spec"].(map[string]interface{})
+	ref := spec["scaleTargetRef"].(map[string]interface{})
+	assert.Equal(t, "apps/v1", ref["apiVersion"])
+	assert.Equal(t, "Deployment", ref["kind"])
+	assert.Equal(t, "mywd-abc", ref["name"])
+}
+
+func TestRenderWorkerResourceTemplate_ScaledObject_PerVersionDeterminism(t *testing.T) {
+	raw, err := json.Marshal(validScaledObjectTemplate())
+	require.NoError(t, err)
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "myso", Namespace: "team-ns", UID: types.UID("uid")},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "mywd"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+	deploy1 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "mywd-1"}}
+	deploy2 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "mywd-2"}}
+
+	got1, err := RenderWorkerResourceTemplate(wrt, deploy1, "build-1", "ns1")
+	require.NoError(t, err)
+	got2, err := RenderWorkerResourceTemplate(wrt, deploy2, "build-2", "ns1")
+	require.NoError(t, err)
+
+	q1 := got1.Object["spec"].(map[string]interface{})["triggers"].([]interface{})[0].
+		(map[string]interface{})["metadata"].(map[string]interface{})["query"]
+	q2 := got2.Object["spec"].(map[string]interface{})["triggers"].([]interface{})[0].
+		(map[string]interface{})["metadata"].(map[string]interface{})["query"]
+
+	assert.Contains(t, q1, `build="build-1"`)
+	assert.Contains(t, q2, `build="build-2"`)
+	assert.NotEqual(t, got1.GetName(), got2.GetName(), "per-version names must differ")
+	assert.NotEqual(t, ComputeRenderedObjectHash(got1), ComputeRenderedObjectHash(got2), "per-version hashes must differ")
+}
+
+func TestRenderWorkerResourceTemplate_ScaledObject_HashStability(t *testing.T) {
+	raw, err := json.Marshal(validScaledObjectTemplate())
+	require.NoError(t, err)
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "myso", Namespace: "team-ns", UID: types.UID("uid")},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: "mywd"},
+			Template:                    runtime.RawExtension{Raw: raw},
+		},
+	}
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "mywd-1"}}
+
+	a, err := RenderWorkerResourceTemplate(wrt, deploy, "build-1", "ns1")
+	require.NoError(t, err)
+	b, err := RenderWorkerResourceTemplate(wrt, deploy, "build-1", "ns1")
+	require.NoError(t, err)
+
+	assert.Equal(t, ComputeRenderedObjectHash(a), ComputeRenderedObjectHash(b), "re-rendering same inputs must produce same hash")
+}

@@ -46,6 +46,14 @@ var ControllerOwnedMetricLabelKeys = []string{
 	"temporal_namespace",
 }
 
+// scaleToZeroRationale is the shared Temporal-side explanation used by both the HPA
+// minReplicas=0 guard and the ScaledObject minReplicaCount/idleReplicaCount guard.
+// Kept in one place so the explanation stays consistent across kinds.
+const scaleToZeroRationale = "scaling Temporal workers to zero is not currently safe: " +
+	"Temporal's approximate_backlog_count metric stops being emitted when the task queue is idle " +
+	"with no pollers, so a metric-based autoscaler cannot detect a new backlog and scale back up " +
+	"from zero once all workers are gone"
+
 // NewWorkerResourceTemplateValidator creates a validator from a manager.
 //
 // Three environment variables are read at startup (all injected by the Helm chart):
@@ -261,24 +269,26 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 	if innerSpec, ok := obj["spec"].(map[string]interface{}); ok {
 		innerSpecPath := field.NewPath("spec").Child("template").Child("spec")
 
-		// 4. minReplicas must not be 0.
-		// Scaling to zero is not safe with Temporal's approximate_backlog_count metric: that metric
-		// is only emitted while the task queue is loaded in memory (i.e. while at least one worker
-		// is polling). If all workers are scaled to zero and the task queue goes idle for ~5 minutes,
-		// the metric stops being emitted and resets to zero. If new tasks then arrive but no worker
-		// polls, the metric remains zero — making it impossible for a metric-based autoscaler to
-		// detect the backlog and scale back up. Until Temporal makes this a reliable metric for
-		// scaling workers to zero and back, minReplicas=0 is rejected.
-		if minReplicas, exists := innerSpec["minReplicas"]; exists {
-			if v, ok := minReplicas.(float64); ok && v == 0 {
+		// 4. Scale-to-zero guard — kind-aware. Other kinds (e.g. PodDisruptionBudget)
+		// have no scale-to-zero concept and are intentionally skipped.
+		switch kind {
+		case "HorizontalPodAutoscaler":
+			if v, ok := innerSpec["minReplicas"].(float64); ok && v == 0 {
 				allErrs = append(allErrs, field.Invalid(
 					innerSpecPath.Child("minReplicas"),
 					0,
-					"minReplicas must not be 0; scaling Temporal workers to zero is not currently safe: "+
-						"Temporal's approximate_backlog_count metric stops being emitted when the task queue is idle "+
-						"with no pollers, so a metric-based autoscaler cannot detect a new backlog and scale back up "+
-						"from zero once all workers are gone",
+					"minReplicas must not be 0; "+scaleToZeroRationale,
 				))
+			}
+		case "ScaledObject":
+			for _, fieldName := range []string{"minReplicaCount", "idleReplicaCount"} {
+				if v, ok := innerSpec[fieldName].(float64); ok && v == 0 {
+					allErrs = append(allErrs, field.Invalid(
+						innerSpecPath.Child(fieldName),
+						0,
+						fieldName+" must not be 0; "+scaleToZeroRationale,
+					))
+				}
 			}
 		}
 

@@ -110,6 +110,12 @@ workerResourceTemplate:
       apiGroups: ["autoscaling"]
       resources: ["horizontalpodautoscalers"]
 
+    # Uncomment to allow KEDA ScaledObjects as WorkerResourceTemplate objects.
+    # Requires KEDA installed in the cluster.
+    # - kinds: ["ScaledObject"]
+    #   apiGroups: ["keda.sh"]
+    #   resources: ["scaledobjects"]
+
 certmanager:
   # install controls whether cert-manager is installed as a Helm subchart.
   # Set to true if cert-manager is not already installed in the cluster.

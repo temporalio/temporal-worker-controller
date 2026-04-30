@@ -1,0 +1,60 @@
+# WorkerResourceTemplate — per-version KEDA ScaledObject (Prometheus trigger)
+#
+# For clusters where KEDA owns the external.metrics.k8s.io APIService (and so an HPA
+# with type: External cannot be used). The controller creates one ScaledObject per
+# active Build ID, pointing at the versioned Deployment; KEDA then drives per-version
+# HPAs under the hood.
+#
+# Prerequisites:
+#   1. KEDA installed in the cluster (>= 2.10 recommended).
+#   2. Add ScaledObject to the controller's allowedResources in Helm values:
+#        workerResourceTemplate:
+#          allowedResources:
+#            - kinds: ["HorizontalPodAutoscaler"]
+#              apiGroups: ["autoscaling"]
+#              resources: ["horizontalpodautoscalers"]
+#            - kinds: ["ScaledObject"]
+#              apiGroups: ["keda.sh"]
+#              resources: ["scaledobjects"]
+#   3. Prometheus reachable at the serverAddress below, scraping Temporal metrics
+#      with the usual versioned labels (temporal_worker_deployment_name,
+#      temporal_worker_build_id, temporal_namespace).
+#
+# Token substitution:
+#   The controller replaces these tokens with per-version values at render time:
+#     __TEMPORAL_WORKER_DEPLOYMENT_NAME__ → "<wrt-namespace>_<twdName>"
+#     __TEMPORAL_WORKER_BUILD_ID__        → the active Build ID
+#     __TEMPORAL_NAMESPACE__              → the Temporal namespace
+#
+# Apply:
+#   kubectl apply -f examples/wrt-keda-prometheus.yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-keda
+  namespace: default
+spec:
+  temporalWorkerDeploymentRef:
+    name: helloworld
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      # {} tells the controller to inject the versioned Deployment reference.
+      scaleTargetRef: {}
+      minReplicaCount: 1
+      maxReplicaCount: 30
+      pollingInterval: 15
+      cooldownPeriod: 120
+      triggers:
+        - type: prometheus
+          metadata:
+            serverAddress: http://prometheus.monitoring.svc:9090
+            threshold: "1"
+            query: |
+              sum(temporal_backlog_count_by_version{
+                temporal_worker_deployment_name="__TEMPORAL_WORKER_DEPLOYMENT_NAME__",
+                temporal_worker_build_id="__TEMPORAL_WORKER_BUILD_ID__",
+                temporal_namespace="__TEMPORAL_NAMESPACE__",
+                task_type="Activity"
+              })

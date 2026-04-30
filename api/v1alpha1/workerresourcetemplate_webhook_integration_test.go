@@ -42,6 +42,31 @@ func hpaObjForIntegration() map[string]interface{} {
 	}
 }
 
+// scaledObjectForIntegration returns a minimal valid ScaledObject embedded object spec,
+// including a token in the PromQL query to confirm the webhook accepts templates
+// that contain substitution tokens (substitution itself happens at controller render time).
+func scaledObjectForIntegration() map[string]interface{} {
+	return map[string]interface{}{
+		"apiVersion": "keda.sh/v1alpha1",
+		"kind":       "ScaledObject",
+		"spec": map[string]interface{}{
+			"scaleTargetRef":  map[string]interface{}{},
+			"minReplicaCount": float64(1),
+			"maxReplicaCount": float64(5),
+			"triggers": []interface{}{
+				map[string]interface{}{
+					"type": "prometheus",
+					"metadata": map[string]interface{}{
+						"serverAddress": "http://prom:9090",
+						"threshold":     "1",
+						"query":         `sum(metric{build="__TEMPORAL_WORKER_BUILD_ID__"})`,
+					},
+				},
+			},
+		},
+	}
+}
+
 // makeWRTForWebhook builds a WorkerResourceTemplate in the given namespace.
 func makeWRTForWebhook(name, ns, workerDeploymentRef string, embeddedObj map[string]interface{}) *WorkerResourceTemplate {
 	raw, _ := json.Marshal(embeddedObj)
@@ -86,6 +111,31 @@ func grantControllerSAHPACreateAccess(ns string) {
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: "sa-hpa-creator-rb", Namespace: ns},
 		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: "sa-hpa-creator"},
+		Subjects: []rbacv1.Subject{
+			{Kind: "ServiceAccount", Name: "test-controller", Namespace: "test-system"},
+		},
+	}
+	Expect(k8sClient.Create(ctx, rb)).To(Succeed())
+}
+
+// grantControllerSAScaledObjectCreateAccess creates a Role granting the controller SA
+// (system:serviceaccount:test-system:test-controller) create access to keda.sh/scaledobjects
+// in ns. Mirrors grantControllerSAHPACreateAccess.
+func grantControllerSAScaledObjectCreateAccess(ns string) {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-so-creator", Namespace: ns},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{"keda.sh"},
+				Resources: []string{"scaledobjects"},
+				Verbs:     []string{"create", "update", "delete"},
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, role)).To(Succeed())
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-so-creator-rb", Namespace: ns},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: "sa-so-creator"},
 		Subjects: []rbacv1.Subject{
 			{Kind: "ServiceAccount", Name: "test-controller", Namespace: "test-system"},
 		},
@@ -192,6 +242,15 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(err).To(HaveOccurred(), "webhook must reject when controller SA cannot create HPAs")
 		Expect(err.Error()).To(ContainSubstring("test-controller"))
 		Expect(err.Error()).To(ContainSubstring("not authorized"))
+	})
+
+	It("allows creation of a ScaledObject-backed WRT when controller SA has keda.sh permission", func() {
+		ns := makeTestNamespace("wh-so-happy")
+		grantControllerSAScaledObjectCreateAccess(ns)
+
+		wrt := makeWRTForWebhook("t-so-happy", ns, "my-worker", scaledObjectForIntegration())
+		Expect(k8sClient.Create(ctx, wrt)).To(Succeed(),
+			"admission must succeed when controller SA can create ScaledObjects")
 	})
 
 	// temporalWorkerDeploymentRef.name immutability enforced via a real HTTP update request.
