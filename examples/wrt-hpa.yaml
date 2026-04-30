@@ -1,7 +1,7 @@
 # WorkerResourceTemplate — HPA example
 #
 # This example attaches a HorizontalPodAutoscaler to each active versioned Deployment
-# of the "helloworld" TemporalWorkerDeployment (from the local demo).
+# of the "helloworld" WorkerDeployment (from the local demo).
 #
 # Prerequisites:
 #   - The helloworld demo is running (skaffold run --profile helloworld-worker)
@@ -20,11 +20,11 @@ apiVersion: temporal.io/v1alpha1
 kind: WorkerResourceTemplate
 metadata:
   name: helloworld-hpa
-  # Deploy into the same namespace as the helloworld TemporalWorkerDeployment.
+  # Deploy into the same namespace as the helloworld WorkerDeployment.
   # The default Skaffold setup does not set a namespace, so resources land in "default".
   namespace: default
 spec:
-  # Must match the name of the TemporalWorkerDeployment.
+  # Must match the name of the WorkerDeployment.
   temporalWorkerDeploymentRef:
     name: helloworld
 

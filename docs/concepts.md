@@ -13,11 +13,15 @@ A logical grouping in Temporal that represents a collection of workers that are 
 - Versions of a Worker Deployment are identified by Build IDs (e.g., "v1.5.1", "v1.5.2")
 - Temporal routes workflow executions to appropriate worker versions based on the `RoutingConfig` of the Worker Deployment that the versions are in.
 
-### `TemporalWorkerDeployment` CRD
+### `WorkerDeployment` CRD
 The Kubernetes Custom Resource Definition that manages one Temporal Worker Deployment. This is the primary resource you interact with when using the Temporal Worker Controller.
 
+> **Note:** This CRD was named `TemporalWorkerDeployment` in Chart Version v0.25.0 and earlier. In Chart Version v0.27.0, no new `TemporalWorkerDeployment`
+> resources can be created, and existing ones must be migrated to `WorkerDeployment`. See the [CRD rename migration guide](migration-crd-rename.md).
+> The old `TemporalWorkerDeployment` CRD will be removed in a future release.
+
 **Key characteristics:**
-- One `TemporalWorkerDeployment` Custom Resource per Temporal Worker Deployment
+- One `WorkerDeployment` Custom Resource per Temporal Worker Deployment
 - Manages the lifecycle of all versions for that worker deployment
 - Defines rollout strategies, resource requirements, and connection details
 - Controller creates and manages multiple Kubernetes `Deployment` resources based on this spec
@@ -25,21 +29,21 @@ The Kubernetes Custom Resource Definition that manages one Temporal Worker Deplo
 The actual Kubernetes `Deployment` resources that run worker pods. The controller automatically creates these - you don't manage them directly.
 
 **Key characteristics:**
-- Multiple Kubernetes `Deployment` resources per `TemporalWorkerDeployment` Custom Resource (one per version)
+- Multiple Kubernetes `Deployment` resources per `WorkerDeployment` Custom Resource (one per version)
 - Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `staging/payment-processor-v1.5.1`)
 - Each runs a specific version of your worker code
 
 ### Key Relationship
-**One `TemporalWorkerDeployment` Custom Resource → Multiple Kubernetes `Deployment` resources (managed by controller)**
+**One `WorkerDeployment` Custom Resource → Multiple Kubernetes `Deployment` resources (managed by controller)**
 
-Make changes to the spec of your `TemporalWorkerDeployment` Custom Resource, and the controller handles all the underlying Kubernetes `Deployment` resources for different versions.
+Make changes to the spec of your `WorkerDeployment` Custom Resource, and the controller handles all the underlying Kubernetes `Deployment` resources for different versions.
 
 ## Version States
 
 Worker deployment versions progress through various states during their lifecycle:
 
 ### NotRegistered
-The version has been specified in the `TemporalWorkerDeployment` custom resource but hasn't been registered with Temporal yet. This typically happens when:
+The version has been specified in the `WorkerDeployment` custom resource but hasn't been registered with Temporal yet. This typically happens when:
 - The worker pods are still starting up
 - There are connectivity issues to Temporal
 - The worker code has errors preventing registration
@@ -87,7 +91,7 @@ Gradually increases the percentage of new workflow executions routed to the new 
 
 ### Worker Options
 Configuration that tells the controller how to connect to the same Temporal cluster and namespace that the worker is connected to:
-- **connectionRef**: A reference to a `TemporalConnection` custom resource. This object contains a `name` field to specify the `TemporalConnection` resource.
+- **connectionRef**: A reference to a `Connection` custom resource. This object contains a `name` field to specify the `Connection` resource.
 - **temporalNamespace**: The Temporal namespace to connect to
 - **deploymentName**: The logical deployment name in Temporal (auto-generated if not specified)
 
@@ -118,7 +122,7 @@ The pod template used for the target version of this worker deployment. Similar 
 The controller automatically sets these environment variables for all worker pods:
 
 ### TEMPORAL_ADDRESS
-The host and port of the Temporal server, derived from the `TemporalConnection` custom resource.
+The host and port of the Temporal server, derived from the `Connection` custom resource.
 The worker must connect to this Temporal endpoint, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that endpoint if it already knows the endpoint another way.
 
 ### TEMPORAL_NAMESPACE
@@ -126,7 +130,7 @@ The Temporal namespace the worker should connect to, from `spec.workerOptions.te
 The worker must connect to this Temporal namespace, but since this is user provided and not controller generated, the user does not necessarily need to access this env var to get that namespace if it already knows the namespace another way.
 
 ### TEMPORAL_DEPLOYMENT_NAME
-The worker deployment name in Temporal, auto-generated from the `TemporalWorkerDeployment` name and Kubernetes namespace.
+The worker deployment name in Temporal, auto-generated from the `WorkerDeployment` name and Kubernetes namespace.
 The worker *must* use this to configure its `worker.DeploymentOptions`.
 
 ### TEMPORAL_WORKER_BUILD_ID
@@ -146,6 +150,6 @@ The automated process of:
 
 ### Controller-Managed Resources
 Resources that are created, updated, and deleted automatically by the controller:
-- `TemporalWorkerDeployment` custom resources, to update their status
+- `WorkerDeployment` custom resources, to update their status
 - Kubernetes `Deployment` resources for each version
 - Labels and annotations for tracking and management

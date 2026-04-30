@@ -4,18 +4,17 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: temporalworkerdeployments.temporal.io
+  name: workerdeployments.temporal.io
 spec:
   group: temporal.io
   names:
-    kind: TemporalWorkerDeployment
-    listKind: TemporalWorkerDeploymentList
-    plural: temporalworkerdeployments
+    kind: WorkerDeployment
+    listKind: WorkerDeploymentList
+    plural: workerdeployments
     shortNames:
-    - twd
-    - twdeployment
-    - tworkerdeployment
-    singular: temporalworkerdeployment
+    - wd
+    - wdeployment
+    singular: workerdeployment
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -35,9 +34,6 @@ spec:
       jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    deprecated: true
-    deprecationWarning: TemporalWorkerDeployment is deprecated. Use WorkerDeployment
-      instead.
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -4214,9 +4210,6 @@ spec:
         x-kubernetes-validations:
         - message: name cannot be more than 63 characters
           rule: size(self.metadata.name) <= 63
-        - message: TemporalWorkerDeployment is deprecated and cannot be created. Use
-            WorkerDeployment instead.
-          rule: oldSelf != null
     served: true
     storage: true
     subresources:

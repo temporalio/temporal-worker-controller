@@ -1,8 +1,8 @@
 # Service that exposes the Prometheus metrics endpoint (port 9090) on all
-# versioned worker pods managed by this TemporalWorkerDeployment.
+# versioned worker pods managed by this WorkerDeployment.
 #
 # The controller labels each versioned Deployment's pods with:
-#   temporal.io/deployment-name: <twd-name>
+#   temporal.io/deployment-name: <workerdeployment-name>
 #   temporal.io/build-id: <buildID>
 #
 # This Service selects all of them so Prometheus (via ServiceMonitor) can
@@ -17,7 +17,7 @@ metadata:
     {{ include "helloworld.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker-metrics
 spec:
-  # Select all versioned worker pods for this TemporalWorkerDeployment.
+  # Select all versioned worker pods for this WorkerDeployment.
   # The controller sets this label on every pod it manages.
   selector:
     temporal.io/deployment-name: {{ .Release.Name }}

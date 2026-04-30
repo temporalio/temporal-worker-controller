@@ -11,7 +11,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 )
 
-// Event reason constants for TemporalWorkerDeployment.
+// Event reason constants for WorkerDeployment.
 //
 // These strings appear in Kubernetes Event objects (kubectl get events) and are
 // internal to the controller's implementation. They are not part of the CRD

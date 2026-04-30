@@ -52,7 +52,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-expect-no-change",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						// Image name with banned characters (slash, colon) that will be replaced
 						// with hyphens in the build ID. Dots and underscores are preserved.
@@ -68,7 +68,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-with-failed-gate-expect-no-current",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithGate(false).
 						WithReplicas(2).
@@ -83,7 +83,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-with-success-gate-expect-no-current",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithGate(true).
 						WithReplicas(2).
@@ -98,7 +98,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-expect-deployments-scaled-up",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithReplicas(2).
 						WithTargetTemplate("v1.0"),
@@ -112,7 +112,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-custom-build-expect-rolling-update", // due to pod spec change
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithReplicas(1).
 						WithTargetTemplate("v1.1"). // new image, same stable build id
@@ -135,7 +135,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-scale-down-deprecated-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithTargetTemplate("v2.0").
 						WithStatus(
@@ -169,7 +169,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-yes-unversioned-pollers-expect-no-current",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithTargetTemplate("v1"),
 				).
@@ -183,7 +183,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-blocked-at-max-versions-ineligible-for-deletion",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithTargetTemplate("v5").
 						WithStatus(
@@ -230,7 +230,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-blocked-by-manager-identity",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithTargetTemplate("v1").
 						WithStatus(
@@ -258,7 +258,7 @@ func TestIntegration(t *testing.T) {
 			name: "manual-rollout-unblocked-after-manager-identity-cleared",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithTargetTemplate("v1").
 						WithStatus(
@@ -285,7 +285,7 @@ func TestIntegration(t *testing.T) {
 	for _, tc := range manualStrategyTestCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+			testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
 		})
 	}
 
@@ -295,7 +295,7 @@ func TestIntegration(t *testing.T) {
 			name: "all-at-once-with-success-gate-expect-current",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithGate(true).
 						WithReplicas(2).
@@ -311,7 +311,7 @@ func TestIntegration(t *testing.T) {
 			name: "all-at-once-rollout-with-failed-gate-expect-no-current",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithGate(false).
 						WithTargetTemplate("v1.0").
@@ -333,7 +333,7 @@ func TestIntegration(t *testing.T) {
 			name: "all-at-once-expect-scale-down-deprecated-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v2.0").
 						WithStatus(
@@ -367,7 +367,7 @@ func TestIntegration(t *testing.T) {
 			name: "all-at-once-yes-unversioned-pollers-expect-current",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1"),
 				).
@@ -381,7 +381,7 @@ func TestIntegration(t *testing.T) {
 			name: "all-at-once-blocked-at-max-versions-ineligible-for-deletion",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v5").
 						WithStatus(
@@ -428,7 +428,7 @@ func TestIntegration(t *testing.T) {
 			name: "all-at-once-rollout-blocked-by-manager-identity",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1").
 						WithStatus(
@@ -456,7 +456,7 @@ func TestIntegration(t *testing.T) {
 			name: "all-at-once-unblocked-after-manager-identity-cleared",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1").
 						WithStatus(
@@ -484,7 +484,7 @@ func TestIntegration(t *testing.T) {
 	for _, tc := range allAtOnceStrategyTestCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+			testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
 		})
 	}
 
@@ -493,7 +493,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-with-gate-no-current-expect-all-at-once",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(10, time.Hour)).
 						WithReplicas(2).
 						WithGate(true).
@@ -509,7 +509,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-no-unversioned-pollers-expect-all-at-once",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithTargetTemplate("v1.0"),
 				).
@@ -523,7 +523,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-yes-unversioned-pollers-expect-first-step",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithTargetTemplate("v1"),
 				).
@@ -537,7 +537,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-expect-first-step",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithTargetTemplate("v1.0").
 						WithStatus(
@@ -559,7 +559,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-success-gate-expect-first-step",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithGate(true).
 						WithTargetTemplate("v1.0").
@@ -582,7 +582,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-with-failed-gate",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithGate(false).
 						WithTargetTemplate("v1.0").
@@ -606,7 +606,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-blocked-at-ctrlr-max-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithTargetTemplate("v5").
 						WithStatus(
@@ -653,7 +653,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-blocked-by-manager-identity",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithTargetTemplate("v1").
 						WithStatus(
@@ -681,7 +681,7 @@ func TestIntegration(t *testing.T) {
 			name: "progressive-rollout-unblocked-after-manager-identity-cleared",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
 						WithTargetTemplate("v1").
 						WithStatus(
@@ -708,7 +708,7 @@ func TestIntegration(t *testing.T) {
 	for _, tc := range progressiveStrategyTestCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+			testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
 		})
 	}
 
@@ -730,7 +730,7 @@ func TestIntegration(t *testing.T) {
 			name: "6th-rollout-unblocked-after-pollers-die-max-ctrlr-versions",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v5").
 						WithStatus(
@@ -778,7 +778,7 @@ func TestIntegration(t *testing.T) {
 			name: "7th-rollout-unblocked-after-pollers-die-version-deleted",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v6").
 						WithStatus(
@@ -828,9 +828,10 @@ func TestIntegration(t *testing.T) {
 	}
 
 	for _, tc := range testsShortPollerTTL {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, tsShortTTL, tc.builder.BuildWithValues(tc.name, testNamespace.Name, tsShortTTL.GetDefaultNamespace()))
+			testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, tsShortTTL, tc.builder.BuildWithValues(tc.name, testNamespace.Name, tsShortTTL.GetDefaultNamespace()))
 		})
 	}
 
@@ -844,7 +845,7 @@ func TestIntegration(t *testing.T) {
 		// Build the TWD using the existing builder (sets connection ref, temporal namespace, task queue).
 		tc := testhelpers.NewTestCase().
 			WithInput(
-				testhelpers.NewTemporalWorkerDeploymentBuilder().
+				testhelpers.NewWorkerDeploymentBuilder().
 					WithAllAtOnceStrategy().
 					WithTargetTemplate("v1.0"),
 			).
@@ -856,18 +857,18 @@ func TestIntegration(t *testing.T) {
 			BuildWithValues(twdName, testNamespace.Name, ts.GetDefaultNamespace())
 		twd := tc.GetTWD()
 
-		t.Log("Creating TemporalConnection")
-		temporalConnection := &temporaliov1alpha1.TemporalConnection{
+		t.Log("Creating Connection")
+		temporalConnection := &temporaliov1alpha1.Connection{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
+				Name:      twd.Spec.WorkerOptions.ConnectionRef.Name,
 				Namespace: twd.Namespace,
 			},
-			Spec: temporaliov1alpha1.TemporalConnectionSpec{
+			Spec: temporaliov1alpha1.ConnectionSpec{
 				HostPort: ts.GetFrontendHostPort(),
 			},
 		}
 		if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-			t.Fatalf("failed to create TemporalConnection: %v", err)
+			t.Fatalf("failed to create Connection: %v", err)
 		}
 
 		env := testhelpers.TestEnv{
@@ -880,9 +881,9 @@ func TestIntegration(t *testing.T) {
 			ExpectedDeploymentReplicas: make(map[string]int32),
 		}
 
-		t.Log("Creating TemporalWorkerDeployment")
+		t.Log("Creating WorkerDeployment")
 		if err := k8sClient.Create(ctx, twd); err != nil {
-			t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+			t.Fatalf("failed to create WorkerDeployment: %v", err)
 		}
 
 		// Wait for the controller to create the versioned Deployment, then start workers
@@ -896,7 +897,7 @@ func TestIntegration(t *testing.T) {
 		// Wait for TWD status to reach Current before creating the WRT,
 		// so that k8sState.Deployments already contains the active Build ID
 		// when the reconciler next runs.
-		verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, tc.GetExpectedStatus(), 30*time.Second, 5*time.Second)
+		verifyWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, tc.GetExpectedStatus(), 30*time.Second, 5*time.Second)
 
 		t.Log("Creating WorkerResourceTemplate with HPA spec")
 		wrt := &temporaliov1alpha1.WorkerResourceTemplate{
@@ -905,7 +906,7 @@ func TestIntegration(t *testing.T) {
 				Namespace: testNamespace.Name,
 			},
 			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-				TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{Name: twd.Name},
+				WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: twd.Name},
 				// scaleTargetRef is set to {} to trigger auto-injection by the controller.
 				Template: runtime.RawExtension{Raw: []byte(`{
 					"apiVersion": "autoscaling/v2",
@@ -944,7 +945,7 @@ func TestIntegration(t *testing.T) {
 	for _, tc := range wrtTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+			testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
 		})
 	}
 
@@ -967,8 +968,8 @@ func TestIntegration(t *testing.T) {
 	runDeletionTests(t, k8sClient, tsShortTTL, testNamespace.Name)
 }
 
-// testTemporalWorkerDeploymentCreation tests the creation of a TemporalWorkerDeployment and waits for the expected status
-func testTemporalWorkerDeploymentCreation(
+// testWorkerDeploymentCreation tests the creation of a WorkerDeployment and waits for the expected status
+func testWorkerDeploymentCreation(
 	ctx context.Context,
 	t *testing.T,
 	k8sClient client.Client,
@@ -979,18 +980,18 @@ func testTemporalWorkerDeploymentCreation(
 	twd := tc.GetTWD()
 	expectedStatus := tc.GetExpectedStatus()
 
-	t.Log("Creating a TemporalConnection")
-	temporalConnection := &temporaliov1alpha1.TemporalConnection{
+	t.Log("Creating a Connection")
+	temporalConnection := &temporaliov1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      twd.Spec.WorkerOptions.TemporalConnectionRef.Name,
+			Name:      twd.Spec.WorkerOptions.ConnectionRef.Name,
 			Namespace: twd.Namespace,
 		},
-		Spec: temporaliov1alpha1.TemporalConnectionSpec{
+		Spec: temporaliov1alpha1.ConnectionSpec{
 			HostPort: ts.GetFrontendHostPort(),
 		},
 	}
 	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to create TemporalConnection: %v", err)
+		t.Fatalf("failed to create Connection: %v", err)
 	}
 
 	env := testhelpers.TestEnv{
@@ -1018,9 +1019,9 @@ func testTemporalWorkerDeploymentCreation(
 		f(twd)
 	}
 
-	t.Log("Creating a TemporalWorkerDeployment")
+	t.Log("Creating a WorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
-		t.Fatalf("failed to create TemporalWorkerDeployment: %v", err)
+		t.Fatalf("failed to create WorkerDeployment: %v", err)
 	}
 
 	// Hook: runs after TWD creation but before waiting for the target Deployment.
@@ -1042,7 +1043,7 @@ func testTemporalWorkerDeploymentCreation(
 	if wait := tc.GetWaitTime(); wait != nil {
 		time.Sleep(*wait)
 	}
-	verifyTemporalWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, expectedStatus, 30*time.Second, 5*time.Second)
+	verifyWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, expectedStatus, 30*time.Second, 5*time.Second)
 	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, *expectedStatus, 30*time.Second, 5*time.Second)
 
 	// apply post-expected-status validation function

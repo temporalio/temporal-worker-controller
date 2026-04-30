@@ -66,7 +66,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      TEMPORAL_ADDRESS=us-east-1.aws.api.temporal.io:7233
      ```
      The namespace-specific endpoint (e.g. `<namespace>.tmprl.cloud:7233`) requires mTLS and will reject API key connections with a `tls: certificate required` error.
-   - Note: Do not set both mTLS and API key for the same connection. If both present, the TemporalConnection Custom Resource
+   - Note: Do not set both mTLS and API key for the same connection. If both present, the Connection Custom Resource
    Instance will not get installed in the k8s environment.
 
 3. Build and deploy the Controller image to the local k8s cluster:
@@ -80,11 +80,11 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    ```bash
    skaffold run --profile helloworld-worker
    ```
-   This deploys a TemporalWorkerDeployment and TemporalConnection Custom Resource using the **Progressive strategy**. Note that when there is no current version (as in an initial versioned worker deployment), the progressive steps are skipped and v1 becomes the current version immediately. All new workflow executions will now start on v1.
+   This deploys a WorkerDeployment and Connection Custom Resource using the **Progressive strategy**. Note that when there is no current version (as in an initial versioned worker deployment), the progressive steps are skipped and v1 becomes the current version immediately. All new workflow executions will now start on v1.
    
 6. Watch the deployment status:
    ```bash
-   watch kubectl get twd
+   watch kubectl get workerdeployment
    ```
 
 7. **Apply load** to the v1 worker to simulate production traffic:
@@ -115,8 +115,8 @@ You can monitor the controller's logs and the worker's status using:
 # Output the controller pod's logs
 kubectl logs -n temporal-system deployments/temporal-worker-controller-manager -f
 
-# View TemporalWorkerDeployment status
-kubectl get twd
+# View WorkerDeployment status
+kubectl get workerdeployment
 ```
 
 ### Testing WorkerResourceTemplate (per-version HPA)
@@ -147,7 +147,7 @@ When you deploy a new worker version (e.g., step 8), the controller creates a ne
 
 See [docs/owned-resources.md](../../docs/worker-resource-templates.md) for full documentation.
 
-> **Note**: If you plan to continue to the Metric-Based HPA Scaling Demo below, delete this WRT before proceeding. Two WRTs targeting the same TemporalWorkerDeployment with the same resource kind will create conflicting HPAs.
+> **Note**: If you plan to continue to the Metric-Based HPA Scaling Demo below, delete this WRT before proceeding. Two WRTs targeting the same WorkerDeployment with the same resource kind will create conflicting HPAs.
 > ```bash
 > kubectl delete -f examples/wrt-hpa.yaml
 > ```

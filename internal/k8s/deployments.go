@@ -49,7 +49,7 @@ type DeploymentState struct {
 }
 
 // GetDeploymentState queries Kubernetes to get the state of all deployments
-// associated with a TemporalWorkerDeployment
+// associated with a WorkerDeployment
 func GetDeploymentState(
 	ctx context.Context,
 	k8sClient client.Client,
@@ -115,7 +115,7 @@ func NewObjectRef(obj client.Object) *corev1.ObjectReference {
 	}
 }
 
-func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 	// Check for user-provided build ID in spec.workerOptions.unsafeCustomBuildID
 	if override := w.Spec.WorkerOptions.UnsafeCustomBuildID; override != "" {
 		cleaned := cleanBuildID(override)
@@ -137,7 +137,7 @@ func ComputeBuildID(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
 }
 
 // ComputeWorkerDeploymentName generates the base worker deployment name
-func ComputeWorkerDeploymentName(w *temporaliov1alpha1.TemporalWorkerDeployment) string {
+func ComputeWorkerDeploymentName(w *temporaliov1alpha1.WorkerDeployment) string {
 	// Use the name and namespace to form the worker deployment name
 	return w.GetNamespace() + WorkerDeploymentNameSeparator + w.GetName()
 }
@@ -224,10 +224,10 @@ func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 func NewDeploymentWithOwnerRef(
 	typeMeta *metav1.TypeMeta,
 	objectMeta *metav1.ObjectMeta,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	workerDeploymentName string,
 	buildID string,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 ) *appsv1.Deployment {
 	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
 
@@ -292,7 +292,7 @@ func NewDeploymentWithOwnerRef(
 }
 
 // TODO (Shivam): Change hash when secret name is updated as well.
-func ComputeConnectionSpecHash(connection temporaliov1alpha1.TemporalConnectionSpec) string {
+func ComputeConnectionSpecHash(connection temporaliov1alpha1.ConnectionSpec) string {
 	// HostPort is required, but MutualTLSSecret can be empty for non-mTLS connections
 	if connection.HostPort == "" {
 		return ""
@@ -327,7 +327,7 @@ func ComputePodTemplateSpecHash(template corev1.PodTemplateSpec) string {
 // updating existing deployments for drift detection.
 func ApplyControllerPodSpecModifications(
 	podSpec *corev1.PodSpec,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 	temporalNamespace string,
 	workerDeploymentName string,
 	buildID string,
@@ -402,9 +402,9 @@ func ApplyControllerPodSpecModifications(
 }
 
 func NewDeploymentWithControllerRef(
-	w *temporaliov1alpha1.TemporalWorkerDeployment,
+	w *temporaliov1alpha1.WorkerDeployment,
 	buildID string,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 	reconcilerScheme *runtime.Scheme,
 ) (*appsv1.Deployment, error) {
 	d := NewDeploymentWithOwnerRef(

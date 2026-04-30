@@ -1,7 +1,7 @@
 # WorkerResourceTemplate — per-version HPA scaling on slot utilization (Phase 1)
 #
 # This example attaches an HPA to each active versioned Deployment of the
-# "helloworld" TemporalWorkerDeployment. The HPA scales on temporal_slot_utilization,
+# "helloworld" WorkerDeployment. The HPA scales on temporal_slot_utilization,
 # a custom metric computed from the Temporal Go SDK's worker task slot gauges by a
 # Prometheus recording rule.
 #

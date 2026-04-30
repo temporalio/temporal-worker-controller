@@ -150,19 +150,19 @@ Configure how workers connect to Temporal:
 ```yaml
 workerOptions:
   connectionRef:
-    name: production-temporal     # Reference to TemporalConnection
+    name: production-temporal     # Reference to Connection
   temporalNamespace: production      # Temporal namespace
 ```
 
 ### Connection Configuration
 
-Reference a `TemporalConnection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both.
+Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both.
 
 **Using mTLS Authentication:**
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
-kind: TemporalConnection
+kind: Connection
 metadata:
   name: production-temporal
 spec:
@@ -229,7 +229,7 @@ cat private-key.key | base64 -w 0
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
-kind: TemporalConnection
+kind: Connection
 metadata:
   name: production-temporal
 spec:
@@ -288,8 +288,8 @@ echo -n "your-api-key-token-here" | base64
 </details>
 
 **Important Notes:**
-- Both secrets must be created in the same Kubernetes namespace as the `TemporalConnection` resource
-- Only one authentication method can be specified per `TemporalConnection` (either `mutualTLSSecretRef` or `apiKeySecretRef`)
+- Both secrets must be created in the same Kubernetes namespace as the `Connection` resource
+- Only one authentication method can be specified per `Connection` (either `mutualTLSSecretRef` or `apiKeySecretRef`)
 - The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
 
@@ -335,7 +335,7 @@ Gate workflow input details:
 **Production Configuration:**
 ```yaml
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: order-processor
   namespace: production
@@ -364,7 +364,7 @@ spec:
 **Staging Configuration:**
 ```yaml
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: order-processor
   namespace: staging
@@ -392,10 +392,10 @@ The controller validates configuration and will report errors in the resource st
 
 ```bash
 # Check for configuration errors
-kubectl describe temporalworkerdeployment my-worker
+kubectl describe workerdeployment my-worker
 
 # Look for validation errors in status
-kubectl get temporalworkerdeployment my-worker -o yaml
+kubectl get workerdeployment my-worker -o yaml
 ```
 
 Common validation errors:

@@ -11,14 +11,6 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// SecretReference contains the name of a Secret resource in the same namespace.
-type SecretReference struct {
-	// Name of the Secret resource.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Name string `json:"name"`
-}
-
 // TemporalConnectionSpec defines the desired state of TemporalConnection
 // +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))",message="Only one of mutualTLSSecretRef or apiKeySecretRef may be set"
 type TemporalConnectionSpec struct {
@@ -48,8 +40,10 @@ type TemporalConnectionSpec struct {
 
 // TemporalConnectionStatus defines the observed state of TemporalConnection
 type TemporalConnectionStatus struct {
-	// TODO(jlegrone): Add additional status fields following Kubernetes API conventions
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -57,6 +51,8 @@ type TemporalConnectionStatus struct {
 //+kubebuilder:resource:shortName=tconn
 //+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server endpoint"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
+// +kubebuilder:validation:XValidation:rule="oldSelf != null",message="TemporalConnection is deprecated and cannot be created. Use Connection instead."
+// +kubebuilder:deprecatedversion:warning="TemporalConnection is deprecated. Use Connection instead."
 
 // TemporalConnection is the Schema for the temporalconnections API
 type TemporalConnection struct {

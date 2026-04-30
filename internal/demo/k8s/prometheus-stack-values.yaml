@@ -90,13 +90,13 @@ additionalPrometheusRulesMap:
           # other changes. Note: this rule only works with Build IDs that don't have underscores.
           #
           # Current Temporal Cloud label:
-          #   worker_version="{k8s-namespace}_{twd-name}_{build-id}"
+          #   worker_version="{k8s-namespace}_{workerdeployment-name}_{build-id}"
           #
-          # k8s namespaces and TWD names follow DNS naming rules (no underscores), so _
+          # k8s namespaces and WorkerDeployment names follow DNS naming rules (no underscores), so _
           # is an unambiguous separator and label_replace is reliable.
           #
           # Extracted labels (matching future Temporal Cloud output):
-          #   temporal_worker_deployment_name      — "{k8s-namespace}_{twd-name}" (all but last segment)
+          #   temporal_worker_deployment_name      — "{k8s-namespace}_{workerdeployment-name}" (all but last segment)
           #   temporal_worker_build_id  — last segment; ≤63 chars, valid k8s label value
           #   temporal_namespace          — preserved from source metric
           #

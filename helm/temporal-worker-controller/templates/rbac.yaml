@@ -112,6 +112,7 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
+      - connections
       - temporalconnections
       - workerresourcetemplates
     verbs:
@@ -123,14 +124,28 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
+      - connections/finalizers
       - temporalconnections/finalizers
       - temporalworkerdeployments/finalizers
+      - workerdeployments/finalizers
     verbs:
       - update
   - apiGroups:
       - temporal.io
     resources:
+      - temporalconnections/status
+      - temporalworkerdeployments/status
+      - workerdeployments/status
+      - workerresourcetemplates/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - temporal.io
+    resources:
       - temporalworkerdeployments
+      - workerdeployments
     verbs:
       - create
       - delete
@@ -139,15 +154,6 @@ rules:
       - patch
       - update
       - watch
-  - apiGroups:
-      - temporal.io
-    resources:
-      - temporalworkerdeployments/status
-      - workerresourcetemplates/status
-    verbs:
-      - get
-      - patch
-      - update
   # GENERATED RULES END
   # Rules for managing resources attached via WorkerResourceTemplate.
   # Driven entirely by workerResourceTemplate.allowedResources in values.yaml.
@@ -184,6 +190,111 @@ subjects:
     name: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
     namespace: {{ .Release.Namespace }}
 ---
+# permissions for end users to edit connections (new name).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-connection-editor-role
+rules:
+  - apiGroups:
+      - temporal.io
+    resources:
+      - connections
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - connections/status
+    verbs:
+      - get
+---
+# permissions for end users to view connections (new name).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-connection-viewer-role
+rules:
+  - apiGroups:
+      - temporal.io
+    resources:
+      - connections
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - connections/status
+    verbs:
+      - get
+---
+# permissions for end users to edit workerdeployments (new name).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-workerdeployment-editor-role
+rules:
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerdeployments
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerdeployments/status
+    verbs:
+      - get
+---
+# permissions for end users to view workerdeployments (new name).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-workerdeployment-viewer-role
+rules:
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerdeployments
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - workerdeployments/status
+    verbs:
+      - get
+---
+# Deprecated editor/viewer roles (migration window — remove in v1.8.0)
 # permissions for end users to edit temporalconnections.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -194,7 +305,7 @@ metadata:
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalconnection-editor-role
 rules:
   - apiGroups:
-      - temporal.io.temporal.io
+      - temporal.io
     resources:
       - temporalconnections
     verbs:
@@ -206,7 +317,7 @@ rules:
       - update
       - watch
   - apiGroups:
-      - temporal.io.temporal.io
+      - temporal.io
     resources:
       - temporalconnections/status
     verbs:
@@ -222,7 +333,7 @@ metadata:
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalconnection-viewer-role
 rules:
   - apiGroups:
-      - temporal.io.temporal.io
+      - temporal.io
     resources:
       - temporalconnections
     verbs:
@@ -230,7 +341,7 @@ rules:
       - list
       - watch
   - apiGroups:
-      - temporal.io.temporal.io
+      - temporal.io
     resources:
       - temporalconnections/status
     verbs:

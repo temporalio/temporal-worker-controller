@@ -5,7 +5,7 @@ package defaults
 
 import "time"
 
-// Default values for TemporalWorkerDeploymentSpec fields
+// Default values for WorkerDeploymentSpec fields
 const (
 	ScaledownDelay                   = 1 * time.Hour
 	DeleteDelay                      = 24 * time.Hour

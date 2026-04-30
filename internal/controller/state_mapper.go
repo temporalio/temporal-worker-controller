@@ -28,8 +28,8 @@ func newStateMapper(k8sState *k8s.DeploymentState, temporalState *temporal.Tempo
 }
 
 // mapToStatus converts the states to a CRD status
-func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.TemporalWorkerDeploymentStatus {
-	status := &v1alpha1.TemporalWorkerDeploymentStatus{
+func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.WorkerDeploymentStatus {
+	status := &v1alpha1.WorkerDeploymentStatus{
 		VersionConflictToken: m.temporalState.VersionConflictToken,
 	}
 

@@ -300,7 +300,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 			UID:       types.UID("wrt-uid-456"),
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{
 				Name: "my-worker",
 			},
 			Template: runtime.RawExtension{Raw: rawBytes},
