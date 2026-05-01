@@ -125,6 +125,6 @@ message: "This TemporalWorkerDeployment is marked for deletion. Create a WorkerD
 
 ## Downgrading from v1.7 to v1.6
 
-There are some important things to consider if you want to roll back
+There are some critical things to consider if you want to roll back
 (downgrade) the installed version of Temporal Worker Controller after upgrading to v1.7.0.
-Please see the [Downgrade Guide](migration-crd-rename-downgrade.md) for more details.
+Please see the [Downgrade Guide](migration-crd-rename-downgrade.md) for details.
