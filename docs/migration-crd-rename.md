@@ -119,3 +119,91 @@ If you delete a deprecated resource before creating its replacement, the resourc
 Ready=False reason=DeletingPendingMigration
 message: "This TemporalWorkerDeployment is marked for deletion. Create a WorkerDeployment with the same name and spec to complete migration; deletion will proceed automatically once migration is confirmed."
 ```
+
+## Downgrading from v1.7 to v1.6
+
+There are some important things to consider if you want to roll back
+(downgrade) an installed version of Temporal Worker Controller.
+
+> **Warning**: You **should not perform a rollback/downgrade of the Temporal
+> Worker Controller CRDs Helm Chart**. Doing so is a potentially
+> **destructive** operation that can cause your Temporal Worker Deployments to
+> be deleted.
+
+To downgrade the Temporal Worker Controller itself, do:
+
+```bash
+helm rollback <RELEASE_NAME> <REVISION_NUMBER>
+```
+
+Where `<RELEASE_NAME>` is the Helm Release associated with the Temporal Worker
+Controller Helm Chart (**not** the CRDs Chart) and `<REVISION_NUMBER>` is the
+Helm release revision number to roll back to. You can get this information by
+doing:
+
+```bash
+helm history -n <TWC_NAMESPACE> <TWC_RELEASE_NAME>
+```
+
+Where `<TWC_NAMESPACE>` is the Kubernetes Namespace you installed Temporal
+Worker Controller in and `<TWC_RELEASE>` is the name of the Helm Release
+associated with the Temporal Worker Controller Helm Chart.
+
+Once you have downgraded the Temporal Worker Controller, you will need to take
+some corrective actions depending on how far down the migration path you went
+when upgrading to the v1.7 Temporal Worker Controller release.
+
+If you upgraded the Temporal Worker Controller to v1.7 -- i.e. you successfully
+completed Step 2 above -- but **did not** complete Step 3 (migrating your
+resources), execute the following `kubectl` command to remove the CRD rename
+validation guard on the old `TemporalWorkerDeployment` Custom Resource
+Definition:
+
+```bash
+kubectl patch crd temporalworkerdeployments.temporal.io --type='json' -p='[{"op": "remove", "path": "/spec/versions/0/schema/openAPIV3Schema/properties/spec/x-kubernetes-validations"}]'
+```
+
+If you upgraded the Temporal Worker Controller to v1.7 and completed Step 3
+above (i.e. you successfully migrated your resources), you will need to
+manually restore the OwnerReferences for your Kubernetes Deployments to point
+at the original `TemporalWorkerDeployment` resources.
+
+To do so, first, get a list of all the original `TemporalWorkerDeployment`
+object names and UIDs:
+
+```bash
+kubectl get -n <NAMESPACE> temporalworkerdeployments.temporal.io -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.uid}{"\n"}{end}'
+```
+
+Then get a list of all the Kubernetes Deployments that are now owned by the new
+`WorkerDeployment` resources:
+
+```bash
+kubectl get -n <NAMESPACE> deployments -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}{end}'
+```
+
+Then, for each of the Kubernetes Deployments listed above, execute the
+following `kubectl` command to reset the OwnerReferences of Kubernetes
+Deployments back to the original `TemporalWorkerDeployment` custom resources:
+
+```bash
+kubectl patch -n <NAMESPACE> deployment <DEPLOYMENT_NAME> --type='merge' -p '
+{
+  "metadata": {
+    "ownerReferences": [
+      {
+        "apiVersion": "v1alpha1",
+        "kind": "TemporalWorkerDeployment",
+        "name": "<TWD_NAME>",
+        "uid": "<TWD_UID>",
+        "controller": true,
+        "blockOwnerDeletion": true
+      }
+    ]
+  }
+}'
+```
+
+Replace `<TWD_NAME>` and `<TWD_UID>` with the correct
+`TemporalWorkerDeployment` custom resource's name and UID you printed out
+earlier.
