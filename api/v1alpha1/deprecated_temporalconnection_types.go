@@ -51,7 +51,7 @@ type TemporalConnectionStatus struct {
 //+kubebuilder:resource:shortName=tconn
 //+kubebuilder:printcolumn:name="Host",type="string",JSONPath=".spec.hostPort",description="Temporal server endpoint"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
-// +kubebuilder:validation:XValidation:rule="oldSelf != null",message="TemporalConnection is deprecated and cannot be created. Use Connection instead."
+// +kubebuilder:validation:XValidation:rule="oldSelf.hasValue()",message="TemporalConnection is deprecated and cannot be created. Use Connection instead.",optionalOldSelf=true
 // +kubebuilder:deprecatedversion:warning="TemporalConnection is deprecated. Use Connection instead."
 
 // TemporalConnection is the Schema for the temporalconnections API
