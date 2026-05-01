@@ -19,6 +19,11 @@ After this release, the Worker Controller will be Generally Available (GA), whic
 
 > **Dev / non-production environments:** If you don't need to preserve any worker state, the simplest path is to delete all your `TemporalWorkerDeployment` and `TemporalConnection` resources while the v1.6 controller is still running. At that point no migration-guard finalizer has been added yet, so deletion completes after the v1.6 finalizer completes. Note that all related Worker Deployment state in the Temporal server will also be deleted. Then upgrade the controller and create fresh `WorkerDeployment` and `Connection` resources.
 
+> **Dev / non-production environments:** If you don’t need to preserve worker state, you can delete your `TemporalWorkerDeployment` and `TemporalConnection` resources while the v1.6 controller is still running. This will cause the controller to remove the associated Worker Deployment state in Temporal, leaving Task Queues unversioned. Once cleanup completes, upgrade the controller and recreate them as `WorkerDeployment` and `Connection` resources.
+>
+> In most cases, following the migration steps below is simpler.
+
+
 ### Step 1: Upgrade the CRDs chart
 
 ```bash
@@ -129,6 +134,10 @@ There are some important things to consider if you want to roll back
 > Worker Controller CRDs Helm Chart**. Doing so is a potentially
 > **destructive** operation that can cause your Temporal Worker Deployments to
 > be deleted.
+> 
+> See [here][crd-pruning] for more details.
+
+[crd-pruning]: https://github.com/temporalio/temporal-worker-controller/blob/main/docs/crd-management.md#crd-rollback-and-field-pruning
 
 To downgrade the Temporal Worker Controller itself, do:
 
@@ -156,11 +165,12 @@ when upgrading to the v1.7 Temporal Worker Controller release.
 If you upgraded the Temporal Worker Controller to v1.7 -- i.e. you successfully
 completed Step 2 above -- but **did not** complete Step 3 (migrating your
 resources), execute the following `kubectl` command to remove the CRD rename
-validation guard on the old `TemporalWorkerDeployment` Custom Resource
-Definition:
+validation guard on the old `TemporalWorkerDeployment` and `TemporalConnection`
+Custom Resource Definitions:
 
 ```bash
 kubectl patch crd temporalworkerdeployments.temporal.io --type='json' -p='[{"op": "remove", "path": "/spec/versions/0/schema/openAPIV3Schema/properties/spec/x-kubernetes-validations"}]'
+kubectl patch crd temporalconnections.temporal.io --type='json' -p='[{"op": "remove", "path": "/spec/versions/0/schema/openAPIV3Schema/properties/spec/x-kubernetes-validations"}]'
 ```
 
 If you upgraded the Temporal Worker Controller to v1.7 and completed Step 3
@@ -173,6 +183,14 @@ object names and UIDs:
 
 ```bash
 kubectl get -n <NAMESPACE> temporalworkerdeployments.temporal.io -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.uid}{"\n"}{end}'
+```
+
+For each of the `TemporalWorkerDeployments` listed above, you will need to
+manually remove the finalizer that was added to your `TemporalWorkerDeployment`
+resource by the 1.7 controller:
+
+```bash
+kubectl patch -n <NAMESPACE> temporalworkerdeployments/<TWD_NAME> --type json -p='[{"op": "remove", "path": "/metadata/finalizers/0"}]'
 ```
 
 Then get a list of all the Kubernetes Deployments that are now owned by the new
@@ -192,7 +210,7 @@ kubectl patch -n <NAMESPACE> deployment <DEPLOYMENT_NAME> --type='merge' -p '
   "metadata": {
     "ownerReferences": [
       {
-        "apiVersion": "v1alpha1",
+        "apiVersion": "temporal.io/v1alpha1",
         "kind": "TemporalWorkerDeployment",
         "name": "<TWD_NAME>",
         "uid": "<TWD_UID>",
@@ -205,5 +223,38 @@ kubectl patch -n <NAMESPACE> deployment <DEPLOYMENT_NAME> --type='merge' -p '
 ```
 
 Replace `<TWD_NAME>` and `<TWD_UID>` with the correct
+`TemporalWorkerDeployment` custom resource's name and UID you printed out
+earlier.
+
+If you completed Step 4 above and modified `WorkerResourceTemplate` resources,
+you will also need to reset the `OwnerReferences` for those resources as well.
+
+```bash
+kubectl get -n <NAMESPACE> workerresourcetemplates -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}{end}'
+```
+
+Then, for each of the `WorkerResourceTemplate` resources listed above, execute
+the following `kubectl` command to reset the OwnerReferences of Kubernetes
+Deployments back to the original `TemporalWorkerDeployment` custom resources:
+
+```bash
+kubectl patch -n <NAMESPACE> deployment <DEPLOYMENT_NAME> --type='merge' -p '
+{
+  "metadata": {
+    "ownerReferences": [
+      {
+        "apiVersion": "temporal.io/v1alpha1",
+        "kind": "TemporalWorkerDeployment",
+        "name": "<TWD_NAME>",
+        "uid": "<TWD_UID>",
+        "controller": true,
+        "blockOwnerDeletion": true
+      }
+    ]
+  }
+}'
+```
+
+Again, replace `<TWD_NAME>` and `<TWD_UID>` with the correct
 `TemporalWorkerDeployment` custom resource's name and UID you printed out
 earlier.
