@@ -33,14 +33,11 @@ rules:
         namespaced: false  # cluster-scoped: HPAs in any k8s namespace can consume this metric
 
     # Phase 2: approximate backlog count per worker version (from Temporal Cloud).
-    # Uses the temporal_backlog_count_by_version recording rule.
-    # cluster-scoped so HPAs in any namespace can consume it; temporal_worker_deployment_name
-    # + temporal_worker_build_id + temporal_namespace matchLabels in the HPA are sufficient to
-    # select the right series.
-    - seriesQuery: 'temporal_backlog_count_by_version{}'
+    # Temporal Cloud emits temporal_worker_deployment_name and temporal_worker_build_id as
+    # separate labels, so the raw metric can be used directly — no recording rule needed.
+    # cluster-scoped so HPAs in any namespace can consume it.
+    - seriesQuery: 'temporal_cloud_v1_approximate_backlog_count{}'
       metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'
-      name:
-        as: "temporal_backlog_count_by_version"
       resources:
         namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric
 

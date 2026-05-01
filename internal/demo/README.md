@@ -262,14 +262,6 @@ Stop the load generator (`Ctrl-C`) and watch the HPA scale back down as in-fligh
 
 `approximate_backlog_count` measures tasks queued in Temporal but not yet started on a worker. Adding it as a second HPA metric means the HPA scales up on *arriving* work even before slots are full — important for bursty traffic.
 
-> **Note:** Temporal Cloud emits `temporal_approximate_backlog_count` with a combined
-> `worker_version="<worker-deployment-name>_<build-id>"` label that easily exceeds Kubernetes max label
-> length of 63 characters. The recording rule in `prometheus-stack-values.yaml` uses `label_replace` 
-> to extract `temporal_worker_deployment_name` and `temporal_worker_build_id` as separate k8s-compatible 
-> labels, producing `temporal_backlog_count_by_version`. The HPA then selects on those labels — the same 
-> pair used by Phase 1. Temporal Cloud is in the process of rolling out the new separate labels, so this
-> workaround is required until then.
-
 **Step 1 — Create the Temporal Cloud credentials secret.**
 
 Create a Temporal Cloud metrics API key (separate from the namespace API key) at Cloud UI → Settings → Observability → Generate API Key. Save it to `certs/metrics-api-key.txt`, then create the secret in the `monitoring` namespace:
@@ -294,11 +286,11 @@ helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
 
 ```bash
 kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9092:9090 &
-curl -s 'http://localhost:9092/api/v1/query?query=temporal_backlog_count_by_version' \
+curl -s 'http://localhost:9092/api/v1/query?query=temporal_cloud_v1_approximate_backlog_count' \
   | jq '.data.result'
 ```
 
-You should see a result with `twd_name` and `build_id` labels. If the result is empty, wait 15–30s for the recording rule to evaluate.
+You should see results with `temporal_worker_deployment_name` and `temporal_worker_build_id` labels. If the result is empty, wait 10–15s for the first scrape to complete.
 
 **Step 4 — Apply the combined WRT.**
 ```bash

@@ -180,7 +180,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 					"type": "External",
 					"external": map[string]interface{}{
 						"metric": map[string]interface{}{
-							"name": "temporal_backlog_count_by_version",
+							"name": "temporal_cloud_v1_approximate_backlog_count",
 							"selector": map[string]interface{}{
 								"matchLabels": map[string]interface{}{}, // opt-in for metric selector
 							},
@@ -223,7 +223,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 					"type": "External",
 					"external": map[string]interface{}{
 						"metric": map[string]interface{}{
-							"name": "temporal_backlog_count_by_version",
+							"name": "temporal_cloud_v1_approximate_backlog_count",
 							"selector": map[string]interface{}{
 								"matchLabels": matchLabels,
 							},
@@ -259,7 +259,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 					"type": "External",
 					"external": map[string]interface{}{
 						"metric": map[string]interface{}{
-							"name":     "temporal_backlog_count_by_version",
+							"name":     "temporal_cloud_v1_approximate_backlog_count",
 							"selector": map[string]interface{}{},
 						},
 					},
