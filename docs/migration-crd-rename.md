@@ -17,8 +17,6 @@ After this release, the Worker Controller will be Generally Available (GA), whic
 
 ## Migration steps
 
-> **Dev / non-production environments:** If you don't need to preserve any worker state, the simplest path is to delete all your `TemporalWorkerDeployment` and `TemporalConnection` resources while the v1.6 controller is still running. At that point no migration-guard finalizer has been added yet, so deletion completes after the v1.6 finalizer completes. Note that all related Worker Deployment state in the Temporal server will also be deleted. Then upgrade the controller and create fresh `WorkerDeployment` and `Connection` resources.
-
 > **Dev / non-production environments:** If you don’t need to preserve worker state, you can delete your `TemporalWorkerDeployment` and `TemporalConnection` resources while the v1.6 controller is still running. This will cause the controller to remove the associated Worker Deployment state in Temporal, leaving Task Queues unversioned. Once cleanup completes, upgrade the controller and recreate them as `WorkerDeployment` and `Connection` resources.
 >
 > In most cases, following the migration steps below is simpler.
@@ -128,7 +126,7 @@ message: "This TemporalWorkerDeployment is marked for deletion. Create a WorkerD
 ## Downgrading from v1.7 to v1.6
 
 There are some important things to consider if you want to roll back
-(downgrade) an installed version of Temporal Worker Controller.
+(downgrade) the installed version of Temporal Worker Controller after upgrading to v1.7.0.
 
 > **Warning**: You **should not perform a rollback/downgrade of the Temporal
 > Worker Controller CRDs Helm Chart**. Doing so is a potentially
@@ -162,6 +160,7 @@ Once you have downgraded the Temporal Worker Controller, you will need to take
 some corrective actions depending on how far down the migration path you went
 when upgrading to the v1.7 Temporal Worker Controller release.
 
+---
 If you upgraded the Temporal Worker Controller to v1.7 -- i.e. you successfully
 completed Step 2 above -- but **did not** complete Step 3 (migrating your
 resources), execute the following `kubectl` command to remove the CRD rename
@@ -172,6 +171,35 @@ Custom Resource Definitions:
 kubectl patch crd temporalworkerdeployments.temporal.io --type='json' -p='[{"op": "remove", "path": "/spec/versions/0/schema/openAPIV3Schema/properties/spec/x-kubernetes-validations"}]'
 kubectl patch crd temporalconnections.temporal.io --type='json' -p='[{"op": "remove", "path": "/spec/versions/0/schema/openAPIV3Schema/properties/spec/x-kubernetes-validations"}]'
 ```
+You will also need to manually remove the `migration-guard` finalizer that was added 
+to your `TemporalWorkerDeployment` and `TemporalConnection` resources by the 1.7 controller:
+
+
+Get a list of all the original `TemporalWorkerDeployment` object names and UIDs:
+
+```bash
+kubectl get -n <NAMESPACE> temporalworkerdeployments.temporal.io -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.uid}{"\n"}{end}'
+```
+
+For each of the `TemporalWorkerDeployments` listed above:
+
+```bash
+kubectl patch -n <NAMESPACE> temporalworkerdeployments/<TWD_NAME> --type=merge -p='{"metadata":{"finalizers":["temporal.io/delete-protection"]}}'
+```
+
+Get a list of all the original `TemporalConnection` object names and UIDs:
+
+```bash
+kubectl get -n <NAMESPACE> temporalworkerdeployments.temporal.io -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.uid}{"\n"}{end}'
+```
+
+For each of the `TemporalConnections` listed above:
+
+```bash
+kubectl patch -n <NAMESPACE>  temporalconnections/<TC_NAME> --type=merge -p='{"metadata":{"finalizers":[]}}'
+```
+
+---
 
 If you upgraded the Temporal Worker Controller to v1.7 and completed Step 3
 above (i.e. you successfully migrated your resources), you will need to
@@ -185,19 +213,15 @@ object names and UIDs:
 kubectl get -n <NAMESPACE> temporalworkerdeployments.temporal.io -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.uid}{"\n"}{end}'
 ```
 
-For each of the `TemporalWorkerDeployments` listed above, you will need to
-manually remove the finalizer that was added to your `TemporalWorkerDeployment`
-resource by the 1.7 controller:
-
-```bash
-kubectl patch -n <NAMESPACE> temporalworkerdeployments/<TWD_NAME> --type json -p='[{"op": "remove", "path": "/metadata/finalizers/0"}]'
-```
-
-Then get a list of all the Kubernetes Deployments that are now owned by the new
+Then get a list of all the Kubernetes `Deployments` that are now owned by the new
 `WorkerDeployment` resources:
 
 ```bash
-kubectl get -n <NAMESPACE> deployments -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}{end}'
+kubectl get deployments -n <NAMESPACE> -o json | jq -r '
+    .items[] | select(
+      .metadata.ownerReferences // [] | any(.kind == "WorkerDeployment")
+    ) | .metadata.name
+  '
 ```
 
 Then, for each of the Kubernetes Deployments listed above, execute the
@@ -224,13 +248,28 @@ kubectl patch -n <NAMESPACE> deployment <DEPLOYMENT_NAME> --type='merge' -p '
 
 Replace `<TWD_NAME>` and `<TWD_UID>` with the correct
 `TemporalWorkerDeployment` custom resource's name and UID you printed out
-earlier.
+earlier. It's important that the UID string is correct, because if Kubernetes GC
+does not recognize the UID, it will treat those `Deployments` as
+orphaned and delete them.
+
+Confirm that your `Deployments` are now owned by the original `TemporalWorkerDeployment` resources:
+```bash
+kubectl get deployments -n <NAMESPACE> -o json | jq -r '
+    .items[] | select(
+      .metadata.ownerReferences // [] | any(.kind == "TemporalWorkerDeployment")
+    ) | .metadata.name
+  '
+```
 
 If you completed Step 4 above and modified `WorkerResourceTemplate` resources,
 you will also need to reset the `OwnerReferences` for those resources as well.
 
 ```bash
-kubectl get -n <NAMESPACE> workerresourcetemplates -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}{end}'
+kubectl get workerresourcetemplates -n <NAMESPACE> -o json | jq -r '
+    .items[] | select(
+      .metadata.ownerReferences // [] | any(.kind == "WorkerDeployment")
+    ) | .metadata.name
+  '
 ```
 
 Then, for each of the `WorkerResourceTemplate` resources listed above, execute
@@ -238,7 +277,7 @@ the following `kubectl` command to reset the OwnerReferences of Kubernetes
 Deployments back to the original `TemporalWorkerDeployment` custom resources:
 
 ```bash
-kubectl patch -n <NAMESPACE> deployment <DEPLOYMENT_NAME> --type='merge' -p '
+kubectl patch -n <NAMESPACE> wrt <WRT_NAME> --type='merge' -p '
 {
   "metadata": {
     "ownerReferences": [
@@ -257,4 +296,52 @@ kubectl patch -n <NAMESPACE> deployment <DEPLOYMENT_NAME> --type='merge' -p '
 
 Again, replace `<TWD_NAME>` and `<TWD_UID>` with the correct
 `TemporalWorkerDeployment` custom resource's name and UID you printed out
-earlier.
+earlier. It's important that the UID string is correct, because if Kubernetes GC 
+does not recognize the UID, it will treat those `WorkerResourceTemplates` as 
+orphaned and delete them.
+
+Confirm that your `WorkerResourceTemplates` are now owned by the original `TemporalWorkerDeployment` resources:
+```bash
+kubectl get workerresourcetemplates -n <NAMESPACE> -o json | jq -r '
+    .items[] | select(
+      .metadata.ownerReferences // [] | any(.kind == "TemporalWorkerDeployment")
+    ) | .metadata.name
+  '
+```
+
+Now you can safely delete the `WorkerDeployment` and `Connection` resources without 
+deleting any `Deployments` or `WorkerResourceTemplates`. Before deleting the `WorkerDeployment` 
+resource, you will need to remove the `deletion-protection` finalizer that the v1.7 controller
+added to it:
+
+```bash
+kubectl patch -n <NAMESPACE> workerdeployments/<WD_NAME> --type=merge -p='{"metadata":{"finalizers":[]}}'
+```
+
+You'll notice that because you did not roll back the CRD chart, there is still a 
+deprecation warning on the `TemporalWorkerDeployment` and `TemporalConnection` resource. 
+This can be safely ignored. If you have already safely migrated ownership away from all
+`WorkerDeployment` resources, you could also roll back the CRD chart to v0.25.0. Rolling
+the CRDs back earlier is very risky, because any `Deployments` and `WorkerResourceTemplates`
+owned by the `WorkerDeployment` resources will be deleted when the `WorkerDeployment` resources
+are deleted, and rolling back the CRDs will delete all `WorkerDeployment` and `Connection` instances.
+
+To recap, here is how to confirm that no `WorkerDeployment` owns any `Deployments` or `WorkerResourceTemplates` in any namespace:
+```bash
+kubectl get deployments -A -o json | jq -r '
+    .items[] | select(
+      .metadata.ownerReferences // [] | any(.kind == "WorkerDeployment")
+    ) | .metadata.name
+  '
+kubectl get workerresourcetemplates -A -o json | jq -r '
+    .items[] | select(
+      .metadata.ownerReferences // [] | any(.kind == "WorkerDeployment")
+    ) | .metadata.name
+  '
+```
+
+and here is how to confirm you no longer have any `WorkerDeployment` or `Connection` in any namespace:
+```bash
+kubectl get workerdeployments -A
+kubectl get connections -A
+```
