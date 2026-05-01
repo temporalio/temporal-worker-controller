@@ -158,7 +158,7 @@ type TemporalWorkerDeploymentStatus struct {
 //+kubebuilder:printcolumn:name="Ramp %",type="number",JSONPath=".status.targetVersion.rampPercentage",description="Ramp percentage"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age"
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="name cannot be more than 63 characters"
-// +kubebuilder:validation:XValidation:rule="oldSelf != null",message="TemporalWorkerDeployment is deprecated and cannot be created. Use WorkerDeployment instead."
+// +kubebuilder:validation:XValidation:rule="oldSelf.hasValue()",message="TemporalWorkerDeployment is deprecated and cannot be created. Use WorkerDeployment instead.",optionalOldSelf=true
 // +kubebuilder:deprecatedversion:warning="TemporalWorkerDeployment is deprecated. Use WorkerDeployment instead."
 
 // TemporalWorkerDeployment is the Schema for the temporalworkerdeployments API

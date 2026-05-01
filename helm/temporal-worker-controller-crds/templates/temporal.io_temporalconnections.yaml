@@ -115,7 +115,8 @@ spec:
         x-kubernetes-validations:
         - message: TemporalConnection is deprecated and cannot be created. Use Connection
             instead.
-          rule: oldSelf != null
+          optionalOldSelf: true
+          rule: oldSelf.hasValue()
     served: true
     storage: true
     subresources:
