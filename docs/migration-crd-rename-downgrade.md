@@ -1,4 +1,4 @@
-# CRD Rename Migration Guide
+# Downgrade from CRD Rename Guide
 
 Starting with Chart Version v0.26.0 (App Version v1.7.0), the Temporal Worker Controller renames its two primary CRDs and one field reference:
 
