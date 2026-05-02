@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/github/license/temporalio/temporal-worker-controller)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/temporalio/temporal-worker-controller)](https://goreportcard.com/report/github.com/temporalio/temporal-worker-controller)
 
-> 🚀 **Public Preview**: This project is in [Public Preview](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases*. Core functionality is complete with stable APIs.
+> 🚀 **Generally Available**: This project is [Generally Available](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases. Core functionality is complete with stable APIs.
 
 **The Temporal Worker Controller makes it simple and safe to deploy Temporal workers on Kubernetes.**
 
