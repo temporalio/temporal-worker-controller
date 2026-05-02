@@ -1,0 +1,94 @@
+apiVersion: temporal.io/v1alpha1
+kind: TemporalWorkerDeployment
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"temporal.io/v1alpha1","kind":"TemporalWorkerDeployment","metadata":{"annotations":{"meta.helm.sh/release-name":"helloworld","meta.helm.sh/release-namespace":"default"},"creationTimestamp":"2026-05-01T20:11:53Z","deletionGracePeriodSeconds":0,"deletionTimestamp":"2026-05-01T21:03:51Z","finalizers":["temporal.io/delete-protection"],"generation":5,"labels":{"app.kubernetes.io/instance":"helloworld","app.kubernetes.io/managed-by":"Helm","app.kubernetes.io/name":"helloworld","app.kubernetes.io/version":"8daa4975906fb1bceda776b6157c7a6bf57a7c9fd57e5758d966108fd6efac2","helm.sh/chart":"helloworld-0.1.0"},"name":"helloworld","namespace":"default","resourceVersion":"2232044","uid":"5ebc98cb-c46c-4f63-abe4-fa6e44d208f0"},"spec":{"minReadySeconds":0,"progressDeadlineSeconds":600,"rollout":{"gate":{"workflowType":"RolloutGate"},"steps":[{"pauseDuration":"2m0s","rampPercentage":25},{"pauseDuration":"2m0s","rampPercentage":50},{"pauseDuration":"2m0s","rampPercentage":75}],"strategy":"Progressive"},"sunset":{"deleteDelay":"5m0s","scaledownDelay":"30s"},"template":{"metadata":{},"spec":{"containers":[{"env":[{"name":"TEMPORAL_TASK_QUEUE","value":"default/helloworld"}],"image":"helloworld:8daa4975906fb1bceda776b6157c7a6bf57a7c9fd57e5758d966108fd6efac23","name":"main","readinessProbe":{"httpGet":{"port":8080}}}]}},"workerOptions":{"connectionRef":{"name":"helloworld"},"temporalNamespace":"worker-controller-demo.a2dd6"}},"status":{"conditions":[{"lastTransitionTime":"2026-05-01T20:11:53Z","message":"Connection is healthy and auth secret is resolved","observedGeneration":3,"reason":"ConnectionHealthy","status":"True","type":"ConnectionHealthy"},{"lastTransitionTime":"2026-05-01T20:19:39Z","message":"Rollout complete for buildID ccf7769ae388e28af5abd7a7c5165f0e71f34a9c67c7248ce535a776ff-9b4b","observedGeneration":3,"reason":"RolloutComplete","status":"True","type":"Ready"},{"lastTransitionTime":"2026-05-01T20:19:39Z","message":"Target version ccf7769ae388e28af5abd7a7c5165f0e71f34a9c67c7248ce535a776ff-9b4b is current","observedGeneration":3,"reason":"RolloutComplete","status":"False","type":"Progressing"},{"lastTransitionTime":"2026-05-01T20:12:27Z","message":"Rollout complete for buildID ccf7769ae388e28af5abd7a7c5165f0e71f34a9c67c7248ce535a776ff-9b4b","observedGeneration":3,"reason":"RolloutComplete","status":"True","type":"RolloutComplete"}],"currentVersion":{"buildID":"ccf7769ae388e28af5abd7a7c5165f0e71f34a9c67c7248ce535a776ff-9b4b","deployment":{"apiVersion":"apps/v1","kind":"Deployment","name":"helloworld-ccf7769ae3-9aaed543ff","namespace":"default","uid":"fbcd759c-20a7-4d78-9ac5-713da94f0338"},"healthySince":"2026-05-01T20:13:04Z","status":"Current"},"deprecatedVersions":[{"buildID":"a9242bd258220f1f7725b79f76b24917db4241d4267986528e8b7253f0-b656","deployment":{"apiVersion":"apps/v1","kind":"Deployment","name":"helloworld-a9242bd258-f33b508d7d","namespace":"default","uid":"fc562337-fef9-4080-800a-ca65f7fcb827"},"healthySince":"2026-05-01T20:12:05Z","status":"Draining"}],"lastModifierIdentity":"temporal-worker-controller/temporal-system/73732167-7e13-485c-a69e-f9a23de1aaa2","managerIdentity":"temporal-worker-controller/temporal-system/73732167-7e13-485c-a69e-f9a23de1aaa2","targetVersion":{"buildID":"ccf7769ae388e28af5abd7a7c5165f0e71f34a9c67c7248ce535a776ff-9b4b","deployment":{"apiVersion":"apps/v1","kind":"Deployment","name":"helloworld-ccf7769ae3-9aaed543ff","namespace":"default","uid":"fbcd759c-20a7-4d78-9ac5-713da94f0338"},"healthySince":"2026-05-01T20:13:04Z","status":"Current"},"versionConflictToken":"AQAAAA7hhwHaNIaQrv//","versionCount":31}}
+    meta.helm.sh/release-name: helloworld
+    meta.helm.sh/release-namespace: default
+  creationTimestamp: "2026-05-01T22:20:47Z"
+  finalizers:
+  generation: 2
+  labels:
+    app.kubernetes.io/instance: helloworld
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: helloworld
+    app.kubernetes.io/version: 8daa4975906fb1bceda776b6157c7a6bf57a7c9fd57e5758d966108fd6efac2
+    helm.sh/chart: helloworld-0.1.0
+    temporal.io/migrated-to-wd: "true"
+  name: helloworld
+  namespace: default
+  resourceVersion: "2240647"
+  uid: 32fe9bb5-5f91-4d74-ba82-89d5bd8006f0
+spec:
+  minReadySeconds: 0
+  progressDeadlineSeconds: 600
+  rollout:
+    gate:
+      workflowType: RolloutGate
+    steps:
+    - pauseDuration: 2m0s
+      rampPercentage: 25
+    - pauseDuration: 2m0s
+      rampPercentage: 50
+    - pauseDuration: 2m0s
+      rampPercentage: 75
+    strategy: Progressive
+  sunset:
+    deleteDelay: 5m0s
+    scaledownDelay: 30s
+  template:
+    metadata: {}
+    spec:
+      containers:
+      - env:
+        - name: TEMPORAL_TASK_QUEUE
+          value: default/helloworld
+        image: helloworld:8daa4975906fb1bceda776b6157c7a6bf57a7c9fd57e5758d966108fd6efac23
+        name: main
+        readinessProbe:
+          httpGet:
+            port: 8080
+        resources: {}
+  workerOptions:
+    connectionRef:
+      name: helloworld
+    temporalNamespace: worker-controller-demo.a2dd6
+status:
+  conditions:
+  - lastTransitionTime: "2026-05-01T22:20:47Z"
+    message: TemporalConnection is healthy and auth secret is resolved
+    observedGeneration: 1
+    reason: TemporalConnectionHealthy
+    status: "True"
+    type: TemporalConnectionHealthy
+  - lastTransitionTime: "2026-05-01T23:44:24Z"
+    message: 'Plan execution failed: deployments.apps "helloworld-8daa497590-861e8087a4"
+      already exists'
+    observedGeneration: 2
+    reason: PlanExecutionFailed
+    status: "False"
+    type: Ready
+  - lastTransitionTime: "2026-05-01T22:21:01Z"
+    message: 'Plan execution failed: deployments.apps "helloworld-8daa497590-861e8087a4"
+      already exists'
+    observedGeneration: 2
+    reason: PlanExecutionFailed
+    status: "False"
+    type: Progressing
+  - lastTransitionTime: "2026-05-01T22:21:01Z"
+    message: Rollout complete for buildID 8daa4975906fb1bceda776b6157c7a6bf57a7c9fd57e5758d966108fd6-6dc7
+    observedGeneration: 1
+    reason: RolloutComplete
+    status: "True"
+    type: RolloutComplete
+  currentVersion:
+    buildID: 8daa4975906fb1bceda776b6157c7a6bf57a7c9fd57e5758d966108fd6-6dc7
+    status: Current
+  lastModifierIdentity: temporal-worker-controller/temporal-system
+  managerIdentity: temporal-worker-controller/temporal-system
+  targetVersion:
+    buildID: 8daa4975906fb1bceda776b6157c7a6bf57a7c9fd57e5758d966108fd6-6dc7
+    status: Current
+  versionConflictToken: AQAAAA7hhx5NKfwFdv//
+  versionCount: 33
