@@ -4216,7 +4216,8 @@ spec:
           rule: size(self.metadata.name) <= 63
         - message: TemporalWorkerDeployment is deprecated and cannot be created. Use
             WorkerDeployment instead.
-          rule: oldSelf != null
+          optionalOldSelf: true
+          rule: oldSelf.hasValue()
     served: true
     storage: true
     subresources:
