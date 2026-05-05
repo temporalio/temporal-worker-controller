@@ -3,7 +3,7 @@
 # Install:
 #   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 #   helm repo update
-#   helm install prometheus prometheus-community/kube-prometheus-stack \
+#   helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
 #     -n monitoring --create-namespace \
 #     -f internal/demo/k8s/prometheus-stack-values.yaml
 #
@@ -11,7 +11,7 @@
 #   1. ServiceMonitor — scrapes worker pod metrics (slot gauges) from port 9090
 #   2. Temporal Cloud scrape config — scrapes temporal_cloud_v1_approximate_backlog_count
 #      (Phase 2 only; requires a Temporal Cloud metrics API key)
-#   3. Recording rules — slot utilization ratio (Phase 1 only)
+#   3. Recording rules — slot utilization ratio (Phase 1) and backlog count by version (Phase 2)
 #   4. prometheus-adapter — see internal/demo/k8s/prometheus-adapter-values.yaml
 
 # ─── 1. ServiceMonitor ──────────────────────────────────────────────────────
@@ -50,8 +50,6 @@ prometheus:
           labels:
             - temporal_worker_deployment_name
             - temporal_worker_build_id
-            - temporal_namespace
-            - task_type
 
 # ─── 3. Recording Rules ─────────────────────────────────────────────────────
 
@@ -83,4 +81,18 @@ additionalPrometheusRulesMap:
                 1
               )
 
+      - name: temporal_cloud_backlog
+        interval: 10s
+        rules:
+          # Backlog count per worker version. Temporal Cloud emits
+          # temporal_worker_deployment_name and temporal_worker_build_id as separate
+          # labels (opted in via params.labels in the scrape config), so no label
+          # manipulation is needed — only cardinality reduction via sum by.
+          # The prometheus-adapter serves this as a cluster-scoped external metric
+          # (namespaced: false), so HPAs in any namespace can consume it.
+          - record: temporal_approximate_backlog_count
+            expr: |
+              sum by (temporal_worker_deployment_name, temporal_worker_build_id, task_type, temporal_namespace, temporal_task_queue) (
+                temporal_cloud_v1_approximate_backlog_count
+              )
 

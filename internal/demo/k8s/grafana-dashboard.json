@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "temporal_cloud_v1_approximate_backlog_count{task_type=\"Workflow\", temporal_worker_deployment_name=\"default_helloworld\"}",
+          "expr": "temporal_approximate_backlog_count{task_type=\"Workflow\", temporal_worker_deployment_name=\"default_helloworld\"}",
           "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
           "refId": "A"
         }
@@ -152,7 +152,7 @@
       },
       "targets": [
         {
-          "expr": "temporal_cloud_v1_approximate_backlog_count{task_type=\"Activity\", temporal_worker_deployment_name=\"default_helloworld\"}",
+          "expr": "temporal_approximate_backlog_count{task_type=\"Activity\", temporal_worker_deployment_name=\"default_helloworld\"}",
           "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
           "refId": "A"
         }

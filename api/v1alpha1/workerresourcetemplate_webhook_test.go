@@ -253,7 +253,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 							"type": "External",
 							"external": map[string]interface{}{
 								"metric": map[string]interface{}{
-									"name": "temporal_cloud_v1_approximate_backlog_count",
+									"name": "temporal_approximate_backlog_count",
 									"selector": map[string]interface{}{
 										"matchLabels": map[string]interface{}{
 											"task_type": "Activity",
@@ -282,7 +282,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 							"type": "External",
 							"external": map[string]interface{}{
 								"metric": map[string]interface{}{
-									"name": "temporal_cloud_v1_approximate_backlog_count",
+									"name": "temporal_approximate_backlog_count",
 									"selector": map[string]interface{}{
 										"matchLabels": map[string]interface{}{
 											"temporal_worker_deployment_name": "default_my-worker",
@@ -309,7 +309,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 							"type": "External",
 							"external": map[string]interface{}{
 								"metric": map[string]interface{}{
-									"name": "temporal_cloud_v1_approximate_backlog_count",
+									"name": "temporal_approximate_backlog_count",
 									"selector": map[string]interface{}{
 										"matchLabels": map[string]interface{}{
 											"temporal_worker_build_id": "abc123",
@@ -336,7 +336,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 							"type": "External",
 							"external": map[string]interface{}{
 								"metric": map[string]interface{}{
-									"name": "temporal_cloud_v1_approximate_backlog_count",
+									"name": "temporal_approximate_backlog_count",
 									"selector": map[string]interface{}{
 										"matchLabels": map[string]interface{}{
 											"temporal_namespace": "my-ns",
@@ -363,7 +363,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 							"type": "External",
 							"external": map[string]interface{}{
 								"metric": map[string]interface{}{
-									"name": "temporal_cloud_v1_approximate_backlog_count",
+									"name": "temporal_approximate_backlog_count",
 									"selector": map[string]interface{}{
 										"matchLabels": map[string]interface{}{},
 									},
@@ -390,7 +390,7 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 							"type": "External",
 							"external": map[string]interface{}{
 								"metric": map[string]interface{}{
-									"name":     "temporal_cloud_v1_approximate_backlog_count",
+									"name":     "temporal_approximate_backlog_count",
 									"selector": map[string]interface{}{},
 								},
 								"target": map[string]interface{}{

@@ -130,7 +130,7 @@ spec:
         - type: External
           external:
             metric:
-              name: temporal_cloud_v1_approximate_backlog_count
+              name: temporal_approximate_backlog_count
               selector:
                 matchLabels:
                   task_type: "Activity"

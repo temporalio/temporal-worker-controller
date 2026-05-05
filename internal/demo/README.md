@@ -197,11 +197,11 @@ In addition to the main demo prerequisites, you need `kube-prometheus-stack` wit
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
-helm install prometheus prometheus-community/kube-prometheus-stack \
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
   -n monitoring --create-namespace \
   -f internal/demo/k8s/prometheus-stack-values.yaml
 
-helm install prometheus-adapter prometheus-community/prometheus-adapter \
+helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
   -n monitoring \
   -f internal/demo/k8s/prometheus-adapter-values.yaml
 
@@ -262,23 +262,32 @@ Stop the load generator (`Ctrl-C`) and watch the HPA scale back down as in-fligh
 
 `approximate_backlog_count` measures tasks queued in Temporal but not yet started on a worker. Adding it as a second HPA metric means the HPA scales up on *arriving* work even before slots are full — important for bursty traffic.
 
-**Step 1 — Create the Temporal Cloud credentials secret.**
+**Step 1 — Create the Temporal Cloud metrics credentials secret.**
 
-Create a Temporal Cloud metrics API key (separate from the namespace API key) at Cloud UI → Settings → Observability → Generate API Key. Save it to `certs/metrics-api-key.txt`, then create the secret in the `monitoring` namespace:
+This requires a **metrics API key** — a separate credential from the namespace API key used for the worker connection. Create it at **Cloud UI → Settings → Observability → Generate API Key**.
+
 ```bash
 kubectl create secret generic temporal-cloud-api-key \
   -n monitoring \
-  --from-file=api-key=certs/metrics-api-key.txt
+  --from-literal=api-key=<your-metrics-api-key>
 ```
 
-**Step 2 — Upgrade Prometheus and prometheus-adapter.**
+> **Rotating an expired key:** If the key expires, generate a new one in the Cloud UI, then replace the secret and restart the Prometheus pod to remount it:
+> ```bash
+> kubectl delete secret temporal-cloud-api-key -n monitoring
+> kubectl create secret generic temporal-cloud-api-key \
+>   -n monitoring \
+>   --from-literal=api-key=<your-new-metrics-api-key>
+> kubectl delete pod -n monitoring prometheus-prometheus-kube-prometheus-prometheus-0
+> ```
 
-The scrape config and recording rule are already configured in `prometheus-stack-values.yaml`:
+**Step 2 — Install or upgrade Prometheus and prometheus-adapter with the Temporal Cloud scrape config.**
+
 ```bash
-helm upgrade prometheus prometheus-community/kube-prometheus-stack \
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
   -n monitoring -f internal/demo/k8s/prometheus-stack-values.yaml
 
-helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
+helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
   -n monitoring -f internal/demo/k8s/prometheus-adapter-values.yaml
 ```
 
@@ -286,11 +295,11 @@ helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
 
 ```bash
 kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9092:9090 &
-curl -s 'http://localhost:9092/api/v1/query?query=temporal_cloud_v1_approximate_backlog_count' \
+curl -s 'http://localhost:9092/api/v1/query?query=temporal_approximate_backlog_count' \
   | jq '.data.result'
 ```
 
-You should see results with `temporal_worker_deployment_name` and `temporal_worker_build_id` labels. If the result is empty, wait 10–15s for the first scrape to complete.
+You should see results with `temporal_worker_deployment_name` and `temporal_worker_build_id` labels. If the result is empty, wait 15–30s for the recording rule to evaluate.
 
 **Step 4 — Apply the combined WRT.**
 ```bash
