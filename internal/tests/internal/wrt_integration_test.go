@@ -192,7 +192,7 @@ func wrtTestCases() []testCase {
 									"type": "External",
 									"external": {
 										"metric": {
-											"name": "temporal_backlog_count_by_version",
+											"name": "temporal_approximate_backlog_count",
 											"selector": {
 												"matchLabels": {
 													"task_type": "Activity"

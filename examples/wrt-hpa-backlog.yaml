@@ -18,7 +18,7 @@
 #        helm upgrade prometheus-adapter prometheus-community/prometheus-adapter \
 #          -n monitoring -f internal/demo/k8s/prometheus-adapter-values.yaml
 #   3. Verify the backlog metric is flowing:
-#        # Port-forward Prometheus and query: temporal_backlog_count_by_version
+#        # Port-forward Prometheus and query: temporal_approximate_backlog_count
 #
 # Apply:
 #   kubectl apply -f examples/wrt-hpa-backlog.yaml
@@ -61,14 +61,18 @@ spec:
               value: "750m"
 
         # Metric: backlog count — scale up when tasks are queued but not yet picked up.
-        # temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace are
-        # appended automatically by the controller — do not set them here.
+        # temporal_approximate_backlog_count is a recording rule that aggregates
+        # temporal_cloud_v1_approximate_backlog_count down to the four labels the HPA needs.
+        # temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace
+        # are injected automatically by the controller — do not set them here.
+        # temporal_task_queue must be set explicitly to scope the metric to your task queue.
         - type: External
           external:
             metric:
-              name: temporal_backlog_count_by_version
+              name: temporal_approximate_backlog_count
               selector:
                 matchLabels:
+                  temporal_task_queue: "default_helloworld"
                   task_type: "Activity"
             target:
               # Scale up if more than 10 tasks are queued per current replica.

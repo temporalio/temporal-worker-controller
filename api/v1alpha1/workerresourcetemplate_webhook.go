@@ -84,9 +84,8 @@ func NewWorkerResourceTemplateValidator(mgr ctrl.Manager) *WorkerResourceTemplat
 //
 // +kubebuilder:webhook:path=/validate-temporal-io-v1alpha1-workerresourcetemplate,mutating=false,failurePolicy=fail,sideEffects=None,groups=temporal.io,resources=workerresourcetemplates,verbs=create;update;delete,versions=v1alpha1,name=vworkerresourcetemplate.kb.io,admissionReviewVersions=v1
 func (v *WorkerResourceTemplateValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&WorkerResourceTemplate{}).
-		WithValidator(v).
+	return ctrl.NewWebhookManagedBy(mgr, &WorkerResourceTemplate{}).
+		WithCustomValidator(v).
 		Complete()
 }
 
