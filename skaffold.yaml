@@ -48,9 +48,12 @@ profiles:
             valuesFiles:
               - helm/temporal-worker-controller/values.yaml
 
-  # Build and deploy the helloworld Custom Resource to the local k8s cluster  
+  # Build and deploy the helloworld Custom Resource to the local k8s cluster
   - name: helloworld-worker
     build:
+      tagPolicy:
+        envTemplate:
+          template: "{{.WORKER_VERSION}}"
       artifacts:
         - image: helloworld
           context: internal/demo
@@ -66,8 +69,8 @@ profiles:
           - name: helloworld
             chartPath: internal/demo/helloworld/helm/helloworld
             setValueTemplates:
-              image.repository: "{{ .IMAGE_REPO_helloworld }}"
-              image.tag: "{{ .IMAGE_TAG_helloworld }}"
+              image.repository: "helloworld"
+              image.tag: "{{ .WORKER_VERSION }}"
               # These connection settings are meant to be defined in skaffold.env (see skaffold.example.env)
               temporal.namespace: "{{ .TEMPORAL_NAMESPACE }}"
               temporal.address: "{{ .TEMPORAL_ADDRESS }}"

@@ -28,8 +28,8 @@ spec:
     gate:
       workflowType: "RolloutGate"
   sunset:
-    scaledownDelay: 30s
-    deleteDelay: 5m
+    scaledownDelay: 0s
+    deleteDelay: 30s
   # Desired number of worker replicas
   # Desired specification for worker pods
   template:

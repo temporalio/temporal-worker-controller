@@ -7,6 +7,7 @@ package util
 import (
 	"context"
 	"os"
+	"time"
 
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
@@ -30,6 +31,7 @@ func newClient(deploymentName, buildID, temporalNamespace string, metricsPort in
 	opts.Identity = os.Getenv("HOSTNAME")
 	opts.Logger = l
 	opts.MetricsHandler = m
+	opts.WorkerHeartbeatInterval = 5 * time.Second
 
 	l.Debug("Client configured", "identity", opts.Identity, "hostPort", opts.HostPort, "namespace", opts.Namespace)
 
