@@ -16,8 +16,28 @@
         },
         "pullPolicy": {
           "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"],
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
           "description": "Container image pull policy"
+        },
+        "imagePullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the secret containing registry credentials"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "description": "List of secrets for pulling images from private registries"
         }
       }
     },
@@ -92,7 +112,10 @@
           "description": "Whether to create a ServiceAccount"
         },
         "name": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The name of the ServiceAccount to use. If null, a name will be generated using the release name."
         }
       }
@@ -217,4 +240,4 @@
       "type": "number"
     }
   }
-} 
+}

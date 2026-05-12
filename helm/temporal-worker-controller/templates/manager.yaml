@@ -55,6 +55,10 @@ spec:
         seccompProfile:
           type: RuntimeDefault
         {{- end }}
+      {{- with .Values.image.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: manager
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion)}}"
