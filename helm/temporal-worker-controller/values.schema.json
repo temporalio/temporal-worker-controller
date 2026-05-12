@@ -23,7 +23,7 @@
           ],
           "description": "Container image pull policy"
         },
-        "imagePullSecrets": {
+        "pullSecrets": {
           "type": "array",
           "items": {
             "type": "object",
