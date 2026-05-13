@@ -260,12 +260,15 @@ Stop the load generator (`Ctrl-C`) and watch the HPA scale back down as in-fligh
 
 #### Phase 2: Add approximate backlog count
 
-`approximate_backlog_count` measures tasks queued in Temporal but not yet started on a worker. Adding it as a second HPA metric means the HPA scales up on *arriving* work even before slots are full — important for bursty traffic.
+[temporal_cloud_v1_approximate_backlog_count](https://docs.temporal.io/cloud/metrics/openmetrics/metrics-reference#temporal_cloud_v1_approximate_backlog_count) measures tasks queued in Temporal but not yet started on a worker. Adding it as a second HPA metric means the HPA scales up on *arriving* work even before slots are full — important for bursty traffic.
+To ingest this metric into your cluster, you'll need to follow the instructions in the [Temporal OpenMetrics docs](https://docs.temporal.io/cloud/metrics/openmetrics) to set up a Temporal Cloud metrics API key. This is a separate credential from the namespace API key used for the worker connection.
+You'll also need to [opt-in](https://docs.temporal.io/cloud/metrics/openmetrics/metrics-reference#opt-in-labels) to the `temporal_worker_deployment_name` and `temporal_worker_build_id` labels to enable per-version scaling.
+
+This requires a **metrics API key** — a separate credential from the namespace API key used for the worker connection.
 
 **Step 1 — Create the Temporal Cloud metrics credentials secret.**
 
-This requires a **metrics API key** — a separate credential from the namespace API key used for the worker connection. Create it at **Cloud UI → Settings → Observability → Generate API Key**.
-
+Once you have created a Temporal Cloud metrics API key at **Cloud UI → Settings → Observability → Generate API Key**, save the API key to `certs/metrics-api-key.txt`, then create the secret in the `monitoring` namespace:
 ```bash
 kubectl create secret generic temporal-cloud-api-key \
   -n monitoring \
