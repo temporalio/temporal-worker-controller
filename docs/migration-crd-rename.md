@@ -17,7 +17,10 @@ After this release, the Worker Controller will be Generally Available (GA), whic
 
 ## Migration steps
 
-> **Dev / non-production environments:** If you don't need to preserve any worker state, the simplest path is to delete all your `TemporalWorkerDeployment` and `TemporalConnection` resources while the v1.6 controller is still running. At that point no migration-guard finalizer has been added yet, so deletion completes after the v1.6 finalizer completes. Note that all related Worker Deployment state in the Temporal server will also be deleted. Then upgrade the controller and create fresh `WorkerDeployment` and `Connection` resources.
+> **Dev / non-production environments:** If you don’t need to preserve worker state, you can delete your `TemporalWorkerDeployment` and `TemporalConnection` resources while the v1.6 controller is still running. This will cause the controller to remove the associated Worker Deployment state in Temporal, leaving Task Queues unversioned. Once cleanup completes, upgrade the controller and recreate them as `WorkerDeployment` and `Connection` resources.
+>
+> In most cases, following the migration steps below is simpler.
+
 
 ### Step 1: Upgrade the CRDs chart
 
@@ -119,3 +122,9 @@ If you delete a deprecated resource before creating its replacement, the resourc
 Ready=False reason=DeletingPendingMigration
 message: "This TemporalWorkerDeployment is marked for deletion. Create a WorkerDeployment with the same name and spec to complete migration; deletion will proceed automatically once migration is confirmed."
 ```
+
+## Downgrading from v1.7 to v1.6
+
+There are some critical things to consider if you want to roll back
+(downgrade) the installed version of Temporal Worker Controller after upgrading to v1.7.0.
+Please see the [Downgrade Guide](migration-crd-rename-downgrade.md) for details.
