@@ -76,9 +76,11 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 
 ### Testing Progressive Deployments
 
+> **`WORKER_VERSION` is required** for every `skaffold run --profile helloworld-worker` invocation. It drives the image tag (and therefore the Temporal build ID), so each deploy must use a fresh value (`v1`, `v2`, …). If unset, skaffold silently falls back to tagging the image `:latest` while helm renders `image.tag` as `<no value>`, which deploys a broken pod.
+
 5. **Deploy the v1 worker**:
    ```bash
-   skaffold run --profile helloworld-worker
+   WORKER_VERSION=v1 skaffold run --profile helloworld-worker
    ```
    This deploys a WorkerDeployment and Connection Custom Resource using the **Progressive strategy**. Note that when there is no current version (as in an initial versioned worker deployment), the progressive steps are skipped and v1 becomes the current version immediately. All new workflow executions will now start on v1.
    
@@ -97,7 +99,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 8. **Deploy a non-replay-safe workflow change**:
    ```bash
    git apply internal/demo/helloworld/changes/no-version-gate.patch
-   skaffold run --profile helloworld-worker
+   WORKER_VERSION=v2 skaffold run --profile helloworld-worker
    ```
    This applies a **non-replay-safe change** (switching an activity response type from string to a struct).
 
@@ -266,6 +268,8 @@ You'll also need to [opt-in](https://docs.temporal.io/cloud/metrics/openmetrics/
 
 This requires a **metrics API key** — a separate credential from the namespace API key used for the worker connection.
 
+> **Note:** This demo ships a Prometheus recording rule that renames `temporal_cloud_v1_approximate_backlog_count` to `temporal_approximate_backlog_count` and reduces it to the labels the HPA cares about. In principle the HPA can consume the raw Cloud metric directly (set `namespaced: false` on the prometheus-adapter rule so it doesn't auto-inject a `namespace` label filter), but this demo uses the recording rule as a known-working path.
+
 **Step 1 — Create the Temporal Cloud metrics credentials secret.**
 
 Once you have created a Temporal Cloud metrics API key at **Cloud UI → Settings → Observability → Generate API Key**, save the API key to `certs/metrics-api-key.txt`, then create the secret in the `monitoring` namespace:
@@ -320,7 +324,7 @@ With load running, this demonstrates the core value proposition: v1 and v2 scale
 make apply-hpa-load
 
 # Terminal 2: deploy v2 while v1 is under load
-skaffold run --profile helloworld-worker
+WORKER_VERSION=v2 skaffold run --profile helloworld-worker
 
 # Terminal 3: watch the two HPAs
 kubectl get hpa -w
