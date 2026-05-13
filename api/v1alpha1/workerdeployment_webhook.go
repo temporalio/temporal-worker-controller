@@ -19,8 +19,9 @@ import (
 )
 
 func (r *WorkerDeployment) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
+		WithCustomDefaulter(r).
+		WithCustomValidator(r).
 		Complete()
 }
 

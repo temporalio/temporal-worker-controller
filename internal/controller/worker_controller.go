@@ -741,7 +741,7 @@ func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	eventMessage string,
 	conditionMessage string,
 ) {
-	r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, reason, eventMessage)
+	r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, reason, "%s", eventMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, reason, conditionMessage)
 	// Deprecated: set ConnectionHealthy=False for v1.3.x compat, but only for
