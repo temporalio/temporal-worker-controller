@@ -2,6 +2,7 @@ image:
   repository: temporalio/temporal-worker-controller
   tag: "" # Defaults to Chart.appVersion if not specified
   pullPolicy: IfNotPresent
+  pullSecrets: []
 
 podAnnotations: {}
   # Additional pod annotations can be added here
