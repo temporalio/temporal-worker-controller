@@ -268,7 +268,7 @@ You'll also need to [opt-in](https://docs.temporal.io/cloud/metrics/openmetrics/
 
 This requires a **metrics API key** — a separate credential from the namespace API key used for the worker connection.
 
-> **Note:** This demo ships a Prometheus recording rule that renames `temporal_cloud_v1_approximate_backlog_count` to `temporal_approximate_backlog_count` and reduces it to the labels the HPA cares about. In principle the HPA can consume the raw Cloud metric directly (set `namespaced: false` on the prometheus-adapter rule so it doesn't auto-inject a `namespace` label filter), but this demo uses the recording rule as a known-working path.
+> **Picking a scaling tool for your workload:** This demo uses the HPA + prometheus-adapter path. It works well for continuously-loaded task queues and has a steady-state reactivity of ~3 minutes 15 seconds (dominated by Temporal Cloud's metric pipeline aggregation lag). It cannot do scale-from-zero or sub-3-min reactivity. For those, use the KEDA Temporal scaler. See [docs/scaling-recommendations.md](../../docs/scaling-recommendations.md) for the full reactivity model and when to pick which.
 
 **Step 1 — Create the Temporal Cloud metrics credentials secret.**
 
@@ -302,11 +302,11 @@ helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapte
 
 ```bash
 kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9092:9090 &
-curl -s 'http://localhost:9092/api/v1/query?query=temporal_approximate_backlog_count' \
+curl -s 'http://localhost:9092/api/v1/query?query=temporal_cloud_v1_approximate_backlog_count' \
   | jq '.data.result'
 ```
 
-You should see results with `temporal_worker_deployment_name` and `temporal_worker_build_id` labels. If the result is empty, wait 15–30s for the recording rule to evaluate.
+You should see results with `temporal_worker_deployment_name` and `temporal_worker_build_id` labels. If the result is empty, verify the Temporal Cloud metrics API key secret is correct and that scrape targets are healthy in the Prometheus UI.
 
 **Step 4 — Apply the combined WRT.**
 ```bash

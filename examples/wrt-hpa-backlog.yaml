@@ -61,15 +61,16 @@ spec:
               value: "750m"
 
         # Metric: backlog count — scale up when tasks are queued but not yet picked up.
-        # temporal_approximate_backlog_count is a recording rule that aggregates
-        # temporal_cloud_v1_approximate_backlog_count down to the four labels the HPA needs.
+        # Sourced directly from Temporal Cloud's temporal_cloud_v1_approximate_backlog_count
+        # series; the prometheus-adapter rule wraps it in sum(...) to collapse labels the HPA
+        # doesn't select on (instance/job/region/task_priority/temporal_account).
         # temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace
         # are injected automatically by the controller — do not set them here.
         # temporal_task_queue must be set explicitly to scope the metric to your task queue.
         - type: External
           external:
             metric:
-              name: temporal_approximate_backlog_count
+              name: temporal_cloud_v1_approximate_backlog_count
               selector:
                 matchLabels:
                   temporal_task_queue: "default_helloworld"
