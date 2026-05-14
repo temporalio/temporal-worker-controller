@@ -29,16 +29,25 @@ rules:
         namespaced: false  # cluster-scoped: HPAs in any k8s namespace can consume this metric
 
     # Phase 2: approximate backlog count per worker version (from Temporal Cloud).
-    # Uses the temporal_approximate_backlog_count recording rule, which reduces the raw
-    # temporal_cloud_v1_approximate_backlog_count (high cardinality, many label dimensions)
-    # down to just the four labels the HPA needs. cluster-scoped so HPAs in any namespace
-    # can consume it.
-    - seriesQuery: 'temporal_approximate_backlog_count{}'
+    # Consumes temporal_cloud_v1_approximate_backlog_count directly. The metricsQuery's
+    # sum(...) collapses labels the HPA's matchLabels don't select on
+    # (instance/job/region/task_priority/temporal_account).
+    #
+    # seriesQuery filter rationale: Temporal Cloud emits this metric for *every* namespace
+    # in your account, including ones not yet opted in to per-version labels — those carry
+    # temporal_worker_build_id="__unversioned__" and can dominate cardinality (5000+ series
+    # per account is typical). The adapter chokes on series-discovery responses that large,
+    # so we filter discovery to versioned series only.
+    #
+    # cluster-scoped so HPAs in any namespace can consume it.
+    - seriesQuery: 'temporal_cloud_v1_approximate_backlog_count{temporal_worker_build_id!="__unversioned__"}'
       metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'
       name:
-        as: "temporal_approximate_backlog_count"
+        as: "temporal_cloud_v1_approximate_backlog_count"
       resources:
         namespaced: false  # cluster-scoped: HPAs in any namespace can consume this metric
 
-# Must be greater than the Prometheus scrape interval.
-metricsRelistInterval: 15s
+# Must accommodate Temporal Cloud's embedded-timestamp lag (~3 min) AND have
+# margin for emission cadence. 5m is empirically the smallest tested value
+# that keeps the metric registered through the 3-min timestamp staleness.
+metricsRelistInterval: 5m
