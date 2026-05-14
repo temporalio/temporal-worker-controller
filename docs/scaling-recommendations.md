@@ -10,8 +10,8 @@ The `internal/demo/` example wires the HPA path described here. The KEDA path is
 |------------------|----------------|
 | Continuous traffic (task queue always loaded) | HPA + prometheus-adapter, scaling on slot utilization + backlog count |
 | Idle periods >5 min between work; needs scale-from-zero | KEDA Temporal scaler |
-| Required reactivity < ~3 min from first backlog | KEDA Temporal scaler |
-| Required reactivity ~3–5 min, queue always loaded | HPA + prometheus-adapter is fine |
+| Required reactivity < ~60 s from first backlog | KEDA Temporal scaler |
+| Required reactivity ~90 s typical, tolerant of occasional multi-minute stalls | HPA + prometheus-adapter is fine |
 | Very large namespaces (N × M HPAs polling) | HPA + prometheus-adapter; KEDA hits the 50 RPS namespace rate limit |
 
 ## The reactivity model for HPA + prometheus-adapter
@@ -20,16 +20,22 @@ For a continuously-loaded task queue, the end-to-end delay from "backlog appears
 
 ```
 backlog appears at T0
-  └─ Temporal Cloud metric pipeline aggregation     +~3 min  (out of your control)
+  └─ Temporal Cloud OpenMetrics emission cadence    +~60 s worst-case  (~1 sample/minute)
        └─ Prometheus scrape interval                 +~10 s
             └─ HPA poll interval                     +~15 s
                  └─ scale-up stabilization window    +~your config
                       └─ first replica added
 ```
 
-**Steady-state reactivity is ≈ 3 minutes 15 seconds + your stabilization window.** Empirically measured against Temporal Cloud, this is dominated by the embedded-timestamp lag in the OpenMetrics `temporal_cloud_v1_approximate_backlog_count` series — the metric values land in Prometheus with timestamps roughly 3 minutes behind wall clock. With `honor_timestamps: true` in the scrape config (the correct setting; preserves source-of-truth timing), this lag flows through to the HPA.
+**Typical end-to-end reactivity is ≈ 85 seconds + your stabilization window.** Empirically, sample age in Prometheus for a single series follows a sawtooth between 0 and 60 seconds (matching the gateway's ~1/min emission cadence). p50 sample age ≈ 30s, p95 ≈ 50s. The 60-second emission cadence is the inherent floor — smaller scrape intervals, tighter `metricsRelistInterval`, or recording rules cannot improve it because they all consume the same upstream cadence.
 
-You cannot improve this with smaller scrape intervals, tighter `metricsRelistInterval`, or recording rules. The Temporal Cloud aggregation pipeline is the floor.
+### Caveat: gateway-wide stalls
+
+We have observed occasional periods of several minutes during which Temporal Cloud's OpenMetrics gateway returns frozen timestamps for *every* series across the account — backlog series, action counts, error counts, every queue, every namespace. The Prometheus scrape continues to succeed (`up{job="temporal_cloud"}` stays 1, HTTP 200 responses), but the embedded timestamps in the response do not advance. During such a stall, HPAs see the last known value (via Prometheus staleness lookback) until either (a) fresh samples resume, or (b) the staleness window (5 min default) expires and the metric disappears entirely.
+
+Frequency and duration of these stalls is still being characterized. They are the dominant reactivity-tail risk for the metric path. If your workload cannot tolerate occasional multi-minute scaling pauses, prefer KEDA.
+
+This is also why `metricsRelistInterval: 5m` is the recommended setting: the discovery window must comfortably exceed the longest expected stall, otherwise the metric will deregister during a stall and only re-register on the next adapter discovery cycle after data flows again.
 
 ### Slot utilization is a much faster leading signal
 
@@ -46,7 +52,7 @@ Two distinct failure modes that look similar in HPA events but have different me
 - Symptom in HPA events: `the server could not find the metric ...`.
 - Recovery: up to one `metricsRelistInterval` after data flows again.
 
-prometheus-adapter periodically asks Prometheus "what series exist in the last `metricsRelistInterval`?" — see the [prometheus-adapter README](https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/README.md). If the discovery query window is shorter than the embedded-timestamp lag of your source data, the discovery returns empty and the metric name disappears from the External Metrics API. That's why this demo configures `metricsRelistInterval: 5m` — empirically the smallest value that reliably catches the 3-min-stale Temporal Cloud samples.
+prometheus-adapter periodically asks Prometheus "what series exist in the last `metricsRelistInterval`?" — see the [prometheus-adapter README](https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/README.md). If the discovery window is shorter than the longest gateway-wide stall, the discovery returns empty and the metric name disappears from the External Metrics API. The `metricsRelistInterval: 5m` setting buys margin: comfortably longer than typical sample age (~30s p50, ~50s p95) and longer than observed multi-minute gateway stalls so far.
 
 ### Mode 2: series-level silence (common in low-traffic workloads)
 - Trigger: a task queue with no polls or new tasks for >5 minutes. Temporal unloads it from memory and stops emitting `temporal_cloud_v1_approximate_backlog_count` for that specific `(task_queue, build_id, ...)` labelset. Other queues' series continue to emit.
@@ -66,7 +72,7 @@ A prior version of this demo wrapped the raw Cloud series in a Prometheus record
 
 The rule was originally added to work around a label-formatting issue in an older Temporal Cloud release. With native per-version labels (`temporal_worker_deployment_name`, `temporal_worker_build_id`) now opt-in, the rule no longer earns its keep:
 
-- **It doesn't reduce reactivity.** The HPA reactivity floor is the upstream Temporal Cloud aggregation lag, not anything the rule could fix.
+- **It doesn't reduce reactivity.** The HPA reactivity floor is the upstream OpenMetrics emission cadence (~60s), not anything the rule could fix.
 - **It duplicates the cardinality bill.** Per-`(task_queue, build_id)` labels are already opt-in at the OpenMetrics level *because* of cardinality. Adding a recording rule on top means storing the same high-cardinality series twice.
 - **It hides a `sum(...)` that the adapter already does.** prometheus-adapter's `metricsQuery: sum(<<.Series>>{<<.LabelMatchers>>})` performs the same collapsing at query time. Pedagogically, "the adapter does the sum" is cleaner than "a recording rule sums first, then the adapter sums again."
 - **It does not solve series-level silence.** When the source goes silent (task queue unloaded), the rule output also goes silent eventually (once Prometheus's staleness lookback expires).
@@ -85,7 +91,7 @@ Scale-from-zero on backlog through the metric path requires the metric to exist 
 4. Adapter discovery returns no series, or HPA queries return no rows.
 5. HPA cannot scale up because there's no signal to scale on.
 
-Submitting a workflow does load the task queue back into memory, but the metric still won't reach the HPA for ~3 minutes (Temporal Cloud aggregation lag + scrape + poll). By the time the HPA reacts, you've already had 3+ minutes of unprovisioned work.
+Submitting a workflow does load the task queue back into memory, but the metric still won't reach the HPA until the next OpenMetrics emission cycle (~1 minute) plus scrape and HPA poll. By the time the HPA reacts, you've already had ~1+ minute of unprovisioned work.
 
 KEDA's Temporal scaler calls `DescribeTaskQueue(stats=true)` (or `DescribeWorkerDeploymentVersion`), which loads the queue synchronously and returns the backlog directly. No metric pipeline involved. Scale-from-zero in seconds.
 
