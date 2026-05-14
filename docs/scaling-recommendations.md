@@ -29,13 +29,17 @@ backlog appears at T0
 
 **Typical end-to-end reactivity is ≈ 85 seconds + your stabilization window.** Empirically, sample age in Prometheus for a single series follows a sawtooth between 0 and 60 seconds (matching the gateway's ~1/min emission cadence). p50 sample age ≈ 30s, p95 ≈ 50s. The 60-second emission cadence is the inherent floor — smaller scrape intervals, tighter `metricsRelistInterval`, or recording rules cannot improve it because they all consume the same upstream cadence.
 
-### Caveat: gateway-wide stalls
+### Caveat: gateway delivery delay
 
-During our investigation we observed one period of several minutes during which Temporal Cloud's OpenMetrics endpoint returned frozen timestamps for *every* series across the account — backlog series, action counts, error counts, every queue, every namespace, all showing the exact same staleness simultaneously (e.g. all ~30 visible series reading 239s old, identical to the second). The Prometheus scrape continued to succeed (`up{job="temporal_cloud"}` stayed 1, HTTP 200 responses) — only the embedded timestamps in the response body did not advance. During such a period, HPAs see the last known value (via Prometheus staleness lookback) until either (a) fresh samples resume, or (b) the staleness window (5 min default) expires and the metric disappears entirely.
+During our investigation we observed periods of several minutes during which Temporal Cloud's OpenMetrics endpoint returned the same embedded timestamps on repeated scrapes for *every* series across the account simultaneously — backlog series, action counts, error counts, every queue, every namespace, all showing identical staleness to the second (e.g. all ~30 visible series reading 239s old at once). The Prometheus scrape continued to succeed (`up{job="temporal_cloud"}` stayed 1, HTTP 200 responses) — the response body simply repeated already-known samples instead of advancing.
 
-We have only directly characterized this once, so frequency and typical duration are not yet known. The behavior is open with Temporal's Observability team. If your workload cannot tolerate occasional multi-minute scaling pauses, prefer KEDA.
+Once the delay resolved, the gateway delivered the missing samples with their original minute-aligned timestamps in a burst, so Prometheus's storage ends up with a complete 1/minute series in retrospect. We verified this directly: across a 3-hour window covering one such delay event, every gap between consecutive sample timestamps was exactly 60 seconds, no exceptions.
 
-This is also why `metricsRelistInterval: 5m` is the recommended setting: the discovery window must comfortably exceed the longest expected gap so the metric does not deregister, otherwise re-registration waits up to one more relist cycle after data flows again.
+The retrospective completeness is helpful for dashboards and post-hoc analysis, but it does **not** help an HPA, which queries the *latest available* value at decision time. During a delivery delay, the latest available sample is the one from before the delay started. The HPA sees real staleness even though the underlying record will eventually be filled in.
+
+We have only directly characterized this pattern during one investigation session (seeing it twice in ~2 hours of close observation). Frequency in normal operation is not yet known and is open with Temporal's Observability team. If your workload cannot tolerate occasional multi-minute scaling pauses, prefer KEDA.
+
+This is also why `metricsRelistInterval: 5m` is the recommended setting: the discovery window must comfortably exceed the longest expected delay so the metric does not deregister, otherwise re-registration waits up to one more relist cycle after delivery resumes.
 
 ### Slot utilization is a much faster leading signal
 
