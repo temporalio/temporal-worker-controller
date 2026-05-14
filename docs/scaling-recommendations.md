@@ -31,11 +31,11 @@ backlog appears at T0
 
 ### Caveat: gateway-wide stalls
 
-We have observed occasional periods of several minutes during which Temporal Cloud's OpenMetrics gateway returns frozen timestamps for *every* series across the account — backlog series, action counts, error counts, every queue, every namespace. The Prometheus scrape continues to succeed (`up{job="temporal_cloud"}` stays 1, HTTP 200 responses), but the embedded timestamps in the response do not advance. During such a stall, HPAs see the last known value (via Prometheus staleness lookback) until either (a) fresh samples resume, or (b) the staleness window (5 min default) expires and the metric disappears entirely.
+During our investigation we observed one period of several minutes during which Temporal Cloud's OpenMetrics endpoint returned frozen timestamps for *every* series across the account — backlog series, action counts, error counts, every queue, every namespace, all showing the exact same staleness simultaneously (e.g. all ~30 visible series reading 239s old, identical to the second). The Prometheus scrape continued to succeed (`up{job="temporal_cloud"}` stayed 1, HTTP 200 responses) — only the embedded timestamps in the response body did not advance. During such a period, HPAs see the last known value (via Prometheus staleness lookback) until either (a) fresh samples resume, or (b) the staleness window (5 min default) expires and the metric disappears entirely.
 
-Frequency and duration of these stalls is still being characterized. They are the dominant reactivity-tail risk for the metric path. If your workload cannot tolerate occasional multi-minute scaling pauses, prefer KEDA.
+We have only directly characterized this once, so frequency and typical duration are not yet known. The behavior is open with Temporal's Observability team. If your workload cannot tolerate occasional multi-minute scaling pauses, prefer KEDA.
 
-This is also why `metricsRelistInterval: 5m` is the recommended setting: the discovery window must comfortably exceed the longest expected stall, otherwise the metric will deregister during a stall and only re-register on the next adapter discovery cycle after data flows again.
+This is also why `metricsRelistInterval: 5m` is the recommended setting: the discovery window must comfortably exceed the longest expected gap so the metric does not deregister, otherwise re-registration waits up to one more relist cycle after data flows again.
 
 ### Slot utilization is a much faster leading signal
 
