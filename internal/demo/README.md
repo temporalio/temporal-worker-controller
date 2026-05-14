@@ -268,7 +268,7 @@ You'll also need to [opt-in](https://docs.temporal.io/cloud/metrics/openmetrics/
 
 This requires a **metrics API key** — a separate credential from the namespace API key used for the worker connection.
 
-> **Picking a scaling tool for your workload:** This demo uses the HPA + prometheus-adapter path. It works well for continuously-loaded task queues and has a typical end-to-end reactivity of ~85 seconds (dominated by Temporal Cloud's ~1/minute OpenMetrics emission cadence). It cannot do scale-from-zero. For sub-60s reactivity or scale-from-zero, use the KEDA Temporal scaler. See [docs/scaling-recommendations.md](../../docs/scaling-recommendations.md) for the full reactivity model, when to pick which, and a caveat about a multi-minute gateway-wide staleness pattern we observed once during testing.
+> **Picking a scaling tool for your workload:** This demo uses the HPA + prometheus-adapter path. It works well for continuously-loaded task queues and has a typical end-to-end reactivity of ~85 seconds (dominated by Temporal Cloud's ~1/minute OpenMetrics emission cadence). It cannot do scale-from-zero. For sub-60s reactivity or scale-from-zero, use the KEDA Temporal scaler. See [docs/scaling-recommendations.md](../../docs/scaling-recommendations.md) for the full reactivity model, when to pick which, and a caveat about an account-wide OpenMetrics delivery-delay pattern we observed during testing (retrospectively backfilled, but real for live HPA queries).
 
 **Step 1 — Create the Temporal Cloud metrics credentials secret.**
 
