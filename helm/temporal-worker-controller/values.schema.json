@@ -95,6 +95,14 @@
       "minimum": 1,
       "description": "Termination grace period in seconds"
     },
+    "priority": {
+      "type": "integer",
+      "description": "Optional explicit Pod priority integer. Prefer priorityClassName when possible."
+    },
+    "priorityClassName": {
+      "type": "string",
+      "description": "Optional name of a PriorityClass for the manager Pod"
+    },
     "rbac": {
       "type": "object",
       "properties": {
