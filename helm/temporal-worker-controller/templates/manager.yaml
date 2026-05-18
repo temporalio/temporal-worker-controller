@@ -59,6 +59,12 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- if and (hasKey .Values "priority") (ne .Values.priority nil) }}
+      priority: {{ .Values.priority }}
+      {{- end }}
       containers:
       - name: manager
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion)}}"

@@ -26,6 +26,12 @@ resources:
 
 terminationGracePeriodSeconds: 10
 
+# Optional Pod priority scheduling. Prefer priorityClassName (references a
+# cluster PriorityClass). Set priority only when you need an explicit integer;
+# see https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/
+# priority: 1000
+priorityClassName: ""
+
 # All RBAC will be applied under this service account in
 # the deployment namespace. You may disable creation of this resource
 # if your manager will use a service account that exists at
