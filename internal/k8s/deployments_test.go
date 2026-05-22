@@ -584,10 +584,10 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 	deployment := k8s.NewDeploymentWithOwnerRef(
 		&metav1.TypeMeta{},
 		&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
-		&temporaliov1alpha1.TemporalWorkerDeploymentSpec{},
+		&temporaliov1alpha1.WorkerDeploymentSpec{},
 		"test-deployment",
 		"build123",
-		temporaliov1alpha1.TemporalConnectionSpec{},
+		temporaliov1alpha1.ConnectionSpec{},
 	)
 
 	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
