@@ -28,8 +28,9 @@ import (
 const (
 	DeployOwnerKey = ".metadata.controller"
 	// BuildIDLabel is the label that identifies the build ID for a deployment
-	BuildIDLabel                  = "temporal.io/build-id"
-	twdNameLabel                  = "temporal.io/deployment-name"
+	BuildIDLabel = "temporal.io/build-id"
+	// WorkerDeploymentNameLabel identifies Deployments managed for a TemporalWorkerDeployment.
+	WorkerDeploymentNameLabel     = "temporal.io/deployment-name"
 	WorkerDeploymentNameSeparator = "/"
 	ResourceNameSeparator         = "-"
 	MaxBuildIDLen                 = 63
@@ -215,8 +216,8 @@ func cleanBuildID(s string) string {
 // These are the same labels set on the Deployment.Spec.Selector.MatchLabels.
 func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 	return map[string]string{
-		twdNameLabel: TruncateString(CleanStringForDNS(twdName), 63),
-		BuildIDLabel: TruncateString(buildID, 63),
+		WorkerDeploymentNameLabel: TruncateString(CleanStringForDNS(twdName), 63),
+		BuildIDLabel:              TruncateString(buildID, 63),
 	}
 }
 

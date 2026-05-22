@@ -75,14 +75,14 @@ func TestComputeWorkerResourceTemplateName(t *testing.T) {
 
 func TestComputeSelectorLabels(t *testing.T) {
 	labels := ComputeSelectorLabels("my-worker", "abc-123")
-	assert.Equal(t, "my-worker", labels[twdNameLabel])
+	assert.Equal(t, "my-worker", labels[WorkerDeploymentNameLabel])
 	assert.Equal(t, "abc-123", labels[BuildIDLabel])
 }
 
 func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 	selectorLabels := map[string]string{
-		BuildIDLabel: "abc123",
-		twdNameLabel: "my-worker",
+		BuildIDLabel:              "abc123",
+		WorkerDeploymentNameLabel: "my-worker",
 	}
 
 	t.Run("does not inject scaleTargetRef when key is entirely absent", func(t *testing.T) {
@@ -122,8 +122,8 @@ func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 
 func TestAutoInjectFields_MatchLabels(t *testing.T) {
 	selectorLabels := map[string]string{
-		BuildIDLabel: "abc123",
-		twdNameLabel: "my-worker",
+		BuildIDLabel:              "abc123",
+		WorkerDeploymentNameLabel: "my-worker",
 	}
 
 	t.Run("does not inject matchLabels when key is absent", func(t *testing.T) {
@@ -147,7 +147,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 		labels, ok := selector["matchLabels"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "abc123", labels[BuildIDLabel])
-		assert.Equal(t, "my-worker", labels[twdNameLabel])
+		assert.Equal(t, "my-worker", labels[WorkerDeploymentNameLabel])
 	})
 
 	t.Run("does not overwrite existing matchLabels", func(t *testing.T) {
@@ -214,7 +214,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 		"temporal_worker_build_id":        "abc123",
 		"temporal_namespace":              "my-ns",
 	}
-	podLabels := map[string]string{BuildIDLabel: "abc123", twdNameLabel: "my-worker"}
+	podLabels := map[string]string{BuildIDLabel: "abc123", WorkerDeploymentNameLabel: "my-worker"}
 
 	metricSpec := func(matchLabels interface{}) map[string]interface{} {
 		return map[string]interface{}{
@@ -326,7 +326,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	// Check selector labels were added
 	labels := obj.GetLabels()
 	assert.Equal(t, "abc123", labels[BuildIDLabel])
-	assert.Equal(t, "my-worker", labels[twdNameLabel])
+	assert.Equal(t, "my-worker", labels[WorkerDeploymentNameLabel])
 
 	// Check owner reference points to the WRT
 	ownerRefs := obj.GetOwnerReferences()

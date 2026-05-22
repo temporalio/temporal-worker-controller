@@ -14,9 +14,13 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/sdk/log"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -24,6 +28,8 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -39,6 +45,21 @@ func init() {
 
 	utilruntime.Must(temporaliov1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+}
+
+func managerCacheOptions() (cache.Options, error) {
+	deploymentLabelReq, err := labels.NewRequirement(k8s.WorkerDeploymentNameLabel, selection.Exists, nil)
+	if err != nil {
+		return cache.Options{}, err
+	}
+
+	return cache.Options{
+		ByObject: map[client.Object]cache.ByObject{
+			&appsv1.Deployment{}: {
+				Label: labels.NewSelector().Add(*deploymentLabelReq),
+			},
+		},
+	}, nil
 }
 
 func main() {
@@ -59,8 +80,15 @@ func main() {
 	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	ctrl.SetLogger(zap.New(zap.JSONEncoder()))
 
+	cacheOptions, err := managerCacheOptions()
+	if err != nil {
+		setupLog.Error(err, "unable to build manager cache options")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
+		Cache:  cacheOptions,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
