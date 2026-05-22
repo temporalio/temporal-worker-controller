@@ -17,7 +17,7 @@ const (
 	taskQueueEnvKey = "TEMPORAL_TASK_QUEUE"
 )
 
-func MakeTWD(
+func MakeWD(
 	name string,
 	namespace string,
 	replicas int32,
@@ -25,7 +25,7 @@ func MakeTWD(
 	rolloutStrategy *temporaliov1alpha1.RolloutStrategy,
 	sunsetStrategy *temporaliov1alpha1.SunsetStrategy,
 	workerOpts *temporaliov1alpha1.WorkerOptions,
-) *temporaliov1alpha1.TemporalWorkerDeployment {
+) *temporaliov1alpha1.WorkerDeployment {
 	r := temporaliov1alpha1.RolloutStrategy{}
 	s := temporaliov1alpha1.SunsetStrategy{}
 	w := temporaliov1alpha1.WorkerOptions{}
@@ -39,10 +39,10 @@ func MakeTWD(
 		w = *workerOpts
 	}
 
-	twd := &temporaliov1alpha1.TemporalWorkerDeployment{
+	twd := &temporaliov1alpha1.WorkerDeployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "temporal.io/v1alpha1",
-			Kind:       "TemporalWorkerDeployment",
+			Kind:       "WorkerDeployment",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -50,7 +50,7 @@ func MakeTWD(
 			UID:       types.UID(fmt.Sprintf("test-owner-%v", uuid.New())),
 			Labels:    map[string]string{"app": "test-worker"},
 		},
-		Spec: temporaliov1alpha1.TemporalWorkerDeploymentSpec{
+		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
 			Replicas:        &replicas,
 			Template:        podSpec,
 			RolloutStrategy: r,
@@ -105,8 +105,8 @@ func SetTaskQueue(podSpec corev1.PodTemplateSpec, taskQueue string) corev1.PodTe
 	return podSpec
 }
 
-func MakeTWDWithImage(name, namespace, imageName string) *temporaliov1alpha1.TemporalWorkerDeployment {
-	return MakeTWD(name, namespace, 1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
+func MakeWDWithImage(name, namespace, imageName string) *temporaliov1alpha1.WorkerDeployment {
+	return MakeWD(name, namespace, 1, MakePodSpec([]corev1.Container{{Image: imageName}}, nil, ""), nil, nil, nil)
 }
 
 // MakeBuildID computes a build id based on the image and
@@ -118,8 +118,8 @@ func MakeBuildID(twdName, imageName, unsafeCustomBuildID string, podSpec *corev1
 	}
 	return k8s.ComputeBuildID(
 		ModifyObj(
-			MakeTWDWithName(twdName, ""),
-			func(obj *temporaliov1alpha1.TemporalWorkerDeployment) *temporaliov1alpha1.TemporalWorkerDeployment {
+			MakeWDWithName(twdName, ""),
+			func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
 				if podSpec != nil {
 					obj.Spec.Template = *podSpec
 				} else {
@@ -131,8 +131,8 @@ func MakeBuildID(twdName, imageName, unsafeCustomBuildID string, podSpec *corev1
 	)
 }
 
-func MakeTWDWithName(name, namespace string) *temporaliov1alpha1.TemporalWorkerDeployment {
-	twd := MakeTWD(name, namespace, 1, MakePodSpec(nil, nil, ""), nil, nil, nil)
+func MakeWDWithName(name, namespace string) *temporaliov1alpha1.WorkerDeployment {
+	twd := MakeWD(name, namespace, 1, MakePodSpec(nil, nil, ""), nil, nil, nil)
 	twd.ObjectMeta.Name = name
 	twd.Name = name
 	return twd

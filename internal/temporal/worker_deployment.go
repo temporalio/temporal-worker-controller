@@ -203,7 +203,7 @@ func GetTestWorkflowStatus(
 	client temporalClient.Client,
 	workerDeploymentName string,
 	buildID string,
-	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	temporalState *TemporalWorkerState,
 ) ([]temporaliov1alpha1.WorkflowExecution, error) {
 	var results []temporaliov1alpha1.WorkflowExecution

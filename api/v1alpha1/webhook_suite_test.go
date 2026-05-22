@@ -121,7 +121,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	err = (&TemporalWorkerDeployment{}).SetupWebhookWithManager(mgr)
+	err = (&WorkerDeployment{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
 	// Set env vars consumed by NewWorkerResourceTemplateValidator before constructing it.

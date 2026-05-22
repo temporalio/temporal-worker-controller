@@ -16,7 +16,7 @@ func ExampleTestCase() {
 	// Create a test case using the builder pattern
 	testCaseBuilder := testhelpers.NewTestCase().
 		WithInput(
-			testhelpers.NewTemporalWorkerDeploymentBuilder().
+			testhelpers.NewWorkerDeploymentBuilder().
 				WithName("example-worker").
 				WithNamespace("default").
 				WithManualStrategy().
@@ -49,7 +49,7 @@ func ExampleTestCase() {
 func ExampleTestCase_withExistingDeployments() {
 	testCaseBuilder := testhelpers.NewTestCase().
 		WithInput(
-			testhelpers.NewTemporalWorkerDeploymentBuilder().
+			testhelpers.NewWorkerDeploymentBuilder().
 				WithName("worker-with-history").
 				WithNamespace("test-ns").
 				WithAllAtOnceStrategy().

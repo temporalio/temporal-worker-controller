@@ -7,9 +7,9 @@ package internal
 // Covered:
 //   - ConditionProgressing = True                (version registered but not yet current)
 //   - ConditionReady = True                      (version promoted to current)
-//   - ConditionProgressing = False               (blocking error: missing TemporalConnection, etc.)
-//   - Event reason TemporalConnectionNotFound    (emitted alongside Progressing=False condition)
-//   - ReasonTemporalClientCreationFailed: TemporalConnection pointing to an unreachable port
+//   - ConditionProgressing = False               (blocking error: missing Connection, etc.)
+//   - Event reason ConnectionNotFound    (emitted alongside Progressing=False condition)
+//   - ReasonTemporalClientCreationFailed: Connection pointing to an unreachable port
 //   - ReasonTemporalStateFetchFailed: TWD pointing to a Temporal namespace that doesn't exist
 //
 // Covered in unit tests
@@ -46,7 +46,7 @@ func runConditionsAndEventsTests(
 			name: "conditions-progressing",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithManualStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -70,7 +70,7 @@ func runConditionsAndEventsTests(
 			name: "conditions-ready-reason-rollout-complete",
 			builder: testhelpers.NewTestCase().
 				WithInput(
-					testhelpers.NewTemporalWorkerDeploymentBuilder().
+					testhelpers.NewWorkerDeploymentBuilder().
 						WithAllAtOnceStrategy().
 						WithTargetTemplate("v1.0"),
 				).
@@ -93,34 +93,34 @@ func runConditionsAndEventsTests(
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			testTemporalWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace, ts.GetDefaultNamespace()))
+			testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace, ts.GetDefaultNamespace()))
 		})
 	}
 
 	// The following three tests each trigger a different ConditionProgressing=False reason.
-	// They all run standalone (not through testTemporalWorkerDeploymentCreation) because
+	// They all run standalone (not through testWorkerDeploymentCreation) because
 	// the controller fails before creating any k8s Deployments, so the normal status-validation
-	// and deployment-wait machinery in testTemporalWorkerDeploymentCreation would time out.
+	// and deployment-wait machinery in testWorkerDeploymentCreation would time out.
 	//
 	// conditions-temporal-state-fetch-failed also cannot use the testCase/testCaseBuilder
-	// structure because testTemporalWorkerDeploymentCreation hardcodes the Temporal namespace
+	// structure because testWorkerDeploymentCreation hardcodes the Temporal namespace
 	// via BuildWithValues(name, ns, ts.GetDefaultNamespace()) with no way to inject a custom
 	// namespace.
 	//
 	// All three share the same skeleton, extracted into testUnhealthyConnectionCondition below.
 	t.Run("conditions-missing-connection", func(t *testing.T) {
-		// No TemporalConnection is created; the controller cannot find the one referenced by
+		// No Connection is created; the controller cannot find the one referenced by
 		// the TWD and immediately sets Progressing=False.
 		testUnhealthyConnectionCondition(t, k8sClient,
 			"conditions-missing-connection", testNamespace, ts.GetDefaultNamespace(),
 			nil,
-			temporaliov1alpha1.ReasonTemporalConnectionNotFound)
+			temporaliov1alpha1.ReasonConnectionNotFound)
 	})
 	t.Run("conditions-client-creation-failed", func(t *testing.T) {
 		// Port 1 is never bound; the SDK returns ECONNREFUSED immediately.
 		testUnhealthyConnectionCondition(t, k8sClient,
 			"conditions-client-creation-failed", testNamespace, ts.GetDefaultNamespace(),
-			&temporaliov1alpha1.TemporalConnectionSpec{HostPort: "localhost:1"},
+			&temporaliov1alpha1.ConnectionSpec{HostPort: "localhost:1"},
 			temporaliov1alpha1.ReasonTemporalClientCreationFailed)
 	})
 	t.Run("conditions-temporal-state-fetch-failed", func(t *testing.T) {
@@ -128,13 +128,13 @@ func runConditionsAndEventsTests(
 		// not a registered Temporal namespace so Describe() fails.
 		testUnhealthyConnectionCondition(t, k8sClient,
 			"conditions-temporal-state-fetch-failed", testNamespace, "does-not-exist",
-			&temporaliov1alpha1.TemporalConnectionSpec{HostPort: ts.GetFrontendHostPort()},
+			&temporaliov1alpha1.ConnectionSpec{HostPort: ts.GetFrontendHostPort()},
 			temporaliov1alpha1.ReasonTemporalStateFetchFailed)
 	})
 }
 
 // testUnhealthyConnectionCondition is shared by the four error-path condition tests.
-// It optionally creates a TemporalConnection (nil connectionSpec = missing connection),
+// It optionally creates a Connection (nil connectionSpec = missing connection),
 // creates a TWD pointing to that connection with the given temporalNamespace, then asserts
 // that ConditionProgressing becomes False with the expected reason and that a matching Warning
 // event is emitted.
@@ -142,28 +142,28 @@ func testUnhealthyConnectionCondition(
 	t *testing.T,
 	k8sClient client.Client,
 	name, testNamespace, temporalNamespace string,
-	connectionSpec *temporaliov1alpha1.TemporalConnectionSpec,
+	connectionSpec *temporaliov1alpha1.ConnectionSpec,
 	expectedReason string,
 ) {
 	t.Helper()
 	ctx := context.Background()
 
 	if connectionSpec != nil {
-		conn := &temporaliov1alpha1.TemporalConnection{
+		conn := &temporaliov1alpha1.Connection{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 			Spec:       *connectionSpec,
 		}
 		if err := k8sClient.Create(ctx, conn); err != nil {
-			t.Fatalf("failed to create TemporalConnection: %v", err)
+			t.Fatalf("failed to create Connection: %v", err)
 		}
 	}
 
-	twd := testhelpers.NewTemporalWorkerDeploymentBuilder().
+	twd := testhelpers.NewWorkerDeploymentBuilder().
 		WithManualStrategy().
 		WithTargetTemplate("v1.0").
 		WithName(name).
 		WithNamespace(testNamespace).
-		WithTemporalConnection(name).
+		WithConnection(name).
 		WithTemporalNamespace(temporalNamespace).
 		Build()
 

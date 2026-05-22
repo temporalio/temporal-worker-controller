@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (r *TemporalWorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, p *plan) error {
+func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) error {
 	// Create deployment
 	if p.CreateDeployment != nil {
 		l.Info("creating deployment", "deployment", p.CreateDeployment)
@@ -112,7 +112,7 @@ func (r *TemporalWorkerDeploymentReconciler) executeK8sOperations(ctx context.Co
 	return nil
 }
 
-func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
+func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
 	for _, wf := range p.startTestWorkflows {
 		// Log workflow start details
 		if len(wf.input) > 0 {
@@ -183,28 +183,36 @@ func (r *TemporalWorkerDeploymentReconciler) startTestWorkflows(ctx context.Cont
 	return nil
 }
 
-func (r *TemporalWorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
+func (r *WorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
 	existing := vcfg.ManagerIdentity
 	if existing == "" {
 		return true // unclaimed
 	}
-	// In the next release, the namespace UID will be included in the controller identity.
-	// To support smooth rollback, in this release, we will detect the future format and
-	// treat that as a reclaimable claim.
-	if existing == getControllerIdentityWithNamespaceUID() {
+
+	// Handle Worker Deployments that were controller-managed before we
+	// started recording the cluster-UID in the manager identity
+	if existing == getDeprecatedControllerIdentity() {
 		return true
 	}
 	return false
 }
 
-func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
+func (r *WorkerDeploymentReconciler) claimManagerIdentity(
 	ctx context.Context,
 	l logr.Logger,
-	workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	vcfg *planner.VersionConfig,
 ) error {
 	identity := getControllerIdentity()
+	if identity == "" {
+		// Passing an empty identity to SetManagerIdentity clears the field on the
+		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
+		// This should never happen, but this is the extra fallback in case somehow
+		// the check in main() and Reconcile() are not sufficient.
+		return errors.New(fmt.Sprintf("%s and %s are not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field",
+			IdentityEnvKey, IdentitySuffixEnvKey))
+	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
 		ConflictToken: vcfg.ConflictToken,
@@ -222,7 +230,7 @@ func (r *TemporalWorkerDeploymentReconciler) claimManagerIdentity(
 	return nil
 }
 
-func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, deploymentHandler sdkclient.WorkerDeploymentHandle, p *plan) error {
+func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, deploymentHandler sdkclient.WorkerDeploymentHandle, p *plan) error {
 	vcfg := p.UpdateVersionConfig
 	if vcfg == nil {
 		return nil
@@ -300,7 +308,8 @@ func (r *TemporalWorkerDeploymentReconciler) updateVersionConfig(ctx context.Con
 	return nil
 }
 
-func (r *TemporalWorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.TemporalWorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
+//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
+func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
 	if err := r.executeK8sOperations(ctx, l, workerDeploy, p); err != nil {
 		return err
 	}

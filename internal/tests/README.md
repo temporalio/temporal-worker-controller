@@ -32,7 +32,7 @@ The integration test (`internal/integration_test.go`) includes:
 2. **CRD Loading**: Loads your CRDs from the Helm directory
 3. **Controller Setup**: Creates and starts the controller with a real manager
 4. **Temporal Client**: Connects to an in-memory Temporal dev server started by the test code
-5. **Test**: Creates a `TemporalConnection` and `TemporalWorkerDeployment` based on the provided spec, then verifies:
+5. **Test**: Creates a `Connection` and `WorkerDeployment` based on the provided spec, then verifies:
    - The controller reconciles successfully
    - A Kubernetes deployment is created
    - The observed status converges to what is expected for that test case

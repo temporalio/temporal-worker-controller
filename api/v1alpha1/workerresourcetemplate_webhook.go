@@ -84,9 +84,8 @@ func NewWorkerResourceTemplateValidator(mgr ctrl.Manager) *WorkerResourceTemplat
 //
 // +kubebuilder:webhook:path=/validate-temporal-io-v1alpha1-workerresourcetemplate,mutating=false,failurePolicy=fail,sideEffects=None,groups=temporal.io,resources=workerresourcetemplates,verbs=create;update;delete,versions=v1alpha1,name=vworkerresourcetemplate.kb.io,admissionReviewVersions=v1
 func (v *WorkerResourceTemplateValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&WorkerResourceTemplate{}).
-		WithValidator(v).
+	return ctrl.NewWebhookManagedBy(mgr, &WorkerResourceTemplate{}).
+		WithCustomValidator(v).
 		Complete()
 }
 
@@ -148,11 +147,11 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	warnings = append(warnings, specWarnings...)
 	allErrs = append(allErrs, specErrs...)
 
-	// Immutability: temporalWorkerDeploymentRef.name must not change on update
-	if oldWRT != nil && oldWRT.Spec.TemporalWorkerDeploymentRef.Name != newWRT.Spec.TemporalWorkerDeploymentRef.Name {
+	// Immutability: workerDeploymentRef.name (effective) must not change on update
+	if oldWRT != nil && oldWRT.Spec.EffectiveWorkerDeploymentName() != newWRT.Spec.EffectiveWorkerDeploymentName() {
 		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec").Child("temporalWorkerDeploymentRef").Child("name"),
-			"temporalWorkerDeploymentRef.name is immutable and cannot be changed after creation",
+			field.NewPath("spec").Child("workerDeploymentRef").Child("name"),
+			"workerDeploymentRef.name is immutable and cannot be changed after creation",
 		))
 	}
 
@@ -186,6 +185,12 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowedKinds []string) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
+
+	// Emit a deprecation warning when the old field is used.
+	// The structural constraint (exactly one must be set) is enforced by CRD CEL validation.
+	if spec.TemporalWorkerDeploymentRef != nil {
+		warnings = append(warnings, "spec.temporalWorkerDeploymentRef is deprecated; use spec.workerDeploymentRef instead")
+	}
 
 	if spec.Template.Raw == nil {
 		allErrs = append(allErrs, field.Required(

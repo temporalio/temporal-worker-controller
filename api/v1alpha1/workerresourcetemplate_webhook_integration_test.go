@@ -51,8 +51,8 @@ func makeWRTForWebhook(name, ns, workerDeploymentRef string, embeddedObj map[str
 			Namespace: ns,
 		},
 		Spec: WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: TemporalWorkerDeploymentReference{Name: workerDeploymentRef},
-			Template:                    runtime.RawExtension{Raw: raw},
+			WorkerDeploymentRef: &WorkerDeploymentReference{Name: workerDeploymentRef},
+			Template:            runtime.RawExtension{Raw: raw},
 		},
 	}
 }
@@ -208,10 +208,10 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "t18-immutable", Namespace: ns}, &created)).To(Succeed())
 
 		updated := created.DeepCopy()
-		updated.Spec.TemporalWorkerDeploymentRef.Name = "different-worker"
+		updated.Spec.WorkerDeploymentRef.Name = "different-worker"
 		err := k8sClient.Update(ctx, updated)
 		Expect(err).To(HaveOccurred(), "webhook must reject workerDeploymentRef.name change")
-		Expect(err.Error()).To(ContainSubstring("temporalWorkerDeploymentRef.name"))
+		Expect(err.Error()).To(ContainSubstring("workerDeploymentRef.name"))
 		Expect(err.Error()).To(ContainSubstring("immutable"))
 	})
 })

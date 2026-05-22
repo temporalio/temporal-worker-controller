@@ -156,7 +156,7 @@ func makePreliminaryStatusTrue(
 	ctx context.Context,
 	t *testing.T,
 	env testhelpers.TestEnv,
-	twd *temporaliov1alpha1.TemporalWorkerDeployment,
+	twd *temporaliov1alpha1.WorkerDeployment,
 ) {
 	t.Logf("Creating starting test env based on input.Status")
 
@@ -194,7 +194,7 @@ func createStatus(
 	ctx context.Context,
 	t *testing.T,
 	env testhelpers.TestEnv,
-	newTWD *temporaliov1alpha1.TemporalWorkerDeployment,
+	newTWD *temporaliov1alpha1.WorkerDeployment,
 	prevVersion temporaliov1alpha1.BaseWorkerDeploymentVersion,
 	rampPercentage *float32,
 ) (workerStopFuncs []func()) {
@@ -238,7 +238,7 @@ func createStatus(
 // recreateTWD returns a copy of the given TWD, but replaces the build-id-generating image name with the given one,
 // and the Spec.Replicas with the given replica count.
 // Panics if the twd spec is nil, or if it has no containers, but that should never be true for these integration tests.
-func recreateTWD(twd *temporaliov1alpha1.TemporalWorkerDeployment, imageName string, replicas int32) *temporaliov1alpha1.TemporalWorkerDeployment {
+func recreateTWD(twd *temporaliov1alpha1.WorkerDeployment, imageName string, replicas int32) *temporaliov1alpha1.WorkerDeployment {
 	ret := twd.DeepCopy()
 	ret.Spec.Template.Spec.Containers[0].Image = imageName
 	ret.Spec.Replicas = &replicas
@@ -249,7 +249,7 @@ func createWorkerDeployment(
 	ctx context.Context,
 	t *testing.T,
 	env testhelpers.TestEnv,
-	twd *temporaliov1alpha1.TemporalWorkerDeployment,
+	twd *temporaliov1alpha1.WorkerDeployment,
 	buildId string,
 ) {
 	dep, err := k8s.NewDeploymentWithControllerRef(twd, buildId, env.Connection.Spec, env.Mgr.GetScheme())

@@ -34,30 +34,30 @@ func runRateLimitTest(
 		ctx := context.Background()
 		const n = 10
 
-		twds := make([]*temporaliov1alpha1.TemporalWorkerDeployment, n)
+		twds := make([]*temporaliov1alpha1.WorkerDeployment, n)
 
 		for i := 0; i < n; i++ {
 			name := fmt.Sprintf("rate-limit-%d", i)
 
-			conn := &temporaliov1alpha1.TemporalConnection{
+			conn := &temporaliov1alpha1.Connection{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: testNamespace,
 				},
-				Spec: temporaliov1alpha1.TemporalConnectionSpec{
+				Spec: temporaliov1alpha1.ConnectionSpec{
 					HostPort: ts.GetFrontendHostPort(),
 				},
 			}
 			if err := k8sClient.Create(ctx, conn); err != nil {
-				t.Fatalf("failed to create TemporalConnection %s: %v", name, err)
+				t.Fatalf("failed to create Connection %s: %v", name, err)
 			}
 
-			twd := testhelpers.NewTemporalWorkerDeploymentBuilder().
+			twd := testhelpers.NewWorkerDeploymentBuilder().
 				WithManualStrategy().
 				WithTargetTemplate("v1.0").
 				WithName(name).
 				WithNamespace(testNamespace).
-				WithTemporalConnection(name).
+				WithConnection(name).
 				WithTemporalNamespace(ts.GetDefaultNamespace()).
 				Build()
 			if err := k8sClient.Create(ctx, twd); err != nil {
@@ -72,7 +72,7 @@ func runRateLimitTest(
 		// handler in worker_controller.go).
 		eventually(t, 30*time.Second, time.Second, func() error {
 			for _, twd := range twds {
-				var fresh temporaliov1alpha1.TemporalWorkerDeployment
+				var fresh temporaliov1alpha1.WorkerDeployment
 				if err := k8sClient.Get(ctx, types.NamespacedName{
 					Name:      twd.Name,
 					Namespace: twd.Namespace,

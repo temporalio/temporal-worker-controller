@@ -8,7 +8,7 @@ For migration help, see [migration-to-versioned.md](migration-to-versioned.md).
 
 ## Understanding the conditions
 
-The `TemporalWorkerDeployment` resource exposes two standard conditions on `status.conditions` that CD tools and scripts can consume.
+The `WorkerDeployment` resource exposes two standard conditions on `status.conditions` that CD tools and scripts can consume.
 
 ### `Ready`
 
@@ -34,7 +34,7 @@ When `Progressing=False` due to an error, the `reason` field identifies what wen
 | Reason | Meaning |
 |---|---|
 | `RolloutComplete` | Not an error — the rollout finished successfully |
-| `TemporalConnectionNotFound` | The referenced `TemporalConnection` resource doesn't exist |
+| `ConnectionNotFound` | The referenced `Connection` resource doesn't exist |
 | `AuthSecretInvalid` | The credential secret is missing, malformed, or has an expired certificate |
 | `TemporalClientCreationFailed` | The controller can't reach the Temporal server (dial/health-check failure) |
 | `TemporalStateFetchFailed` | The controller reached the server but can't read the worker deployment state |
@@ -45,7 +45,7 @@ Once the underlying problem is fixed, the next successful reconcile will restore
 
 ## Triggering a rollout
 
-A rollout starts when you change the pod template in your `TemporalWorkerDeployment` spec — a changed pod spec produces a new Build ID, which the controller treats as a new version to roll out.
+A rollout starts when you change the pod template in your `WorkerDeployment` spec — a changed pod spec produces a new Build ID, which the controller treats as a new version to roll out.
 
 With Helm (image tag update):
 
@@ -63,7 +63,7 @@ helm upgrade my-worker ./chart --values values.yaml
 With a plain manifest:
 
 ```yaml
-# twd.yaml
+# workerdeployment.yaml
 spec:
   template:
     spec:
@@ -73,7 +73,7 @@ spec:
 ```
 
 ```bash
-kubectl apply -f twd.yaml
+kubectl apply -f workerdeployment.yaml
 ```
 
 The controller picks up the change on the next reconcile loop (within seconds) and begins the rollout.
@@ -83,8 +83,8 @@ The controller picks up the change on the next reconcile loop (within seconds) a
 `kubectl wait` can block a pipeline script until `Ready=True`:
 
 ```bash
-kubectl apply -f twd.yaml
-kubectl wait temporalworkerdeployment/my-worker \
+kubectl apply -f workerdeployment.yaml
+kubectl wait workerdeployment/my-worker \
   --for=condition=Ready \
   --timeout=10m
 ```
@@ -95,7 +95,7 @@ Set `--timeout` to exceed the longest expected rollout time — for progressive 
 
 ### Helm 4
 
-Helm 4 uses [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) for its `--wait` implementation ([HIP-0022](https://helm.sh/community/hips/hip-0022/)). kstatus understands the standard Kubernetes conditions contract and should block until `Ready=True` on your `TemporalWorkerDeployment`:
+Helm 4 uses [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) for its `--wait` implementation ([HIP-0022](https://helm.sh/community/hips/hip-0022/)). kstatus understands the standard Kubernetes conditions contract and should block until `Ready=True` on your `WorkerDeployment`:
 
 ```bash
 helm upgrade my-worker ./chart --values values.yaml --wait --timeout 10m
@@ -109,7 +109,7 @@ Helm 3's `--wait` only covers a hardcoded set of native resource types (Deployme
 
 ```bash
 helm upgrade my-worker ./chart --values values.yaml
-kubectl wait temporalworkerdeployment/my-worker \
+kubectl wait workerdeployment/my-worker \
   --for=condition=Ready \
   --timeout=10m \
   --namespace my-namespace
@@ -124,7 +124,7 @@ The two standard conditions (`Ready`, `Progressing`) keep the Lua simple — it 
 ```yaml
 # In your argocd-cm ConfigMap
 data:
-  resource.customizations.health.temporal.io_TemporalWorkerDeployment: |
+  resource.customizations.health.temporal.io_WorkerDeployment: |
     local ready = nil
     local progressing = nil
     if obj.status ~= nil and obj.status.conditions ~= nil then
@@ -152,7 +152,7 @@ With a health check like this in place:
 - ArgoCD shows **Progressing** while a rollout is in-flight (`Progressing=True`).
 - ArgoCD shows **Degraded** when progress is blocked (`Progressing=False` with an error reason).
 
-If you use [sync waves](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-waves/) and workers must be fully rolled out before a dependent service is updated, place the `TemporalWorkerDeployment` in an earlier wave.
+If you use [sync waves](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-waves/) and workers must be fully rolled out before a dependent service is updated, place the `WorkerDeployment` in an earlier wave.
 
 > **Verify:** ArgoCD's health customization API and Lua runtime have changed across versions. Test your health check script in a non-production environment before relying on it to gate sync waves.
 
@@ -160,7 +160,7 @@ If you use [sync waves](https://argo-cd.readthedocs.io/en/stable/user-guide/sync
 
 ### Kustomization
 
-Flux's `Kustomization` controller uses kstatus to assess resource health. Because `TemporalWorkerDeployment` emits a standard `Ready` condition, Flux should treat it as healthy when `Ready=True`. Adding an explicit `healthChecks` entry makes the dependency visible and ensures Flux waits on the `TemporalWorkerDeployment` before marking the Kustomization as ready:
+Flux's `Kustomization` controller uses kstatus to assess resource health. Because `WorkerDeployment` emits a standard `Ready` condition, Flux should treat it as healthy when `Ready=True`. Adding an explicit `healthChecks` entry makes the dependency visible and ensures Flux waits on the `WorkerDeployment` before marking the Kustomization as ready:
 
 ```yaml
 apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -177,7 +177,7 @@ spec:
     name: my-repo
   healthChecks:
     - apiVersion: temporal.io/v1alpha1
-      kind: TemporalWorkerDeployment
+      kind: WorkerDeployment
       name: my-worker
       namespace: my-namespace
   timeout: 10m
@@ -187,7 +187,7 @@ Set `timeout` to exceed the longest expected rollout duration.
 
 ### HelmRelease
 
-Flux's `helm-controller` uses kstatus by default for post-install/post-upgrade health assessment, so a `HelmRelease` deploying your worker chart should automatically wait for `Ready=True` on any `TemporalWorkerDeployment` resources in the release:
+Flux's `helm-controller` uses kstatus by default for post-install/post-upgrade health assessment, so a `HelmRelease` deploying your worker chart should automatically wait for `Ready=True` on any `WorkerDeployment` resources in the release:
 
 ```yaml
 apiVersion: helm.toolkit.fluxcd.io/v2

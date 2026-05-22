@@ -3,7 +3,7 @@
 ## Problem
 
 If the worker controller is managing a Worker Deployment (i.e. updating its routing config), but a user makes a manual
-change via the CLI, SDK, or gRPC API instead of via the `TemporalWorkerDeployment` CRD interface, the controller should 
+change via the CLI, SDK, or gRPC API instead of via the `WorkerDeployment` CRD interface, the controller should 
 not clobber the user's change.
 
 Once the user has finished their manual intervention, they need a way to hand ownership back to the controller.
@@ -15,7 +15,7 @@ ownership of routing changes.
 
 When `ManagerIdentity` is set on a Worker Deployment, only clients whose identity matches `ManagerIdentity` can make
 routing changes (set current version, set ramping version). The controller's identity is visible in the
-`managerIdentity` field of the `TemporalWorkerDeployment` status.
+`managerIdentity` field of the `WorkerDeployment` status.
 
 ### How the controller claims ownership
 

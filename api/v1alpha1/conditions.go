@@ -2,7 +2,7 @@ package v1alpha1
 
 // Condition type constants.
 const (
-	// ConditionReady is True for TemporalWorkerDeployment when the Temporal
+	// ConditionReady is True for WorkerDeployment when the Temporal
 	// connection is reachable and the target version is the current version in Temporal.
 	// It is True for WorkerResourceTemplate when all active Build ID instances of the
 	// WorkerResourceTemplate have been successfully applied.
@@ -18,7 +18,7 @@ const (
 // instead. These will be removed in the next major version of the CRD.
 const (
 	// Deprecated: Use ConditionReady and ConditionProgressing instead.
-	ConditionTemporalConnectionHealthy = "TemporalConnectionHealthy"
+	ConditionConnectionHealthy = "ConnectionHealthy"
 
 	// Deprecated: Use ConditionReady instead.
 	ConditionRolloutComplete = "RolloutComplete"

@@ -32,7 +32,7 @@ func configureObservability(deploymentName, buildID, temporalNamespace string, m
 	if err != nil {
 		panic(err)
 	}
-	// Extract the TWD name from the Temporal deployment name ("namespace/name").
+	// Extract the WD name from the Temporal deployment name ("namespace/name").
 	deploymentNameCleanForLabel := strings.Replace(deploymentName, "/", "_", 1)
 	m = opentelemetry.NewMetricsHandler(opentelemetry.MetricsHandlerOptions{
 		Meter: metric.NewMeterProvider(metric.WithReader(exporter)).Meter("worker"),

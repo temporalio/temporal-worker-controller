@@ -180,7 +180,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 					"type": "External",
 					"external": map[string]interface{}{
 						"metric": map[string]interface{}{
-							"name": "temporal_backlog_count_by_version",
+							"name": "temporal_approximate_backlog_count",
 							"selector": map[string]interface{}{
 								"matchLabels": map[string]interface{}{}, // opt-in for metric selector
 							},
@@ -223,7 +223,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 					"type": "External",
 					"external": map[string]interface{}{
 						"metric": map[string]interface{}{
-							"name": "temporal_backlog_count_by_version",
+							"name": "temporal_approximate_backlog_count",
 							"selector": map[string]interface{}{
 								"matchLabels": matchLabels,
 							},
@@ -259,7 +259,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 					"type": "External",
 					"external": map[string]interface{}{
 						"metric": map[string]interface{}{
-							"name":     "temporal_backlog_count_by_version",
+							"name":     "temporal_approximate_backlog_count",
 							"selector": map[string]interface{}{},
 						},
 					},
@@ -300,7 +300,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 			UID:       types.UID("wrt-uid-456"),
 		},
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			TemporalWorkerDeploymentRef: temporaliov1alpha1.TemporalWorkerDeploymentReference{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{
 				Name: "my-worker",
 			},
 			Template: runtime.RawExtension{Raw: rawBytes},

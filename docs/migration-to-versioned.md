@@ -4,7 +4,7 @@ This guide helps teams migrate from unversioned Temporal workflows to versioned 
 
 ## Important Note
 
-This guide uses specific terminology that is defined in the [Concepts](concepts.md) document. Please review the concepts document first to understand key terms like **Temporal Worker Deployment**, **`TemporalWorkerDeployment` CRD**, and **Kubernetes `Deployment`**, as well as the relationship between them.
+This guide uses specific terminology that is defined in the [Concepts](concepts.md) document. Please review the concepts document first to understand key terms like **Temporal Worker Deployment**, **`WorkerDeployment` CRD**, and **Kubernetes `Deployment`**, as well as the relationship between them.
 
 ## Table of Contents
 
@@ -86,7 +86,7 @@ spec:
 ```yaml
 # Single Custom Resource manages multiple versions of a worker deployment automatically
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: my-worker
 spec:
@@ -116,7 +116,7 @@ spec:
 
 **New Deployment Process:**
 1. Build new worker image  
-2. Update `TemporalWorkerDeployment` custom resource with new image
+2. Update `WorkerDeployment` custom resource with new image
 3. Controller creates new Kubernetes `Deployment` for the new version
 4. Controller gradually routes new workflows and existing AutoUpgrade workflows to new version
 5. Old version continues handling existing Pinned workflows until they complete
@@ -152,7 +152,7 @@ The migration from unversioned to versioned workflows requires careful planning 
 
 #### Phase 2: Initial Migration
 1. **Choose lowest-risk worker** to migrate first
-2. **Create `TemporalWorkerDeployment` custom resource** with a Progressive strategy (conservative intervals recommended)
+2. **Create `WorkerDeployment` custom resource** with a Progressive strategy (conservative intervals recommended)
 3. **Validate controller management** works correctly
 4. **Update deployment pipeline** for this worker
 
@@ -179,13 +179,13 @@ helm install -n temporal-system --create-namespace \
   
 ```
 
-### Step 2: Create TemporalConnection Resources
+### Step 2: Create Connection Resources
 
 Define connection parameters to your Temporal server(s):
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
-kind: TemporalConnection
+kind: Connection
 metadata:
   name: production-temporal
   namespace: default
@@ -195,7 +195,7 @@ spec:
     name: temporal-cloud-mtls  # Optional: for mTLS
 ---
 apiVersion: temporal.io/v1alpha1
-kind: TemporalConnection
+kind: Connection
 metadata:
   name: staging-temporal
   namespace: default
@@ -235,9 +235,9 @@ workerOptions.DeploymentOptions = worker.DeploymentOptions{
 worker := worker.New(client, "my-task-queue", workerOptions)
 ```
 
-### Step 4: Create Your First TemporalWorkerDeployment
+### Step 4: Create Your First WorkerDeployment
 
-Start with your lowest-risk worker. Make a copy of your existing unversioned Deployment and convert it to a `TemporalWorkerDeployment` custom resource:
+Start with your lowest-risk worker. Make a copy of your existing unversioned Deployment and convert it to a `WorkerDeployment` custom resource:
 
 **Existing Unversioned Deployment:**
 ```yaml
@@ -259,10 +259,10 @@ spec:
           value: "production"
 ```
 
-**New TemporalWorkerDeployment custom resource (IMPORTANT: Use Progressive strategy with conservative settings initially):**
+**New WorkerDeployment custom resource (IMPORTANT: Use Progressive strategy with conservative settings initially):**
 ```yaml
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: payment-processor
   labels:
@@ -298,9 +298,9 @@ spec:
         # Note: Controller automatically adds TEMPORAL_* env vars
 ```
 
-### Step 5: Deploy the TemporalWorkerDeployment
+### Step 5: Deploy the WorkerDeployment
 
-1. **Create the `TemporalWorkerDeployment` custom resource:**
+1. **Create the `WorkerDeployment` custom resource:**
    ```bash
    kubectl apply -f payment-processor-versioned.yaml
    ```
@@ -373,7 +373,7 @@ Now you need to carefully transition from your old unversioned deployment to the
 Once the initial migration is complete and validated, you can optimize rollout settings for faster deployments:
 
 ```bash
-# Update the TemporalWorkerDeployment custom resource to use faster Progressive rollout
+# Update the WorkerDeployment custom resource to use faster Progressive rollout
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{
   "spec": {
     "rollout": {
@@ -399,7 +399,7 @@ kubectl set image deployment/payment-processor worker=payment-processor:v1.6.0
 
 **After (Versioned):**
 ```bash
-# New pipeline updates TemporalWorkerDeployment custom resource
+# New pipeline updates WorkerDeployment custom resource
 kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{"spec":{"template":{"spec":{"containers":[{"name":"worker","image":"payment-processor:v1.6.0"}]}}}}'
 ```
 
@@ -416,7 +416,7 @@ Deploy a new version to validate the entire flow:
 
 1. **Make a small, safe change** to your worker code
 2. **Build and push** a new container image
-3. **Update the TemporalWorkerDeployment:**
+3. **Update the WorkerDeployment:**
    ```bash
    kubectl patch temporalworkerdeployment payment-processor --type='merge' -p='{"spec":{"template":{"spec":{"containers":[{"name":"worker","image":"payment-processor:v1.6.0"}]}}}}'
    ```
@@ -449,7 +449,7 @@ See [Configuration Reference](configuration.md) for detailed examples and advanc
 
 1. **Test in non-production environment:**
    ```bash
-   # Create test TemporalWorkerDeployment
+   # Create test WorkerDeployment
    kubectl apply -f test-worker.yaml
    
    # Verify worker registration
@@ -470,7 +470,7 @@ See [Configuration Reference](configuration.md) for detailed examples and advanc
 
 2. **Monitor version transitions:**
    ```bash
-   kubectl get events --field-selector involvedObject.kind=TemporalWorkerDeployment
+   kubectl get events --field-selector involvedObject.kind=WorkerDeployment
    ```
 
 3. **Validate workflow routing:**
@@ -489,7 +489,7 @@ If you have multiple services with their own workers, and each service is versio
 ```yaml
 # Payment service worker
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: payment-processor
   namespace: payments
@@ -508,7 +508,7 @@ spec:
 ---
 # Notification service worker (separate service, different risk profile)
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: notification-sender
   namespace: notifications
@@ -528,7 +528,7 @@ Use different rollout strategies based on environment risk:
 ```yaml
 # Production - Conservative rollout
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: order-processor
   namespace: production
@@ -563,7 +563,7 @@ spec:
 ---
 # Staging - Fast rollout for testing
 apiVersion: temporal.io/v1alpha1
-kind: TemporalWorkerDeployment
+kind: WorkerDeployment
 metadata:
   name: order-processor
   namespace: staging
@@ -609,7 +609,7 @@ status:
 
 *Solutions:*
 - Check worker logs for connection/initialization errors
-- Verify TemporalConnection configuration  
+- Verify Connection configuration  
 - Ensure TLS secrets are properly configured
 - Verify network connectivity to Temporal server
 - Check that worker code properly handles `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` environment variables
@@ -670,13 +670,13 @@ kubectl get deployments -l temporal.io/managed-by=temporal-worker-controller
 kubectl logs -l temporal.io/worker-deployment=my-worker
 
 # Check controller events
-kubectl get events --field-selector involvedObject.kind=TemporalWorkerDeployment
+kubectl get events --field-selector involvedObject.kind=WorkerDeployment
 ```
 
 ### Getting Help
 
 1. **Check controller logs** for error messages
-2. **Review TemporalWorkerDeployment status** for detailed state information
+2. **Review WorkerDeployment status** for detailed state information
 3. **Verify Temporal server connectivity** from worker pods
 4. **File issues** at the project repository with logs and configuration
 

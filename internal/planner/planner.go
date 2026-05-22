@@ -124,10 +124,10 @@ type Config struct {
 func GeneratePlan(
 	l logr.Logger,
 	k8sState *k8s.DeploymentState,
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	temporalState *temporal.TemporalWorkerState,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 	config *Config,
 	workerDeploymentName string,
 	maxVersionsIneligibleForDeletion int32,
@@ -158,7 +158,7 @@ func GeneratePlan(
 	// Determine version config changes
 	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
 
-	// TODO(jlegrone): generate warnings/events on the TemporalWorkerDeployment resource when buildIDs are reachable
+	// TODO(jlegrone): generate warnings/events on the WorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
 	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments)
@@ -256,7 +256,7 @@ func getWRTOwnerRefPatches(
 	blockOwnerDeletion := true
 	ownerRef := metav1.OwnerReference{
 		APIVersion:         temporaliov1alpha1.GroupVersion.String(),
-		Kind:               "TemporalWorkerDeployment",
+		Kind:               "WorkerDeployment",
 		Name:               twdName,
 		UID:                twdUID,
 		Controller:         &isController,
@@ -325,7 +325,7 @@ func getDeleteWorkerResources(
 			// buildID (e.g. the version was already eligible for deletion when the WRT was
 			// first created). The Delete call is a no-op if the resource doesn't exist.
 			resourceName := k8s.ComputeWorkerResourceTemplateName(
-				wrt.Spec.TemporalWorkerDeploymentRef.Name, wrt.Name, buildID,
+				wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, buildID,
 			)
 			refs = append(refs, WorkerResourceRef{
 				Namespace:  wrt.Namespace,
@@ -339,13 +339,13 @@ func getDeleteWorkerResources(
 }
 
 // checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
-// out-of-date with respect to the provided TemporalConnectionSpec. If an update is required, it mutates
+// out-of-date with respect to the provided ConnectionSpec. If an update is required, it mutates
 // the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
 // the Deployment does not exist, it returns nil.
 func checkAndUpdateDeploymentConnectionSpec(
 	buildID string,
 	k8sState *k8s.DeploymentState,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 ) *appsv1.Deployment {
 	existingDeployment, exists := k8sState.Deployments[buildID]
 	if !exists {
@@ -364,8 +364,8 @@ func checkAndUpdateDeploymentConnectionSpec(
 	return nil
 }
 
-// updateDeploymentWithConnection updates an existing deployment with new TemporalConnectionSpec
-func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection temporaliov1alpha1.TemporalConnectionSpec) {
+// updateDeploymentWithConnection updates an existing deployment with new ConnectionSpec
+func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection temporaliov1alpha1.ConnectionSpec) {
 	// Update the connection spec hash annotation
 	deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
 
@@ -397,8 +397,8 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 func checkAndUpdateDeploymentPodTemplateSpec(
 	buildID string,
 	k8sState *k8s.DeploymentState,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 ) *appsv1.Deployment {
 	existingDeployment, exists := k8sState.Deployments[buildID]
 	if !exists {
@@ -442,8 +442,8 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 // from the TWD spec. This applies all the controller modifications that NewDeploymentWithOwnerRef does.
 func updateDeploymentWithPodTemplateSpec(
 	deployment *appsv1.Deployment,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 ) {
 	// Deep copy the user-provided pod spec to avoid mutating the original
 	podSpec := spec.Template.Spec.DeepCopy()
@@ -507,9 +507,9 @@ func updateDeploymentWithPodTemplateSpec(
 
 func getUpdateDeployments(
 	k8sState *k8s.DeploymentState,
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
-	connection temporaliov1alpha1.TemporalConnectionSpec,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	connection temporaliov1alpha1.ConnectionSpec,
 ) []*appsv1.Deployment {
 	var updateDeployments []*appsv1.Deployment
 	// Track which deployments we've already added to avoid duplicates
@@ -557,8 +557,8 @@ func getUpdateDeployments(
 // getDeleteDeployments determines which deployments should be deleted
 func getDeleteDeployments(
 	k8sState *k8s.DeploymentState,
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	foundDeploymentInTemporal bool,
 ) []*appsv1.Deployment {
 	var deleteDeployments []*appsv1.Deployment
@@ -603,15 +603,15 @@ func getDeleteDeployments(
 // versions that are not the rollout target are always scaled to zero during sunset.
 func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
-	spec *temporaliov1alpha1.TemporalWorkerDeploymentSpec,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
 
 	// Scale the current version if needed
 	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
 		// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
-		// Scale the Current Version per the TemporalWorkerDeploymentSpec.Replicas value.
+		// Scale the Current Version per the WorkerDeploymentSpec.Replicas value.
 		if spec.Replicas != nil {
 			replicas := *spec.Replicas
 			ref := status.CurrentVersion.Deployment
@@ -693,7 +693,7 @@ func getScaleDeployments(
 
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	maxVersionsIneligibleForDeletion int32,
 ) bool {
 	// Check if target version already has a deployment
@@ -718,7 +718,7 @@ func shouldCreateDeployment(
 
 // getTestWorkflows determines which test workflows should be started
 func getTestWorkflows(
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	config *Config,
 	workerDeploymentName string,
 	gateInput []byte,
@@ -762,7 +762,7 @@ func getTestWorkflows(
 // getVersionConfigDiff determines the version configuration based on the rollout strategy
 func getVersionConfigDiff(
 	l logr.Logger,
-	status *temporaliov1alpha1.TemporalWorkerDeploymentStatus,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	temporalState *temporal.TemporalWorkerState,
 	config *Config,
 	workerDeploymentName string,

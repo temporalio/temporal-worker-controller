@@ -6,12 +6,12 @@ This document provides a detailed technical overview of how the Temporal Worker 
 
 ## How It Works
 
-Every `TemporalWorkerDeployment` resource manages one or more standard `Deployment` resources. Each Deployment manages pods which in turn poll Temporal for tasks routed to their respective worker versions.
+Every `WorkerDeployment` resource manages one or more standard `Deployment` resources. Each Deployment manages pods which in turn poll Temporal for tasks routed to their respective worker versions.
 
 ```mermaid
 flowchart TD
     subgraph "K8s Namespace 'ns'"
-      twd[TemporalWorkerDeployment 'foo']
+      wd[WorkerDeployment 'foo']
       
       subgraph "Current/default version"
         d5["Deployment foo-v5, Version{DeploymentName: ns/foo, BuildID: v5}"]
@@ -38,9 +38,9 @@ flowchart TD
       end
     end  
 
-    twd --> d1
-    twd --> dN
-    twd --> d5
+    wd --> d1
+    wd --> dN
+    wd --> d5
 
     p1a -. "poll version {ns/foo, v1}" .-> server
     p1b -. "poll version {ns/foo, v1}" .-> server
@@ -103,12 +103,12 @@ sequenceDiagram
     participant Ctl as WorkerController
     participant T as Temporal
 
-    Dev->>K8s: Create TemporalWorkerDeployment "foo" (v1)
-    K8s-->>Ctl: Notify TemporalWorkerDeployment "foo" created
+    Dev->>K8s: Create WorkerDeployment "foo" (v1)
+    K8s-->>Ctl: Notify WorkerDeployment "foo" created
     Ctl->>K8s: Create Deployment "foo-v1"
     Ctl->>T: Register build "v1" as new current version of "ns/foo"
-    Dev->>K8s: Update TemporalWorker "foo" (v2)
-    K8s-->>Ctl: Notify TemporalWorker "foo" updated
+    Dev->>K8s: Update WorkerDeployment "foo" (v2)
+    K8s-->>Ctl: Notify WorkerDeployment "foo" updated
     Ctl->>K8s: Create Deployment "foo-v2"
     Ctl->>T: Register build "v2" as new current version of "ns/foo"
     
@@ -121,7 +121,7 @@ sequenceDiagram
 
 ## Resource Relationships
 
-### TemporalWorkerDeployment (Custom Resource)
+### WorkerDeployment (Custom Resource)
 - **Purpose**: High-level configuration for a worker deployment across all versions
 - **Manages**: Multiple Kubernetes `Deployment` resources (one per version)
 - **Lifecycle**: Long-lived, persists across worker version changes
@@ -131,7 +131,7 @@ sequenceDiagram
 - **Naming**: `{worker-deployment-name}-{build-id}`
 - **Lifecycle**: Created when new version deployed, deleted when version drained
 
-### TemporalConnection (Custom Resource)
+### Connection (Custom Resource)
 - **Purpose**: Connection configuration to Temporal server(s)
 - **Scope**: Can be shared across multiple worker deployments
 - **Contains**: Server addresses, TLS configuration, authentication
