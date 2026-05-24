@@ -3,7 +3,7 @@ module github.com/temporalio/temporal-worker-controller/internal/demo
 go 1.26.2
 
 require (
-	github.com/prometheus/client_golang v1.23.0
+	github.com/prometheus/client_golang v1.23.2
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.60.0
 	go.opentelemetry.io/otel/sdk/metric v1.43.0
