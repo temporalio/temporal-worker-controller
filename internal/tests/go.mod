@@ -3,7 +3,7 @@ module github.com/temporalio/temporal-worker-controller/tests
 go 1.26.2
 
 require (
-	github.com/temporalio/temporal-worker-controller v1.6.0
+	github.com/temporalio/temporal-worker-controller v1.7.0
 	go.temporal.io/api v1.62.11
 	go.temporal.io/sdk v1.43.0
 	go.temporal.io/server v1.32.0-155.0

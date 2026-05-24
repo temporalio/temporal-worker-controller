@@ -402,8 +402,8 @@ github.com/temporalio/sqlparser v0.0.0-20231115171017-f4060bcfa6cb/go.mod h1:143
 github.com/temporalio/tchannel-go v1.22.1-0.20220818200552-1be8d8cffa5b/go.mod h1:c+V9Z/ZgkzAdyGvHrvC5AsXgN+M9Qwey04cBdKYzV7U=
 github.com/temporalio/tchannel-go v1.22.1-0.20260129151045-8706a1ab5f61 h1:v9EBEMJggmXGbVcIAjGQpKgEB+a9E/Q0brJ6fGWJvhQ=
 github.com/temporalio/tchannel-go v1.22.1-0.20260129151045-8706a1ab5f61/go.mod h1:ezRQRwu9KQXy8Wuuv1aaFFxoCNz5CeNbVOOkh3xctbY=
-github.com/temporalio/temporal-worker-controller v1.6.0 h1:8v6SHjeJIK6vRd07dxA5JGY2SdxfOiVRUI6TijsDbec=
-github.com/temporalio/temporal-worker-controller v1.6.0/go.mod h1:pfRZyP5FH08cN2x7n5EdBWJy9NjwYK1IyC4MJ7l+TYA=
+github.com/temporalio/temporal-worker-controller v1.7.0 h1:HZwgpM6oHFPYCXe19w70J37rBmEdC/slnSY6s8jhKHM=
+github.com/temporalio/temporal-worker-controller v1.7.0/go.mod h1:pfRZyP5FH08cN2x7n5EdBWJy9NjwYK1IyC4MJ7l+TYA=
 github.com/tidwall/btree v1.8.1 h1:27ehoXvm5AG/g+1VxLS1SD3vRhp/H7LuEfwNvddEdmA=
 github.com/tidwall/btree v1.8.1/go.mod h1:jBbTdUWhSZClZWoDg54VnvV7/54modSOzDN7VXftj1A=
 github.com/twmb/murmur3 v1.1.8 h1:8Yt9taO/WN3l08xErzjeschgZU2QSrwm1kclYq+0aRg=
