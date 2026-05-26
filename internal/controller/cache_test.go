@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package main
+package controller
 
 import (
 	"testing"
@@ -12,10 +12,10 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-func TestManagerCacheOptionsScopesDeploymentsByWorkerLabel(t *testing.T) {
-	opts, err := managerCacheOptions()
+func TestNewCacheOptionsScopesDeploymentsByWorkerLabel(t *testing.T) {
+	opts, err := NewCacheOptions()
 	if err != nil {
-		t.Fatalf("managerCacheOptions returned error: %v", err)
+		t.Fatalf("NewCacheOptions returned error: %v", err)
 	}
 
 	var deploymentSelector labels.Selector
