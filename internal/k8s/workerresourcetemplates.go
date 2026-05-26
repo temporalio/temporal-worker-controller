@@ -99,11 +99,12 @@ func RenderWorkerResourceTemplate(
 		"temporal_namespace":              temporalNamespace,
 	}
 
-	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, and metric selector labels.
-	// NestedFieldNoCopy returns a live reference so mutations are reflected in obj.Object directly.
+	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, metric selector labels,
+	// and KEDA Temporal trigger metadata. NestedFieldNoCopy returns a live reference so
+	// mutations are reflected in obj.Object directly.
 	if specRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec"); ok {
 		if spec, ok := specRaw.(map[string]interface{}); ok {
-			autoInjectFields(spec, deployment.Name, selectorLabels, metricSelectorLabels)
+			autoInjectFields(spec, deployment.Name, twdName, buildID, selectorLabels, metricSelectorLabels)
 		}
 	}
 
@@ -152,9 +153,15 @@ func RenderWorkerResourceTemplate(
 //     matchLabels is present (including {}). User labels like task_type coexist.
 //     If matchLabels is absent, no injection occurs for that metric entry.
 //
+//   - spec.triggers[*].metadata (KEDA ScaledObject): for triggers of type "temporal",
+//     workerDeploymentName and workerDeploymentBuildId are set whenever the key is
+//     present in metadata (including empty string). Required by KEDA's Temporal scaler
+//     (kedacore/keda#7672) for per-version backlog scaling against Worker Deployment
+//     Versioning.
+//
 //   - scaleTargetRef: injected anywhere in the spec tree when {} (empty), via
 //     injectScaleTargetRefRecursive. Unambiguous across all supported resource types.
-func autoInjectFields(spec map[string]interface{}, deploymentName string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
+func autoInjectFields(spec map[string]interface{}, deploymentName, twdName, buildID string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
 	// spec.selector.matchLabels: {} opt-in sentinel.
 	if sel, ok := spec["selector"].(map[string]interface{}); ok {
 		if isEmptyMap(sel["matchLabels"]) {
@@ -166,6 +173,9 @@ func autoInjectFields(spec map[string]interface{}, deploymentName string, podSel
 	if len(metricSelectorLabels) > 0 {
 		appendMetricsMatchLabelSelector(spec, metricSelectorLabels)
 	}
+
+	// triggers[*].metadata: inject KEDA Temporal scaler version identifiers when present.
+	appendTemporalTriggerMetadata(spec, twdName, buildID)
 
 	// scaleTargetRef: inject anywhere in the spec tree.
 	injectScaleTargetRefRecursive(spec, deploymentName)
@@ -204,6 +214,43 @@ func appendMetricsMatchLabelSelector(spec map[string]interface{}, metricSelector
 				existing[k] = v
 			}
 			_ = unstructured.SetNestedStringMap(sel, existing, "matchLabels")
+		}
+	}
+}
+
+// appendTemporalTriggerMetadata walks spec.triggers[*] and, for any KEDA trigger
+// of type "temporal", sets workerDeploymentName and workerDeploymentBuildId in its
+// metadata map. Injection is opt-in: only keys already present in metadata are
+// overwritten, mirroring the matchLabels merge pattern used elsewhere in this file.
+// Users opt a template into per-version injection by writing the placeholder keys
+// (any string value, typically "") in their WorkerResourceTemplate spec.
+//
+// Required by KEDA's Temporal scaler (kedacore/keda#7672) for per-version backlog
+// scaling against Temporal's Worker Deployment Versioning model. Non-temporal
+// triggers in the same ScaledObject are untouched.
+func appendTemporalTriggerMetadata(spec map[string]interface{}, twdName, buildID string) {
+	triggers, ok := spec["triggers"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, t := range triggers {
+		trigger, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		triggerType, _ := trigger["type"].(string)
+		if triggerType != "temporal" {
+			continue
+		}
+		metadata, ok := trigger["metadata"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, present := metadata["workerDeploymentName"]; present {
+			metadata["workerDeploymentName"] = twdName
+		}
+		if _, present := metadata["workerDeploymentBuildId"]; present {
+			metadata["workerDeploymentBuildId"] = buildID
 		}
 	}
 }
