@@ -52,7 +52,7 @@ jobs:
           echo "ref=${branch}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.meta.outputs.ref }}
           fetch-depth: 0
