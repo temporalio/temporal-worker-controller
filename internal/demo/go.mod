@@ -10,7 +10,7 @@ require (
 	go.temporal.io/api v1.62.11
 	go.temporal.io/sdk v1.43.0
 	go.temporal.io/sdk/contrib/envconfig v1.0.1
-	go.temporal.io/sdk/contrib/opentelemetry v0.6.0
+	go.temporal.io/sdk/contrib/opentelemetry v0.7.0
 )
 
 require (
