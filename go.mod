@@ -10,10 +10,10 @@ require (
 	github.com/onsi/gomega v1.40.0
 	github.com/pborman/uuid v1.2.1
 	github.com/stretchr/testify v1.11.1
-	go.temporal.io/api v1.62.11
+	go.temporal.io/api v1.62.12-0.20260430203359-15c391664683
 	go.temporal.io/sdk v1.43.0
 	go.temporal.io/sdk/contrib/envconfig v1.0.1
-	go.temporal.io/server v1.32.0-155.0
+	go.temporal.io/server v1.32.0-156.0-rc.20260513120230
 	google.golang.org/grpc v1.80.0
 	k8s.io/api v0.36.0
 	k8s.io/apiextensions-apiserver v0.36.0
