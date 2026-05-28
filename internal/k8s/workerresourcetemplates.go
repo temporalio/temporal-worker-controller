@@ -225,10 +225,16 @@ func appendMetricsMatchLabelSelector(spec map[string]interface{}, metricSelector
 
 // appendTemporalTriggerMetadata walks spec.triggers[*] and, for any KEDA trigger
 // of type "temporal", sets workerDeploymentName and workerDeploymentBuildId in its
-// metadata map. Injection is opt-in: only keys already present in metadata are
-// overwritten, mirroring the matchLabels merge pattern used elsewhere in this file.
-// Users opt a template into per-version injection by writing the placeholder keys
-// (any string value, typically "") in their WorkerResourceTemplate spec.
+// metadata map. Injection is opt-in via the empty-string sentinel, mirroring the
+// scaleTargetRef {} sentinel pattern: absent = no injection; present-and-empty = inject;
+// present-and-non-empty is rejected by the WorkerResourceTemplate validating webhook
+// (defense in depth — if a non-empty value reaches the runtime, it is left untouched
+// rather than silently overwritten).
+//
+// twdName must be the fully-qualified Temporal-server Worker Deployment name
+// (computeWorkerDeploymentName(k8sNamespace, wdName)) — that's what workers register
+// with at Temporal Cloud and what KEDA's scaler needs to query backlog for a specific
+// version.
 //
 // Required by KEDA's Temporal scaler (kedacore/keda#7672) for per-version backlog
 // scaling against Temporal's Worker Deployment Versioning model. Non-temporal
@@ -251,13 +257,21 @@ func appendTemporalTriggerMetadata(spec map[string]interface{}, twdName, buildID
 		if !ok {
 			continue
 		}
-		if _, present := metadata["workerDeploymentName"]; present {
+		if isEmptyString(metadata["workerDeploymentName"]) {
 			metadata["workerDeploymentName"] = twdName
 		}
-		if _, present := metadata["workerDeploymentBuildId"]; present {
+		if isEmptyString(metadata["workerDeploymentBuildId"]) {
 			metadata["workerDeploymentBuildId"] = buildID
 		}
 	}
+}
+
+// isEmptyString returns true if v is a string with no characters. The trigger-metadata
+// injection mirrors scaleTargetRef's isEmptyMap sentinel pattern but for string fields,
+// since KEDA's trigger metadata is a map of strings.
+func isEmptyString(v interface{}) bool {
+	s, ok := v.(string)
+	return ok && s == ""
 }
 
 // injectScaleTargetRefRecursive recursively traverses obj and injects scaleTargetRef

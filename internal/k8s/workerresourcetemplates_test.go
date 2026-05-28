@@ -315,15 +315,20 @@ func TestAutoInjectFields_TemporalTriggerMetadata(t *testing.T) {
 		assert.Equal(t, "my-tq", md["taskQueue"])
 	})
 
-	t.Run("overwrites pre-existing values when keys are present", func(t *testing.T) {
+	t.Run("does not overwrite non-empty user values (webhook rejects, runtime is defensive)", func(t *testing.T) {
+		// The validating webhook is the primary line of defence: a WorkerResourceTemplate
+		// whose template contains a non-empty workerDeploymentName or workerDeploymentBuildId
+		// is rejected at admission. The runtime injection is defensive: if a non-empty value
+		// somehow reaches it, the user-provided value is preserved (consistent with the
+		// scaleTargetRef pattern where only {} opts in).
 		spec := scaledObjectSpec(map[string]interface{}{
-			"workerDeploymentName":    "stale-name",
-			"workerDeploymentBuildId": "stale-build",
+			"workerDeploymentName":    "user-set-name",
+			"workerDeploymentBuildId": "user-set-build",
 		})
 		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, nil, nil)
 		md := spec["triggers"].([]interface{})[0].(map[string]interface{})["metadata"].(map[string]interface{})
-		assert.Equal(t, twdName, md["workerDeploymentName"], "should overwrite stale value with current twdName")
-		assert.Equal(t, buildID, md["workerDeploymentBuildId"], "should overwrite stale value with current buildID")
+		assert.Equal(t, "user-set-name", md["workerDeploymentName"], "runtime must not silently overwrite non-empty user value")
+		assert.Equal(t, "user-set-build", md["workerDeploymentBuildId"], "runtime must not silently overwrite non-empty user value")
 	})
 
 	t.Run("does not inject when keys are absent", func(t *testing.T) {
