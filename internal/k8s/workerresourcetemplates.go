@@ -40,7 +40,7 @@ const (
 )
 
 // ComputeWorkerResourceTemplateName generates a deterministic, DNS-safe name for the worker resource template
-// instance corresponding to a given (twdName, wrtName, buildID) triple.
+// instance corresponding to a given (wdName, wrtName, buildID) triple.
 //
 // The name has the form:
 //
@@ -50,16 +50,16 @@ const (
 // capping occurs. This guarantees that two different triples — including triples that
 // differ only in the buildID — always produce different names, even if the human-readable
 // prefix is truncated. The buildID is therefore always uniquely represented via the hash,
-// regardless of how long twdName or wrtName are.
-func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string {
+// regardless of how long wdName or wrtName are.
+func ComputeWorkerResourceTemplateName(wdName, wrtName, buildID string) string {
 	// Hash the full triple first, before any truncation.
-	h := sha256.Sum256([]byte(twdName + wrtName + buildID))
+	h := sha256.Sum256([]byte(wdName + wrtName + buildID))
 	hashSuffix := hex.EncodeToString(h[:workerResourceTemplateHashLen/2]) // 4 bytes → 8 hex chars
 
 	// Build the human-readable prefix and truncate so the total fits in maxLen.
 	// suffixLen = len("-") + workerResourceTemplateHashLen
 	const suffixLen = 1 + workerResourceTemplateHashLen
-	raw := CleanStringForDNS(twdName + ResourceNameSeparator + wrtName + ResourceNameSeparator + buildID)
+	raw := CleanStringForDNS(wdName + ResourceNameSeparator + wrtName + ResourceNameSeparator + buildID)
 	prefix := TruncateString(raw, workerResourceTemplateMaxNameLen-suffixLen)
 	// Trim any trailing separator that results from truncating mid-segment.
 	prefix = strings.TrimRight(prefix, ResourceNameSeparator)
@@ -86,15 +86,20 @@ func RenderWorkerResourceTemplate(
 		return nil, fmt.Errorf("failed to unmarshal spec.template: %w", err)
 	}
 
-	twdName := wrt.Spec.EffectiveWorkerDeploymentName()
-	selectorLabels := ComputeSelectorLabels(twdName, buildID)
+	// The name of the Worker Deployment Kubernetes resource
+	wdName := wrt.Spec.EffectiveWorkerDeploymentName()
+
+	// The name of the Worker Deployment in Temporal Server, prefixed by the Kubernetes namespace of the resource
+	twdName := computeWorkerDeploymentName(wrt.Namespace, wdName)
+
+	selectorLabels := ComputeSelectorLabels(wdName, buildID)
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
 	// that is present in the template. These identify the exact per-version Prometheus series.
 	// Ordering is not a concern: matchLabels is a map; encoding/json serialises map keys in
 	// sorted order, so ComputeRenderedObjectHash is deterministic regardless of insertion order.
 	metricSelectorLabels := map[string]string{
-		"temporal_worker_deployment_name": wrt.Namespace + "_" + twdName,
+		"temporal_worker_deployment_name": cleanDeploymentNameForK8sLabelValue(twdName),
 		"temporal_worker_build_id":        buildID,
 		"temporal_namespace":              temporalNamespace,
 	}
