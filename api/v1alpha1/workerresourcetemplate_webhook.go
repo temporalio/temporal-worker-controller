@@ -326,9 +326,10 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 
 // checkTemporalTriggerMetadataNotSet validates that, for each KEDA trigger of type "temporal"
 // in spec.triggers, the controller-owned metadata keys (workerDeploymentName,
-// workerDeploymentBuildId) are either absent or set to the empty-string opt-in sentinel.
-// A non-empty value is rejected — the controller fills these per-version at render time
-// and a hardcoded value would point at the wrong worker deployment / build.
+// workerDeploymentBuildId, namespace) are either absent or set to the empty-string opt-in
+// sentinel. A non-empty value is rejected — the controller fills these at render time from
+// the WorkerDeployment's connection / per-version state, and a hardcoded value would point
+// at the wrong worker deployment / build / Temporal namespace.
 // Non-temporal triggers (prometheus, cron, etc.) are not validated.
 func checkTemporalTriggerMetadataNotSet(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
 	triggers, ok := spec["triggers"].([]interface{})
@@ -350,7 +351,7 @@ func checkTemporalTriggerMetadataNotSet(spec map[string]interface{}, path *field
 			continue
 		}
 		triggerPath := triggersPath.Index(i).Child("metadata")
-		for _, key := range []string{"workerDeploymentName", "workerDeploymentBuildId"} {
+		for _, key := range []string{"workerDeploymentName", "workerDeploymentBuildId", "namespace"} {
 			val, present := metadata[key]
 			if !present {
 				continue
@@ -360,8 +361,8 @@ func checkTemporalTriggerMetadataNotSet(spec map[string]interface{}, path *field
 				*allErrs = append(*allErrs, field.Forbidden(
 					triggerPath.Child(key),
 					"if "+key+" is present on a temporal trigger, the controller owns it and "+
-						"will set it to the per-version value; set it to \"\" to opt in to auto-injection, "+
-						"or remove it entirely if you do not need per-version trigger metadata",
+						"will set it to the per-version or per-connection value; set it to \"\" to opt in "+
+						"to auto-injection, or remove it entirely if you do not need it",
 				))
 			}
 		}
