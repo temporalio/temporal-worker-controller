@@ -1,20 +1,30 @@
-# Scaling Recommendations: HPA + prometheus-adapter vs KEDA
+# Scaling Recommendations
 
-This document describes practical reactivity and reliability tradeoffs when scaling Temporal workers per worker-deployment-version on Kubernetes, and recommends which tool fits which workload pattern.
+This document describes practical reactivity and reliability tradeoffs when scaling Temporal workers per worker deployment version on Kubernetes, and recommends which tool fits which workload pattern.
 
 The `internal/demo/` example wires the HPA path described here. The KEDA path is mentioned for comparison and as a recommendation for workloads that cannot tolerate the HPA path's limits.
 
-## TL;DR — Pick by workload pattern
+## TL;DR
+
+We recommend choosing a scaler approach that aligns with the workload pattern your application exhibits.
 
 | Workload pattern | Recommendation |
 |------------------|----------------|
-| Continuous traffic (task queue always loaded) | HPA + prometheus-adapter, scaling on slot utilization + backlog count |
-| Idle periods >5 min between work; needs scale-from-zero | KEDA Temporal scaler |
+| Continuous traffic (task queue always loaded) | HPA |
+| Idle periods >5 min between work OR needs scale-from-zero | KEDA Temporal scaler |
 | Required reactivity < ~60 s from first backlog | KEDA Temporal scaler |
-| Required reactivity ~90 s typical, tolerant of occasional multi-minute stalls | HPA + prometheus-adapter is fine |
-| Very large namespaces (N × M HPAs polling) | HPA + prometheus-adapter; KEDA hits the 50 RPS namespace rate limit |
+| Required reactivity ~90 s typical, tolerant of occasional multi-minute stalls | HPA + prometheus-adapter |
+| 1000s of task queues and worker deployment versions  | HPA + prometheus-adapter |
 
-## The reactivity model for HPA + prometheus-adapter
+## HPA scaling signal
+
+This section describes the signal used by HPA + prometheus adapter to adjust the count of workers in a Kubernetes deployment managed by Temporal Worker Controller.
+
+There are two metric data points that are scraped by HPA + prometheus adapter.
+
+`temporal_cloud_v1_approximate_backlog_count` (or just "backlog") is a measurement of the number of pending tasks on a particular task queue that are waiting for a poller (a worker) to pull that task and process it.
+
+`temporal_slot_utilization` (or just "slot util") is emitted directly by worker pods (no Temporal Cloud aggregation), scraped at the ServiceMonitor interval (~10–30 s), and reflects the current state of a particular worker. This metrics rises *before* backlog accumulates — slots saturate first, then queueing starts.
 
 For a continuously-loaded task queue, the end-to-end delay from "backlog appears" to "HPA scales up" decomposes as:
 
@@ -67,7 +77,7 @@ In a two-metric HPA configured with slot utilization, this is mostly fine: the H
 
 ## Why this demo does not use a backlog recording rule
 
-A prior version of this demo wrapped the raw Cloud series in a Prometheus recording rule:
+A prior version of this demo wrapped the raw Temporal Cloud series in a Prometheus recording rule:
 
 ```yaml
 - record: temporal_approximate_backlog_count
@@ -84,10 +94,20 @@ The rule was originally added to work around a label-formatting issue in an olde
 What the recording rule *does* buy is registration stability after operational events: when the source series is sparse-by-timestamp, the rule produces a dense 10-second sample stream that lets the adapter discover with a tight `metricsRelistInterval`. If you find yourself fighting registration flicker on every adapter restart and would rather pay the cardinality cost than tune `metricsRelistInterval`, a recording rule is a reasonable choice. Otherwise, prefer the raw metric.
 
 In this demo we set `metricsRelistInterval: 5m` and consume the raw metric directly.
+## HPA strengths
 
-## Why prometheus-adapter cannot do scale-from-zero
+Because HPA uses a single OpenMetrics scrape to gather all series for the namespace in a single HTTP request, the HPA approach scales independently of namespace count. The single HTTP request for OpenMetrics more efficient than KEDA's Temporal API-based approach, and will not run into Temporal API rate limiting problems (see section below on [KEDA limitations](#keda-limitations)).
 
-Scale-from-zero on backlog through the metric path requires the metric to exist while there are zero workers. It does not:
+HPA + prometheus adapter configured to look at both slot util and backlog provides fast scale-up via slot util and a backlog-driven backstop to prevent overly reactive replica count adjustment.
+## HPA limitations
+
+This section describes two known limitations for HPA + prometheus adapter.
+
+Temporal Cloud's OpenMetrics endpoint may sometimes return the same embedded timestamps on repeated scrapes for each series across the account simultaneously — backlog series, action counts, error counts, every queue, every namespace. This delay in returning fresh metrics data can impact the speed to which HPA + prometheus adapter scales out or in the replica count for a worker deployment version. This means that HPA + prometheus adapter may not be a good solution if your workload cannot tolerate occasional multi-minute scaling pauses.
+
+> **Note**: This is why `metricsRelistInterval: 5m` is the recommended setting: the discovery window must comfortably exceed the longest expected delay so the metric does not deregister, otherwise re-registration waits up to one more relist cycle after delivery resumes.
+
+HPA cannot scale your Worker Deployment from zero because the signal for scaling does not yet exist. The signal for scaling is the backlog metric for the task queue associated with the workers in the Worker Deployment. This metric will not exist until there is at least one worker polling the task queue.
 
 1. Zero workers means no polls.
 2. No polls for >5 minutes means the task queue is unloaded from Temporal Cloud's memory.
@@ -95,11 +115,13 @@ Scale-from-zero on backlog through the metric path requires the metric to exist 
 4. Adapter discovery returns no series, or HPA queries return no rows.
 5. HPA cannot scale up because there's no signal to scale on.
 
-Submitting a workflow does load the task queue back into memory, but the metric still won't reach the HPA until the next OpenMetrics emission cycle (~1 minute) plus scrape and HPA poll. By the time the HPA reacts, you've already had ~1+ minute of unprovisioned work.
+Submitting a workflow does load the task queue back into memory, but the metric still won't reach the HPA until the next OpenMetrics emission cycle (~1 minute). By the time the HPA reacts, you've already had ~1+ minute of unprovisioned work.
 
-KEDA's Temporal scaler calls `DescribeTaskQueue(stats=true)` (or `DescribeWorkerDeploymentVersion`), which loads the queue synchronously and returns the backlog directly. No metric pipeline involved. Scale-from-zero in seconds.
+## KEDA strengths
 
-## When KEDA hits its own limits
+KEDA's Temporal scaler calls `DescribeTaskQueue(stats=true)` (or `DescribeWorkerDeploymentVersion`), which loads the queue synchronously and returns the backlog directly. This allows KEDA to scale Temporal workers from zero.
+
+## KEDA limitations
 
 KEDA bypasses the metric pipeline but uses Temporal API calls, which are subject to a per-namespace rate limit:
 
@@ -115,9 +137,8 @@ For a namespace with N task queues × M worker-deployment-versions = K HPAs, eac
 | 250       | 8 RPS (17%)    | 25 RPS (50%)   | 50 RPS (100%) |
 | 1500      | 50 RPS (100%)  | exceeds limit  | exceeds limit |
 
-prometheus-adapter has no equivalent per-namespace bottleneck — one OpenMetrics scrape returns all series for the namespace in a single HTTP request, scaling independently of HPA count.
 
-So for very large namespaces (hundreds–thousands of HPAs) needing fast reactivity, neither path is great: KEDA hits the API rate limit, and the metric path has the 3-min aggregation floor. In practice this is a "talk to your account team" situation.
+If you are using KEDA with Temporal Cloud and hitting the API rate limit described above, you will need to contact your Temporal Cloud account team to discuss increasing the rate limits.
 
 ## Recommended configuration for the HPA + prometheus-adapter path
 
