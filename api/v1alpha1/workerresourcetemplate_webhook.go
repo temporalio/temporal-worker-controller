@@ -342,8 +342,8 @@ func checkTemporalTriggerMetadataNotSet(spec map[string]interface{}, path *field
 		if !ok {
 			continue
 		}
-		triggerType, _ := trigger["type"].(string)
-		if triggerType != "temporal" {
+		triggerType, ok := trigger["type"].(string)
+		if !ok || triggerType != "temporal" {
 			continue
 		}
 		metadata, ok := trigger["metadata"].(map[string]interface{})

@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"strings"
 
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 // RenderedHashLen is the number of hex characters used for rendered-object hashes stored in
@@ -251,8 +252,8 @@ func appendTemporalTriggerMetadata(spec map[string]interface{}, twdName, buildID
 		if !ok {
 			continue
 		}
-		triggerType, _ := trigger["type"].(string)
-		if triggerType != "temporal" {
+		triggerType, ok := trigger["type"].(string)
+		if !ok || triggerType != "temporal" {
 			continue
 		}
 		metadata, ok := trigger["metadata"].(map[string]interface{})
