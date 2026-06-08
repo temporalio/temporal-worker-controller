@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"strings"
 
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 )
 
 // RenderedHashLen is the number of hex characters used for rendered-object hashes stored in
