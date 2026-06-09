@@ -189,9 +189,16 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 				return ctrl.Result{}, err
 			}
 
+			// We use Patch here and not Update here to avoid conflicts during
+			// apply where the field manager is different (say, helm versus
+			// temporal-worker-controller).
+			//
+			// Ref: https://github.com/temporalio/temporal-worker-controller/issues/317
+			patch := client.MergeFrom(workerDeploy.DeepCopy())
+
 			// Cleanup succeeded, remove the finalizer so K8s can delete the resource
 			controllerutil.RemoveFinalizer(&workerDeploy, finalizerName)
-			if err := r.Update(ctx, &workerDeploy); err != nil {
+			if err := r.Patch(ctx, &workerDeploy, patch); err != nil {
 				return ctrl.Result{}, err
 			}
 			l.Info("Temporal server-side cleanup complete, finalizer removed")
@@ -201,8 +208,14 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Ensure finalizer is present on non-deleted resources
 	if !controllerutil.ContainsFinalizer(&workerDeploy, finalizerName) {
+		// We use Patch here and not Update here to avoid conflicts during
+		// apply where the field manager is different (say, helm versus
+		// temporal-worker-controller).
+		//
+		// Ref: https://github.com/temporalio/temporal-worker-controller/issues/317
+		patch := client.MergeFrom(workerDeploy.DeepCopy())
 		controllerutil.AddFinalizer(&workerDeploy, finalizerName)
-		if err := r.Update(ctx, &workerDeploy); err != nil {
+		if err := r.Patch(ctx, &workerDeploy, patch); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
