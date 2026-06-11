@@ -36,7 +36,20 @@ backlog appears at T0
                  └─ scale-up stabilization window    + taken from HPA configuration
                       └─ first replica added
 ```
+
+Per-Worker tunable configuration options is outside the scope of this document.
+
+Please refer to the [documentation](worker-perf) for recommendations on when to use different [slot allocation strategies](slot-alloc-strat) for different workloads.
+
+Briefly, however, follow this advice:
+
+> Scenarios with tasks that have variable, or very high, per-task resource
+> needs should rely on fixed-size suppliers and manual tuning rather than
+> resource-based suppliers.
+
 [tc-openmetrics]: https://docs.temporal.io/cloud/metrics/openmetrics
+[worker-perf]: https://docs.temporal.io/develop/worker-performance
+[slot-alloc-strat]: https://docs.temporal.io/develop/worker-performance#choosing-slot-supplier-types
 
 ## HPA strengths
 
@@ -62,32 +75,9 @@ Submitting a workflow does load the task queue back into memory, but the metric 
 
 [om-delay]: https://docs.temporal.io/cloud/metrics/openmetrics#overview
 
-## KEDA strengths
+## HPA example configuration
 
-KEDA's Temporal scaler calls `DescribeTaskQueue(stats=true)` (or `DescribeWorkerDeploymentVersion`), which loads the queue synchronously and returns the backlog directly. This allows KEDA to scale Temporal workers from zero.
-
-## KEDA limitations
-
-KEDA bypasses the metric pipeline but uses Temporal API calls, which are subject to a per-namespace rate limit:
-
-```
-FrontendGlobalWorkerDeploymentReadRPS = 50  # per namespace, evenly distributed across frontend instances
-```
-
-For a namespace with N task queues × M worker-deployment-versions = K HPAs, each KEDA poll uses ~1 API call. The polling budget:
-
-| HPA count | Poll every 30s | Poll every 10s | Poll every 5s |
-|-----------|----------------|----------------|---------------|
-| 50        | 1.7 RPS (3%)   | 5 RPS (10%)    | 10 RPS (20%)  |
-| 250       | 8 RPS (17%)    | 25 RPS (50%)   | 50 RPS (100%) |
-| 1500      | 50 RPS (100%)  | exceeds limit  | exceeds limit |
-
-
-If you are using KEDA with Temporal Cloud and hitting the API rate limit described above, you will need to contact your Temporal Cloud account team to discuss increasing the rate limits.
-
-## Recommended configuration for the HPA + prometheus-adapter path
-
-This demo's configuration represents the recommendation, in compact form:
+Here is an example HPA + prometheus adapter configuration (snipped for brevity).
 
 **Scrape config** (`internal/demo/k8s/prometheus-stack-values.yaml`):
 ```yaml
@@ -134,8 +124,8 @@ spec:
             matchLabels:
               worker_type: "ActivityWorker"
         target:
-          type: Value
-          value: "750m"
+          type: AverageValue
+          value: "0.75"
 
     - type: External
       external:
@@ -166,9 +156,33 @@ spec:
       selectPolicy: Max
 ```
 
+## KEDA strengths
+
+KEDA's Temporal scaler calls `DescribeTaskQueue(stats=true)` (or `DescribeWorkerDeploymentVersion`), which loads the queue synchronously and returns the backlog directly. This allows KEDA to scale Temporal workers from zero.
+
+## KEDA limitations
+
+KEDA bypasses the metric pipeline but uses Temporal API calls, which are subject to a per-namespace rate limit:
+
+```
+FrontendGlobalWorkerDeploymentReadRPS = 50  # per namespace, evenly distributed across frontend instances
+```
+
+For a namespace with N task queues × M worker-deployment-versions = K HPAs, each KEDA poll uses ~1 API call. The polling budget:
+
+| HPA count | Poll every 30s | Poll every 10s | Poll every 5s |
+|-----------|----------------|----------------|---------------|
+| 50        | 1.7 RPS (3%)   | 5 RPS (10%)    | 10 RPS (20%)  |
+| 250       | 8 RPS (17%)    | 25 RPS (50%)   | 50 RPS (100%) |
+| 1500      | 50 RPS (100%)  | exceeds limit  | exceeds limit |
+
+
+If you are using KEDA with Temporal Cloud and hitting the API rate limit described above, you will need to contact your Temporal Cloud account team to discuss increasing the rate limits.
+
 ## References
 
 - [Temporal Cloud OpenMetrics](https://docs.temporal.io/cloud/metrics/openmetrics) — endpoint and opt-in labels
+* [Temporal Worker Performance Tuning](https://docs.temporal.io/develop/worker-performance) — explanation of tunable Worker performance knobs
 - [prometheus-adapter README](https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/README.md) — `metrics-relist-interval` and discovery window semantics
 - [prometheus-adapter externalmetrics.md](https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/docs/externalmetrics.md) — external rules, `namespaced: false` for cluster-scoped metrics
 - [Prometheus HTTP API: `/api/v1/series`](https://prometheus.io/docs/prometheus/latest/querying/api/#finding-series-by-label-matchers) — series discovery semantics
