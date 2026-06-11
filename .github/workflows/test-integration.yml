@@ -14,16 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version-file: 'go.mod'
         check-latest: true
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
     - name: Install Skaffold
       run: |
@@ -60,7 +60,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: setup go workspace
       run: go work init && go work use -r .
@@ -81,12 +81,12 @@ jobs:
         echo "$HOME/.temporalio/bin" >> "$GITHUB_PATH"
         
     - name: Install kubectl
-      uses: azure/setup-kubectl@v3
+      uses: azure/setup-kubectl@901a10e89ea615cf61f57ac05cecdf23e7de06d8 # v3.2
       with:
         version: 'latest'
         
     - name: Install Helm
-      uses: azure/setup-helm@v3
+      uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78 # v3.5
       with:
         version: 'v3.14.3'
         
@@ -106,7 +106,7 @@ jobs:
       
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: test-results
         path: |
@@ -120,7 +120,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: setup go workspace
       run: go work init && go work use -r .
@@ -139,7 +139,7 @@ jobs:
       run: go mod download
 
     - name: Install Helm
-      uses: azure/setup-helm@v3
+      uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78 # v3.5
 
     - name: Build Helm chart dependencies
       run: helm repo add jetstack https://charts.jetstack.io && helm dependency build helm/temporal-worker-controller
@@ -149,7 +149,7 @@ jobs:
       
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: unit-test-results
         path: |
