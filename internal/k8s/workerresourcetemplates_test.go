@@ -90,7 +90,7 @@ func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 			"minReplicas": 1,
 			"maxReplicas": 5,
 		}
-		autoInjectFields(spec, "my-worker-abc123", selectorLabels, nil)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
 		_, hasKey := spec["scaleTargetRef"]
 		assert.False(t, hasKey, "scaleTargetRef should not be injected when absent (user must opt in with {})")
 	})
@@ -99,7 +99,7 @@ func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 		spec := map[string]interface{}{
 			"scaleTargetRef": map[string]interface{}{},
 		}
-		autoInjectFields(spec, "my-worker-abc123", selectorLabels, nil)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
 		ref, ok := spec["scaleTargetRef"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "my-worker-abc123", ref["name"])
@@ -114,7 +114,7 @@ func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 				"kind": "Deployment",
 			},
 		}
-		autoInjectFields(spec, "my-worker-abc123", selectorLabels, nil)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
 		ref := spec["scaleTargetRef"].(map[string]interface{})
 		assert.Equal(t, "custom-deployment", ref["name"], "should not overwrite user-provided ref")
 	})
@@ -130,7 +130,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 		spec := map[string]interface{}{
 			"selector": map[string]interface{}{},
 		}
-		autoInjectFields(spec, "my-worker-abc123", selectorLabels, nil)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
 		selector := spec["selector"].(map[string]interface{})
 		_, hasKey := selector["matchLabels"]
 		assert.False(t, hasKey, "matchLabels should not be injected when absent (user must opt in with {})")
@@ -142,7 +142,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 				"matchLabels": map[string]interface{}{},
 			},
 		}
-		autoInjectFields(spec, "my-worker-abc123", selectorLabels, nil)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
 		selector := spec["selector"].(map[string]interface{})
 		labels, ok := selector["matchLabels"].(map[string]interface{})
 		require.True(t, ok)
@@ -158,7 +158,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 				},
 			},
 		}
-		autoInjectFields(spec, "my-worker-abc123", selectorLabels, nil)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
 		selector := spec["selector"].(map[string]interface{})
 		labels := selector["matchLabels"].(map[string]interface{})
 		assert.Equal(t, "label", labels["custom"], "should not overwrite user-provided labels")
@@ -189,7 +189,7 @@ func TestAutoInjectFields_MatchLabels(t *testing.T) {
 				},
 			},
 		}
-		autoInjectFields(spec, "my-worker-abc123", selectorLabels, metricLabels)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, metricLabels)
 
 		// spec.selector.matchLabels gets pod selector labels only
 		topSelector := spec["selector"].(map[string]interface{})
@@ -236,7 +236,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 
 	t.Run("injects temporal labels when matchLabels is empty ({})", func(t *testing.T) {
 		spec := metricSpec(map[string]interface{}{})
-		autoInjectFields(spec, "my-worker-abc123", podLabels, metricLabels)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", podLabels, metricLabels)
 		ml := spec["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
 		assert.Equal(t, "default_my-worker", ml["temporal_worker_deployment_name"])
 		assert.Equal(t, "abc123", ml["temporal_worker_build_id"])
@@ -245,7 +245,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 
 	t.Run("merges temporal labels alongside user labels", func(t *testing.T) {
 		spec := metricSpec(map[string]interface{}{"task_type": "Activity"})
-		autoInjectFields(spec, "my-worker-abc123", podLabels, metricLabels)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", podLabels, metricLabels)
 		ml := spec["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
 		assert.Equal(t, "Activity", ml["task_type"], "user label must be preserved")
 		assert.Equal(t, "default_my-worker", ml["temporal_worker_deployment_name"])
@@ -266,7 +266,7 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 				},
 			},
 		}
-		autoInjectFields(spec, "my-worker-abc123", podLabels, metricLabels)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", podLabels, metricLabels)
 		sel := spec["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})
 		_, hasMatchLabels := sel["matchLabels"]
 		assert.False(t, hasMatchLabels, "matchLabels must not be created when absent")
@@ -274,9 +274,140 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 
 	t.Run("no-op when metricSelectorLabels is nil", func(t *testing.T) {
 		spec := metricSpec(map[string]interface{}{})
-		autoInjectFields(spec, "my-worker-abc123", podLabels, nil)
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", podLabels, nil)
 		ml := spec["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
 		assert.Empty(t, ml, "no metric labels should be injected when metricSelectorLabels is nil")
+	})
+}
+
+// scaledObjectSpec builds a minimal KEDA ScaledObject spec with one temporal trigger
+// whose metadata starts with the given base entries.
+func scaledObjectSpec(temporalMetadata map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"scaleTargetRef": map[string]interface{}{}, // opt in to auto-injection
+		"triggers": []interface{}{
+			map[string]interface{}{
+				"type":     "temporal",
+				"metadata": temporalMetadata,
+			},
+		},
+	}
+}
+
+func TestAutoInjectFields_TemporalTriggerMetadata(t *testing.T) {
+	const twdName = "my-worker"
+	const buildID = "abc123"
+
+	t.Run("injects workerDeploymentName, workerDeploymentBuildId, namespace when keys are present (empty string)", func(t *testing.T) {
+		spec := scaledObjectSpec(map[string]interface{}{
+			"endpoint":                "us-east-1.aws.api.temporal.io:7233",
+			"namespace":               "", // opt-in sentinel
+			"taskQueue":               "my-tq",
+			"workerDeploymentName":    "",
+			"workerDeploymentBuildId": "",
+		})
+		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, "my-temporal-ns", nil, nil)
+		md := spec["triggers"].([]interface{})[0].(map[string]interface{})["metadata"].(map[string]interface{})
+		assert.Equal(t, twdName, md["workerDeploymentName"])
+		assert.Equal(t, buildID, md["workerDeploymentBuildId"])
+		assert.Equal(t, "my-temporal-ns", md["namespace"], "namespace must be auto-injected from the Temporal connection")
+		// User-set fields are preserved.
+		assert.Equal(t, "us-east-1.aws.api.temporal.io:7233", md["endpoint"])
+		assert.Equal(t, "my-tq", md["taskQueue"])
+	})
+
+	t.Run("does not inject namespace when key is absent", func(t *testing.T) {
+		spec := scaledObjectSpec(map[string]interface{}{
+			"endpoint":                "us-east-1.aws.api.temporal.io:7233",
+			"taskQueue":               "my-tq",
+			"workerDeploymentName":    "",
+			"workerDeploymentBuildId": "",
+			// no namespace key at all
+		})
+		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, "my-temporal-ns", nil, nil)
+		md := spec["triggers"].([]interface{})[0].(map[string]interface{})["metadata"].(map[string]interface{})
+		_, hasNamespace := md["namespace"]
+		assert.False(t, hasNamespace, "namespace must not be added when absent (opt-in)")
+	})
+
+	t.Run("does not overwrite non-empty user values (webhook rejects, runtime is defensive)", func(t *testing.T) {
+		// The validating webhook is the primary line of defence: a WorkerResourceTemplate
+		// whose template contains a non-empty workerDeploymentName or workerDeploymentBuildId
+		// is rejected at admission. The runtime injection is defensive: if a non-empty value
+		// somehow reaches it, the user-provided value is preserved (consistent with the
+		// scaleTargetRef pattern where only {} opts in).
+		spec := scaledObjectSpec(map[string]interface{}{
+			"workerDeploymentName":    "user-set-name",
+			"workerDeploymentBuildId": "user-set-build",
+		})
+		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, "my-temporal-ns", nil, nil)
+		md := spec["triggers"].([]interface{})[0].(map[string]interface{})["metadata"].(map[string]interface{})
+		assert.Equal(t, "user-set-name", md["workerDeploymentName"], "runtime must not silently overwrite non-empty user value")
+		assert.Equal(t, "user-set-build", md["workerDeploymentBuildId"], "runtime must not silently overwrite non-empty user value")
+	})
+
+	t.Run("does not inject when keys are absent", func(t *testing.T) {
+		spec := scaledObjectSpec(map[string]interface{}{
+			"endpoint":  "us-east-1.aws.api.temporal.io:7233",
+			"namespace": "default",
+			"taskQueue": "my-tq",
+		})
+		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, "my-temporal-ns", nil, nil)
+		md := spec["triggers"].([]interface{})[0].(map[string]interface{})["metadata"].(map[string]interface{})
+		_, hasName := md["workerDeploymentName"]
+		_, hasBuild := md["workerDeploymentBuildId"]
+		assert.False(t, hasName, "workerDeploymentName must not be added when absent (opt-in)")
+		assert.False(t, hasBuild, "workerDeploymentBuildId must not be added when absent (opt-in)")
+	})
+
+	t.Run("does not touch non-temporal triggers", func(t *testing.T) {
+		spec := map[string]interface{}{
+			"triggers": []interface{}{
+				map[string]interface{}{
+					"type": "prometheus",
+					"metadata": map[string]interface{}{
+						"serverAddress":           "http://prom",
+						"workerDeploymentName":    "should-stay-untouched",
+						"workerDeploymentBuildId": "should-stay-untouched",
+					},
+				},
+				map[string]interface{}{
+					"type": "temporal",
+					"metadata": map[string]interface{}{
+						"workerDeploymentName":    "",
+						"workerDeploymentBuildId": "",
+					},
+				},
+			},
+		}
+		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, "my-temporal-ns", nil, nil)
+		triggers := spec["triggers"].([]interface{})
+		promMd := triggers[0].(map[string]interface{})["metadata"].(map[string]interface{})
+		assert.Equal(t, "should-stay-untouched", promMd["workerDeploymentName"], "prometheus trigger must not be modified")
+		assert.Equal(t, "should-stay-untouched", promMd["workerDeploymentBuildId"], "prometheus trigger must not be modified")
+		tempMd := triggers[1].(map[string]interface{})["metadata"].(map[string]interface{})
+		assert.Equal(t, twdName, tempMd["workerDeploymentName"])
+		assert.Equal(t, buildID, tempMd["workerDeploymentBuildId"])
+	})
+
+	t.Run("scaleTargetRef auto-injection still works for ScaledObject", func(t *testing.T) {
+		spec := scaledObjectSpec(map[string]interface{}{
+			"workerDeploymentName":    "",
+			"workerDeploymentBuildId": "",
+		})
+		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, "my-temporal-ns", nil, nil)
+		ref := spec["scaleTargetRef"].(map[string]interface{})
+		assert.Equal(t, "my-worker-abc123", ref["name"])
+		assert.Equal(t, "Deployment", ref["kind"])
+	})
+
+	t.Run("no-op when triggers is absent", func(t *testing.T) {
+		spec := map[string]interface{}{
+			"minReplicas": 1,
+		}
+		autoInjectFields(spec, "my-worker-abc123", twdName, buildID, "my-temporal-ns", nil, nil)
+		_, hasTriggers := spec["triggers"]
+		assert.False(t, hasTriggers)
 	})
 }
 

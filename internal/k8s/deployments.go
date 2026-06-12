@@ -30,13 +30,19 @@ const (
 	// BuildIDLabel is the label that identifies the build ID for a deployment
 	BuildIDLabel = "temporal.io/build-id"
 	// WorkerDeploymentNameLabel identifies Deployments managed for a TemporalWorkerDeployment.
-	WorkerDeploymentNameLabel     = "temporal.io/deployment-name"
+	WorkerDeploymentNameLabel = "temporal.io/deployment-name"
+	// WorkerDeploymentNameSeparator joins the K8s namespace and the WorkerDeployment resource
+	// name to form the Temporal-server-side worker deployment name (namespace/wdName).
 	WorkerDeploymentNameSeparator = "/"
-	ResourceNameSeparator         = "-"
-	MaxBuildIDLen                 = 63
-	MaxDeploymentNameLen          = 47
-	ConnectionSpecHashAnnotation  = "temporal.io/connection-spec-hash"
-	PodTemplateSpecHashAnnotation = "temporal.io/pod-template-spec-hash"
+	// WorkerDeploymentNameSeparatorK8sLabelCompliant is the substitute used when the
+	// Temporal-server worker deployment name needs to be stored in a Kubernetes label value
+	// (which disallows "/"). See cleanDeploymentNameForK8sLabelValue.
+	WorkerDeploymentNameSeparatorK8sLabelCompliant = "_"
+	ResourceNameSeparator                          = "-"
+	MaxBuildIDLen                                  = 63
+	MaxDeploymentNameLen                           = 47
+	ConnectionSpecHashAnnotation                   = "temporal.io/connection-spec-hash"
+	PodTemplateSpecHashAnnotation                  = "temporal.io/pod-template-spec-hash"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -139,8 +145,12 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 
 // ComputeWorkerDeploymentName generates the base worker deployment name
 func ComputeWorkerDeploymentName(w *temporaliov1alpha1.WorkerDeployment) string {
+	return computeWorkerDeploymentName(w.GetNamespace(), w.GetName())
+}
+
+func computeWorkerDeploymentName(k8sNamespace, workerDeploymentResourceName string) string {
 	// Use the name and namespace to form the worker deployment name
-	return w.GetNamespace() + WorkerDeploymentNameSeparator + w.GetName()
+	return k8sNamespace + WorkerDeploymentNameSeparator + workerDeploymentResourceName
 }
 
 // ComputeVersionedDeploymentName generates a name for a versioned deployment
@@ -190,6 +200,10 @@ func CleanStringForDNS(s string) string {
 	re := regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 	// Lowercase to ensure RFC 1123 DNS label compliance for Kubernetes resource names.
 	return strings.ToLower(re.ReplaceAllString(s, ResourceNameSeparator))
+}
+
+func cleanDeploymentNameForK8sLabelValue(s string) string {
+	return strings.ReplaceAll(s, WorkerDeploymentNameSeparator, WorkerDeploymentNameSeparatorK8sLabelCompliant)
 }
 
 // Build ID is used as a label in k8s, and as the build ID for
