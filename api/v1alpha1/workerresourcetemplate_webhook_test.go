@@ -482,19 +482,19 @@ func TestWorkerResourceTemplate_ValidateCreate_TemporalTriggerMetadata(t *testin
 			obj: newWRT("keda-bad-name", "my-worker", scaledObjectTemplateWithTemporalTrigger(map[string]interface{}{
 				"workerDeploymentName": "some-other-name",
 			})),
-			errorMsg: "if workerDeploymentName is present on a temporal trigger, the controller owns it",
+			errorMsg: "if workerDeploymentName is present on a KEDA ScaledObject temporal trigger, the controller owns it",
 		},
 		"non-empty workerDeploymentBuildId is rejected": {
 			obj: newWRT("keda-bad-build", "my-worker", scaledObjectTemplateWithTemporalTrigger(map[string]interface{}{
 				"workerDeploymentBuildId": "abc123",
 			})),
-			errorMsg: "if workerDeploymentBuildId is present on a temporal trigger, the controller owns it",
+			errorMsg: "if workerDeploymentBuildId is present on a KEDA ScaledObject temporal trigger, the controller owns it",
 		},
 		"non-empty namespace is rejected": {
 			obj: newWRT("keda-bad-namespace", "my-worker", scaledObjectTemplateWithTemporalTrigger(map[string]interface{}{
 				"namespace": "some-other-temporal-ns",
 			})),
-			errorMsg: "if namespace is present on a temporal trigger, the controller owns it",
+			errorMsg: "if namespace is present on a KEDA ScaledObject temporal trigger, the controller owns it",
 		},
 		"non-temporal trigger with same keys is allowed (validation only targets temporal triggers)": {
 			obj: newWRT("keda-prom-trigger", "my-worker", map[string]interface{}{

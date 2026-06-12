@@ -316,22 +316,23 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 
 		// 8. triggers[*].metadata.workerDeploymentName / workerDeploymentBuildId
 		// (KEDA ScaledObject): the controller owns these for triggers of type "temporal" so
-		// each per-version ScaledObject queries the correct Temporal-server worker deployment.
-		// Allow empty-string opt-in ("") and reject any other value.
-		checkTemporalTriggerMetadataNotSet(innerSpec, innerSpecPath, &allErrs)
+		// each per-version ScaledObject queries the correct Temporal Worker Deployment Version
+		// (workerDeploymentName + workerDeploymentBuildId). Allow empty-string opt-in ("") and
+		// reject any other value.
+		checkKEDATriggerMetadata(innerSpec, innerSpecPath, &allErrs)
 	}
 
 	return warnings, allErrs
 }
 
-// checkTemporalTriggerMetadataNotSet validates that, for each KEDA trigger of type "temporal"
+// checkKEDATriggerMetadata validates that, for each KEDA trigger of type "temporal"
 // in spec.triggers, the controller-owned metadata keys (workerDeploymentName,
 // workerDeploymentBuildId, namespace) are either absent or set to the empty-string opt-in
 // sentinel. A non-empty value is rejected — the controller fills these at render time from
 // the WorkerDeployment's connection / per-version state, and a hardcoded value would point
 // at the wrong worker deployment / build / Temporal namespace.
 // Non-temporal triggers (prometheus, cron, etc.) are not validated.
-func checkTemporalTriggerMetadataNotSet(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
+func checkKEDATriggerMetadata(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
 	triggers, ok := spec["triggers"].([]interface{})
 	if !ok {
 		return
@@ -360,7 +361,7 @@ func checkTemporalTriggerMetadataNotSet(spec map[string]interface{}, path *field
 			if !isString || s != "" {
 				*allErrs = append(*allErrs, field.Forbidden(
 					triggerPath.Child(key),
-					"if "+key+" is present on a temporal trigger, the controller owns it and "+
+					"if "+key+" is present on a KEDA ScaledObject temporal trigger, the controller owns it and "+
 						"will set it to the per-version or per-connection value; set it to \"\" to opt in "+
 						"to auto-injection, or remove it entirely if you do not need it",
 				))

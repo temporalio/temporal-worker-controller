@@ -90,7 +90,7 @@ func RenderWorkerResourceTemplate(
 	wdName := wrt.Spec.EffectiveWorkerDeploymentName()
 
 	// The name of the Worker Deployment in Temporal Server, prefixed by the Kubernetes namespace of the resource
-	twdName := computeWorkerDeploymentName(wrt.Namespace, wdName)
+	serverWDName := computeWorkerDeploymentName(wrt.Namespace, wdName)
 
 	selectorLabels := ComputeSelectorLabels(wdName, buildID)
 
@@ -99,7 +99,7 @@ func RenderWorkerResourceTemplate(
 	// Ordering is not a concern: matchLabels is a map; encoding/json serialises map keys in
 	// sorted order, so ComputeRenderedObjectHash is deterministic regardless of insertion order.
 	metricSelectorLabels := map[string]string{
-		"temporal_worker_deployment_name": cleanDeploymentNameForK8sLabelValue(twdName),
+		"temporal_worker_deployment_name": cleanDeploymentNameForK8sLabelValue(serverWDName),
 		"temporal_worker_build_id":        buildID,
 		"temporal_namespace":              temporalNamespace,
 	}
@@ -109,7 +109,7 @@ func RenderWorkerResourceTemplate(
 	// mutations are reflected in obj.Object directly.
 	if specRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec"); ok {
 		if spec, ok := specRaw.(map[string]interface{}); ok {
-			autoInjectFields(spec, deployment.Name, twdName, buildID, temporalNamespace, selectorLabels, metricSelectorLabels)
+			autoInjectFields(spec, deployment.Name, serverWDName, buildID, temporalNamespace, selectorLabels, metricSelectorLabels)
 		}
 	}
 
@@ -163,12 +163,12 @@ func RenderWorkerResourceTemplate(
 //     the key is present with the empty-string opt-in sentinel. The webhook rejects
 //     non-empty values for these keys. Required by KEDA's Temporal scaler
 //     (kedacore/keda#7672) for per-version backlog scaling against Worker Deployment
-//     Versioning. twdName must be the fully-qualified Temporal-server name
+//     Versioning. serverWDName must be the fully-qualified Temporal-server name
 //     (namespace/wdName, as returned by ComputeWorkerDeploymentName).
 //
 //   - scaleTargetRef: injected anywhere in the spec tree when {} (empty), via
 //     injectScaleTargetRefRecursive. Unambiguous across all supported resource types.
-func autoInjectFields(spec map[string]interface{}, deploymentName, twdName, buildID, temporalNamespace string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
+func autoInjectFields(spec map[string]interface{}, deploymentName, serverWDName, buildID, temporalNamespace string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
 	// spec.selector.matchLabels: {} opt-in sentinel.
 	if sel, ok := spec["selector"].(map[string]interface{}); ok {
 		if isEmptyMap(sel["matchLabels"]) {
@@ -182,7 +182,7 @@ func autoInjectFields(spec map[string]interface{}, deploymentName, twdName, buil
 	}
 
 	// triggers[*].metadata: inject KEDA Temporal scaler version identifiers when present.
-	appendTemporalTriggerMetadata(spec, twdName, buildID, temporalNamespace)
+	appendKEDATriggerMetadata(spec, serverWDName, buildID, temporalNamespace)
 
 	// scaleTargetRef: inject anywhere in the spec tree.
 	injectScaleTargetRefRecursive(spec, deploymentName)
@@ -225,7 +225,7 @@ func appendMetricsMatchLabelSelector(spec map[string]interface{}, metricSelector
 	}
 }
 
-// appendTemporalTriggerMetadata walks spec.triggers[*] and, for any KEDA trigger
+// appendKEDATriggerMetadata walks spec.triggers[*] and, for any KEDA trigger
 // of type "temporal", sets workerDeploymentName, workerDeploymentBuildId, and namespace
 // in its metadata map. Injection is opt-in via the empty-string sentinel, mirroring
 // the scaleTargetRef {} sentinel pattern: absent = no injection; present-and-empty
@@ -233,7 +233,7 @@ func appendMetricsMatchLabelSelector(spec map[string]interface{}, metricSelector
 // webhook (defense in depth — if a non-empty value reaches the runtime, it is left
 // untouched rather than silently overwritten).
 //
-// twdName must be the fully-qualified Temporal-server Worker Deployment name
+// serverWDName must be the fully-qualified Temporal-server Worker Deployment name
 // (computeWorkerDeploymentName(k8sNamespace, wdName)) — that's what workers register
 // with at Temporal Cloud and what KEDA's scaler needs to query backlog for a specific
 // version. temporalNamespace is the Temporal Cloud namespace from the connection.
@@ -241,7 +241,7 @@ func appendMetricsMatchLabelSelector(spec map[string]interface{}, metricSelector
 // Required by KEDA's Temporal scaler (kedacore/keda#7672) for per-version backlog
 // scaling against Temporal's Worker Deployment Versioning model. Non-temporal
 // triggers in the same ScaledObject are untouched.
-func appendTemporalTriggerMetadata(spec map[string]interface{}, twdName, buildID, temporalNamespace string) {
+func appendKEDATriggerMetadata(spec map[string]interface{}, serverWDName, buildID, temporalNamespace string) {
 	triggers, ok := spec["triggers"].([]interface{})
 	if !ok {
 		return
@@ -260,7 +260,7 @@ func appendTemporalTriggerMetadata(spec map[string]interface{}, twdName, buildID
 			continue
 		}
 		if isEmptyString(metadata["workerDeploymentName"]) {
-			metadata["workerDeploymentName"] = twdName
+			metadata["workerDeploymentName"] = serverWDName
 		}
 		if isEmptyString(metadata["workerDeploymentBuildId"]) {
 			metadata["workerDeploymentBuildId"] = buildID
