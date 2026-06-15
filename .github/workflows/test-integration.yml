@@ -81,7 +81,7 @@ jobs:
         echo "$HOME/.temporalio/bin" >> "$GITHUB_PATH"
         
     - name: Install kubectl
-      uses: azure/setup-kubectl@901a10e89ea615cf61f57ac05cecdf23e7de06d8 # v3.2
+      uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
       with:
         version: 'latest'
         
