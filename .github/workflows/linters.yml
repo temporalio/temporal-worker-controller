@@ -49,6 +49,32 @@ jobs:
             exit 1
           fi
 
+  tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+          cache: true
+
+      - name: tidy go modules
+        run: |
+          make tidy
+
+      - name: check-is-dirty
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "Detected uncommitted changes. Run 'make tidy' and commit the result."
+            git status
+            git diff
+            exit 1
+          fi
+
   golangci:
     runs-on: ubuntu-latest
     steps:
@@ -96,6 +122,7 @@ jobs:
     needs:
       - lint-actions
       - fmt-imports
+      - tidy
       - golangci
       - go-vet
     runs-on: ubuntu-latest
