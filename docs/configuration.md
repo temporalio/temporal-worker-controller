@@ -156,7 +156,7 @@ workerOptions:
 
 ### Connection Configuration
 
-Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both.
+Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname.
 
 **Using mTLS Authentication:**
 
@@ -167,6 +167,9 @@ metadata:
   name: production-temporal
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
+  # Optional: override the TLS server name used for certificate verification
+  tls:
+    serverName: "production.abc123.tmprl.cloud"
   mutualTLSSecretRef: 
     name: temporal-cloud-mtls  # Optional: for mTLS
 ```
@@ -234,6 +237,9 @@ metadata:
   name: production-temporal
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
+  # Optional: override the TLS server name used for certificate verification
+  tls:
+    serverName: "production.abc123.tmprl.cloud"
   apiKeySecretRef:
     name: temporal-api-key  # Name of the Secret
     key: api-key            # Key within the Secret containing the API key token
@@ -291,6 +297,7 @@ echo -n "your-api-key-token-here" | base64
 - Both secrets must be created in the same Kubernetes namespace as the `Connection` resource
 - Only one authentication method can be specified per `Connection` (either `mutualTLSSecretRef` or `apiKeySecretRef`)
 - The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
+- `tls.serverName` affects TLS certificate verification by the controller and is injected into Worker Pods as `TEMPORAL_TLS_SERVER_NAME` for SDK envconfig users.
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
 
 ## Gate Configuration

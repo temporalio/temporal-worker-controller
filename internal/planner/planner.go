@@ -380,13 +380,37 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 	}
 
 	// Update any environment variables that reference the connection
-	for i, container := range deployment.Spec.Template.Spec.Containers {
-		for j, env := range container.Env {
-			if env.Name == "TEMPORAL_ADDRESS" {
-				deployment.Spec.Template.Spec.Containers[i].Env[j].Value = connection.HostPort
-			}
+	tlsServerName := connection.TLSServerName()
+	for i := range deployment.Spec.Template.Spec.Containers {
+		env := deployment.Spec.Template.Spec.Containers[i].Env
+		env = setEnvVar(env, "TEMPORAL_ADDRESS", connection.HostPort)
+		if tlsServerName != "" {
+			env = setEnvVar(env, "TEMPORAL_TLS_SERVER_NAME", tlsServerName)
+		} else {
+			env = removeEnvVar(env, "TEMPORAL_TLS_SERVER_NAME")
+		}
+		deployment.Spec.Template.Spec.Containers[i].Env = env
+	}
+}
+
+func setEnvVar(envVars []corev1.EnvVar, name string, value string) []corev1.EnvVar {
+	for i := range envVars {
+		if envVars[i].Name == name {
+			envVars[i].Value = value
+			envVars[i].ValueFrom = nil
+			return envVars
 		}
 	}
+	return append(envVars, corev1.EnvVar{Name: name, Value: value})
+}
+
+func removeEnvVar(envVars []corev1.EnvVar, name string) []corev1.EnvVar {
+	for i := range envVars {
+		if envVars[i].Name == name {
+			return append(envVars[:i], envVars[i+1:]...)
+		}
+	}
+	return envVars
 }
 
 // checkAndUpdateDeploymentPodTemplateSpec determines whether the Deployment for the given buildID is

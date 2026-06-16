@@ -237,6 +237,78 @@ func TestFetchMTLS_ValidCert_Succeeds(t *testing.T) {
 	assert.Len(t, clientOpts.ConnectionOptions.TLS.Certificates, 1)
 }
 
+func TestFetchMTLS_TLSServerNameOverride(t *testing.T) {
+	now := time.Now()
+	caCert, caKey, _ := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", now.Add(-time.Hour), now.Add(time.Hour))
+
+	cp := newTestPool()
+	secret := makeTLSSecret(certPEM, keyPEM, nil)
+	opts := makeOpts("temporal-nlb.example.com:443")
+	opts.Spec.TLS = &temporaliov1alpha1.ConnectionTLSConfig{
+		ServerName: "temporal-cloud.example.com",
+	}
+
+	clientOpts, key, _, err := cp.fetchClientUsingMTLSSecret(secret, opts)
+
+	require.NoError(t, err)
+	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
+	assert.Equal(t, "temporal-cloud.example.com", clientOpts.ConnectionOptions.TLS.ServerName)
+	assert.Equal(t, "temporal-cloud.example.com", key.TLSServerName)
+}
+
+func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	cp := newTestPoolWithFakeClient(&secret)
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := NewClientOptions{
+		TemporalNamespace: "default",
+		K8sNamespace:      "test-ns",
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal-nlb.example.com:443",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				ServerName: "temporal-cloud.example.com",
+			},
+			APIKeySecretRef: apiKeySelector,
+		},
+	}
+
+	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts)
+
+	require.NoError(t, err)
+	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
+	assert.Equal(t, "temporal-cloud.example.com", clientOpts.ConnectionOptions.TLS.ServerName)
+	assert.Equal(t, "temporal-cloud.example.com", key.TLSServerName)
+}
+
+func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
+	cp := newTestPool()
+	opts := NewClientOptions{
+		TemporalNamespace: "default",
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal-nlb.example.com:443",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				ServerName: "temporal-cloud.example.com",
+			},
+		},
+	}
+
+	clientOpts, key, auth, err := cp.fetchClientUsingNoCredentials(opts)
+
+	require.NoError(t, err)
+	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
+	assert.Equal(t, "temporal-cloud.example.com", clientOpts.ConnectionOptions.TLS.ServerName)
+	assert.Equal(t, "temporal-cloud.example.com", key.TLSServerName)
+	assert.Equal(t, AuthModeNoCredentials, auth.mode)
+}
+
 func newTestPoolWithFakeClient(objects ...runtime.Object) *ClientPool {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)

@@ -273,10 +273,11 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Get or update temporal client for connection
 	clientPoolKey := clientpool.ClientPoolKey{
-		HostPort:   connection.Spec.HostPort,
-		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName: secretName,
-		AuthMode:   authMode,
+		HostPort:      connection.Spec.HostPort,
+		TLSServerName: connection.Spec.TLSServerName(),
+		Namespace:     workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		SecretName:    secretName,
+		AuthMode:      authMode,
 	}
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
 	if !ok {
@@ -576,10 +577,11 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	}
 
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
-		HostPort:   temporalConnection.Spec.HostPort,
-		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName: secretName,
-		AuthMode:   authMode,
+		HostPort:      temporalConnection.Spec.HostPort,
+		TLSServerName: temporalConnection.Spec.TLSServerName(),
+		Namespace:     workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		SecretName:    secretName,
+		AuthMode:      authMode,
 	})
 	if !ok {
 		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{

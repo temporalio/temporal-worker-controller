@@ -59,6 +59,12 @@ spec:
                 required:
                 - name
                 type: object
+              tls:
+                properties:
+                  serverName:
+                    pattern: ^[a-zA-Z0-9.-]+$
+                    type: string
+                type: object
             required:
             - hostPort
             type: object

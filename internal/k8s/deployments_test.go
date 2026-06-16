@@ -644,6 +644,26 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEqual(t, hash1, hash2, "Different hostports should produce different hashes")
 	})
 
+	t.Run("different TLS server names produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				ServerName: "server1.example.com",
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				ServerName: "server2.example.com",
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different TLS server names should produce different hashes")
+	})
+
 	t.Run("different mTLS secrets produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:           "localhost:7233",
@@ -869,6 +889,22 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 				"TEMPORAL_TLS":                  "true",
 				"TEMPORAL_TLS_CLIENT_KEY_PATH":  "/etc/temporal/tls/tls.key",
 				"TEMPORAL_TLS_CLIENT_CERT_PATH": "/etc/temporal/tls/tls.crt",
+			},
+			unexpectedEnvVars: []string{},
+		},
+		"with TLS server name": {
+			connection: temporaliov1alpha1.ConnectionSpec{
+				HostPort: "temporal-nlb.example.com:443",
+				TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+					ServerName: "temporal-cloud.example.com",
+				},
+			},
+			expectedEnvVars: map[string]string{
+				"TEMPORAL_ADDRESS":         "temporal-nlb.example.com:443",
+				"TEMPORAL_NAMESPACE":       "test-namespace",
+				"TEMPORAL_DEPLOYMENT_NAME": "test-deployment",
+				"TEMPORAL_WORKER_BUILD_ID": "test-build-id",
+				"TEMPORAL_TLS_SERVER_NAME": "temporal-cloud.example.com",
 			},
 			unexpectedEnvVars: []string{},
 		},
