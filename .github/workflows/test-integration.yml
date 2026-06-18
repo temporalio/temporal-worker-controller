@@ -86,7 +86,7 @@ jobs:
         version: 'latest'
         
     - name: Install Helm
-      uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78 # v3.5
+      uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
       with:
         version: 'v3.14.3'
         
@@ -139,7 +139,7 @@ jobs:
       run: go mod download
 
     - name: Install Helm
-      uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78 # v3.5
+      uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
 
     - name: Build Helm chart dependencies
       run: helm repo add jetstack https://charts.jetstack.io && helm dependency build helm/temporal-worker-controller
