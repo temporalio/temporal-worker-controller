@@ -12,8 +12,7 @@
 #   2. Temporal Cloud scrape config — scrapes temporal_cloud_v1_approximate_backlog_count
 #      (Phase 2 only; requires a Temporal Cloud metrics API key)
 #   3. Recording rule — slot utilization ratio (Phase 1 only). The backlog count
-#      is consumed directly from the raw Cloud series via prometheus-adapter; see
-#      docs/scaling-recommendations.md for the reasoning.
+#      is consumed directly from the raw Cloud series via prometheus-adapter
 #   4. prometheus-adapter — see internal/demo/k8s/prometheus-adapter-values.yaml
 
 # ─── 1. ServiceMonitor ──────────────────────────────────────────────────────

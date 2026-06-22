@@ -10,11 +10,41 @@ We recommend choosing a scaler approach that aligns with the workload pattern yo
 
 | Workload pattern | Recommendation |
 |------------------|----------------|
-| Continuous traffic (task queue always loaded) | HPA |
-| Idle periods >5 min between work OR needs scale-from-zero | KEDA Temporal scaler |
+| Continuous traffic (task queue always loaded) | HPA + prometheus-adapter* |
+| Idle periods >5 min between work AND needs scale-from-zero | KEDA Temporal scaler |
 | Required reactivity < ~60 s from first backlog | KEDA Temporal scaler |
 | Required reactivity ~90 s typical, tolerant of occasional multi-minute stalls | HPA + prometheus-adapter |
 | 1000s of task queues and worker deployment versions  | HPA + prometheus-adapter |
+
+\* We tested and are discussing prometheus in detail, but there are other
+ways to pipe Cloud Metrics -> HPA that have similar caveats with slightly
+different timing depending on configuration
+
+We discuss the Prometheus Metrics Adapter in depth because it is free to
+install so we have tested it with the Worker Controller end to end, but the
+Temporal Cloud Metrics -> HPA method is expected to work with other metrics
+providers as long as the metrics provider can ingest Temporal Cloud Metrics
+from our OpenMetrics endpoint, and the metrics provider has a Kubernetes
+adapter to pipe those metrics to HPA and uses the native HPA `matchLabels`
+format to create a per-version metrics query. Using a different aggregation
+layer could incur additional delays, depending on the configuration of that
+layer.
+
+Examples of potential combinations:
+
+- **Prometheus** (detailed in this document)
+ * Temporal Cloud Metrics integration (Temporal Cloud -> Prometheus)
+ * HPA adapter (Prometheus -> HPA)
+- **Datadog**
+ * Temporal Cloud Metrics integration (Temporal Cloud -> DataDog)
+ * HPA adapter (DataDog -> HPA)
+- **New Relic**
+ * Temporal Cloud Metrics integration (Temporal Cloud -> New Relic)
+ * HPA adapter (New Relic -> HPA)
+- **OpenTelemetry Collector**
+ * Temporal Cloud Metrics integration (Temporal Cloud -> OpenTelemetry)
+ * AWS CloudWatch OpenTelemetry integration (OpenTelemetry -> CloudWatch)
+ * HPA adapter for AWS CloudWatch (CloudWatch -> HPA)
 
 ## HPA scaling signal
 
@@ -55,7 +85,7 @@ Briefly, however, follow this advice:
 
 Because HPA uses a single OpenMetrics scrape to gather all series for the namespace in a single HTTP request, the HPA approach scales independently of namespace count. The single HTTP request for OpenMetrics more efficient than KEDA's Temporal API-based approach, and will not run into Temporal API rate limiting problems (see section below on [KEDA limitations](#keda-limitations)).
 
-HPA + prometheus adapter configured to look at both slot util and backlog provides fast scale-up via slot util and a backlog-driven backstop to prevent overly reactive replica count adjustment.
+HPA + prometheus adapter can be configured to look at both slot utilization and backlog provides fast scale-up via slot util and a backlog-driven backstop to prevent overly reactive replica count adjustment. Slot utilization can be used to prevent overly reactive scale-down when backlog is zero but the workers are well-utilized and replica count is right-sized for the workload.
 
 ## HPA limitations
 
@@ -161,6 +191,8 @@ spec:
 KEDA's Temporal scaler calls `DescribeTaskQueue(stats=true)` (or `DescribeWorkerDeploymentVersion`), which loads the queue synchronously and returns the backlog directly. This allows KEDA to scale Temporal workers from zero.
 
 ## KEDA limitations
+
+As of June 2026 and the KEDA 2.20 release, the KEDA Temporal Scaler uses backlog count *only*. Releases of Temporal Worker Controller before v1.8.0 do not support per-version metrics queries in KEDA Temporal Scaler configuration of Worker Resource Templates.
 
 KEDA bypasses the metric pipeline but uses Temporal API calls, which are subject to a per-namespace rate limit:
 
