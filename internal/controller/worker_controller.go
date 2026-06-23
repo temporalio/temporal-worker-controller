@@ -334,7 +334,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		getControllerIdentity(),
 	)
 	if err != nil {
-		if isAccessDeniedErr(err) {
+		if shouldEvictClient(err) {
 			r.TemporalClientPool.EvictClient(clientPoolKey)
 		}
 		var rateLimitErr *serviceerror.ResourceExhausted
@@ -380,7 +380,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Execute the plan, handling any errors
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
-		if isAccessDeniedErr(err) {
+		if shouldEvictClient(err) {
 			r.TemporalClientPool.EvictClient(clientPoolKey)
 		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
@@ -558,7 +558,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	ctx context.Context,
 	l logr.Logger,
 	workerDeploy *temporaliov1alpha1.WorkerDeployment,
-) error {
+) (retErr error) {
 	// Resolve Connection.
 	// The Connection is guaranteed to exist because we hold a finalizer on it
 	// that prevents deletion while any WD references it.
@@ -575,12 +575,14 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		return fmt.Errorf("unable to resolve auth secret name: %w", err)
 	}
 
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
+	clientPoolKey := clientpool.ClientPoolKey{
 		HostPort:   temporalConnection.Spec.HostPort,
 		Namespace:  workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		SecretName: secretName,
 		AuthMode:   authMode,
-	})
+	}
+
+	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
 	if !ok {
 		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
@@ -597,6 +599,15 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		}
 		temporalClient = c
 	}
+
+	// Evict cached SDK clients on failures that indicate the cached client may
+	// no longer be usable. Domain responses such as NotFound are handled as
+	// success below and should not churn otherwise healthy clients.
+	defer func() {
+		if shouldEvictClient(retErr) {
+			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
+	}()
 
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(workerDeploymentName)
@@ -939,4 +950,18 @@ func isAccessDeniedErr(err error) bool {
 		return true
 	}
 	return grpcstatus.Code(err) == codes.Unauthenticated
+}
+
+func shouldEvictClient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isAccessDeniedErr(err) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var unavailable *serviceerror.Unavailable
+	return errors.As(err, &unavailable)
 }

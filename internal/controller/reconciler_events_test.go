@@ -19,6 +19,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	deploymentpb "go.temporal.io/api/deployment/v1"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
@@ -263,6 +264,11 @@ func (s *stubTemporalClient) ExecuteWorkflow(_ context.Context, _ sdkclient.Star
 	return nil, s.execErr
 }
 
+// Close satisfies sdkclient.Client.Close so the stub can be evicted via
+// ClientPool.EvictClient without panicking through the embedded nil Client
+// interface.
+func (s *stubTemporalClient) Close() {}
+
 // newStubTemporalClient returns a stub client whose WorkflowService().DescribeWorkerDeployment
 // returns a valid empty response, and whose ExecuteWorkflow returns execErr.
 func newStubTemporalClient(execErr error) *stubTemporalClient {
@@ -385,6 +391,56 @@ func TestSyncConditions(t *testing.T) {
 		// Deprecated conditions
 		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
 	})
+}
+
+func TestShouldEvictClient(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "Nil",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "DeadlineExceeded",
+			err:  fmt.Errorf("wrapped: %w", context.DeadlineExceeded),
+			want: true,
+		},
+		{
+			name: "Unavailable",
+			err:  fmt.Errorf("wrapped: %w", serviceerror.NewUnavailable("temporary transport failure")),
+			want: true,
+		},
+		{
+			name: "PermissionDenied",
+			err:  fmt.Errorf("wrapped: %w", serviceerror.NewPermissionDenied("bad credentials", "")),
+			want: true,
+		},
+		{
+			name: "Canceled",
+			err:  context.Canceled,
+			want: false,
+		},
+		{
+			name: "ResourceExhausted",
+			err:  serviceerror.NewResourceExhausted(enumspb.RESOURCE_EXHAUSTED_CAUSE_RPS_LIMIT, "rate limited"),
+			want: false,
+		},
+		{
+			name: "NotFound",
+			err:  &serviceerror.NotFound{},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldEvictClient(tt.err))
+		})
+	}
 }
 
 // ─── Reconcile tests ──────────────────────────────────────────────────────────
@@ -671,6 +727,39 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	assertNoEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
 }
 
+// TestReconcile_EvictsCachedClientOnTransportFailure verifies that transport-level
+// failures from the main Reconcile path evict the cached SDK client. Otherwise the
+// next reconcile would reuse the same client and can remain wedged until the
+// controller pod restarts and drops the in-memory pool.
+func TestReconcile_EvictsCachedClientOnTransportFailure(t *testing.T) {
+	k8sNamespace := "default"
+	hostPort := "localhost:7233"
+
+	conn := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
+	twd := makeWD("test-worker", k8sNamespace, conn.Name)
+
+	r, recorder := newTestReconciler([]client.Object{twd, conn})
+
+	poolKey := noCredsPoolKey(conn.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace)
+	poisoned := newStubTemporalClient(nil)
+	poisoned.describeDeploymentErr = context.DeadlineExceeded
+	r.TemporalClientPool.SetClientForTesting(poolKey, poisoned)
+
+	cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
+	require.True(t, ok, "poisoned client should be cached before Reconcile runs")
+	require.Same(t, poisoned, cached)
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+	require.Error(t, err, "Reconcile must surface the Temporal Describe error")
+	require.ErrorIs(t, err, context.DeadlineExceeded, "the original transport error must propagate")
+	assertEventEmitted(t, drainEvents(recorder), temporaliov1alpha1.ReasonTemporalStateFetchFailed)
+
+	_, ok = r.TemporalClientPool.GetSDKClient(poolKey)
+	require.False(t, ok, "poisoned client must be evicted so the next reconcile dials a fresh one")
+}
+
 // ─── executeK8sOperations tests ──────────────────────────────────────────────
 
 func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
@@ -817,4 +906,62 @@ func TestUpdateVersionConfig_EmitsEventOnFailure(t *testing.T) {
 			assertEventEmitted(t, drainEvents(recorder), tc.expectedReason)
 		})
 	}
+}
+
+// TestHandleDeletion_EvictsCachedClientOnTemporalFailure verifies that
+// transport-level failures inside handleDeletion evict the cached SDK client.
+// NotFound is treated as "already cleaned up" and must not evict.
+func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
+	t.Run("DescribeError_EvictsClient", func(t *testing.T) {
+		k8sNamespace := "default"
+		hostPort := "localhost:7233"
+
+		conn := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
+		twd := makeWD("del-worker", k8sNamespace, conn.Name)
+
+		r, _ := newTestReconciler([]client.Object{twd, conn})
+
+		poolKey := noCredsPoolKey(conn.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace)
+		poisoned := &stubTemporalClient{
+			wdClient: &stubWDClient{handle: &stubWDHandle{
+				describeErr: context.DeadlineExceeded,
+			}},
+		}
+		r.TemporalClientPool.SetClientForTesting(poolKey, poisoned)
+
+		// Sanity: the poisoned client is what handleDeletion will pick up.
+		cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
+		require.True(t, ok, "poisoned client should be cached before handleDeletion runs")
+		require.Same(t, poisoned, cached)
+
+		err := r.handleDeletion(context.Background(), logr.Discard(), twd)
+		require.Error(t, err, "handleDeletion must surface the Temporal Describe error")
+		require.ErrorIs(t, err, context.DeadlineExceeded, "the original error must propagate so the reconciler requeues")
+
+		_, ok = r.TemporalClientPool.GetSDKClient(poolKey)
+		require.False(t, ok, "poisoned client must be evicted from the pool after a Temporal-server-side failure so the next reconcile dials a fresh one")
+	})
+
+	t.Run("DescribeNotFound_RetainsClient", func(t *testing.T) {
+		// NotFound on Describe is treated as success (nothing to clean up).
+		// The cached client is healthy and must not be evicted.
+		k8sNamespace := "default"
+		hostPort := "localhost:7233"
+
+		conn := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
+		twd := makeWD("del-worker", k8sNamespace, conn.Name)
+
+		r, _ := newTestReconciler([]client.Object{twd, conn})
+
+		poolKey := noCredsPoolKey(conn.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace)
+		healthy := newStubTemporalClient(nil) // describeErr=&serviceerror.NotFound{}
+		r.TemporalClientPool.SetClientForTesting(poolKey, healthy)
+
+		err := r.handleDeletion(context.Background(), logr.Discard(), twd)
+		require.NoError(t, err, "Describe returning NotFound must be treated as success")
+
+		cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
+		require.True(t, ok, "a healthy cached client must remain in the pool after a successful handleDeletion")
+		require.Same(t, healthy, cached)
+	})
 }
