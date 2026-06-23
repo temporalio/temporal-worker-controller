@@ -360,3 +360,14 @@ fmt: ## Run go fmt against code.
 .PHONY: vet
 vet: ## Run go vet against code.
 	go vet ./...
+
+##### Go modules #####
+# All Go module directories in the repo (root + submodules), discovered from go.mod files.
+GO_MODULE_DIRS := $(shell find . -name go.mod -not -path './bin/*' -exec dirname {} \;)
+
+.PHONY: tidy
+tidy: ## Run go mod tidy in every module. Run after checking out a Dependabot branch.
+	@for dir in $(GO_MODULE_DIRS); do \
+		printf $(COLOR) "Tidying go module: $$dir"; \
+		GOWORK=off go mod tidy -C $$dir || exit 1; \
+	done
