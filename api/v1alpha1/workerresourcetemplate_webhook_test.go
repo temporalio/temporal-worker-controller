@@ -423,6 +423,120 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 	}
 }
 
+// newValidatorNoAPIWithKEDA mirrors newValidatorNoAPI but additionally allows the
+// KEDA ScaledObject kind, so tests of KEDA-specific validation can reach the relevant
+// check without being rejected by the allow-list.
+func newValidatorNoAPIWithKEDA() *temporaliov1alpha1.WorkerResourceTemplateValidator {
+	return &temporaliov1alpha1.WorkerResourceTemplateValidator{
+		Client: fake.NewClientBuilder().Build(),
+		RESTMapper: newFakeRESTMapper(
+			schema.GroupVersionKind{Group: "autoscaling", Version: "v2", Kind: "HorizontalPodAutoscaler"},
+			schema.GroupVersionKind{Group: "policy", Version: "v1", Kind: "PodDisruptionBudget"},
+			schema.GroupVersionKind{Group: "keda.sh", Version: "v1alpha1", Kind: "ScaledObject"},
+		),
+		AllowedKinds: []string{"HorizontalPodAutoscaler", "PodDisruptionBudget", "ScaledObject"},
+	}
+}
+
+// scaledObjectTemplateWithTemporalTrigger builds a minimal KEDA ScaledObject template
+// where the user can set their own trigger metadata values; auto-injection placeholders
+// for workerDeploymentName / workerDeploymentBuildId default to the empty-string sentinel
+// unless overridden by the caller.
+func scaledObjectTemplateWithTemporalTrigger(metadataOverrides map[string]interface{}) map[string]interface{} {
+	metadata := map[string]interface{}{
+		"endpoint":                "us-east-1.aws.api.temporal.io:7233",
+		"namespace":               "", // opt-in sentinel — controller injects from connection
+		"taskQueue":               "my-tq",
+		"workerDeploymentName":    "", // opt-in sentinel
+		"workerDeploymentBuildId": "", // opt-in sentinel
+	}
+	for k, v := range metadataOverrides {
+		metadata[k] = v
+	}
+	return map[string]interface{}{
+		"apiVersion": "keda.sh/v1alpha1",
+		"kind":       "ScaledObject",
+		"spec": map[string]interface{}{
+			"scaleTargetRef":  map[string]interface{}{}, // opt-in
+			"minReplicaCount": float64(1),
+			"maxReplicaCount": float64(10),
+			"triggers": []interface{}{
+				map[string]interface{}{
+					"type":     "temporal",
+					"metadata": metadata,
+				},
+			},
+		},
+	}
+}
+
+func TestWorkerResourceTemplate_ValidateCreate_TemporalTriggerMetadata(t *testing.T) {
+	tests := map[string]struct {
+		obj      runtime.Object
+		errorMsg string
+	}{
+		"empty workerDeploymentName + workerDeploymentBuildId opt-in is valid": {
+			obj: newWRT("keda-opt-in", "my-worker", scaledObjectTemplateWithTemporalTrigger(nil)),
+		},
+		"non-empty workerDeploymentName is rejected": {
+			obj: newWRT("keda-bad-name", "my-worker", scaledObjectTemplateWithTemporalTrigger(map[string]interface{}{
+				"workerDeploymentName": "some-other-name",
+			})),
+			errorMsg: "if workerDeploymentName is present on a KEDA ScaledObject temporal trigger, the controller owns it",
+		},
+		"non-empty workerDeploymentBuildId is rejected": {
+			obj: newWRT("keda-bad-build", "my-worker", scaledObjectTemplateWithTemporalTrigger(map[string]interface{}{
+				"workerDeploymentBuildId": "abc123",
+			})),
+			errorMsg: "if workerDeploymentBuildId is present on a KEDA ScaledObject temporal trigger, the controller owns it",
+		},
+		"non-empty namespace is rejected": {
+			obj: newWRT("keda-bad-namespace", "my-worker", scaledObjectTemplateWithTemporalTrigger(map[string]interface{}{
+				"namespace": "some-other-temporal-ns",
+			})),
+			errorMsg: "if namespace is present on a KEDA ScaledObject temporal trigger, the controller owns it",
+		},
+		"non-temporal trigger with same keys is allowed (validation only targets temporal triggers)": {
+			obj: newWRT("keda-prom-trigger", "my-worker", map[string]interface{}{
+				"apiVersion": "keda.sh/v1alpha1",
+				"kind":       "ScaledObject",
+				"spec": map[string]interface{}{
+					"scaleTargetRef":  map[string]interface{}{},
+					"minReplicaCount": float64(1),
+					"maxReplicaCount": float64(10),
+					"triggers": []interface{}{
+						map[string]interface{}{
+							"type": "prometheus",
+							"metadata": map[string]interface{}{
+								"serverAddress":           "http://prom",
+								"workerDeploymentName":    "anything-goes",
+								"workerDeploymentBuildId": "anything-goes",
+							},
+						},
+					},
+				},
+			}),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			v := newValidatorNoAPIWithKEDA()
+
+			warnings, err := v.ValidateCreate(ctx, tc.obj)
+
+			if tc.errorMsg != "" {
+				require.Error(t, err, "expected an error containing %q", tc.errorMsg)
+				assert.Contains(t, err.Error(), tc.errorMsg)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Nil(t, warnings)
+		})
+	}
+}
+
 func TestWorkerResourceTemplate_ValidateUpdate_Immutability(t *testing.T) {
 	tests := map[string]struct {
 		oldWorkerDeploymentRef string

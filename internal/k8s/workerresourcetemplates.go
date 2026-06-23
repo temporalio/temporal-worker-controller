@@ -40,7 +40,7 @@ const (
 )
 
 // ComputeWorkerResourceTemplateName generates a deterministic, DNS-safe name for the worker resource template
-// instance corresponding to a given (twdName, wrtName, buildID) triple.
+// instance corresponding to a given (wdName, wrtName, buildID) triple.
 //
 // The name has the form:
 //
@@ -50,16 +50,16 @@ const (
 // capping occurs. This guarantees that two different triples — including triples that
 // differ only in the buildID — always produce different names, even if the human-readable
 // prefix is truncated. The buildID is therefore always uniquely represented via the hash,
-// regardless of how long twdName or wrtName are.
-func ComputeWorkerResourceTemplateName(twdName, wrtName, buildID string) string {
+// regardless of how long wdName or wrtName are.
+func ComputeWorkerResourceTemplateName(wdName, wrtName, buildID string) string {
 	// Hash the full triple first, before any truncation.
-	h := sha256.Sum256([]byte(twdName + wrtName + buildID))
+	h := sha256.Sum256([]byte(wdName + wrtName + buildID))
 	hashSuffix := hex.EncodeToString(h[:workerResourceTemplateHashLen/2]) // 4 bytes → 8 hex chars
 
 	// Build the human-readable prefix and truncate so the total fits in maxLen.
 	// suffixLen = len("-") + workerResourceTemplateHashLen
 	const suffixLen = 1 + workerResourceTemplateHashLen
-	raw := CleanStringForDNS(twdName + ResourceNameSeparator + wrtName + ResourceNameSeparator + buildID)
+	raw := CleanStringForDNS(wdName + ResourceNameSeparator + wrtName + ResourceNameSeparator + buildID)
 	prefix := TruncateString(raw, workerResourceTemplateMaxNameLen-suffixLen)
 	// Trim any trailing separator that results from truncating mid-segment.
 	prefix = strings.TrimRight(prefix, ResourceNameSeparator)
@@ -86,24 +86,30 @@ func RenderWorkerResourceTemplate(
 		return nil, fmt.Errorf("failed to unmarshal spec.template: %w", err)
 	}
 
-	twdName := wrt.Spec.EffectiveWorkerDeploymentName()
-	selectorLabels := ComputeSelectorLabels(twdName, buildID)
+	// The name of the Worker Deployment Kubernetes resource
+	wdName := wrt.Spec.EffectiveWorkerDeploymentName()
+
+	// The name of the Worker Deployment in Temporal Server, prefixed by the Kubernetes namespace of the resource
+	serverWDName := computeWorkerDeploymentName(wrt.Namespace, wdName)
+
+	selectorLabels := ComputeSelectorLabels(wdName, buildID)
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
 	// that is present in the template. These identify the exact per-version Prometheus series.
 	// Ordering is not a concern: matchLabels is a map; encoding/json serialises map keys in
 	// sorted order, so ComputeRenderedObjectHash is deterministic regardless of insertion order.
 	metricSelectorLabels := map[string]string{
-		"temporal_worker_deployment_name": wrt.Namespace + "_" + twdName,
+		"temporal_worker_deployment_name": cleanDeploymentNameForK8sLabelValue(serverWDName),
 		"temporal_worker_build_id":        buildID,
 		"temporal_namespace":              temporalNamespace,
 	}
 
-	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, and metric selector labels.
-	// NestedFieldNoCopy returns a live reference so mutations are reflected in obj.Object directly.
+	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, metric selector labels,
+	// and KEDA Temporal trigger metadata. NestedFieldNoCopy returns a live reference so
+	// mutations are reflected in obj.Object directly.
 	if specRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec"); ok {
 		if spec, ok := specRaw.(map[string]interface{}); ok {
-			autoInjectFields(spec, deployment.Name, selectorLabels, metricSelectorLabels)
+			autoInjectFields(spec, deployment.Name, serverWDName, buildID, temporalNamespace, selectorLabels, metricSelectorLabels)
 		}
 	}
 
@@ -152,9 +158,17 @@ func RenderWorkerResourceTemplate(
 //     matchLabels is present (including {}). User labels like task_type coexist.
 //     If matchLabels is absent, no injection occurs for that metric entry.
 //
+//   - spec.triggers[*].metadata (KEDA ScaledObject): for triggers of type "temporal",
+//     workerDeploymentName, workerDeploymentBuildId, and namespace are set whenever
+//     the key is present with the empty-string opt-in sentinel. The webhook rejects
+//     non-empty values for these keys. Required by KEDA's Temporal scaler
+//     (kedacore/keda#7672) for per-version backlog scaling against Worker Deployment
+//     Versioning. serverWDName must be the fully-qualified Temporal-server name
+//     (namespace/wdName, as returned by ComputeWorkerDeploymentName).
+//
 //   - scaleTargetRef: injected anywhere in the spec tree when {} (empty), via
 //     injectScaleTargetRefRecursive. Unambiguous across all supported resource types.
-func autoInjectFields(spec map[string]interface{}, deploymentName string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
+func autoInjectFields(spec map[string]interface{}, deploymentName, serverWDName, buildID, temporalNamespace string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
 	// spec.selector.matchLabels: {} opt-in sentinel.
 	if sel, ok := spec["selector"].(map[string]interface{}); ok {
 		if isEmptyMap(sel["matchLabels"]) {
@@ -166,6 +180,9 @@ func autoInjectFields(spec map[string]interface{}, deploymentName string, podSel
 	if len(metricSelectorLabels) > 0 {
 		appendMetricsMatchLabelSelector(spec, metricSelectorLabels)
 	}
+
+	// triggers[*].metadata: inject KEDA Temporal scaler version identifiers when present.
+	appendKEDATriggerMetadata(spec, serverWDName, buildID, temporalNamespace)
 
 	// scaleTargetRef: inject anywhere in the spec tree.
 	injectScaleTargetRefRecursive(spec, deploymentName)
@@ -206,6 +223,60 @@ func appendMetricsMatchLabelSelector(spec map[string]interface{}, metricSelector
 			_ = unstructured.SetNestedStringMap(sel, existing, "matchLabels")
 		}
 	}
+}
+
+// appendKEDATriggerMetadata walks spec.triggers[*] and, for any KEDA trigger
+// of type "temporal", sets workerDeploymentName, workerDeploymentBuildId, and namespace
+// in its metadata map. Injection is opt-in via the empty-string sentinel, mirroring
+// the scaleTargetRef {} sentinel pattern: absent = no injection; present-and-empty
+// = inject; present-and-non-empty is rejected by the WorkerResourceTemplate validating
+// webhook (defense in depth — if a non-empty value reaches the runtime, it is left
+// untouched rather than silently overwritten).
+//
+// serverWDName must be the fully-qualified Temporal-server Worker Deployment name
+// (computeWorkerDeploymentName(k8sNamespace, wdName)) — that's what workers register
+// with at Temporal Cloud and what KEDA's scaler needs to query backlog for a specific
+// version. temporalNamespace is the Temporal Cloud namespace from the connection.
+//
+// Required by KEDA's Temporal scaler (kedacore/keda#7672) for per-version backlog
+// scaling against Temporal's Worker Deployment Versioning model. Non-temporal
+// triggers in the same ScaledObject are untouched.
+func appendKEDATriggerMetadata(spec map[string]interface{}, serverWDName, buildID, temporalNamespace string) {
+	triggers, ok := spec["triggers"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, t := range triggers {
+		trigger, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		triggerType, ok := trigger["type"].(string)
+		if !ok || triggerType != "temporal" {
+			continue
+		}
+		metadata, ok := trigger["metadata"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if isEmptyString(metadata["workerDeploymentName"]) {
+			metadata["workerDeploymentName"] = serverWDName
+		}
+		if isEmptyString(metadata["workerDeploymentBuildId"]) {
+			metadata["workerDeploymentBuildId"] = buildID
+		}
+		if isEmptyString(metadata["namespace"]) {
+			metadata["namespace"] = temporalNamespace
+		}
+	}
+}
+
+// isEmptyString returns true if v is a string with no characters. The trigger-metadata
+// injection mirrors scaleTargetRef's isEmptyMap sentinel pattern but for string fields,
+// since KEDA's trigger metadata is a map of strings.
+func isEmptyString(v interface{}) bool {
+	s, ok := v.(string)
+	return ok && s == ""
 }
 
 // injectScaleTargetRefRecursive recursively traverses obj and injects scaleTargetRef

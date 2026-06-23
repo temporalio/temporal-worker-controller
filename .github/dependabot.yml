@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # One entry covering all Go modules. group-by: dependency-name makes Dependabot
+  # raise one PR per dependency spanning every listed directory, rather than a
+  # separate PR per module.
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+      - "/internal/demo"
+      - "/internal/tests"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      go-modules:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        group-by: dependency-name
+
+  - package-ecosystem: helm
+    directory: "/helm/temporal-worker-controller"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14

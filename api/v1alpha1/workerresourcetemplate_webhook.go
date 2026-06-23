@@ -313,9 +313,61 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		// the controller generates the correct per-version values at render time.
 		// User labels (e.g. task_type: "Activity") are allowed alongside the controller-owned keys.
 		checkMetricSelectorLabelsNotSet(innerSpec, innerSpecPath, &allErrs)
+
+		// 8. triggers[*].metadata.workerDeploymentName / workerDeploymentBuildId
+		// (KEDA ScaledObject): the controller owns these for triggers of type "temporal" so
+		// each per-version ScaledObject queries the correct Temporal Worker Deployment Version
+		// (workerDeploymentName + workerDeploymentBuildId). Allow empty-string opt-in ("") and
+		// reject any other value.
+		checkKEDATriggerMetadata(innerSpec, innerSpecPath, &allErrs)
 	}
 
 	return warnings, allErrs
+}
+
+// checkKEDATriggerMetadata validates that, for each KEDA trigger of type "temporal"
+// in spec.triggers, the controller-owned metadata keys (workerDeploymentName,
+// workerDeploymentBuildId, namespace) are either absent or set to the empty-string opt-in
+// sentinel. A non-empty value is rejected — the controller fills these at render time from
+// the WorkerDeployment's connection / per-version state, and a hardcoded value would point
+// at the wrong worker deployment / build / Temporal namespace.
+// Non-temporal triggers (prometheus, cron, etc.) are not validated.
+func checkKEDATriggerMetadata(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
+	triggers, ok := spec["triggers"].([]interface{})
+	if !ok {
+		return
+	}
+	triggersPath := path.Child("triggers")
+	for i, t := range triggers {
+		trigger, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		triggerType, ok := trigger["type"].(string)
+		if !ok || triggerType != "temporal" {
+			continue
+		}
+		metadata, ok := trigger["metadata"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		triggerPath := triggersPath.Index(i).Child("metadata")
+		for _, key := range []string{"workerDeploymentName", "workerDeploymentBuildId", "namespace"} {
+			val, present := metadata[key]
+			if !present {
+				continue
+			}
+			s, isString := val.(string)
+			if !isString || s != "" {
+				*allErrs = append(*allErrs, field.Forbidden(
+					triggerPath.Child(key),
+					"if "+key+" is present on a KEDA ScaledObject temporal trigger, the controller owns it and "+
+						"will set it to the per-version or per-connection value; set it to \"\" to opt in "+
+						"to auto-injection, or remove it entirely if you do not need it",
+				))
+			}
+		}
+	}
 }
 
 // checkScaleTargetRefNotSet recursively traverses obj looking for any scaleTargetRef that is

@@ -44,7 +44,7 @@ roleRef:
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-proxy-role
 subjects:
   - kind: ServiceAccount
-    name: controller-manager
+    name: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
     namespace: {{ .Release.Namespace }}
 ---
 apiVersion: v1

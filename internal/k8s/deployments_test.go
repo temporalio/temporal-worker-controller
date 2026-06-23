@@ -580,6 +580,20 @@ func TestNewDeploymentWithPodAnnotations(t *testing.T) {
 	assert.Equal(t, expectedHash, actualHash, "Deployment should have correct connection spec hash annotation")
 }
 
+func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
+	deployment := k8s.NewDeploymentWithOwnerRef(
+		&metav1.TypeMeta{},
+		&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+		&temporaliov1alpha1.WorkerDeploymentSpec{},
+		"test-deployment",
+		"build123",
+		temporaliov1alpha1.ConnectionSpec{},
+	)
+
+	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
+	assert.Equal(t, "build123", deployment.Labels[k8s.BuildIDLabel])
+}
+
 func TestComputeConnectionSpecHash(t *testing.T) {
 	t.Run("generates non-empty hash for valid connection spec", func(t *testing.T) {
 		spec := temporaliov1alpha1.ConnectionSpec{
