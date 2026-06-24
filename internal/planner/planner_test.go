@@ -2275,6 +2275,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 		expectUpdate         bool
 		expectSecretName     string
 		expectHostPortEnv    string
+		expectTLSServerName  string
 		expectConnectionHash string
 	}{
 		{
@@ -2370,10 +2371,42 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			}),
 		},
 		{
-			name:    "empty mutual tls secret updates correctly",
+			name:    "different TLS server name triggers env update",
 			buildID: "v5",
 			existingDeployment: createTestDeploymentWithConnection(
 				"test-worker", "v5",
+				temporaliov1alpha1.ConnectionSpec{
+					HostPort: defaultHostPort(),
+					TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+						ServerName: "old-server.example.com",
+					},
+					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
+				},
+			),
+			newConnection: temporaliov1alpha1.ConnectionSpec{
+				HostPort: defaultHostPort(),
+				TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+					ServerName: "new-server.example.com",
+				},
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
+			},
+			expectUpdate:        true,
+			expectSecretName:    defaultMutualTLSSecret(),
+			expectHostPortEnv:   defaultHostPort(),
+			expectTLSServerName: "new-server.example.com",
+			expectConnectionHash: k8s.ComputeConnectionSpecHash(temporaliov1alpha1.ConnectionSpec{
+				HostPort: defaultHostPort(),
+				TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+					ServerName: "new-server.example.com",
+				},
+				MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
+			}),
+		},
+		{
+			name:    "empty mutual tls secret updates correctly",
+			buildID: "v6",
+			existingDeployment: createTestDeploymentWithConnection(
+				"test-worker", "v6",
 				temporaliov1alpha1.ConnectionSpec{
 					HostPort:           defaultHostPort(),
 					MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: defaultMutualTLSSecret()},
@@ -2442,6 +2475,20 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 				}
 			}
 			assert.True(t, found, "Should find TEMPORAL_ADDRESS environment variable")
+
+			if tt.expectTLSServerName != "" {
+				found = false
+				for _, container := range result.Spec.Template.Spec.Containers {
+					for _, env := range container.Env {
+						if env.Name == "TEMPORAL_TLS_SERVER_NAME" {
+							assert.Equal(t, tt.expectTLSServerName, env.Value, "TEMPORAL_TLS_SERVER_NAME should be updated")
+							found = true
+							break
+						}
+					}
+				}
+				assert.True(t, found, "Should find TEMPORAL_TLS_SERVER_NAME environment variable")
+			}
 		})
 	}
 }

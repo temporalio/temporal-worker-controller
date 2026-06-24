@@ -32,10 +32,11 @@ const (
 )
 
 type ClientPoolKey struct {
-	HostPort   string
-	Namespace  string   // Temporal namespace
-	SecretName string   // Include secret name in key to invalidate cache when the secret name changes
-	AuthMode   AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
+	HostPort      string
+	TLSServerName string
+	Namespace     string   // Temporal namespace
+	SecretName    string   // Include secret name in key to invalidate cache when the secret name changes
+	AuthMode      AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
 }
 
 type MTLSAuth struct {
@@ -123,6 +124,7 @@ type NewClientOptions struct {
 }
 
 func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
+	tlsServerName := opts.Spec.TLSServerName()
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
@@ -155,6 +157,7 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	}
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
+		ServerName:   tlsServerName,
 	}
 	// If the secret contains a CA certificate, append it to the system CA pool for
 	// server certificate verification. This enables connecting to Temporal servers whose
@@ -177,10 +180,11 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	expiryTime = exp
 
 	key := ClientPoolKey{
-		HostPort:   opts.Spec.HostPort,
-		Namespace:  opts.TemporalNamespace,
-		SecretName: opts.Spec.MutualTLSSecretRef.Name,
-		AuthMode:   AuthModeTLS,
+		HostPort:      opts.Spec.HostPort,
+		TLSServerName: tlsServerName,
+		Namespace:     opts.TemporalNamespace,
+		SecretName:    opts.Spec.MutualTLSSecretRef.Name,
+		AuthMode:      AuthModeTLS,
 	}
 	auth := ClientAuth{
 		mode: AuthModeTLS,
@@ -190,13 +194,14 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 }
 
 func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
+	tlsServerName := opts.Spec.TLSServerName()
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
 		Identity:  opts.Identity,
 		ConnectionOptions: sdkclient.ConnectionOptions{
-			TLS: &tls.Config{},
+			TLS: &tls.Config{ServerName: tlsServerName},
 		},
 	}
 
@@ -208,10 +213,11 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions) (*sdkc
 	})
 
 	key := ClientPoolKey{
-		HostPort:   opts.Spec.HostPort,
-		Namespace:  opts.TemporalNamespace,
-		SecretName: opts.Spec.APIKeySecretRef.Name,
-		AuthMode:   AuthModeAPIKey,
+		HostPort:      opts.Spec.HostPort,
+		TLSServerName: tlsServerName,
+		Namespace:     opts.TemporalNamespace,
+		SecretName:    opts.Spec.APIKeySecretRef.Name,
+		AuthMode:      AuthModeAPIKey,
 	}
 	auth := ClientAuth{
 		mode: AuthModeAPIKey,
@@ -222,18 +228,23 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions) (*sdkc
 }
 
 func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
+	tlsServerName := opts.Spec.TLSServerName()
 	clientOpts := sdkclient.Options{
 		Logger:    cp.logger,
 		HostPort:  opts.Spec.HostPort,
 		Namespace: opts.TemporalNamespace,
 		Identity:  opts.Identity,
 	}
+	if tlsServerName != "" {
+		clientOpts.ConnectionOptions.TLS = &tls.Config{ServerName: tlsServerName}
+	}
 
 	key := ClientPoolKey{
-		HostPort:   opts.Spec.HostPort,
-		Namespace:  opts.TemporalNamespace,
-		SecretName: "",
-		AuthMode:   AuthModeNoCredentials,
+		HostPort:      opts.Spec.HostPort,
+		TLSServerName: tlsServerName,
+		Namespace:     opts.TemporalNamespace,
+		SecretName:    "",
+		AuthMode:      AuthModeNoCredentials,
 	}
 	auth := ClientAuth{
 		mode: AuthModeNoCredentials,

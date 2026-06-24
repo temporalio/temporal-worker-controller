@@ -19,12 +19,25 @@ type SecretReference struct {
 	Name string `json:"name"`
 }
 
+// ConnectionTLSConfig defines TLS settings for a Connection.
+type ConnectionTLSConfig struct {
+	// ServerName overrides the server name used to verify the Temporal server
+	// certificate when TLS is enabled.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+$`
+	ServerName string `json:"serverName,omitempty"`
+}
+
 // ConnectionSpec defines the desired state of Connection
 // +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))",message="Only one of mutualTLSSecretRef or apiKeySecretRef may be set"
 type ConnectionSpec struct {
 	// The host and port of the Temporal server.
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
 	HostPort string `json:"hostPort"`
+
+	// TLS configures TLS behavior for the Temporal server connection.
+	// +optional
+	TLS *ConnectionTLSConfig `json:"tls,omitempty"`
 
 	// MutualTLSSecretRef is the name of the Secret that contains the TLS certificate and key
 	// for mutual TLS authentication. The secret must be `type: kubernetes.io/tls` or
@@ -44,6 +57,13 @@ type ConnectionSpec struct {
 	//   - Key: the data key within Secret.Data whose value is the API key token
 	// +optional
 	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
+}
+
+func (s ConnectionSpec) TLSServerName() string {
+	if s.TLS == nil {
+		return ""
+	}
+	return s.TLS.ServerName
 }
 
 // ConnectionStatus defines the observed state of Connection

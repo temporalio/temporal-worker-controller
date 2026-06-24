@@ -317,6 +317,7 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.ConnectionSpec) str
 
 	// Hash connection spec fields in deterministic order
 	_, _ = hasher.Write([]byte(connection.HostPort))
+	_, _ = hasher.Write([]byte(connection.TLSServerName()))
 	if connection.MutualTLSSecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
 	} else if connection.APIKeySecretRef != nil {
@@ -368,6 +369,16 @@ func ApplyControllerPodSpecModifications(
 			},
 		)
 		podSpec.Containers[i] = container
+	}
+
+	if tlsServerName := connection.TLSServerName(); tlsServerName != "" {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  "TEMPORAL_TLS_SERVER_NAME",
+				Value: tlsServerName,
+			})
+			podSpec.Containers[i] = container
+		}
 	}
 
 	// Add TLS config if mTLS is enabled
