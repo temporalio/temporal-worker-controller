@@ -97,7 +97,7 @@
     },
     "priority": {
       "type": "integer",
-      "description": "Optional explicit Pod priority integer. Prefer priorityClassName when possible."
+      "description": "Optional Pod priority integer. Prefer priorityClassName when possible."
     },
     "priorityClassName": {
       "type": "string",
