@@ -49,13 +49,41 @@ serviceAccount:
   name:
 
 # For common cases that do not require escalating privileges it is recommended to ensure that
-#  all your Pods/Containers are restrictive.
+# all your Pods/Containers are restrictive.
 # More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
 # Please enable the following if your project does NOT have to work on old Kubernetes versions < 1.19
 # or on vendors versions which do NOT support this field by default (i.e. Openshift < 4.11 ).
 securityContext:
   seccompProfile:
     enabled: false
+
+# podSecurityContext overrides the default pod-level securityContext entirely when set.
+# If empty (default), the chart uses the legacy behavior above (runAsNonRoot: true +
+# optional seccompProfile toggle).
+# Example for restricted Pod Security Standards / Kyverno compliance:
+#   podSecurityContext:
+#     runAsNonRoot: true
+#     runAsUser: 65532
+#     runAsGroup: 65532
+#     fsGroup: 65532
+#     seccompProfile:
+#       type: RuntimeDefault
+podSecurityContext: {}
+
+# containerSecurityContext overrides the default container-level securityContext for both
+# the manager and kube-rbac-proxy containers when set. If empty (default), the chart uses
+# the legacy behavior (allowPrivilegeEscalation: false + capabilities.drop: ALL).
+# Example for restricted Pod Security Standards / Kyverno compliance:
+#   containerSecurityContext:
+#     allowPrivilegeEscalation: false
+#     readOnlyRootFilesystem: true
+#     runAsGroup: 65532
+#     seccompProfile:
+#       type: RuntimeDefault
+#     capabilities:
+#       drop:
+#         - "ALL"
+containerSecurityContext: {}
 
 # Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager
 # pods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.
