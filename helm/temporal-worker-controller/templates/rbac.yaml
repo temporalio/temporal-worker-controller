@@ -59,12 +59,9 @@ subjects:
     namespace: {{ .Release.Namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ include "temporal-worker-controller.rbac.roleKind" . }}
+kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-role
-  {{- if .Values.rbac.ownNamespace }}
-  namespace: {{ .Release.Namespace }}
-  {{- end }}
 rules:
   # GENERATED RULES BEGIN - do not edit; run 'make manifests' to update
   - apiGroups:
@@ -177,24 +174,86 @@ rules:
       - update
   {{- end }}
 ---
+{{- if .Values.rbac.restrictWatchNamespaces }}
+# Namespace-scoped mode: the manager role is bound only within the watched
+# namespaces (RoleBindings below). The two grants that must stay cluster-wide are
+# split into a minimal ClusterRole: namespaces "get" (restricted to the release
+# namespace, for the controller identity-suffix lookup) and subjectaccessreviews
+# "create" (the always-on validating webhook).
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ include "temporal-worker-controller.rbac.roleBindingKind" . }}
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-cluster-role
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    resourceNames:
+      - {{ .Release.Namespace }}
+    verbs:
+      - get
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-cluster-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-cluster-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
+    namespace: {{ .Release.Namespace }}
+{{- range .Values.rbac.restrictWatchNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" $ | nindent 4 }}
+  name: {{ $.Release.Name }}-{{ $.Release.Namespace }}-manager-rolebinding
+  namespace: {{ . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $.Release.Name }}-{{ $.Release.Namespace }}-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Values.serviceAccount.name | default (printf "%s-service-account" $.Release.Name) }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
 metadata:
   labels:
     app.kubernetes.io/component: rbac
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-rolebinding
-  {{- if .Values.rbac.ownNamespace }}
-  namespace: {{ .Release.Namespace }}
-  {{- end }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: {{ include "temporal-worker-controller.rbac.roleKind" . }}
+  kind: ClusterRole
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-role
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
     namespace: {{ .Release.Namespace }}
+{{- end }}
 ---
 # permissions for end users to edit connections (new name).
 apiVersion: rbac.authorization.k8s.io/v1
@@ -303,15 +362,12 @@ rules:
 # Deprecated editor/viewer roles (migration window — remove in v1.8.0)
 # permissions for end users to edit temporalconnections.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ include "temporal-worker-controller.rbac.roleKind" . }}
+kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/component: rbac
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalconnection-editor-role
-  {{- if .Values.rbac.ownNamespace }}
-  namespace: {{ .Release.Namespace }}
-  {{- end }}
 rules:
   - apiGroups:
       - temporal.io
@@ -334,15 +390,12 @@ rules:
 ---
 # permissions for end users to view temporalconnections.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ include "temporal-worker-controller.rbac.roleKind" . }}
+kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/component: rbac
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalconnection-viewer-role
-  {{- if .Values.rbac.ownNamespace }}
-  namespace: {{ .Release.Namespace }}
-  {{- end }}
 rules:
   - apiGroups:
       - temporal.io
@@ -361,15 +414,12 @@ rules:
 ---
 # permissions for end users to edit temporalworkerdeployments.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ include "temporal-worker-controller.rbac.roleKind" . }}
+kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/component: rbac
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalworkerdeployment-editor-role
-  {{- if .Values.rbac.ownNamespace }}
-  namespace: {{ .Release.Namespace }}
-  {{- end }}
 rules:
   - apiGroups:
       - temporal.io
@@ -392,15 +442,12 @@ rules:
 ---
 # permissions for end users to view temporalworkerdeployments.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ include "temporal-worker-controller.rbac.roleKind" . }}
+kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/component: rbac
     {{- include "temporal-worker-controller.labels" . | nindent 4 }}
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-temporalworkerdeployment-viewer-role
-  {{- if .Values.rbac.ownNamespace }}
-  namespace: {{ .Release.Namespace }}
-  {{- end }}
 rules:
   - apiGroups:
       - temporal.io

@@ -20,23 +20,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Return Role or ClusterRole depending on ownNamespace
+Namespace selector restricting admission webhooks to the watched namespaces.
+Rendered only when rbac.restrictWatchNamespaces is set; keys off the
+kubernetes.io/metadata.name label the API server sets on every namespace.
 */}}
-{{- define "temporal-worker-controller.rbac.roleKind" -}}
-{{- if .Values.rbac.ownNamespace -}}
-Role
-{{- else -}}
-ClusterRole
-{{- end -}}
-{{- end -}}
-
-{{/*
-Return RoleBinding or ClusterRoleBinding depending on ownNamespace
-*/}}
-{{- define "temporal-worker-controller.rbac.roleBindingKind" -}}
-{{- if .Values.rbac.ownNamespace -}}
-RoleBinding
-{{- else -}}
-ClusterRoleBinding
-{{- end -}}
-{{- end -}}
+{{- define "temporal-worker-controller.webhookNamespaceSelector" -}}
+namespaceSelector:
+  matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: In
+      values:
+      {{- range .Values.rbac.restrictWatchNamespaces }}
+        - {{ . | quote }}
+      {{- end }}
+{{- end }}

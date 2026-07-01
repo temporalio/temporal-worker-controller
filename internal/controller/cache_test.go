@@ -5,6 +5,7 @@
 package controller
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestNewCacheOptionsScopesDeploymentsByWorkerLabel(t *testing.T) {
-	opts, err := NewCacheOptions()
+	opts, err := NewCacheOptions(nil)
 	if err != nil {
 		t.Fatalf("NewCacheOptions returned error: %v", err)
 	}
@@ -38,5 +39,55 @@ func TestNewCacheOptionsScopesDeploymentsByWorkerLabel(t *testing.T) {
 	}
 	if deploymentSelector.Matches(labels.Set{}) {
 		t.Fatal("expected selector not to match unlabeled Deployment")
+	}
+}
+
+func TestNewCacheOptionsScopesToWatchNamespaces(t *testing.T) {
+	opts, err := NewCacheOptions([]string{"ns-a", "ns-b"})
+	if err != nil {
+		t.Fatalf("NewCacheOptions returned error: %v", err)
+	}
+
+	if len(opts.DefaultNamespaces) != 2 {
+		t.Fatalf("expected 2 default namespaces, got %d", len(opts.DefaultNamespaces))
+	}
+	for _, ns := range []string{"ns-a", "ns-b"} {
+		if _, ok := opts.DefaultNamespaces[ns]; !ok {
+			t.Fatalf("expected namespace %q in DefaultNamespaces", ns)
+		}
+	}
+}
+
+func TestNewCacheOptionsWatchesAllNamespacesWhenEmpty(t *testing.T) {
+	opts, err := NewCacheOptions(nil)
+	if err != nil {
+		t.Fatalf("NewCacheOptions returned error: %v", err)
+	}
+
+	if len(opts.DefaultNamespaces) != 0 {
+		t.Fatalf("expected no default namespaces, got %d", len(opts.DefaultNamespaces))
+	}
+}
+
+func TestParseWatchNamespaces(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{name: "empty returns nil", raw: "", want: nil},
+		{name: "single namespace", raw: "ns-a", want: []string{"ns-a"}},
+		{name: "comma separated", raw: "ns-a,ns-b", want: []string{"ns-a", "ns-b"}},
+		{name: "trims whitespace and drops empties", raw: " ns-a , , ns-b ,", want: []string{"ns-a", "ns-b"}},
+		{name: "separators only returns empty slice", raw: " , , ", want: []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseWatchNamespaces(tt.raw)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ParseWatchNamespaces(%q) = %#v, want %#v", tt.raw, got, tt.want)
+			}
+		})
 	}
 }

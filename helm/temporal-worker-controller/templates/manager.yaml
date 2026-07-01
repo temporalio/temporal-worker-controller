@@ -98,9 +98,9 @@ spec:
         {{- end }}
         - name: ALLOWED_KINDS
           value: {{ join "," $allKinds | quote }}
-        {{- with .Values.watchNamespace }}
-        - name: WATCH_NAMESPACE
-          value: {{ . | quote }}
+        {{- with .Values.rbac.restrictWatchNamespaces }}
+        - name: WATCH_NAMESPACES
+          value: {{ join "," . | quote }}
         {{- end }}
         args:
         - --leader-elect
