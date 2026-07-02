@@ -4,8 +4,8 @@ go 1.26.2
 
 require (
 	github.com/temporalio/temporal-worker-controller v1.6.0
-	go.temporal.io/api v1.62.11
-	go.temporal.io/sdk v1.43.0
+	go.temporal.io/api v1.62.12
+	go.temporal.io/sdk v1.45.0
 	go.temporal.io/server v1.32.0-155.0
 	k8s.io/api v0.35.4
 	k8s.io/apimachinery v0.35.4
