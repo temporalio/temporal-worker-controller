@@ -49,12 +49,17 @@ spec:
 {{ include "temporal-worker-controller.selectorLabels" . | nindent 20 }}
                 topologyKey: kubernetes.io/hostname
       {{- end }}
+      {{- if .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- else }}
       securityContext:
         runAsNonRoot: true
         {{- if .Values.securityContext.seccompProfile.enabled }}
         seccompProfile:
           type: RuntimeDefault
         {{- end }}
+      {{- end }}
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -116,11 +121,16 @@ spec:
           - mountPath: {{ .Values.webhook.certDir }}
             name: cert
             readOnly: true
+        {{- if .Values.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
+        {{- else }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
               - "ALL"
+        {{- end }}
         livenessProbe:
           httpGet:
             path: /healthz
@@ -137,11 +147,16 @@ spec:
           {{- toYaml .Values.resources | nindent 10 }}
       {{- if not .Values.metrics.disableAuth }}
       - name: kube-rbac-proxy
+        {{- if .Values.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
+        {{- else }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
               - "ALL"
+        {{- end }}
         image: registry.k8s.io/kubebuilder/kube-rbac-proxy:v0.14.1
         args:
           - "--secure-listen-address=0.0.0.0:8443"
