@@ -1,7 +1,7 @@
 # Temporal Worker Controller
 
 [![License](https://img.shields.io/github/license/temporalio/temporal-worker-controller)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/temporalio/temporal-worker-controller)](https://goreportcard.com/report/github.com/temporalio/temporal-worker-controller)
+[![Build Status](https://github.com/temporalio/temporal-worker-controller/actions/workflows/test-integration.yml/badge.svg?branch=main)](https://github.com/temporalio/temporal-worker-controller/actions)
 
 > 🚀 **Generally Available**: This project is [Generally Available](https://docs.temporal.io/evaluate/development-production-features/release-stages) and ready for production use cases. Core functionality is complete with stable APIs.
 
