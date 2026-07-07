@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -75,10 +78,22 @@ func GetWorkerDeploymentState(
 
 	// Describe the worker deployment using gRPC API directly to get full version summary info
 	// (including drainage timestamps) without needing per-version DescribeVersion calls.
-	resp, err := client.WorkflowService().DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
-		Namespace:      namespace,
-		DeploymentName: workerDeploymentName,
+	//
+	// Raw WorkflowService calls bypass the SDK's built-in retry interceptor (it only
+	// engages for the SDK's own high-level methods), so a single transient transport
+	// blip here would otherwise abort the whole reconcile pass — stacking
+	// controller-runtime backoff on top and delaying drained-version sunsets by hours.
+	// Retry transient failures briefly before giving up.
+	var resp *workflowservice.DescribeWorkerDeploymentResponse
+	describeErr := retryTransient(ctx, 3, time.Second, func() error {
+		var err error
+		resp, err = client.WorkflowService().DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
+			Namespace:      namespace,
+			DeploymentName: workerDeploymentName,
+		})
+		return err
 	})
+	err := describeErr
 	if err != nil {
 		var notFound *serviceerror.NotFound
 		if errors.As(err, &notFound) {
@@ -181,6 +196,37 @@ func GetWorkerDeploymentState(
 	}
 
 	return state, nil
+}
+
+// retryTransient runs fn up to attempts times, retrying only transient
+// transport-level failures (mirroring the retryable set of the SDK's own
+// interceptor) with linear backoff. Context cancellation stops retries.
+func retryTransient(ctx context.Context, attempts int, backoff time.Duration, fn func() error) error {
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		lastErr = fn()
+		if lastErr == nil || !isTransientGRPCError(lastErr) {
+			return lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff * time.Duration(i+1)):
+		}
+	}
+	return lastErr
+}
+
+// isTransientGRPCError mirrors the SDK retry interceptor's retryable codes.
+func isTransientGRPCError(err error) bool {
+	switch status.Code(err) {
+	case codes.Unavailable, codes.Unknown, codes.Aborted, codes.ResourceExhausted:
+		return true
+	}
+	return false
 }
 
 func withBackoff(timeout time.Duration, tick time.Duration, fn func() error) error {
