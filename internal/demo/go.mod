@@ -7,9 +7,9 @@ require (
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.60.0
 	go.opentelemetry.io/otel/sdk/metric v1.43.0
-	go.temporal.io/api v1.62.11
+	go.temporal.io/api v1.62.12
 	go.temporal.io/sdk v1.43.0
-	go.temporal.io/sdk/contrib/envconfig v0.1.0
+	go.temporal.io/sdk/contrib/envconfig v1.0.2
 	go.temporal.io/sdk/contrib/opentelemetry v0.7.0
 )
 
