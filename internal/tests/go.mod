@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/temporalio/temporal-worker-controller v1.6.0
-	go.temporal.io/api v1.62.11
+	go.temporal.io/api v1.63.0
 	go.temporal.io/sdk v1.43.0
 	go.temporal.io/server v1.32.0-155.0
 	k8s.io/api v0.35.4
@@ -128,6 +128,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/nexus-rpc/nexus-proto-annotations v0.1.0 // indirect
 	github.com/nexus-rpc/sdk-go v0.6.0 // indirect
 	github.com/olivere/elastic/v7 v7.0.32 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
