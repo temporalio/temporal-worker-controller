@@ -59,7 +59,7 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&temporaliov1alpha1.WorkerDeployment{}).
+		WithStatusSubresource(&temporaliov1alpha1.WorkerDeployment{}, &temporaliov1alpha1.WorkerResourceTemplate{}).
 		WithIndex(&appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
 			deploy := rawObj.(*appsv1.Deployment)
 			owner := metav1.GetControllerOf(deploy)

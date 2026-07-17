@@ -23,6 +23,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -337,9 +338,14 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 		}
 	}
 
-	// Apply worker resource templates via Server-Side Apply.
-	// Partial failure isolation: all resources are attempted even if some fail;
-	// errors are collected and returned together.
+	return r.applyWorkerResourceTemplates(ctx, l, p)
+}
+
+// applyWorkerResourceTemplates applies rendered worker resource templates via
+// Server-Side Apply and records per-Build-ID results in each WRT's status.
+// Partial failure isolation: all resources are attempted even if some fail;
+// errors are collected and returned together.
+func (r *WorkerDeploymentReconciler) applyWorkerResourceTemplates(ctx context.Context, l logr.Logger, p *plan) error {
 	type wrtKey struct{ namespace, name string }
 	type applyResult struct {
 		buildID      string
@@ -370,14 +376,47 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 		// successfully applied. This avoids unnecessary API server load at scale
 		// (hundreds of TWDs × hundreds of versions × multiple WRTs).
 		// An empty RenderedHash means hashing failed; always apply in that case.
+		//
+		// The hash match alone is not sufficient: the tracked resource may have been
+		// deleted since the hash was recorded. In particular, when a version is
+		// sunset its rendered resources are deleted (DeleteWorkerResources), but the
+		// WRT status entry for that build can survive — e.g. the status update that
+		// would drop it hits a conflict, or the version is re-registered before the
+		// next successful status write. If the same build ID then comes back, the
+		// stale LastAppliedHash matches the unchanged render and the resource is
+		// never re-created, leaving the returning version without its scaler
+		// (observed as a current version pinned at 1 replica with no ScaledObject).
+		// Guard the skip with an existence check on the rendered object.
 		if apply.RenderedHash != "" && apply.RenderedHash == apply.LastAppliedHash {
-			wrtResults[key] = append(wrtResults[key], applyResult{
-				buildID:      apply.BuildID,
-				resourceName: apply.Resource.GetName(),
-				hash:         apply.RenderedHash,
-				skipped:      true,
-			})
-			continue
+			existing := &unstructured.Unstructured{}
+			existing.SetGroupVersionKind(apply.Resource.GroupVersionKind())
+			getErr := r.Get(ctx, types.NamespacedName{
+				Namespace: apply.Resource.GetNamespace(),
+				Name:      apply.Resource.GetName(),
+			}, existing)
+			if getErr == nil {
+				wrtResults[key] = append(wrtResults[key], applyResult{
+					buildID:      apply.BuildID,
+					resourceName: apply.Resource.GetName(),
+					hash:         apply.RenderedHash,
+					skipped:      true,
+				})
+				continue
+			}
+			if !apierrors.IsNotFound(getErr) {
+				l.Error(getErr, "unable to confirm worker resource exists; re-applying",
+					"name", apply.Resource.GetName(),
+					"kind", apply.Resource.GetKind(),
+				)
+			} else {
+				l.Info("worker resource missing despite unchanged hash; re-applying",
+					"name", apply.Resource.GetName(),
+					"kind", apply.Resource.GetKind(),
+					"buildID", apply.BuildID,
+				)
+			}
+			// Fall through to the SSA apply: it is create-or-update, so re-applying
+			// is safe in both the NotFound and the indeterminate-error case.
 		}
 
 		l.Info("applying rendered worker resource template",
