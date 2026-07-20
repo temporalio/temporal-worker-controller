@@ -48,6 +48,9 @@ webhooks:
         operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["workerresourcetemplates"]
     sideEffects: None
+    {{- if .Values.rbac.restrictWatchNamespaces }}
+    {{- include "temporal-worker-controller.webhookNamespaceSelector" . | nindent 4 }}
+    {{- end }}
 {{- if .Values.webhook.enabled }}
 ---
 # ValidatingWebhookConfiguration for WorkerDeployment.
@@ -80,4 +83,7 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         resources: ["workerdeployments"]
     sideEffects: None
+    {{- if .Values.rbac.restrictWatchNamespaces }}
+    {{- include "temporal-worker-controller.webhookNamespaceSelector" . | nindent 4 }}
+    {{- end }}
 {{- end }}
