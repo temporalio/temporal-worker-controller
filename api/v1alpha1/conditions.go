@@ -11,6 +11,12 @@ const (
 	// ConditionProgressing is True while a rollout is actively in-flight —
 	// i.e., the target version has not yet been promoted to current.
 	ConditionProgressing = "Progressing"
+
+	// ConditionWorkersHealthy indicates whether workers for the version currently
+	// serving production traffic (or, before the first rollout completes, the target
+	// version) are actively polling Temporal -- as opposed to merely being Ready at
+	// the Kubernetes level.
+	ConditionWorkersHealthy = "WorkersHealthy"
 )
 
 // Deprecated condition type constants. Maintained for backward compatibility with
