@@ -109,6 +109,13 @@
         "create": {
           "type": "boolean",
           "description": "Whether to create RBAC resources"
+        },
+        "restrictWatchNamespaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Namespaces the controller watches and is granted RBAC in. Empty (the default) watches all namespaces with cluster-wide RBAC; when set, the controller is scoped to these namespaces via per-namespace RoleBindings plus a minimal cluster-scoped role."
         }
       }
     },

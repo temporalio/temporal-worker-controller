@@ -45,8 +45,12 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var watchNamespaces string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&watchNamespaces, "watch-namespaces", "",
+		"Comma-separated list of namespaces the controller watches. "+
+			"If empty, the controller watches all namespaces.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -56,10 +60,19 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	if watchNamespaces == "" {
+		watchNamespaces = os.Getenv("WATCH_NAMESPACES")
+	}
+	namespaces := controller.ParseWatchNamespaces(watchNamespaces)
+
 	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	ctrl.SetLogger(zap.New(zap.JSONEncoder()))
 
-	cacheOptions, err := controller.NewCacheOptions()
+	if len(namespaces) > 0 {
+		setupLog.Info("running controller in namespace-scoped mode", "namespaces", namespaces)
+	}
+
+	cacheOptions, err := controller.NewCacheOptions(namespaces)
 	if err != nil {
 		setupLog.Error(err, "unable to build manager cache options")
 		os.Exit(1)
@@ -86,6 +99,7 @@ func main() {
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
 	})
+
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
