@@ -38,6 +38,17 @@ type VersionInfo struct {
 	//   - Strategy is Progressive, and
 	//   - Presence of unversioned pollers in all task queues of target version cannot be confirmed.
 	AllTaskQueuesHaveUnversionedPoller bool
+
+	// PollerHealth summarizes, per task queue, whether at least one poller was observed.
+	// Keyed by task queue name; true = has at least one poller. A task queue is absent
+	// from the map if its poller status could not be determined (e.g. a transient
+	// DescribeTaskQueue error) -- see PollerHealthUnknown.
+	PollerHealth map[string]bool
+
+	// PollerHealthUnknown is true if poller status could not be determined for one or
+	// more of this version's task queues. Callers must not interpret this as unhealthy;
+	// it means "don't know", not "broken".
+	PollerHealthUnknown bool
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -177,6 +188,22 @@ func GetWorkerDeploymentState(
 
 		}
 
+		// Poller health for the current version reflects whether workers are actively
+		// receiving tasks for the version serving production traffic, as opposed to
+		// merely being Ready at the Kubernetes level. Only checked for the current
+		// version to avoid an extra DescribeVersion/DescribeTaskQueue round trip per
+		// version on every reconcile.
+		if versionInfo.Status == temporaliov1alpha1.VersionStatusCurrent {
+			currentDesc, descErr := deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+				BuildID: version.DeploymentVersion.BuildId,
+			})
+			if descErr == nil {
+				versionInfo.PollerHealth, versionInfo.PollerHealthUnknown = computePollerHealth(ctx, client, currentDesc.Info.TaskQueuesInfos)
+			} else {
+				versionInfo.PollerHealthUnknown = true
+			}
+		}
+
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
@@ -227,6 +254,11 @@ func GetTestWorkflowStatus(
 		// Ignore NotFound error, because if the version is not found, we know there are no test workflows running on it.
 		return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
 	}
+
+	// Poller health for the target version, computed from the task queues already
+	// fetched above via DescribeVersion (no additional per-version round trip).
+	temporalState.Versions[buildID].PollerHealth, temporalState.Versions[buildID].PollerHealthUnknown =
+		computePollerHealth(ctx, client, versionResp.Info.TaskQueuesInfos)
 
 	// Check test workflows for each task queue
 	for _, tq := range versionResp.Info.TaskQueuesInfos {
@@ -331,6 +363,27 @@ func getPollers(ctx context.Context,
 		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
 	}
 	return resp.GetPollers(), nil
+}
+
+// computePollerHealth reports, per task queue, whether at least one poller was
+// observed. A task queue is omitted from the returned map (and unknown is set
+// to true) if its poller status could not be determined, e.g. a transient
+// DescribeTaskQueue error -- this must not be interpreted as unhealthy.
+func computePollerHealth(
+	ctx context.Context,
+	client temporalClient.Client,
+	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
+) (health map[string]bool, unknown bool) {
+	health = make(map[string]bool, len(tqs))
+	for _, tqInfo := range tqs {
+		pollers, err := getPollers(ctx, client, tqInfo)
+		if err != nil { //nolint:revive // TODO(carlydf): consider logging this error
+			unknown = true
+			continue
+		}
+		health[tqInfo.Name] = len(pollers) > 0
+	}
+	return health, unknown
 }
 
 func allTaskQueuesHaveUnversionedPoller(
