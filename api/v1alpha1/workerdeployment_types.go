@@ -168,6 +168,20 @@ const (
 
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
 	ReasonConnectionHealthy = "ConnectionHealthy"
+
+	// ReasonPollersHealthy is set on ConditionWorkersHealthy=True when all known
+	// task queues for the version have at least one active poller.
+	ReasonPollersHealthy = "PollersHealthy"
+
+	// ReasonNoActivePollers is set on ConditionWorkersHealthy=False when one or more
+	// of a version's task queues have no active poller.
+	ReasonNoActivePollers = "NoActivePollers"
+
+	// ReasonPollerStatusUnknown is set on ConditionWorkersHealthy=Unknown when poller
+	// status could not be determined (e.g. a transient DescribeTaskQueue error, or the
+	// version is not yet registered with Temporal). This must NOT be treated as
+	// unhealthy -- it means "don't know", not "broken".
+	ReasonPollerStatusUnknown = "PollerStatusUnknown"
 )
 
 // VersionStatus indicates the status of a version.
