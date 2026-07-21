@@ -420,6 +420,9 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Derive Ready/Progressing from rollout state before the final write.
 	r.syncConditions(&workerDeploy)
+	// Surface poller health (are workers actually polling Temporal, not just Ready
+	// at the Kubernetes level) as a condition, separate from rollout progress.
+	r.syncWorkersHealthyCondition(&workerDeploy, temporalState)
 
 	// Single status write per reconcile: persists the generated status and
 	// conditions set during this loop (Ready, Progressing). Do not send the update
@@ -750,14 +753,15 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	return nil
 }
 
-// setCondition sets a condition on the WorkerDeployment status.
+// setCondition sets the given condition and reports whether it actually changed
+// (differed in Status/Reason/Message/ObservedGeneration from what was already set).
 func (r *WorkerDeploymentReconciler) setCondition(
 	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	conditionType string,
 	status metav1.ConditionStatus,
 	reason, message string,
-) {
-	meta.SetStatusCondition(&workerDeploy.Status.Conditions, metav1.Condition{
+) bool {
+	return meta.SetStatusCondition(&workerDeploy.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
 		ObservedGeneration: workerDeploy.Generation,
