@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
@@ -229,8 +228,8 @@ func TestExecutePlan_SunsetThenRedeploySameBuildID_ReappliesWorkerResource(t *te
 	// The WRT status entry for the sunset build must be pruned together with the resource;
 	// a stale entry would poison a future redeploy of the same build ID with a hash skip.
 	statuses := getWRTVersionStatuses(t, r, namespace, wrt.Name)
-	assert.NotContains(t, statuses, buildA, "WRT status entry for the sunset build must be pruned when its rendered resource is deleted")
-	assert.Contains(t, statuses, buildB, "WRT status entry for the live build must be retained")
+	require.NotContains(t, statuses, buildA, "WRT status entry for the sunset build must be pruned when its rendered resource is deleted")
+	require.Contains(t, statuses, buildB, "WRT status entry for the live build must be retained")
 
 	// ── Cycle 2: roll back to build-a (same build ID redeployed) ──
 	depA2 := makeVersionedDeployment(twd, buildA, 1, connection)
@@ -240,15 +239,15 @@ func TestExecutePlan_SunsetThenRedeploySameBuildID_ReappliesWorkerResource(t *te
 		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
 	}
 	p2 := runPlanCycle(t, r, twd, connection, rollbackStatus)
-	assert.Empty(t, p2.DeleteWorkerResources, "redeployed build must not have its rendered resource scheduled for deletion")
+	require.Empty(t, p2.DeleteWorkerResources, "redeployed build must not have its rendered resource scheduled for deletion")
 
 	// The rendered resource for build-a must exist again: this is the core regression.
-	assert.NoError(t, getRenderedHPA(r, namespace, hpaA.GetName()), "rendered resource for the redeployed build ID must be re-applied after a sunset")
+	require.NoError(t, getRenderedHPA(r, namespace, hpaA.GetName()), "rendered resource for the redeployed build ID must be re-applied after a sunset")
 
 	statuses = getWRTVersionStatuses(t, r, namespace, wrt.Name)
-	if entry, ok := statuses[buildA]; assert.True(t, ok, "WRT status must have an entry for the redeployed build") {
-		assert.Equal(t, hashA, entry.LastAppliedHash, "re-applied entry must record the rendered hash")
-	}
+	entry, ok := statuses[buildA]
+	require.True(t, ok, "WRT status must have an entry for the redeployed build")
+	require.Equal(t, hashA, entry.LastAppliedHash, "re-applied entry must record the rendered hash")
 }
 
 // TestExecutePlan_WRTResourceDeleteFailure_RetriedNextCycle is a regression test for the
@@ -317,13 +316,13 @@ func TestExecutePlan_WRTResourceDeleteFailure_RetriedNextCycle(t *testing.T) {
 		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
 	}
 	p2 := runPlanCycle(t, r, twd, connection, steadyStatus)
-	assert.NotEmpty(t, p2.DeleteWorkerResources, "delete of the orphaned rendered resource must be retried even though its Deployment no longer exists")
+	require.NotEmpty(t, p2.DeleteWorkerResources, "delete of the orphaned rendered resource must be retried even though its Deployment no longer exists")
 
-	assert.True(t, apierrors.IsNotFound(getRenderedHPA(r, namespace, hpaA.GetName())), "orphaned rendered resource must be deleted on retry")
+	require.True(t, apierrors.IsNotFound(getRenderedHPA(r, namespace, hpaA.GetName())), "orphaned rendered resource must be deleted on retry")
 
 	statuses = getWRTVersionStatuses(t, r, namespace, wrt.Name)
-	assert.NotContains(t, statuses, buildA, "WRT status entry must be pruned once the rendered resource is deleted")
-	assert.Contains(t, statuses, buildB, "WRT status entry for the live build must be retained")
+	require.NotContains(t, statuses, buildA, "WRT status entry must be pruned once the rendered resource is deleted")
+	require.Contains(t, statuses, buildB, "WRT status entry for the live build must be retained")
 }
 
 // TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite guards the skip
@@ -359,5 +358,5 @@ func TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite(t *testing
 
 	after := &temporaliov1alpha1.WorkerResourceTemplate{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, after))
-	assert.Equal(t, before.ResourceVersion, after.ResourceVersion, "no-op cycle must not write WRT status")
+	require.Equal(t, before.ResourceVersion, after.ResourceVersion, "no-op cycle must not write WRT status")
 }

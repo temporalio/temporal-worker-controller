@@ -31,6 +31,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// executeK8sOperations executes the Kubernetes operations contained in the plan: creating,
+// deleting, scaling, and updating Deployments, and deleting the rendered WRT resources of
+// sunset or orphaned build IDs. It returns the refs from p.DeleteWorkerResources whose
+// delete was confirmed this cycle — the delete succeeded or the resource was already gone
+// (NotFound). executePlan prunes the WRT status entries matching the returned refs; entries
+// for unconfirmed deletes are retained so the planner re-derives and retries the delete on
+// the next reconcile. Rendered-resource delete failures are logged rather than returned as
+// errors, so the returned slice can be partial even when the error is nil.
 func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) ([]planner.WorkerResourceRef, error) {
 	// Create deployment
 	if p.CreateDeployment != nil {

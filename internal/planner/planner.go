@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -337,22 +338,11 @@ func getDeleteWorkerResources(
 			continue
 		}
 
-		// Union of builds being sunset this cycle and orphaned status entries,
-		// deduplicated (a build sunset this cycle usually still has a status entry).
+		// Union of builds being sunset this cycle and orphaned status entries.
 		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
-		seen := make(map[string]struct{}, len(deletingBuildIDs)+len(wrt.Status.Versions))
-		for _, buildID := range deletingBuildIDs {
-			if _, dup := seen[buildID]; dup {
-				continue
-			}
-			seen[buildID] = struct{}{}
-			buildIDs = append(buildIDs, buildID)
-		}
+		buildIDs = append(buildIDs, deletingBuildIDs...)
 		for _, v := range wrt.Status.Versions {
 			if v.BuildID == "" {
-				continue
-			}
-			if _, dup := seen[v.BuildID]; dup {
 				continue
 			}
 			if k8sState != nil {
@@ -360,9 +350,13 @@ func getDeleteWorkerResources(
 					continue // build still has a Deployment; its resource is managed by applies
 				}
 			}
-			seen[v.BuildID] = struct{}{}
 			buildIDs = append(buildIDs, v.BuildID)
 		}
+		// Sort before Compact: duplicates in the union are usually non-adjacent (a build
+		// sunset this cycle typically still has a status entry), and Compact only collapses
+		// adjacent runs.
+		slices.Sort(buildIDs)
+		buildIDs = slices.Compact(buildIDs)
 
 		for _, buildID := range buildIDs {
 			// Compute the resource name deterministically — no status lookup needed.
