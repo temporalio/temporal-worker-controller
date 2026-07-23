@@ -7,7 +7,7 @@ require (
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.60.0
 	go.opentelemetry.io/otel/sdk/metric v1.43.0
-	go.temporal.io/api v1.62.11
+	go.temporal.io/api v1.63.2
 	go.temporal.io/sdk v1.43.0
 	go.temporal.io/sdk/contrib/envconfig v0.1.0
 	go.temporal.io/sdk/contrib/opentelemetry v0.7.0
@@ -27,6 +27,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/nexus-rpc/nexus-proto-annotations v0.1.0 // indirect
 	github.com/nexus-rpc/sdk-go v0.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
