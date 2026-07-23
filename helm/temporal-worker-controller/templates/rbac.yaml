@@ -371,6 +371,7 @@ subjects:
     name: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
+{{- if ne (.Values.rbac.createEndUserRoles | toString) "false" }}
 ---
 # permissions for end users to edit connections (new name).
 apiVersion: rbac.authorization.k8s.io/v1
@@ -632,5 +633,6 @@ rules:
       - workerresourcetemplates/status
     verbs:
       - get
+{{- end }}
 ---
 {{- end }}
