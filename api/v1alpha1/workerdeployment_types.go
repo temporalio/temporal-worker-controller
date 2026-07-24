@@ -169,18 +169,24 @@ const (
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
 	ReasonConnectionHealthy = "ConnectionHealthy"
 
-	// ReasonPollersHealthy is set on ConditionWorkersHealthy=True when all known
-	// task queues for the version have at least one active poller.
+	// ReasonPollersHealthy is used on ConditionReady=True (in place of
+	// ReasonRolloutComplete) and on the Normal Event emitted when a version's workers
+	// transition from having no active pollers (or unknown status) back to actively
+	// polling every known task queue.
 	ReasonPollersHealthy = "PollersHealthy"
 
-	// ReasonNoActivePollers is set on ConditionWorkersHealthy=False when one or more
-	// of a version's task queues have no active poller.
+	// ReasonNoActivePollers is set on ConditionReady=False -- even though the target
+	// version has otherwise completed rollout and become current -- when one or more
+	// of the version's task queues have no active poller. A Deployment can be fully
+	// Ready at the Kubernetes level while its workers are misconfigured, stuck, or
+	// unable to reach Temporal; this reason distinguishes that case from a healthy
+	// rollout.
 	ReasonNoActivePollers = "NoActivePollers"
 
-	// ReasonPollerStatusUnknown is set on ConditionWorkersHealthy=Unknown when poller
-	// status could not be determined (e.g. a transient DescribeTaskQueue error, or the
-	// version is not yet registered with Temporal). This must NOT be treated as
-	// unhealthy -- it means "don't know", not "broken".
+	// ReasonPollerStatusUnknown is set on ConditionReady=Unknown when poller status
+	// could not be determined for the current version (e.g. a transient
+	// DescribeTaskQueue error). This must NOT be treated as unhealthy -- it means
+	// "don't know", not "broken".
 	ReasonPollerStatusUnknown = "PollerStatusUnknown"
 )
 
