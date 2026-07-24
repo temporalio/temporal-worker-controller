@@ -25,6 +25,7 @@ import (
 	sdkclient "go.temporal.io/sdk/client"
 	"google.golang.org/grpc"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,6 +47,9 @@ func newTestScheme() *runtime.Scheme {
 	_ = temporaliov1alpha1.AddToScheme(s)
 	_ = appsv1.AddToScheme(s)
 	_ = corev1.AddToScheme(s)
+	// Registered so tests can seed and assert on rendered WorkerResourceTemplate
+	// copies (HPA templates) with the fake client.
+	_ = autoscalingv2.AddToScheme(s)
 	return s
 }
 
@@ -60,7 +64,7 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&temporaliov1alpha1.WorkerDeployment{}).
+		WithStatusSubresource(&temporaliov1alpha1.WorkerDeployment{}, &temporaliov1alpha1.WorkerResourceTemplate{}).
 		WithIndex(&appsv1.Deployment{}, deployOwnerKey, func(rawObj client.Object) []string {
 			deploy := rawObj.(*appsv1.Deployment)
 			owner := metav1.GetControllerOf(deploy)
@@ -778,7 +782,7 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, tc.interceptors)
-			err := r.executeK8sOperations(context.Background(), logr.Discard(), twd, tc.makePlan(twd.Namespace))
+			_, err := r.executeK8sOperations(context.Background(), logr.Discard(), twd, tc.makePlan(twd.Namespace))
 			require.Error(t, err)
 			assertEventEmitted(t, drainEvents(recorder), tc.expectedReason)
 		})
