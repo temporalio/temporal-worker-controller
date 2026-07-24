@@ -73,6 +73,7 @@ metadata:
   name: {{ $.Release.Name }}-manager-role
   namespace: {{ . }}
 rules:
+  # GENERATED RULES (NAMESPACED) BEGIN - do not edit; run 'make manifests' to update
   - apiGroups:
       - ""
     resources:
@@ -151,6 +152,7 @@ rules:
       - patch
       - update
       - watch
+  # GENERATED RULES (NAMESPACED) END
   {{- range $.Values.workerResourceTemplate.allowedResources }}
   - apiGroups:
       {{- range .apiGroups }}

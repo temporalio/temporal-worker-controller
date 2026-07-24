@@ -1,65 +1,100 @@
 #!/usr/bin/env python3
-"""Sync rules from config/rbac/role.yaml into the Helm ClusterRole template.
+"""Sync rules from config/rbac/role.yaml into the Helm RBAC template.
 
-The Helm template must contain:
-  # GENERATED RULES BEGIN
-  ...
+The Helm template contains two marker pairs:
+
+  # GENERATED RULES BEGIN           — full rules for the ClusterRole (default mode)
   # GENERATED RULES END
-markers inside its ClusterRole rules section.  Everything between the markers
-is replaced with the rules from config/rbac/role.yaml (indented by two spaces).
+
+  # GENERATED RULES (NAMESPACED) BEGIN  — rules minus cluster-scoped entries for
+  # GENERATED RULES (NAMESPACED) END      the namespaced Role (restrictWatchNamespaces)
+
+Both are updated from config/rbac/role.yaml.  The namespaced block excludes
+rules for cluster-scoped resources (namespaces, subjectaccessreviews) since
+those are handled by the separate manager-cluster-role.
 """
 import re
 import sys
 
+import yaml
+
 ROLE_YAML = "config/rbac/role.yaml"
 HELM_RBAC = "helm/temporal-worker-controller/templates/rbac.yaml"
+
 BEGIN_MARKER = "  # GENERATED RULES BEGIN"
 END_MARKER = "  # GENERATED RULES END"
+BEGIN_MARKER_NS = "  # GENERATED RULES (NAMESPACED) BEGIN"
+END_MARKER_NS = "  # GENERATED RULES (NAMESPACED) END"
+
+CLUSTER_SCOPED_RESOURCES = {"namespaces", "subjectaccessreviews"}
 
 
-def extract_rules_text(path):
+def extract_rules(path):
+    """Return the list of rule dicts from config/rbac/role.yaml."""
     with open(path) as f:
         content = f.read()
-    idx = content.find("\nrules:\n")
-    if idx == -1:
-        print(f"ERROR: 'rules:' not found in {path}", file=sys.stderr)
-        sys.exit(1)
-    rules_body = content[idx + len("\nrules:\n"):]
-    # Indent lines relative to the `rules:` key in the Helm template.
-    # controller-gen emits two indentation levels:
-    #   col 0: outer list items  (e.g. "- apiGroups:")   → add 2 spaces
-    #   col 2: inner list values (e.g. "  - events")     → add 4 spaces
-    #   col 2: mapping keys      (e.g. "  resources:")   → add 2 spaces
-    # The extra indent on inner list values matches the style used by the
-    # hand-authored rules in the Helm template.
-    lines = rules_body.splitlines(keepends=True)
-    result = []
-    for line in lines:
-        if not line.strip():
-            result.append(line)
-        elif line.startswith("  - "):
-            result.append("    " + line)  # inner list value: 2 global + 2 extra
-        else:
-            result.append("  " + line)    # outer list item or mapping key: 2 global
-    return "".join(result)
+    docs = list(yaml.safe_load_all(content))
+    for doc in docs:
+        if doc and doc.get("kind") == "ClusterRole" and "rules" in doc:
+            return doc["rules"]
+    print(f"ERROR: ClusterRole with rules not found in {path}", file=sys.stderr)
+    sys.exit(1)
 
 
-def update_helm(path, rules_text):
-    with open(path) as f:
-        content = f.read()
+def rules_to_text(rules):
+    """Convert a list of rule dicts to indented YAML text for the Helm template."""
+    lines = []
+    for rule in rules:
+        lines.append("  - apiGroups:")
+        for ag in rule.get("apiGroups", []):
+            lines.append(f'      - "{ag}"' if ag == "" else f"      - {ag}")
+        lines.append("    resources:")
+        for res in rule.get("resources", []):
+            lines.append(f"      - {res}")
+        if "resourceNames" in rule:
+            lines.append("    resourceNames:")
+            for rn in rule["resourceNames"]:
+                lines.append(f"      - {rn}")
+        lines.append("    verbs:")
+        for verb in rule.get("verbs", []):
+            lines.append(f"      - {verb}")
+    return "\n".join(lines) + "\n"
+
+
+def filter_namespaced(rules):
+    """Remove rules that reference cluster-scoped resources."""
+    return [
+        r for r in rules
+        if not CLUSTER_SCOPED_RESOURCES.intersection(r.get("resources", []))
+    ]
+
+
+def replace_between_markers(content, begin, end, replacement):
     pattern = re.compile(
-        r"(" + re.escape(BEGIN_MARKER) + r"[^\n]*\n)(.*?)(" + re.escape(END_MARKER) + r")",
+        r"(" + re.escape(begin) + r"[^\n]*\n)(.*?)(" + re.escape(end) + r")",
         re.DOTALL,
     )
     if not pattern.search(content):
-        print(f"ERROR: markers not found in {path}", file=sys.stderr)
+        print(f"ERROR: markers {begin!r} not found", file=sys.stderr)
         sys.exit(1)
-    updated = pattern.sub(r"\g<1>" + rules_text + r"\g<3>", content)
-    with open(path, "w") as f:
-        f.write(updated)
+    return pattern.sub(r"\g<1>" + replacement + r"\g<3>", content)
+
+
+def main():
+    rules = extract_rules(ROLE_YAML)
+
+    with open(HELM_RBAC) as f:
+        content = f.read()
+
+    content = replace_between_markers(content, BEGIN_MARKER, END_MARKER, rules_to_text(rules))
+    content = replace_between_markers(
+        content, BEGIN_MARKER_NS, END_MARKER_NS, rules_to_text(filter_namespaced(rules))
+    )
+
+    with open(HELM_RBAC, "w") as f:
+        f.write(content)
     print(f"Synced RBAC rules from {ROLE_YAML} → {HELM_RBAC}")
 
 
 if __name__ == "__main__":
-    rules = extract_rules_text(ROLE_YAML)
-    update_helm(HELM_RBAC, rules)
+    main()
