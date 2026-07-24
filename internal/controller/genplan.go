@@ -39,9 +39,11 @@ type plan struct {
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []planner.WorkerResourceApply
 
-	// Rendered WRT resource copies to delete explicitly on version sunset.
-	// Rendered resources are owned by the WRT (not the Deployment), so they are not
-	// GC'd when the Deployment is deleted; the controller deletes them here instead.
+	// Rendered WRT resource copies to delete explicitly, on version sunset or as a
+	// retry for a previously unconfirmed delete (derived from WRT status entries whose
+	// build ID has no Deployment). Rendered resources are owned by the WRT (not the
+	// Deployment), so they are not GC'd when the Deployment is deleted; the controller
+	// deletes them here instead.
 	DeleteWorkerResources []planner.WorkerResourceRef
 
 	// WRTs that need a controller owner reference added, as (base, patched) pairs
