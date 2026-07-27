@@ -97,16 +97,17 @@ def replace_between_markers(content, begin, end, replacement):
 def main():
     rules_text = extract_rules_text(ROLE_YAML)
 
-    with open(HELM_RBAC) as f:
+    with open(HELM_RBAC, "r+") as f:
         content = f.read()
 
-    content = replace_between_markers(content, BEGIN_MARKER, END_MARKER, rules_text)
-    content = replace_between_markers(
-        content, BEGIN_MARKER_NS, END_MARKER_NS, filter_namespaced(rules_text)
-    )
+        content = replace_between_markers(content, BEGIN_MARKER, END_MARKER, rules_text)
+        content = replace_between_markers(
+            content, BEGIN_MARKER_NS, END_MARKER_NS, filter_namespaced(rules_text)
+        )
 
-    with open(HELM_RBAC, "w") as f:
+        f.seek(0)
         f.write(content)
+        f.truncate()
     print(f"Synced RBAC rules from {ROLE_YAML} → {HELM_RBAC}")
 
 
