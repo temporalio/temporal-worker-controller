@@ -161,7 +161,8 @@ spec:
             drop:
               - "ALL"
         {{- end }}
-        image: registry.k8s.io/kubebuilder/kube-rbac-proxy:v0.14.1
+        image: "{{ .Values.metrics.kubeRbacProxy.image.repository }}:{{ .Values.metrics.kubeRbacProxy.image.tag }}"
+        imagePullPolicy: {{ .Values.metrics.kubeRbacProxy.image.pullPolicy }}
         args:
           - "--secure-listen-address=0.0.0.0:8443"
           - --upstream=http://127.0.0.1:{{ .Values.metrics.port }}/

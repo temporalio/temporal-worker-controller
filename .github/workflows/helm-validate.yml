@@ -49,6 +49,13 @@ jobs:
           helm template test-release helm/temporal-worker-controller \
             --set metrics.disableAuth=true
 
+      - name: Template with kube-rbac-proxy image override
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set metrics.kubeRbacProxy.image.repository=example.invalid/kube-rbac-proxy \
+            --set metrics.kubeRbacProxy.image.tag=test \
+            --set metrics.kubeRbacProxy.image.pullPolicy=Always
+
       - name: Template with restricted watch namespaces
         run: |
           helm template test-release helm/temporal-worker-controller \

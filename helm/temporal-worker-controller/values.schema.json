@@ -181,6 +181,33 @@
           "maximum": 65535,
           "description": "Port for metrics endpoint"
         },
+        "kubeRbacProxy": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "description": "kube-rbac-proxy image repository"
+                },
+                "tag": {
+                  "type": "string",
+                  "description": "kube-rbac-proxy image tag"
+                },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "Always",
+                    "IfNotPresent",
+                    "Never"
+                  ],
+                  "description": "kube-rbac-proxy image pull policy"
+                }
+              }
+            }
+          }
+        },
         "disableAuth": {
           "type": "boolean",
           "description": "Whether to disable authentication for metrics endpoint"
