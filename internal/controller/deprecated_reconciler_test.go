@@ -363,3 +363,37 @@ func TestMigrateFromDeprecatedTWD_UnrelatedDeploymentUntouched(t *testing.T) {
 	require.Len(t, gotDep.OwnerReferences, 1)
 	assert.Equal(t, otherUID, gotDep.OwnerReferences[0].UID, "unrelated deployment ownerRef must not be modified")
 }
+
+func TestReconcileWithoutDeprecatedCRDs(t *testing.T) {
+	scheme := runtime.NewScheme()
+	scheme.AddKnownTypes(
+		temporaliov1alpha1.GroupVersion,
+		&temporaliov1alpha1.WorkerDeployment{},
+		&temporaliov1alpha1.WorkerDeploymentList{},
+	)
+	metav1.AddToGroupVersion(scheme, temporaliov1alpha1.GroupVersion)
+
+	now := metav1.Now()
+	wd := &temporaliov1alpha1.WorkerDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "worker",
+			Namespace:         "default",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"test"},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(wd).
+		Build()
+	r := &WorkerDeploymentReconciler{
+		Client:               fakeClient,
+		Scheme:               scheme,
+		DisableDeprecatedTWD: true,
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: wd.Name, Namespace: wd.Namespace},
+	})
+	require.NoError(t, err)
+}
