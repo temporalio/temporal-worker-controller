@@ -3474,13 +3474,26 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		return d
 	}
 
-	t.Run("no delete deployments produces no refs", func(t *testing.T) {
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, nil)
+	// stateWith builds a DeploymentState containing the given deployments keyed by
+	// their build-id label, mirroring k8s.GetDeploymentState.
+	stateWith := func(deps ...*appsv1.Deployment) *k8s.DeploymentState {
+		state := &k8s.DeploymentState{Deployments: make(map[string]*appsv1.Deployment)}
+		for _, d := range deps {
+			if bid := d.Labels[k8s.BuildIDLabel]; bid != "" {
+				state.Deployments[bid] = d
+			}
+		}
+		return state
+	}
+
+	t.Run("no delete deployments and no status entries produces no refs", func(t *testing.T) {
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, nil, stateWith())
 		assert.Nil(t, refs)
 	})
 
 	t.Run("no wrts produces no refs", func(t *testing.T) {
-		refs := getDeleteWorkerResources(nil, []*appsv1.Deployment{makeDeployment("worker-abc", "abc")})
+		dep := makeDeployment("worker-abc", "abc")
+		refs := getDeleteWorkerResources(nil, []*appsv1.Deployment{dep}, stateWith(dep))
 		assert.Nil(t, refs)
 	})
 
@@ -3488,13 +3501,17 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		// The resource name must be computable even when wrt.Status.Versions is empty —
 		// i.e. the WRT was never applied for this buildID before the Deployment was deleted.
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep})
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep))
 		require.Len(t, refs, 1)
 		expectedName := k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")
 		assert.Equal(t, expectedName, refs[0].Name)
 		assert.Equal(t, "default", refs[0].Namespace)
 		assert.Equal(t, "autoscaling/v2", refs[0].APIVersion)
 		assert.Equal(t, "HorizontalPodAutoscaler", refs[0].Kind)
+		// The ref must identify its WRT and build ID so the controller can prune the
+		// WRT status entry once the delete succeeds.
+		assert.Equal(t, "my-hpa", refs[0].WRTName)
+		assert.Equal(t, "build-abc", refs[0].BuildID)
 	})
 
 	t.Run("multiple WRTs × single deployment produces one ref per WRT", func(t *testing.T) {
@@ -3511,7 +3528,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			},
 		}
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt, wrt2}, []*appsv1.Deployment{dep})
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt, wrt2}, []*appsv1.Deployment{dep}, stateWith(dep))
 		require.Len(t, refs, 2)
 		kinds := map[string]bool{refs[0].Kind: true, refs[1].Kind: true}
 		assert.True(t, kinds["HorizontalPodAutoscaler"], "expected HPA ref")
@@ -3521,7 +3538,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 	t.Run("single WRT × multiple deployments produces one ref per deployment", func(t *testing.T) {
 		dep1 := makeDeployment("worker-abc", "build-abc")
 		dep2 := makeDeployment("worker-def", "build-def")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep1, dep2})
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep1, dep2}, stateWith(dep1, dep2))
 		require.Len(t, refs, 2)
 		names := map[string]bool{refs[0].Name: true, refs[1].Name: true}
 		assert.True(t, names[k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")])
@@ -3532,7 +3549,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		dep := &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Name: "worker-no-label"},
 		}
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep})
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep))
 		assert.Nil(t, refs)
 	})
 
@@ -3545,9 +3562,50 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			},
 		}
 		dep := makeDeployment("worker-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{badWRT, wrt}, []*appsv1.Deployment{dep})
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{badWRT, wrt}, []*appsv1.Deployment{dep}, stateWith(dep))
 		require.Len(t, refs, 1) // only the valid WRT
 		assert.Equal(t, "HorizontalPodAutoscaler", refs[0].Kind)
+	})
+
+	t.Run("orphaned status entry with no live deployment produces a retry ref", func(t *testing.T) {
+		// A status entry whose build ID has no Deployment means the version was sunset
+		// (or the Deployment was removed) but the rendered resource's deletion has not
+		// been confirmed — e.g. the delete failed after the Deployment was already gone.
+		// The delete must be re-derived from the entry so it is retried until it succeeds.
+		orphanWRT := *wrt.DeepCopy()
+		orphanWRT.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
+			{BuildID: "build-gone", LastAppliedHash: "somehash", ResourceName: "stale-resource"},
+		}
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{orphanWRT}, nil, stateWith())
+		require.Len(t, refs, 1)
+		assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-gone"), refs[0].Name)
+		assert.Equal(t, "autoscaling/v2", refs[0].APIVersion)
+		assert.Equal(t, "HorizontalPodAutoscaler", refs[0].Kind)
+		assert.Equal(t, "my-hpa", refs[0].WRTName)
+		assert.Equal(t, "build-gone", refs[0].BuildID)
+	})
+
+	t.Run("status entry with live deployment produces no ref", func(t *testing.T) {
+		liveWRT := *wrt.DeepCopy()
+		liveWRT.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
+			{BuildID: "build-abc", LastAppliedHash: "somehash"},
+		}
+		dep := makeDeployment("worker-build-abc", "build-abc")
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{liveWRT}, nil, stateWith(dep))
+		assert.Nil(t, refs)
+	})
+
+	t.Run("status entry for deployment being deleted produces exactly one ref", func(t *testing.T) {
+		// A build being sunset this cycle can appear both via deleteDeployments and via
+		// its status entry; it must not produce duplicate delete refs.
+		entryWRT := *wrt.DeepCopy()
+		entryWRT.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
+			{BuildID: "build-abc", LastAppliedHash: "somehash"},
+		}
+		dep := makeDeployment("worker-build-abc", "build-abc")
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{entryWRT}, []*appsv1.Deployment{dep}, stateWith(dep))
+		require.Len(t, refs, 1)
+		assert.Equal(t, "build-abc", refs[0].BuildID)
 	})
 }
 

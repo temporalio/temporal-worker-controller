@@ -5,6 +5,9 @@
 package controller
 
 import (
+	"cmp"
+	"slices"
+
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -65,6 +68,17 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.WorkerDeployme
 			deprecatedVersions = append(deprecatedVersions, versionStatus)
 		}
 	}
+	// NOTE(jaypipes): Need to sort the deprecated versions here in order to
+	// prevent sort order differences from causing unnecessary status
+	// generation increments.
+	//
+	// See: https://github.com/temporalio/temporal-worker-controller/issues/415
+	slices.SortStableFunc(
+		deprecatedVersions,
+		func(a, b *v1alpha1.DeprecatedWorkerDeploymentVersion) int {
+			return cmp.Compare(a.BuildID, b.BuildID)
+		},
+	)
 	status.DeprecatedVersions = deprecatedVersions
 
 	// Set version count from temporal state (directly from VersionSummaries via Versions map)
