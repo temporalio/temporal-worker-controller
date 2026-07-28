@@ -41,64 +41,6 @@
         }
       }
     },
-    "kubeRBACProxy": {
-      "type": "object",
-      "description": "Configuration for the kube-rbac-proxy metrics sidecar",
-      "properties": {
-        "image": {
-          "type": "object",
-          "properties": {
-            "registry": {
-              "type": "string",
-              "description": "kube-rbac-proxy image registry"
-            },
-            "repository": {
-              "type": "string",
-              "description": "kube-rbac-proxy image repository"
-            },
-            "tag": {
-              "type": "string",
-              "description": "kube-rbac-proxy image tag"
-            },
-            "sha": {
-              "type": "string",
-              "description": "Optional kube-rbac-proxy image digest"
-            },
-            "pullPolicy": {
-              "type": "string",
-              "enum": [
-                "Always",
-                "IfNotPresent",
-                "Never"
-              ],
-              "description": "kube-rbac-proxy image pull policy"
-            }
-          }
-        },
-        "extraArgs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Additional kube-rbac-proxy arguments"
-        },
-        "containerSecurityContext": {
-          "type": "object",
-          "description": "kube-rbac-proxy container security context"
-        },
-        "resources": {
-          "type": "object",
-          "description": "kube-rbac-proxy resource requirements"
-        },
-        "volumeMounts": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          },
-          "description": "Additional kube-rbac-proxy volume mounts"
-        }
-      }
-    },
     "podAnnotations": {
       "type": "object",
       "description": "Additional pod annotations",
@@ -315,6 +257,64 @@
       "default": 1,
       "description": "Number of replicas of manager to run.\n\nThe default is 1, but in production set this to 2 or 3 to provide high availability.",
       "type": "number"
+    },
+    "kubeRBACProxy": {
+      "type": "object",
+      "description": "Configuration for the kube-rbac-proxy metrics sidecar",
+      "properties": {
+        "image": {
+          "type": "object",
+          "properties": {
+            "registry": {
+              "type": "string",
+              "description": "kube-rbac-proxy image registry"
+            },
+            "repository": {
+              "type": "string",
+              "description": "kube-rbac-proxy image repository"
+            },
+            "tag": {
+              "type": "string",
+              "description": "kube-rbac-proxy image tag"
+            },
+            "sha": {
+              "type": "string",
+              "description": "Optional kube-rbac-proxy image digest"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ],
+              "description": "kube-rbac-proxy image pull policy"
+            }
+          }
+        },
+        "extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional kube-rbac-proxy arguments"
+        },
+        "containerSecurityContext": {
+          "type": "object",
+          "description": "kube-rbac-proxy container security context"
+        },
+        "resources": {
+          "type": "object",
+          "description": "kube-rbac-proxy resource requirements"
+        },
+        "volumeMounts": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Additional kube-rbac-proxy volume mounts"
+        }
+      }
     }
   }
 }

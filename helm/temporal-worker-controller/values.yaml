@@ -110,31 +110,6 @@ replicas: 2
 authProxy:
   enabled: true
 
-# Configure the kube-rbac-proxy sidecar that protects the controller metrics
-# endpoint. The sidecar is enabled unless metrics.disableAuth is true.
-kubeRBACProxy:
-  image:
-    registry: registry.k8s.io
-    repository: kubebuilder/kube-rbac-proxy
-    tag: v0.14.1
-    sha: ""
-    pullPolicy: IfNotPresent
-  # Additional arguments for kube-rbac-proxy.
-  extraArgs: []
-  # Overrides the global containerSecurityContext for this sidecar only.
-  # When empty, the global containerSecurityContext remains the fallback.
-  containerSecurityContext: {}
-  resources:
-    limits:
-      cpu: 500m
-      memory: 128Mi
-    requests:
-      cpu: 5m
-      memory: 64Mi
-  # Additional volume mounts for kube-rbac-proxy. Volumes must be supplied by
-  # the chart or another supported configuration option.
-  volumeMounts: []
-
 metrics:
   enabled: true
   port: 8080
@@ -209,3 +184,28 @@ prometheus:
 nodeSelector: {}
 
 tolerations: []
+
+# Configure the kube-rbac-proxy sidecar that protects the controller metrics
+# endpoint. The sidecar is enabled unless metrics.disableAuth is true.
+kubeRBACProxy:
+  image:
+    registry: registry.k8s.io
+    repository: kubebuilder/kube-rbac-proxy
+    tag: v0.14.1
+    sha: ""
+    pullPolicy: IfNotPresent
+  # Additional arguments for kube-rbac-proxy.
+  extraArgs: []
+  # Overrides the global containerSecurityContext for this sidecar only.
+  # When empty, the global containerSecurityContext remains the fallback.
+  containerSecurityContext: {}
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 5m
+      memory: 64Mi
+  # Additional volume mounts for kube-rbac-proxy. Volumes must be supplied by
+  # the chart or another supported configuration option.
+  volumeMounts: []
