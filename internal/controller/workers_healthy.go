@@ -11,37 +11,40 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// computePollerHealthCondition derives a poller-health status/reason from a version's
-// poller health data, for use as part of the ConditionReady calculation (see
-// syncConditions). It is a pure function so the decision logic can be unit tested
-// without an envtest environment.
+// computePollerHealthCondition derives a ConditionProgressing status/reason from a
+// version's poller presence data, for use as part of the ConditionProgressing
+// calculation when the target version is Current (see syncConditions). It is a
+// pure function so the decision logic can be unit tested without an envtest
+// environment.
 //
 //   - pollerHealth == nil: poller status was never checked for this version (e.g. not
-//     yet registered with Temporal) -> Unknown.
-//   - any task queue with a false value -> False, naming the affected queues. A known
-//     problem takes precedence over an unrelated unknown elsewhere.
-//   - no false values, but unknown == true (some task queues errored) -> Unknown.
-//   - all task queues true, unknown == false -> True.
+//     yet registered with Temporal) -> Progressing=False, ReasonPollerStatusUnknown.
+//   - any task queue with a false value -> Progressing=True, ReasonWaitingForPollers,
+//     naming the affected queues. A known missing-poller problem takes precedence
+//     over an unrelated unknown elsewhere.
+//   - no false values, but unknown == true (some task queues errored) ->
+//     Progressing=False, ReasonPollerStatusUnknown.
+//   - all task queues true, unknown == false -> Progressing=False, ReasonActivePollers.
 func computePollerHealthCondition(
 	pollerHealth map[string]bool,
 	unknown bool,
 ) (status metav1.ConditionStatus, reason string, affectedQueues []string) {
 	if pollerHealth == nil {
-		return metav1.ConditionUnknown, temporaliov1alpha1.ReasonPollerStatusUnknown, nil
+		return metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown, nil
 	}
 
-	for tq, healthy := range pollerHealth {
-		if !healthy {
+	for tq, hasPoller := range pollerHealth {
+		if !hasPoller {
 			affectedQueues = append(affectedQueues, tq)
 		}
 	}
 
 	if len(affectedQueues) > 0 {
 		sort.Strings(affectedQueues)
-		return metav1.ConditionFalse, temporaliov1alpha1.ReasonNoActivePollers, affectedQueues
+		return metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers, affectedQueues
 	}
 	if unknown {
-		return metav1.ConditionUnknown, temporaliov1alpha1.ReasonPollerStatusUnknown, nil
+		return metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown, nil
 	}
-	return metav1.ConditionTrue, temporaliov1alpha1.ReasonPollersHealthy, nil
+	return metav1.ConditionFalse, temporaliov1alpha1.ReasonActivePollers, nil
 }
