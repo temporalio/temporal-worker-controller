@@ -56,34 +56,6 @@ const (
 	finalizerName = "temporal.io/delete-protection"
 )
 
-// getAPIKeySecretName extracts the secret name from a SecretKeySelector
-func getAPIKeySecretName(secretRef *corev1.SecretKeySelector) (string, error) {
-	if secretRef != nil && secretRef.Name != "" {
-		return secretRef.Name, nil
-	}
-
-	return "", errors.New("API key secret name is not set")
-}
-
-func getTLSSecretName(secretRef *temporaliov1alpha1.SecretReference) (string, error) {
-	if secretRef != nil && secretRef.Name != "" {
-		return secretRef.Name, nil
-	}
-
-	return "", errors.New("TLS secret name is not set")
-}
-
-func resolveAuthSecretName(tc *temporaliov1alpha1.Connection) (clientpool.AuthMode, string, error) {
-	if tc.Spec.MutualTLSSecretRef != nil {
-		name, err := getTLSSecretName(tc.Spec.MutualTLSSecretRef)
-		return clientpool.AuthModeTLS, name, err
-	} else if tc.Spec.APIKeySecretRef != nil {
-		name, err := getAPIKeySecretName(tc.Spec.APIKeySecretRef)
-		return clientpool.AuthModeAPIKey, name, err
-	}
-	return clientpool.AuthModeNoCredentials, "", nil
-}
-
 // WorkerDeploymentReconciler reconciles a WorkerDeployment object
 type WorkerDeploymentReconciler struct {
 	client.Client
@@ -261,16 +233,22 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	// Get the Auth Mode and Secret Name
-	authMode, secretName, err := resolveAuthSecretName(&connection)
-	if err != nil {
-		l.Error(err, "unable to resolve auth secret name")
+	if err := connection.Spec.Validate(); err != nil {
+		l.Error(err, "connection spec not valid")
+		// TODO(jaypipes): As of TWC release <=v1.8.1, the only validation
+		// error for the connection spec is that the authentication secret is
+		// not valid. Revisit this warning reason when there are more potential
+		// validation failures.
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonAuthSecretInvalid,
 			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", connection.Name, err),
 			fmt.Sprintf("Unable to resolve auth secret: %v", err))
 		return ctrl.Result{}, err
 	}
+
+	// Get the Auth Mode and Secret Name
+	authMode := connection.Spec.AuthMode()
+	secretName := connection.Spec.SecretName()
 
 	// Get or update temporal client for connection
 	clientPoolKey := clientpool.ClientPoolKey{
@@ -567,22 +545,28 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	// Resolve Connection.
 	// The Connection is guaranteed to exist because we hold a finalizer on it
 	// that prevents deletion while any WD references it.
-	var temporalConnection temporaliov1alpha1.Connection
+	var connection temporaliov1alpha1.Connection
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      workerDeploy.Spec.WorkerOptions.ConnectionRef.Name,
 		Namespace: workerDeploy.Namespace,
-	}, &temporalConnection); err != nil {
+	}, &connection); err != nil {
 		return fmt.Errorf("unable to fetch Connection: %w", err)
 	}
 
-	authMode, secretName, err := resolveAuthSecretName(&temporalConnection)
-	if err != nil {
+	if err := connection.Spec.Validate(); err != nil {
+		// TODO(jaypipes): As of TWC release <=v1.8.1, the only validation
+		// error for the connection spec is that the authentication secret is
+		// not valid. Revisit this error wrap when there are more potential
+		// validation failures.
 		return fmt.Errorf("unable to resolve auth secret name: %w", err)
 	}
 
+	authMode := connection.Spec.AuthMode()
+	secretName := connection.Spec.SecretName()
+
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
-		HostPort:      temporalConnection.Spec.HostPort,
-		TLSServerName: temporalConnection.Spec.TLSServerName(),
+		HostPort:      connection.Spec.HostPort,
+		TLSServerName: connection.Spec.TLSServerName(),
 		Namespace:     workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		SecretName:    secretName,
 		AuthMode:      authMode,
@@ -591,7 +575,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
 			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-			Spec:              temporalConnection.Spec,
+			Spec:              connection.Spec,
 			Identity:          getControllerIdentity(),
 		})
 		if err != nil {

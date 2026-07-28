@@ -5,8 +5,20 @@
 package v1alpha1
 
 import (
+	"errors"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// AuthMode is the mode for authenticating to a Temporal server.
+type AuthMode string
+
+const (
+	AuthModeTLS           AuthMode = "TLS"
+	AuthModeAPIKey        AuthMode = "API_KEY"
+	AuthModeNoCredentials AuthMode = "NO_CREDENTIALS"
+	// Add more auth modes here as they are supported
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -57,6 +69,52 @@ type ConnectionSpec struct {
 	//   - Key: the data key within Secret.Data whose value is the API key token
 	// +optional
 	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
+}
+
+// Validate returns an error if the ConnectionSpec is not valid.
+func (s ConnectionSpec) Validate() error {
+	switch s.AuthMode() {
+	case AuthModeTLS:
+		if s.MutualTLSSecretRef == nil || s.MutualTLSSecretRef.Name == "" {
+			return errors.New("TLS secret name is not set")
+		}
+	case AuthModeAPIKey:
+		if s.APIKeySecretRef == nil || s.APIKeySecretRef.Name == "" {
+			return errors.New("API key secret name is not set")
+		}
+	}
+	return nil
+}
+
+// AuthMode returns the authentication mode for the ConnectionSpec.
+func (s ConnectionSpec) AuthMode() AuthMode {
+	switch {
+	case s.MutualTLSSecretRef != nil:
+		return AuthModeTLS
+	case s.APIKeySecretRef != nil:
+		return AuthModeAPIKey
+	default:
+		return AuthModeNoCredentials
+	}
+}
+
+// SecretName extracts the secret name from the ConnectionSpec, returning an
+// empty string authentication mode does not requires it.
+func (s ConnectionSpec) SecretName() string {
+	switch s.AuthMode() {
+	case AuthModeTLS:
+		if s.MutualTLSSecretRef == nil {
+			return ""
+		}
+		return s.MutualTLSSecretRef.Name
+	case AuthModeAPIKey:
+		if s.APIKeySecretRef == nil {
+			return ""
+		}
+		return s.APIKeySecretRef.Name
+	default:
+		return ""
+	}
 }
 
 func (s ConnectionSpec) TLSServerName() string {
