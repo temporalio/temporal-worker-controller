@@ -58,9 +58,125 @@ subjects:
     name: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
     namespace: {{ .Release.Namespace }}
 ---
+{{- if .Values.rbac.restrictWatchNamespaces }}
+# Namespace-scoped mode: the manager role is emitted as a namespaced Role in each
+# watched namespace. Cluster-scoped rules (namespaces get, subjectaccessreviews
+# create) are handled by the separate manager-cluster-role below.
+{{- range .Values.rbac.restrictWatchNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" $ | nindent 4 }}
+  name: {{ $.Release.Name }}-{{ $.Release.Namespace }}-manager-role
+  namespace: {{ . }}
+rules:
+  # GENERATED RULES (NAMESPACED) BEGIN - do not edit; run 'make manifests' to update
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments/scale
+    verbs:
+      - update
+  - apiGroups:
+      - temporal.io
+    resources:
+      - connections
+      - temporalconnections
+      - workerresourcetemplates
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - temporal.io
+    resources:
+      - connections/finalizers
+      - temporalconnections/finalizers
+      - temporalworkerdeployments/finalizers
+      - workerdeployments/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - temporal.io
+    resources:
+      - temporalconnections/status
+      - temporalworkerdeployments/status
+      - workerdeployments/status
+      - workerresourcetemplates/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - temporal.io
+    resources:
+      - temporalworkerdeployments
+      - workerdeployments
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # GENERATED RULES (NAMESPACED) END
+  {{- range $.Values.workerResourceTemplate.allowedResources }}
+  - apiGroups:
+      {{- range .apiGroups }}
+      - {{ . | quote }}
+      {{- end }}
+    resources:
+      {{- range .resources }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
+      - update
+  {{- end }}
+{{- end }}
+{{- else }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
   name: {{ .Release.Name }}-{{ .Release.Namespace }}-manager-role
 rules:
   # GENERATED RULES BEGIN - do not edit; run 'make manifests' to update
@@ -173,6 +289,7 @@ rules:
       - patch
       - update
   {{- end }}
+{{- end }}
 ---
 {{- if .Values.rbac.restrictWatchNamespaces }}
 # Namespace-scoped mode: the manager role is bound only within the watched
@@ -230,7 +347,7 @@ metadata:
   namespace: {{ . }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: {{ $.Release.Name }}-{{ $.Release.Namespace }}-manager-role
 subjects:
   - kind: ServiceAccount
@@ -254,6 +371,7 @@ subjects:
     name: {{ .Values.serviceAccount.name | default (printf "%s-service-account" .Release.Name) }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
+{{- if .Values.rbac.createEndUserRoles }}
 ---
 # permissions for end users to edit connections (new name).
 apiVersion: rbac.authorization.k8s.io/v1
@@ -515,5 +633,6 @@ rules:
       - workerresourcetemplates/status
     verbs:
       - get
+{{- end }}
 ---
 {{- end }}

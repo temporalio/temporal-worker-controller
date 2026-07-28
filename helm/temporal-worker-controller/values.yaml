@@ -42,11 +42,17 @@ rbac:
   create: true
   # restrictWatchNamespaces keeps the namespaces the controller watches and the
   # namespaces its RBAC grants access to in sync. Empty (the default) watches all
-  # namespaces with cluster-wide RBAC. When set, the controller watches only these
-  # namespaces (via WATCH_NAMESPACES) and is granted the manager role through a
-  # RoleBinding in each listed namespace, plus a minimal cluster-scoped role for the
-  # two grants that cannot be namespaced (namespaces get, subjectaccessreviews create).
+  # namespaces with cluster-wide RBAC (ClusterRole + ClusterRoleBinding). When set,
+  # the manager role is emitted as a namespaced Role (one per listed namespace) bound
+  # via a RoleBinding, plus a minimal cluster-scoped role for the two grants that
+  # cannot be namespaced (namespaces get, subjectaccessreviews create).
   restrictWatchNamespaces: []
+  # createEndUserRoles controls whether the chart creates the optional ClusterRoles
+  # that grant end users permission to edit/view temporal.io custom resources
+  # (connections, workerdeployments, workerresourcetemplates). These roles have no
+  # bindings by default — they exist so cluster admins can bind them as needed.
+  # Set to false to skip creating them entirely.
+  createEndUserRoles: true
 
 serviceAccount:
   # Specifies whether a ServiceAccount should be created

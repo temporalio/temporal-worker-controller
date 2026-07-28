@@ -49,6 +49,16 @@ jobs:
           helm template test-release helm/temporal-worker-controller \
             --set metrics.disableAuth=true
 
+      - name: Template with restricted watch namespaces
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set 'rbac.restrictWatchNamespaces={ns-a,ns-b}'
+
+      - name: Template with end user roles disabled
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set rbac.createEndUserRoles=false
+
   helm-lint-crds:
     name: Lint CRDs Chart
     runs-on: ubuntu-latest

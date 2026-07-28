@@ -14,7 +14,7 @@ require (
 	go.temporal.io/sdk v1.43.0
 	go.temporal.io/sdk/contrib/envconfig v1.0.1
 	go.temporal.io/server v1.32.0-155.0
-	google.golang.org/grpc v1.80.0
+	google.golang.org/grpc v1.82.0
 	k8s.io/api v0.36.0
 	k8s.io/apiextensions-apiserver v0.36.0
 	k8s.io/apimachinery v0.36.0
