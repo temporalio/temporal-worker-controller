@@ -31,7 +31,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) error {
+// executeK8sOperations executes the Kubernetes operations contained in the plan: creating,
+// deleting, scaling, and updating Deployments, and deleting the rendered WRT resources of
+// sunset or orphaned build IDs. It returns the refs from p.DeleteWorkerResources whose
+// delete was confirmed this cycle — the delete succeeded or the resource was already gone
+// (NotFound). executePlan prunes the WRT status entries matching the returned refs; entries
+// for unconfirmed deletes are retained so the planner re-derives and retries the delete on
+// the next reconcile. Rendered-resource delete failures are logged rather than returned as
+// errors, so the returned slice can be partial even when the error is nil.
+func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) ([]planner.WorkerResourceRef, error) {
 	// Create deployment
 	if p.CreateDeployment != nil {
 		l.Info("creating deployment", "deployment", p.CreateDeployment)
@@ -39,7 +47,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentCreateFailed,
 				"Failed to create Deployment %q: %v", p.CreateDeployment.Name, err)
-			return err
+			return nil, err
 		}
 	}
 
@@ -50,15 +58,18 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 			l.Error(err, "unable to delete deployment", "deployment", d)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentDeleteFailed,
 				"Failed to delete Deployment %q: %v", d.Name, err)
-			return err
+			return nil, err
 		}
 	}
 
-	// Delete rendered WRT resources whose versioned Deployment is being sunset.
+	// Delete rendered WRT resources whose versioned Deployment is being sunset, or whose
+	// WRT status entry is orphaned (its build ID has no versioned Deployment anymore).
 	// Rendered resources are owned by the WRT (not the Deployment), so k8s GC does not
 	// clean them up when the Deployment is deleted; the controller does it here instead.
-	// Errors are logged and skipped — a failed delete will be retried next reconcile
-	// (the Deployment is already gone so its build ID won't produce a new apply).
+	// Errors are logged and skipped: the WRT status entry for the build ID is only pruned
+	// after a confirmed delete (see executePlan), and the planner re-derives delete refs
+	// from surviving entries, so a failed delete is retried on the next reconcile.
+	var deletedWorkerResources []planner.WorkerResourceRef
 	for _, res := range p.DeleteWorkerResources {
 		obj := &unstructured.Unstructured{}
 		gv, err := schema.ParseGroupVersion(res.APIVersion)
@@ -70,10 +81,12 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		obj.SetGroupVersionKind(schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: res.Kind})
 		obj.SetNamespace(res.Namespace)
 		obj.SetName(res.Name)
+		// A NotFound result counts as a successful delete: the resource is confirmed gone.
 		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
 			l.Error(err, "unable to delete worker resource on version sunset",
 				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
 		} else {
+			deletedWorkerResources = append(deletedWorkerResources, res)
 			l.Info("deleted worker resource on version sunset",
 				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
 		}
@@ -94,7 +107,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 			l.Error(err, "unable to scale deployment", "deployment", d, "replicas", replicas)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentScaleFailed,
 				"Failed to scale Deployment %q to %d replicas: %v", d.Name, replicas, err)
-			return fmt.Errorf("unable to scale deployment: %w", err)
+			return deletedWorkerResources, fmt.Errorf("unable to scale deployment: %w", err)
 		}
 	}
 
@@ -105,11 +118,11 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 			l.Error(err, "unable to update deployment", "deployment", d)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentUpdateFailed,
 				"Failed to update Deployment %q: %v", d.Name, err)
-			return fmt.Errorf("unable to update deployment: %w", err)
+			return deletedWorkerResources, fmt.Errorf("unable to update deployment: %w", err)
 		}
 	}
 
-	return nil
+	return deletedWorkerResources, nil
 }
 
 func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
@@ -310,7 +323,8 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 
 //nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
 func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
-	if err := r.executeK8sOperations(ctx, l, workerDeploy, p); err != nil {
+	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
+	if err != nil {
 		return err
 	}
 
@@ -421,14 +435,43 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 		})
 	}
 
-	// Write per-Build-ID status back to each WRT.
+	// Group confirmed rendered-resource deletions by WRT so the matching per-Build-ID
+	// status entries can be pruned below. Pruning only after a confirmed delete keeps an
+	// entry (and its LastAppliedHash) alive while the resource may still exist: the
+	// surviving entry is what makes the planner re-derive the delete next cycle, and
+	// pruning it on success is what allows a later redeploy of the same build ID to be
+	// re-applied instead of being skipped against a stale hash.
+	deletedBuildIDs := make(map[wrtKey]map[string]struct{})
+	for _, ref := range deletedWorkerResources {
+		if ref.WRTName == "" || ref.BuildID == "" {
+			continue
+		}
+		key := wrtKey{ref.Namespace, ref.WRTName}
+		if deletedBuildIDs[key] == nil {
+			deletedBuildIDs[key] = make(map[string]struct{})
+		}
+		deletedBuildIDs[key][ref.BuildID] = struct{}{}
+	}
+
+	// Write per-Build-ID status back to each WRT that had an apply or a confirmed delete.
 	// Done after all applies so a single failed apply does not prevent status
 	// updates for the other (WRT, Build ID) pairs.
 	// If every result for a WRT was skipped (hash unchanged since last successful
-	// apply), the status is already correct — skip the status write entirely to
-	// avoid unnecessary resourceVersion bumps.
+	// apply) and none of its rendered resources were deleted, the status is already
+	// correct — skip the status write entirely to avoid unnecessary resourceVersion bumps.
+	statusKeys := make(map[wrtKey]struct{}, len(wrtResults)+len(deletedBuildIDs))
+	for key := range wrtResults {
+		statusKeys[key] = struct{}{}
+	}
+	for key := range deletedBuildIDs {
+		statusKeys[key] = struct{}{}
+	}
+
 	var applyErrs, statusErrs []error
-	for key, results := range wrtResults {
+	for key := range statusKeys {
+		results := wrtResults[key]
+		deleted := deletedBuildIDs[key]
+
 		allSkipped := true
 		for _, res := range results {
 			if !res.skipped {
@@ -436,7 +479,7 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 				break
 			}
 		}
-		if allSkipped {
+		if allSkipped && len(deleted) == 0 {
 			continue
 		}
 
@@ -456,8 +499,10 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 		}
 
 		versions := make([]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, 0, len(results))
+		coveredByApply := make(map[string]struct{}, len(results))
 		anyFailed := false
 		for _, result := range results {
+			coveredByApply[result.buildID] = struct{}{}
 			if result.skipped {
 				if existing, ok := existingByBuildID[result.buildID]; ok {
 					versions = append(versions, existing)
@@ -479,6 +524,20 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 			versions = append(versions, k8s.WorkerResourceTemplateVersionStatusForBuildID(
 				result.buildID, result.resourceName, appliedGeneration, result.hash, applyErr,
 			))
+		}
+
+		// Carry over existing entries not covered by this cycle's applies, pruning the
+		// ones whose rendered resource delete was confirmed above. Entries that were
+		// neither applied nor confirmed-deleted (e.g. the resource delete failed this
+		// cycle) are retained so the planner keeps retrying the delete.
+		for _, v := range wrt.Status.Versions {
+			if _, ok := coveredByApply[v.BuildID]; ok {
+				continue
+			}
+			if _, ok := deleted[v.BuildID]; ok {
+				continue
+			}
+			versions = append(versions, v)
 		}
 
 		// Compute the top-level Ready condition.

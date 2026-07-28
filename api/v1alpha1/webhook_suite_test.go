@@ -63,7 +63,11 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	By("bootstrapping test environment")
-	wrtWebhook := loadWRTWebhookFromHelmChart(filepath.Join("..", "..", "helm", "temporal-worker-controller"))
+	chartPath := filepath.Join("..", "..", "helm", "temporal-worker-controller")
+	wrtWebhook := loadWebhookFromHelmChart(chartPath, "vworkerresourcetemplate.kb.io")
+	// The WorkerDeployment webhook config is gated behind the chart's webhook.enabled flag,
+	// so render it the same way a real install with the flag on would.
+	wdWebhook := loadWebhookFromHelmChart(chartPath, "vworkerdeployment.kb.io", "--set", "webhook.enabled=true")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			// CRDs live in the crds chart's templates directory
@@ -71,7 +75,7 @@ var _ = BeforeSuite(func() {
 		},
 		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
-			ValidatingWebhooks: []*admissionregistrationv1.ValidatingWebhookConfiguration{wrtWebhook},
+			ValidatingWebhooks: []*admissionregistrationv1.ValidatingWebhookConfiguration{wrtWebhook, wdWebhook},
 		},
 	}
 
@@ -157,29 +161,31 @@ var _ = BeforeSuite(func() {
 
 })
 
-// loadWRTWebhookFromHelmChart renders the Helm chart's webhook.yaml with default values using
-// `helm template` and extracts the ValidatingWebhookConfiguration for WorkerResourceTemplate.
+// loadWebhookFromHelmChart renders the Helm chart's webhook.yaml using `helm template`
+// (with any extra helm arguments, e.g. --set webhook.enabled=true) and extracts the
+// ValidatingWebhookConfiguration containing the named webhook.
 // This makes the test authoritative against the Helm chart rather than a hand-maintained copy.
-func loadWRTWebhookFromHelmChart(chartPath string) *admissionregistrationv1.ValidatingWebhookConfiguration {
-	out, err := exec.Command("helm", "template", "test", chartPath, "--show-only", "templates/webhook.yaml").Output()
+func loadWebhookFromHelmChart(chartPath, webhookName string, extraArgs ...string) *admissionregistrationv1.ValidatingWebhookConfiguration {
+	args := append([]string{"template", "test", chartPath, "--show-only", "templates/webhook.yaml"}, extraArgs...)
+	out, err := exec.Command("helm", args...).Output()
 	Expect(err).NotTo(HaveOccurred(), "helm template failed — is helm installed?")
 
-	// The file contains multiple YAML documents; find the WRT ValidatingWebhookConfiguration.
+	// The file contains multiple YAML documents; find the requested ValidatingWebhookConfiguration.
 	for _, doc := range bytes.Split(out, []byte("\n---\n")) {
 		trimmed := strings.TrimSpace(string(doc))
 		if !strings.Contains(trimmed, "kind: ValidatingWebhookConfiguration") {
 			continue
 		}
-		if !strings.Contains(trimmed, "vworkerresourcetemplate.kb.io") {
+		if !strings.Contains(trimmed, webhookName) {
 			continue
 		}
 		jsonBytes, convErr := sigsyaml.YAMLToJSON([]byte(trimmed))
-		Expect(convErr).NotTo(HaveOccurred(), "failed to convert WRT webhook YAML to JSON")
+		Expect(convErr).NotTo(HaveOccurred(), "failed to convert webhook YAML to JSON")
 		var wh admissionregistrationv1.ValidatingWebhookConfiguration
-		Expect(json.Unmarshal(jsonBytes, &wh)).To(Succeed(), "failed to decode WRT ValidatingWebhookConfiguration")
+		Expect(json.Unmarshal(jsonBytes, &wh)).To(Succeed(), "failed to decode ValidatingWebhookConfiguration")
 		return &wh
 	}
-	Fail("WRT ValidatingWebhookConfiguration not found in rendered helm chart webhook.yaml")
+	Fail(fmt.Sprintf("ValidatingWebhookConfiguration containing %q not found in rendered helm chart webhook.yaml", webhookName))
 	return nil
 }
 
