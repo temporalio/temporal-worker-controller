@@ -230,8 +230,8 @@ func TestFetchMTLS_ValidCert_Succeeds(t *testing.T) {
 	clientOpts, key, auth, err := cp.fetchClientUsingMTLSSecret(secret, makeOpts("localhost:7233"))
 
 	require.NoError(t, err)
-	assert.Equal(t, AuthModeTLS, key.AuthMode)
-	assert.Equal(t, AuthModeTLS, auth.mode)
+	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, key.AuthMode)
+	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, auth.mode)
 	assert.NotNil(t, auth.mTLS)
 	assert.NotNil(t, clientOpts.ConnectionOptions.TLS)
 	assert.Len(t, clientOpts.ConnectionOptions.TLS.Certificates, 1)
@@ -306,7 +306,7 @@ func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
 	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
 	assert.Equal(t, "temporal-cloud.example.com", clientOpts.ConnectionOptions.TLS.ServerName)
 	assert.Equal(t, "temporal-cloud.example.com", key.TLSServerName)
-	assert.Equal(t, AuthModeNoCredentials, auth.mode)
+	assert.Equal(t, temporaliov1alpha1.AuthModeNoCredentials, auth.mode)
 }
 
 func newTestPoolWithFakeClient(objects ...runtime.Object) *ClientPool {
@@ -349,8 +349,8 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 	clientOpts, key, auth, err := cp.fetchClientUsingAPIKeySecret(opts)
 
 	require.NoError(t, err)
-	assert.Equal(t, AuthModeAPIKey, key.AuthMode)
-	assert.Equal(t, AuthModeAPIKey, auth.mode)
+	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, key.AuthMode)
+	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, auth.mode)
 	assert.Nil(t, auth.mTLS)
 	assert.NotNil(t, clientOpts.Credentials, "API key credentials must be set")
 	assert.NotNil(t, clientOpts.ConnectionOptions.TLS, "TLS config must be non-nil for gRPC API key transport")
@@ -401,8 +401,8 @@ func TestParseClientSecret_OpaqueSecretType(t *testing.T) {
 	_, key, auth, err := cp.fetchClientUsingMTLSSecret(opaqueSecret, makeOpts("localhost:7233"))
 
 	require.NoError(t, err, "Opaque secret with tls.crt and tls.key should be accepted for mTLS auth")
-	assert.Equal(t, AuthModeTLS, key.AuthMode)
-	assert.Equal(t, AuthModeTLS, auth.mode)
+	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, key.AuthMode)
+	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, auth.mode)
 	assert.NotNil(t, auth.mTLS)
 }
 
@@ -414,15 +414,15 @@ func TestParseClientSecret_OpaqueSecretType(t *testing.T) {
 // Cloud, namespace-scoped API keys do not have permission to call the system-scoped
 // CheckHealth RPC, so every connection attempt failed.
 //
-// After the fix, CheckHealth is skipped for AuthModeAPIKey because client.Dial already
+// After the fix, CheckHealth is skipped for temporaliov1alpha1.AuthModeAPIKey because client.Dial already
 // calls GetSystemInfo internally (a superset of CheckHealth).
 func TestDialAndUpsert_APIKeySkipsCheckHealth(t *testing.T) {
 	mock := &mockSDKClient{}
 	cp := newTestPool()
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
-	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: AuthModeAPIKey}
-	auth := ClientAuth{mode: AuthModeAPIKey}
+	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeAPIKey}
+	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeAPIKey}
 
 	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
 
@@ -439,9 +439,9 @@ func TestDialAndUpsert_TLSCallsCheckHealth(t *testing.T) {
 	cp := newTestPool()
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
-	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: AuthModeTLS}
+	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeTLS}
 	auth := ClientAuth{
-		mode: AuthModeTLS,
+		mode: temporaliov1alpha1.AuthModeTLS,
 		mTLS: &MTLSAuth{tlsConfig: &tls.Config{}, expiryTime: time.Now().Add(time.Hour)},
 	}
 
@@ -458,8 +458,8 @@ func TestDialAndUpsert_NoCredsCallsCheckHealth(t *testing.T) {
 	cp := newTestPool()
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
-	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: AuthModeNoCredentials}
-	auth := ClientAuth{mode: AuthModeNoCredentials}
+	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeNoCredentials}
+	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeNoCredentials}
 
 	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
 
@@ -476,7 +476,7 @@ func TestEvictClient_RemovesAndClosesClient(t *testing.T) {
 		HostPort:   "localhost:7233",
 		Namespace:  "default",
 		SecretName: "my-secret",
-		AuthMode:   AuthModeAPIKey,
+		AuthMode:   temporaliov1alpha1.AuthModeAPIKey,
 	}
 	mock := &mockSDKClient{}
 	cp.SetClientForTesting(key, mock)
@@ -493,7 +493,7 @@ func TestEvictClient_RemovesAndClosesClient(t *testing.T) {
 
 func TestEvictClient_NoopWhenKeyAbsent(t *testing.T) {
 	cp := newTestPool()
-	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: AuthModeNoCredentials}
+	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeNoCredentials}
 	// Should not panic when key is not in the pool
 	cp.EvictClient(key)
 }
