@@ -283,7 +283,7 @@ func noCredsPoolKey(hostPort, temporalNamespace string) clientpool.ClientPoolKey
 		HostPort:   hostPort,
 		Namespace:  temporalNamespace,
 		SecretName: "",
-		AuthMode:   clientpool.AuthModeNoCredentials,
+		AuthMode:   temporaliov1alpha1.AuthModeNoCredentials,
 	}
 }
 
