@@ -52,9 +52,10 @@ jobs:
       - name: Template with kube-rbac-proxy image override
         run: |
           helm template test-release helm/temporal-worker-controller \
-            --set metrics.kubeRbacProxy.image.repository=example.invalid/kube-rbac-proxy \
-            --set metrics.kubeRbacProxy.image.tag=test \
-            --set metrics.kubeRbacProxy.image.pullPolicy=Always
+            --set kubeRBACProxy.image.registry=example.invalid \
+            --set kubeRBACProxy.image.repository=kube-rbac-proxy \
+            --set kubeRBACProxy.image.tag=test \
+            --set kubeRBACProxy.image.pullPolicy=Always
 
       - name: Template with restricted watch namespaces
         run: |

@@ -41,6 +41,64 @@
         }
       }
     },
+    "kubeRBACProxy": {
+      "type": "object",
+      "description": "Configuration for the kube-rbac-proxy metrics sidecar",
+      "properties": {
+        "image": {
+          "type": "object",
+          "properties": {
+            "registry": {
+              "type": "string",
+              "description": "kube-rbac-proxy image registry"
+            },
+            "repository": {
+              "type": "string",
+              "description": "kube-rbac-proxy image repository"
+            },
+            "tag": {
+              "type": "string",
+              "description": "kube-rbac-proxy image tag"
+            },
+            "sha": {
+              "type": "string",
+              "description": "Optional kube-rbac-proxy image digest"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ],
+              "description": "kube-rbac-proxy image pull policy"
+            }
+          }
+        },
+        "extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional kube-rbac-proxy arguments"
+        },
+        "containerSecurityContext": {
+          "type": "object",
+          "description": "kube-rbac-proxy container security context"
+        },
+        "resources": {
+          "type": "object",
+          "description": "kube-rbac-proxy resource requirements"
+        },
+        "volumeMounts": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Additional kube-rbac-proxy volume mounts"
+        }
+      }
+    },
     "podAnnotations": {
       "type": "object",
       "description": "Additional pod annotations",
@@ -180,33 +238,6 @@
           "minimum": 1,
           "maximum": 65535,
           "description": "Port for metrics endpoint"
-        },
-        "kubeRbacProxy": {
-          "type": "object",
-          "properties": {
-            "image": {
-              "type": "object",
-              "properties": {
-                "repository": {
-                  "type": "string",
-                  "description": "kube-rbac-proxy image repository"
-                },
-                "tag": {
-                  "type": "string",
-                  "description": "kube-rbac-proxy image tag"
-                },
-                "pullPolicy": {
-                  "type": "string",
-                  "enum": [
-                    "Always",
-                    "IfNotPresent",
-                    "Never"
-                  ],
-                  "description": "kube-rbac-proxy image pull policy"
-                }
-              }
-            }
-          }
         },
         "disableAuth": {
           "type": "boolean",
