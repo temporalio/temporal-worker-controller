@@ -20,6 +20,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+kube-rbac-proxy image reference. A digest takes precedence over a tag when set.
+*/}}
+{{- define "temporal-worker-controller.kubeRBACProxyImage" -}}
+{{- if .Values.kubeRBACProxy.image.sha -}}
+{{ printf "%s/%s@%s" .Values.kubeRBACProxy.image.registry .Values.kubeRBACProxy.image.repository .Values.kubeRBACProxy.image.sha }}
+{{- else -}}
+{{ printf "%s/%s:%s" .Values.kubeRBACProxy.image.registry .Values.kubeRBACProxy.image.repository .Values.kubeRBACProxy.image.tag }}
+{{- end -}}
+{{- end }}
+
+{{/*
 Namespace selector restricting admission webhooks to the watched namespaces.
 Rendered only when rbac.restrictWatchNamespaces is set; keys off the
 kubernetes.io/metadata.name label the API server sets on every namespace.
