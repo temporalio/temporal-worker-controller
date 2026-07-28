@@ -51,7 +51,7 @@ rbac:
   # that grant end users permission to edit/view temporal.io custom resources
   # (connections, workerdeployments, workerresourcetemplates). These roles have no
   # bindings by default — they exist so cluster admins can bind them as needed.
-  # Set to false to skip creating them entirely
+  # Set to false to skip creating them entirely.
   createEndUserRoles: true
 
 serviceAccount:
