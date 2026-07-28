@@ -101,9 +101,11 @@ const (
 	// when the target version has been successfully registered as the current version.
 	ReasonRolloutComplete = "RolloutComplete"
 
-	// ReasonWaitingForPollers is set on ConditionProgressing=True when the target
-	// version's Kubernetes Deployment has been created but the version is not yet
-	// registered with Temporal (workers have not started polling yet).
+	// ReasonWaitingForPollers is set on ConditionProgressing=True when workers are
+	// not yet (or are no longer) actively polling Temporal. This covers both:
+	// (1) the target version's Kubernetes Deployment has been created but the
+	// version is not yet registered with Temporal, and (2) the target version has
+	// become current but one or more of its task queues have no active poller.
 	ReasonWaitingForPollers = "WaitingForPollers"
 
 	// ReasonWaitingForPromotion is set on ConditionProgressing=True when the target
@@ -144,24 +146,20 @@ const (
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
 	ReasonConnectionHealthy = "ConnectionHealthy"
 
-	// ReasonPollersHealthy is used on ConditionReady=True (in place of
-	// ReasonRolloutComplete) and on the Normal Event emitted when a version's workers
-	// transition from having no active pollers (or unknown status) back to actively
-	// polling every known task queue.
-	ReasonPollersHealthy = "PollersHealthy"
+	// ReasonActivePollers is set on ConditionProgressing=False when the target
+	// version has become current and all known task queues have at least one
+	// active poller. This mirrors ReasonWaitingForPollers on
+	// ConditionProgressing=True: it reports only that workers are actively
+	// polling the server, not that the pollers themselves are otherwise healthy.
+	// Also used as the reason on the Normal Event emitted when a version
+	// transitions from having no active pollers (or unknown status) back to
+	// actively polling every known task queue.
+	ReasonActivePollers = "ActivePollers"
 
-	// ReasonNoActivePollers is set on ConditionReady=False -- even though the target
-	// version has otherwise completed rollout and become current -- when one or more
-	// of the version's task queues have no active poller. A Deployment can be fully
-	// Ready at the Kubernetes level while its workers are misconfigured, stuck, or
-	// unable to reach Temporal; this reason distinguishes that case from a healthy
-	// rollout.
-	ReasonNoActivePollers = "NoActivePollers"
-
-	// ReasonPollerStatusUnknown is set on ConditionReady=Unknown when poller status
-	// could not be determined for the current version (e.g. a transient
-	// DescribeTaskQueue error). This must NOT be treated as unhealthy -- it means
-	// "don't know", not "broken".
+	// ReasonPollerStatusUnknown is set on ConditionProgressing=False when poller
+	// status could not be determined for the current version (e.g. a transient
+	// DescribeTaskQueue error). This must NOT be treated as "no pollers" -- it
+	// means "don't know", not "broken".
 	ReasonPollerStatusUnknown = "PollerStatusUnknown"
 )
 
