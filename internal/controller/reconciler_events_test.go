@@ -28,9 +28,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	kstatus "sigs.k8s.io/cli-utils/pkg/kstatus/status"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -287,6 +289,31 @@ func noCredsPoolKey(hostPort, temporalNamespace string) clientpool.ClientPoolKey
 	}
 }
 
+// assertKstatus converts twd to unstructured and asserts that kstatus.Compute() returns
+// expected — this is what generic kstatus-aware tooling (kubectl wait, ArgoCD, Flux) infers
+// from status.conditions alone, with no WorkerDeployment-specific logic involved.
+func assertKstatus(t *testing.T, twd *temporaliov1alpha1.WorkerDeployment, expected kstatus.Result) {
+	t.Helper()
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(twd)
+	require.NoError(t, err)
+	res, err := kstatus.Compute(&unstructured.Unstructured{Object: obj})
+	require.NoError(t, err)
+	assert.Equal(t, expected, *res)
+}
+
+// expectedReconciling builds the kstatus.Result expected when kstatus's Ready-condition
+// fallback observes our Ready condition set to False (its way of reporting InProgress absent
+// a native Reconciling condition of our own).
+func expectedReconciling(reason, message string) kstatus.Result {
+	return kstatus.Result{
+		Status:  kstatus.InProgressStatus,
+		Message: message,
+		Conditions: []kstatus.Condition{
+			{Type: kstatus.ConditionReconciling, Status: corev1.ConditionTrue, Reason: reason, Message: message},
+		},
+	}
+}
+
 // ─── setCondition tests ───────────────────────────────────────────────────────
 
 func TestSetCondition(t *testing.T) {
@@ -355,6 +382,12 @@ func TestSyncConditions(t *testing.T) {
 		// Deprecated conditions
 		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
 		assertCondition(t, twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)     //nolint:staticcheck // backward compat
+
+		assertKstatus(t, twd, kstatus.Result{
+			Status:     kstatus.CurrentStatus,
+			Message:    "Resource is Ready",
+			Conditions: []kstatus.Condition{},
+		})
 	})
 
 	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
@@ -366,6 +399,10 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping)
 		// Deprecated conditions
 		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
+
+		// TODO(jlegrone): none of these sync states set status.observedGeneration, so kstatus
+		// can't detect a stale generation. Setting it (from twd.Generation) would close this gap.
+		assertKstatus(t, twd, expectedReconciling(temporaliov1alpha1.ReasonRamping, "Target version  is ramping"))
 	})
 
 	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
@@ -377,6 +414,8 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion)
 		// Deprecated conditions
 		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
+
+		assertKstatus(t, twd, expectedReconciling(temporaliov1alpha1.ReasonWaitingForPromotion, "Target version  is registered but not yet promoted"))
 	})
 
 	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
@@ -388,6 +427,8 @@ func TestSyncConditions(t *testing.T) {
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)
 		// Deprecated conditions
 		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
+
+		assertKstatus(t, twd, expectedReconciling(temporaliov1alpha1.ReasonWaitingForPollers, "Target version  is not yet registered with Temporal"))
 	})
 }
 
@@ -435,6 +476,11 @@ func TestReconcile_InvalidSpec_EmitsEventAndSetsCondition(t *testing.T) {
 	require.NotNil(t, cond, "Progressing condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	assert.Equal(t, temporaliov1alpha1.ReasonInvalidSpec, cond.Reason)
+
+	// TODO(jlegrone): this is a terminal failure, but we never set a Stalled condition, so
+	// kstatus can only report InProgress here, not Failed.
+	assertKstatus(t, &updated, expectedReconciling(temporaliov1alpha1.ReasonInvalidSpec,
+		` "test-worker" is invalid: spec.rollout.steps[1].rampPercentage: Invalid value: 10: rampPercentage must increase between each step`))
 }
 
 // TestReconcile_ConnectionNotFound covers all three related assertions: event emission,
@@ -470,6 +516,10 @@ func TestReconcile_ConnectionNotFound(t *testing.T) {
 	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
 	require.NotNil(t, connHealthy, "deprecated ConnectionHealthy condition should be set")
 	assert.Equal(t, metav1.ConditionFalse, connHealthy.Status)
+
+	// TODO(jlegrone): see TestReconcile_InvalidSpec_EmitsEventAndSetsCondition.
+	assertKstatus(t, &updated, expectedReconciling(temporaliov1alpha1.ReasonConnectionNotFound,
+		`Connection "nonexistent-connection" not found: connections.temporal.io "nonexistent-connection" not found`))
 }
 
 // TestReconcile_ConnectionUnhealthy verifies that credential configuration
@@ -485,9 +535,10 @@ func TestReconcile_ConnectionNotFound(t *testing.T) {
 // conditions-client-creation-failed.
 func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 	cases := []struct {
-		name           string
-		setupConn      func(*temporaliov1alpha1.Connection)
-		expectedReason string
+		name            string
+		setupConn       func(*temporaliov1alpha1.Connection)
+		expectedReason  string
+		expectedMessage string
 	}{
 		{
 			// Secret name is non-empty but the k8s Secret doesn't exist; ParseClientSecret
@@ -496,7 +547,8 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 			setupConn: func(tc *temporaliov1alpha1.Connection) {
 				tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: "missing-tls-secret"}
 			},
-			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedReason:  temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedMessage: `Invalid auth secret: secrets "missing-tls-secret" not found`,
 		},
 		{
 			// Same as above for API key auth.
@@ -507,7 +559,8 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 					Key:                  "api-key",
 				}
 			},
-			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedReason:  temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedMessage: `Invalid auth secret: secrets "missing-api-key-secret" not found`,
 		},
 		{
 			// Secret ref is present but name is empty; resolveAuthSecretName returns an error.
@@ -515,7 +568,8 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 			setupConn: func(tc *temporaliov1alpha1.Connection) {
 				tc.Spec.MutualTLSSecretRef = &temporaliov1alpha1.SecretReference{Name: ""}
 			},
-			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedReason:  temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedMessage: "Unable to resolve auth secret: TLS secret name is not set",
 		},
 		{
 			// Same as above for API key auth.
@@ -526,7 +580,8 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 					Key:                  "api-key",
 				}
 			},
-			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedReason:  temporaliov1alpha1.ReasonAuthSecretInvalid,
+			expectedMessage: "Unable to resolve auth secret: API key secret name is not set",
 		},
 	}
 
@@ -554,6 +609,9 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 			connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
 			require.NotNil(t, connHealthy, "deprecated ConnectionHealthy condition should be set")
 			assert.Equal(t, metav1.ConditionFalse, connHealthy.Status)
+
+			// TODO(jlegrone): see TestReconcile_InvalidSpec_EmitsEventAndSetsCondition.
+			assertKstatus(t, &updated, expectedReconciling(tc.expectedReason, tc.expectedMessage))
 		})
 	}
 }
@@ -601,6 +659,10 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 	// PlanGenerationFailed is not a connection issue — ConnectionHealthy must not be set.
 	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
 	assert.Nil(t, connHealthy, "ConnectionHealthy should not be set for plan generation failures")
+
+	// TODO(jlegrone): see TestReconcile_InvalidSpec_EmitsEventAndSetsCondition.
+	assertKstatus(t, &updated, expectedReconciling(ReasonPlanGenerationFailed,
+		"Plan generation failed: unable to get Kubernetes deployment state: unable to list child deployments: simulated List failure on call #2"))
 }
 
 // TestReconcile_PlanExecutionFailed_EmitsEvent injects a Create failure so that
@@ -643,6 +705,10 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 	// PlanExecutionFailed is not a connection issue — ConnectionHealthy must not be set.
 	connHealthy := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionConnectionHealthy) //nolint:staticcheck // backward compat
 	assert.Nil(t, connHealthy, "ConnectionHealthy should not be set for plan execution failures")
+
+	// TODO(jlegrone): see TestReconcile_InvalidSpec_EmitsEventAndSetsCondition.
+	assertKstatus(t, &updated, expectedReconciling(ReasonPlanExecutionFailed,
+		"Plan execution failed: simulated Deployment create failure"))
 }
 
 // TestReconcile_DescribeWorkerDeploymentNotFound verifies that when the gRPC

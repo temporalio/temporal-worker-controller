@@ -17,7 +17,10 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	kstatus "sigs.k8s.io/cli-utils/pkg/kstatus/status"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -451,6 +454,44 @@ func waitForCondition(
 			}
 		}
 		return fmt.Errorf("condition %q not found on TWD %s/%s", condType, namespace, twdName)
+	})
+}
+
+// waitForKstatusCurrent polls until sigs.k8s.io/cli-utils' kstatus library independently
+// computes the named WorkerDeployment's status as Current, using nothing but the standard
+// kstatus.Compute() heuristics (generic Reconciling/Stalled conditions, then the fallback
+// "Ready" condition check) against the resource as a client would see it. This verifies
+// that our status.conditions are set in a way third-party kstatus-aware tooling (e.g. `kubectl
+// wait --for=condition=Ready`, ArgoCD, Flux) can understand without any WorkerDeployment-specific
+// logic. Fatals immediately if kstatus reports FailedStatus, since that will never self-resolve.
+func waitForKstatusCurrent(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	twdName, namespace string,
+	timeout, interval time.Duration,
+) {
+	t.Helper()
+	eventually(t, timeout, interval, func() error {
+		var twd temporaliov1alpha1.WorkerDeployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: twdName, Namespace: namespace}, &twd); err != nil {
+			return fmt.Errorf("failed to get TWD: %w", err)
+		}
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&twd)
+		if err != nil {
+			return fmt.Errorf("failed to convert TWD to unstructured: %w", err)
+		}
+		res, err := kstatus.Compute(&unstructured.Unstructured{Object: obj})
+		if err != nil {
+			return fmt.Errorf("kstatus failed to compute status: %w", err)
+		}
+		if res.Status == kstatus.FailedStatus {
+			t.Fatalf("kstatus reports WorkerDeployment %s/%s as Failed: %s", namespace, twdName, res.Message)
+		}
+		if res.Status != kstatus.CurrentStatus {
+			return fmt.Errorf("kstatus status is %q (want %q): %s", res.Status, kstatus.CurrentStatus, res.Message)
+		}
+		return nil
 	})
 }
 

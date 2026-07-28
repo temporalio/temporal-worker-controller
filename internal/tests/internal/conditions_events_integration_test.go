@@ -7,6 +7,8 @@ package internal
 // Covered:
 //   - ConditionProgressing = True                (version registered but not yet current)
 //   - ConditionReady = True                      (version promoted to current)
+//   - kstatus.Compute() reports Current          (verifies our conditions are readable by
+//     generic kstatus-aware tooling, not just our own status fields)
 //   - ConditionProgressing = False               (blocking error: missing Connection, etc.)
 //   - Event reason ConnectionNotFound    (emitted alongside Progressing=False condition)
 //   - ReasonTemporalClientCreationFailed: Connection pointing to an unreachable port
@@ -65,8 +67,9 @@ func runConditionsAndEventsTests(
 		},
 		{
 			// Verifies that ConditionReady=True is set after the controller promotes
-			// a version to current. Note: only a condition is set here — no
-			// separate k8s Event is emitted for RolloutComplete.
+			// a version to current, and that kstatus.Compute() independently agrees the
+			// resource is Current based solely on that condition. Note: only a condition
+			// is set here — no separate k8s Event is emitted for RolloutComplete.
 			name: "conditions-ready-reason-rollout-complete",
 			builder: testhelpers.NewTestCase().
 				WithInput(
@@ -85,6 +88,8 @@ func runConditionsAndEventsTests(
 						temporaliov1alpha1.ConditionReady,
 						metav1.ConditionTrue,
 						temporaliov1alpha1.ReasonRolloutComplete,
+						10*time.Second, time.Second)
+					waitForKstatusCurrent(t, ctx, env.K8sClient, twd.Name, twd.Namespace,
 						10*time.Second, time.Second)
 				}),
 		},
