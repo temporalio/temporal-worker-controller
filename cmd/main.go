@@ -138,7 +138,7 @@ func main() {
 		setupLog.Error(err, "unable to create webhook", "webhook", "WorkerResourceTemplate")
 		os.Exit(1)
 	}
-	if err = (&temporaliov1alpha1.WorkerDeployment{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&temporaliov1alpha1.WorkerDeployment{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "WorkerDeployment")
 		os.Exit(1)
 	}
