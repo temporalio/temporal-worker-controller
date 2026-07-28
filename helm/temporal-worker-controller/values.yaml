@@ -40,6 +40,13 @@ priorityClassName: ""
 rbac:
   # Specifies whether RBAC resources should be created
   create: true
+  # restrictWatchNamespaces keeps the namespaces the controller watches and the
+  # namespaces its RBAC grants access to in sync. Empty (the default) watches all
+  # namespaces with cluster-wide RBAC (ClusterRole + ClusterRoleBinding). When set,
+  # the manager role is emitted as a namespaced Role (one per listed namespace) bound
+  # via a RoleBinding, plus a minimal cluster-scoped role for the two grants that
+  # cannot be namespaced (namespaces get, subjectaccessreviews create).
+  restrictWatchNamespaces: []
 
 serviceAccount:
   # Specifies whether a ServiceAccount should be created

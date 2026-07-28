@@ -22,21 +22,12 @@ import (
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type AuthMode string
-
-const (
-	AuthModeTLS           AuthMode = "TLS"
-	AuthModeAPIKey        AuthMode = "API_KEY"
-	AuthModeNoCredentials AuthMode = "NO_CREDENTIALS"
-	// Add more auth modes here as they are supported
-)
-
 type ClientPoolKey struct {
 	HostPort      string
 	TLSServerName string
-	Namespace     string   // Temporal namespace
-	SecretName    string   // Include secret name in key to invalidate cache when the secret name changes
-	AuthMode      AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
+	Namespace     string            // Temporal namespace
+	SecretName    string            // Include secret name in key to invalidate cache when the secret name changes
+	AuthMode      v1alpha1.AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
 }
 
 type MTLSAuth struct {
@@ -45,7 +36,7 @@ type MTLSAuth struct {
 }
 
 type ClientAuth struct {
-	mode AuthMode
+	mode v1alpha1.AuthMode
 	mTLS *MTLSAuth // non-nil when mode == AuthMTLS, nil when mode == AuthAPIKey
 }
 
@@ -100,7 +91,7 @@ func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
 		return nil, false
 	}
 
-	if key.AuthMode == AuthModeTLS {
+	if key.AuthMode == v1alpha1.AuthModeTLS {
 		// Check if any certificate is expired
 		expired, err := isCertificateExpired(info.auth.mTLS.expiryTime)
 		if err != nil {
@@ -184,10 +175,10 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 		TLSServerName: tlsServerName,
 		Namespace:     opts.TemporalNamespace,
 		SecretName:    opts.Spec.MutualTLSSecretRef.Name,
-		AuthMode:      AuthModeTLS,
+		AuthMode:      v1alpha1.AuthModeTLS,
 	}
 	auth := ClientAuth{
-		mode: AuthModeTLS,
+		mode: v1alpha1.AuthModeTLS,
 		mTLS: &MTLSAuth{tlsConfig: clientOpts.ConnectionOptions.TLS, expiryTime: expiryTime},
 	}
 	return &clientOpts, &key, &auth, nil
@@ -217,10 +208,10 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions) (*sdkc
 		TLSServerName: tlsServerName,
 		Namespace:     opts.TemporalNamespace,
 		SecretName:    opts.Spec.APIKeySecretRef.Name,
-		AuthMode:      AuthModeAPIKey,
+		AuthMode:      v1alpha1.AuthModeAPIKey,
 	}
 	auth := ClientAuth{
-		mode: AuthModeAPIKey,
+		mode: v1alpha1.AuthModeAPIKey,
 		mTLS: nil,
 	}
 
@@ -244,10 +235,10 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (*sdk
 		TLSServerName: tlsServerName,
 		Namespace:     opts.TemporalNamespace,
 		SecretName:    "",
-		AuthMode:      AuthModeNoCredentials,
+		AuthMode:      v1alpha1.AuthModeNoCredentials,
 	}
 	auth := ClientAuth{
-		mode: AuthModeNoCredentials,
+		mode: v1alpha1.AuthModeNoCredentials,
 		mTLS: nil,
 	}
 
@@ -257,7 +248,7 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (*sdk
 func (cp *ClientPool) ParseClientSecret(
 	ctx context.Context,
 	secretName string,
-	authMode AuthMode,
+	authMode v1alpha1.AuthMode,
 	opts NewClientOptions,
 ) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	// Fetch the secret from k8s cluster, if it exists. Otherwise, create a connection with the server without using any credentials.
@@ -273,21 +264,21 @@ func (cp *ClientPool) ParseClientSecret(
 
 	// Check the secret type
 	switch authMode {
-	case AuthModeTLS:
+	case v1alpha1.AuthModeTLS:
 		if secret.Type != corev1.SecretTypeTLS && secret.Type != corev1.SecretTypeOpaque {
 			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls or Opaque", secret.Name)
 			return nil, nil, nil, err
 		}
 		return cp.fetchClientUsingMTLSSecret(secret, opts)
 
-	case AuthModeAPIKey:
+	case v1alpha1.AuthModeAPIKey:
 		if secret.Type != corev1.SecretTypeOpaque {
 			err := fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
 			return nil, nil, nil, err
 		}
 		return cp.fetchClientUsingAPIKeySecret(opts)
 
-	case AuthModeNoCredentials:
+	case v1alpha1.AuthModeNoCredentials:
 		return cp.fetchClientUsingNoCredentials(opts)
 
 	default:
@@ -305,7 +296,7 @@ func (cp *ClientPool) DialAndUpsertClient(clientOpts sdkclient.Options, clientPo
 	// (non-namespace-scoped) RPC that fails with namespace-scoped API keys
 	// on Temporal Cloud. This is safe because client.Dial already calls
 	// GetSystemInfo internally, which is a superset of CheckHealth.
-	if clientAuth.mode != AuthModeAPIKey {
+	if clientAuth.mode != v1alpha1.AuthModeAPIKey {
 		if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
 			c.Close()
 			return nil, fmt.Errorf("temporal server health check failed: %w", err)

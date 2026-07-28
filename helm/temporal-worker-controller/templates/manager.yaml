@@ -103,6 +103,10 @@ spec:
         {{- end }}
         - name: ALLOWED_KINDS
           value: {{ join "," $allKinds | quote }}
+        {{- with .Values.rbac.restrictWatchNamespaces }}
+        - name: WATCH_NAMESPACES
+          value: {{ join "," . | quote }}
+        {{- end }}
         args:
         - --leader-elect
         {{- if .Values.metrics.enabled }}
