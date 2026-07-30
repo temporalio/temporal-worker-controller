@@ -25,6 +25,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 14
+    ignore:
+      # We are deliberate about updating cert-manager dependency in our Helm
+      # chart. Keep this at >=1.0.0 and instruct dependabot to ignore this
+      # dependency in our Chart.yaml file.
+      - dependency-name: "cert-manager"
 
   - package-ecosystem: github-actions
     directory: "/"
