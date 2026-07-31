@@ -109,7 +109,7 @@ func TestNewClientOptionsSetsTemporalNamespaceHeader(t *testing.T) {
 	opts.TemporalNamespace = "routing-namespace"
 	clientOpts := newTestPool().newClientOptions(opts)
 
-	headers, err := clientOpts.HeadersProvider.GetHeaders(context.Background())
+	headers, err := clientOpts.HeadersProvider.GetHeaders(t.Context())
 
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
