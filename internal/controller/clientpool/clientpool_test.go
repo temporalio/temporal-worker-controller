@@ -104,6 +104,19 @@ func makeOpts(hostPort string) NewClientOptions {
 	}
 }
 
+func TestNewClientOptionsSetsTemporalNamespaceHeader(t *testing.T) {
+	opts := makeOpts("localhost:7233")
+	opts.TemporalNamespace = "routing-namespace"
+	clientOpts := newTestPool().newClientOptions(opts)
+
+	headers, err := clientOpts.HeadersProvider.GetHeaders(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"temporal-namespace": "routing-namespace",
+	}, headers)
+}
+
 func makeTLSSecret(certPEM, keyPEM, caPEM []byte) corev1.Secret {
 	data := map[string][]byte{
 		"tls.crt": certPEM,
