@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -108,8 +109,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	detectionClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		setupLog.Error(err, "unable to create deprecated CRD detection client")
+		os.Exit(1)
+	}
 	detectionCtx, cancelDetection := context.WithTimeout(context.Background(), 10*time.Second)
-	deprecatedCRDWatches, err := controller.DetectDeprecatedCRDWatches(detectionCtx, config, namespaces)
+	deprecatedCRDWatches, err := controller.DetectDeprecatedCRDWatches(detectionCtx, detectionClient, namespaces)
 	cancelDetection()
 	if err != nil {
 		setupLog.Error(err, "unable to detect deprecated CRD watches")

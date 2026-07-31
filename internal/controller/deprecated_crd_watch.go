@@ -8,7 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 var (
@@ -25,19 +24,8 @@ type DeprecatedCRDWatches struct {
 	TemporalConnections       bool
 }
 
+// DetectDeprecatedCRDWatches returns which deprecated CRDs can be listed and watched in every configured namespace.
 func DetectDeprecatedCRDWatches(
-	ctx context.Context,
-	config *rest.Config,
-	namespaces []string,
-) (DeprecatedCRDWatches, error) {
-	client, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return DeprecatedCRDWatches{}, err
-	}
-	return detectDeprecatedCRDWatches(ctx, client, namespaces)
-}
-
-func detectDeprecatedCRDWatches(
 	ctx context.Context,
 	client dynamic.Interface,
 	namespaces []string,
