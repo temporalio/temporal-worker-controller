@@ -114,14 +114,25 @@ type NewClientOptions struct {
 	Identity          string
 }
 
+type namespaceHeadersProvider string
+
+func (p namespaceHeadersProvider) GetHeaders(context.Context) (map[string]string, error) {
+	return map[string]string{"temporal-namespace": string(p)}, nil
+}
+
+func (cp *ClientPool) newClientOptions(opts NewClientOptions) sdkclient.Options {
+	return sdkclient.Options{
+		Logger:          cp.logger,
+		HostPort:        opts.Spec.HostPort,
+		Namespace:       opts.TemporalNamespace,
+		Identity:        opts.Identity,
+		HeadersProvider: namespaceHeadersProvider(opts.TemporalNamespace),
+	}
+}
+
 func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	tlsServerName := opts.Spec.TLSServerName()
-	clientOpts := sdkclient.Options{
-		Logger:    cp.logger,
-		HostPort:  opts.Spec.HostPort,
-		Namespace: opts.TemporalNamespace,
-		Identity:  opts.Identity,
-	}
+	clientOpts := cp.newClientOptions(opts)
 
 	var pemCert []byte
 	var expiryTime time.Time
@@ -186,15 +197,8 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 
 func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	tlsServerName := opts.Spec.TLSServerName()
-	clientOpts := sdkclient.Options{
-		Logger:    cp.logger,
-		HostPort:  opts.Spec.HostPort,
-		Namespace: opts.TemporalNamespace,
-		Identity:  opts.Identity,
-		ConnectionOptions: sdkclient.ConnectionOptions{
-			TLS: &tls.Config{ServerName: tlsServerName},
-		},
-	}
+	clientOpts := cp.newClientOptions(opts)
+	clientOpts.ConnectionOptions.TLS = &tls.Config{ServerName: tlsServerName}
 
 	secretName := opts.Spec.APIKeySecretRef.Name
 	secretKey := opts.Spec.APIKeySecretRef.Key
@@ -220,12 +224,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions) (*sdkc
 
 func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	tlsServerName := opts.Spec.TLSServerName()
-	clientOpts := sdkclient.Options{
-		Logger:    cp.logger,
-		HostPort:  opts.Spec.HostPort,
-		Namespace: opts.TemporalNamespace,
-		Identity:  opts.Identity,
-	}
+	clientOpts := cp.newClientOptions(opts)
 	if tlsServerName != "" {
 		clientOpts.ConnectionOptions.TLS = &tls.Config{ServerName: tlsServerName}
 	}
