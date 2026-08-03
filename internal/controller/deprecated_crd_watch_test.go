@@ -106,13 +106,33 @@ func TestDetectDeprecatedCRDWatchesEveryNamespace(t *testing.T) {
 
 func TestDetectDeprecatedCRDWatchesUnexpectedError(t *testing.T) {
 	client := newDeprecatedCRDWatchClient()
+	connectionResetErr := errors.New("connection reset")
 	client.PrependReactor("list", deprecatedTWDResource.Resource, func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("connection reset")
+		return true, nil, connectionResetErr
 	})
 
 	_, err := DetectDeprecatedCRDWatches(context.Background(), client, nil)
-	if err == nil {
-		t.Fatal("expected an error")
+	if !errors.Is(err, connectionResetErr) {
+		t.Fatalf("DetectDeprecatedCRDWatches() error = %v, want %v", err, connectionResetErr)
+	}
+	if got, want := err.Error(), "check TemporalWorkerDeployment availability: list temporalworkerdeployments: connection reset"; got != want {
+		t.Fatalf("DetectDeprecatedCRDWatches() error = %q, want %q", got, want)
+	}
+}
+
+func TestDetectDeprecatedCRDWatchesUnexpectedWatchError(t *testing.T) {
+	client := newDeprecatedCRDWatchClient()
+	connectionResetErr := errors.New("connection reset")
+	client.PrependWatchReactor(deprecatedTWDResource.Resource, func(k8stesting.Action) (bool, watch.Interface, error) {
+		return true, nil, connectionResetErr
+	})
+
+	_, err := DetectDeprecatedCRDWatches(context.Background(), client, nil)
+	if !errors.Is(err, connectionResetErr) {
+		t.Fatalf("DetectDeprecatedCRDWatches() error = %v, want %v", err, connectionResetErr)
+	}
+	if got, want := err.Error(), "check TemporalWorkerDeployment availability: watch temporalworkerdeployments: connection reset"; got != want {
+		t.Fatalf("DetectDeprecatedCRDWatches() error = %q, want %q", got, want)
 	}
 }
 

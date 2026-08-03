@@ -32,11 +32,11 @@ func DetectDeprecatedCRDWatches(
 ) (DeprecatedCRDWatches, error) {
 	twd, err := canListAndWatch(ctx, client, deprecatedTWDResource, namespaces)
 	if err != nil {
-		return DeprecatedCRDWatches{}, fmt.Errorf("check TemporalWorkerDeployment watch: %w", err)
+		return DeprecatedCRDWatches{}, fmt.Errorf("check TemporalWorkerDeployment availability: %w", err)
 	}
 	tc, err := canListAndWatch(ctx, client, deprecatedTCResource, namespaces)
 	if err != nil {
-		return DeprecatedCRDWatches{}, fmt.Errorf("check TemporalConnection watch: %w", err)
+		return DeprecatedCRDWatches{}, fmt.Errorf("check TemporalConnection availability: %w", err)
 	}
 	return DeprecatedCRDWatches{
 		TemporalWorkerDeployments: twd,
@@ -59,14 +59,14 @@ func canListAndWatch(
 			if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 				return false, nil
 			}
-			return false, err
+			return false, fmt.Errorf("list %s: %w", resource.Resource, err)
 		}
 		stream, err := resourceClient.Watch(ctx, metav1.ListOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 				return false, nil
 			}
-			return false, err
+			return false, fmt.Errorf("watch %s: %w", resource.Resource, err)
 		}
 		stream.Stop()
 	}
