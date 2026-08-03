@@ -21,6 +21,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -302,8 +303,43 @@ func NewDeploymentWithOwnerRef(
 				Spec: *podSpec,
 			},
 			MinReadySeconds: spec.MinReadySeconds,
+			Strategy:        DesiredDeploymentStrategy(spec),
 		},
 	}
+}
+
+// DesiredDeploymentStrategy returns the Deployment strategy to apply from the
+// WorkerDeployment spec. When spec.Strategy is nil, returns the zero value so
+// Kubernetes defaults apply. When set, unset subfields are filled with the same
+// defaults the Deployment API server uses so create/update/reconcile stay stable.
+func DesiredDeploymentStrategy(spec *temporaliov1alpha1.WorkerDeploymentSpec) appsv1.DeploymentStrategy {
+	if spec == nil || spec.Strategy == nil {
+		return appsv1.DeploymentStrategy{}
+	}
+	return ApplyDeploymentStrategyDefaults(*spec.Strategy.DeepCopy())
+}
+
+// ApplyDeploymentStrategyDefaults fills Deployment strategy fields the same way
+// the apps/v1 Deployment defaulter does, so comparisons against live objects do
+// not flap on omitted Type / maxUnavailable / maxSurge.
+func ApplyDeploymentStrategyDefaults(s appsv1.DeploymentStrategy) appsv1.DeploymentStrategy {
+	if s.Type == "" {
+		s.Type = appsv1.RollingUpdateDeploymentStrategyType
+	}
+	if s.Type == appsv1.RollingUpdateDeploymentStrategyType {
+		if s.RollingUpdate == nil {
+			s.RollingUpdate = &appsv1.RollingUpdateDeployment{}
+		}
+		if s.RollingUpdate.MaxUnavailable == nil {
+			maxUnavailable := intstr.FromString("25%")
+			s.RollingUpdate.MaxUnavailable = &maxUnavailable
+		}
+		if s.RollingUpdate.MaxSurge == nil {
+			maxSurge := intstr.FromString("25%")
+			s.RollingUpdate.MaxSurge = &maxSurge
+		}
+	}
+	return s
 }
 
 // TODO (Shivam): Change hash when secret name is updated as well.

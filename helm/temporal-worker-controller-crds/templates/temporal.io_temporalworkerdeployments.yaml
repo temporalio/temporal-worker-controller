@@ -136,6 +136,24 @@ spec:
                     set
                   rule: '!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef)
                     != has(self.gate.inputFrom.secretKeyRef))'
+              strategy:
+                properties:
+                  rollingUpdate:
+                    properties:
+                      maxSurge:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        x-kubernetes-int-or-string: true
+                      maxUnavailable:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        x-kubernetes-int-or-string: true
+                    type: object
+                  type:
+                    type: string
+                type: object
               sunset:
                 properties:
                   deleteDelay:
