@@ -151,7 +151,10 @@ spec:
           {{- toYaml .Values.resources | nindent 10 }}
       {{- if not .Values.metrics.disableAuth }}
       - name: kube-rbac-proxy
-        {{- if .Values.containerSecurityContext }}
+        {{- if .Values.kubeRBACProxy.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.kubeRBACProxy.containerSecurityContext | nindent 10 }}
+        {{- else if .Values.containerSecurityContext }}
         securityContext:
           {{- toYaml .Values.containerSecurityContext | nindent 10 }}
         {{- else }}
@@ -161,23 +164,26 @@ spec:
             drop:
               - "ALL"
         {{- end }}
-        image: registry.k8s.io/kubebuilder/kube-rbac-proxy:v0.14.1
+        image: {{ include "temporal-worker-controller.kubeRBACProxyImage" . | quote }}
+        imagePullPolicy: {{ .Values.kubeRBACProxy.image.pullPolicy }}
         args:
           - "--secure-listen-address=0.0.0.0:8443"
           - --upstream=http://127.0.0.1:{{ .Values.metrics.port }}/
           - "--logtostderr=true"
           - "--v=0"
+        {{- with .Values.kubeRBACProxy.extraArgs }}
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         ports:
           - containerPort: 8443
             protocol: TCP
             name: https
+        {{- with .Values.kubeRBACProxy.volumeMounts }}
+        volumeMounts:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         resources:
-          limits:
-            cpu: 500m
-            memory: 128Mi
-          requests:
-            cpu: 5m
-            memory: 64Mi
+          {{- toYaml .Values.kubeRBACProxy.resources | nindent 10 }}
       {{- end }}
       volumes:
         - name: cert

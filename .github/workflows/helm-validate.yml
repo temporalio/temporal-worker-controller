@@ -49,10 +49,23 @@ jobs:
           helm template test-release helm/temporal-worker-controller \
             --set metrics.disableAuth=true
 
+      - name: Template with kube-rbac-proxy image override
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set kubeRBACProxy.image.registry=example.invalid \
+            --set kubeRBACProxy.image.repository=kube-rbac-proxy \
+            --set kubeRBACProxy.image.tag=test \
+            --set kubeRBACProxy.image.pullPolicy=Always
+
       - name: Template with restricted watch namespaces
         run: |
           helm template test-release helm/temporal-worker-controller \
             --set 'rbac.restrictWatchNamespaces={ns-a,ns-b}'
+
+      - name: Template with end user roles disabled
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set rbac.createEndUserRoles=false
 
   helm-lint-crds:
     name: Lint CRDs Chart
@@ -84,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 

@@ -64,7 +64,8 @@ type WorkerDeploymentReconciler struct {
 	Recorder           record.EventRecorder
 
 	// Disables panic recovery if true
-	DisableRecoverPanic bool
+	DisableRecoverPanic  bool
+	DisableDeprecatedTWD bool
 
 	// When a Worker Deployment has the maximum number of versions (100 per Worker Deployment by default),
 	// it will delete the oldest eligible version when a worker with the 101st version arrives.
@@ -142,8 +143,10 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Migration: if a deprecated TemporalWorkerDeployment with the same name/namespace
 	// exists and has not yet been migrated, transfer ownership of its child Deployments
 	// and WorkerResourceTemplates to this WorkerDeployment.
-	if err := r.migrateFromDeprecatedTWD(ctx, l, &workerDeploy); err != nil {
-		return ctrl.Result{}, err
+	if !r.DisableDeprecatedTWD {
+		if err := r.migrateFromDeprecatedTWD(ctx, l, &workerDeploy); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Handle deletion: clean up Temporal server-side versioning data before allowing
@@ -911,17 +914,20 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	recoverPanic := !r.DisableRecoverPanic
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.WorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
-		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT)).
+		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT))
+	if !r.DisableDeprecatedTWD {
 		// Watch deprecated TemporalWorkerDeployments so that any modification to an existing TWD
 		// (e.g. a status update before migration completes) triggers a reconcile of the matching WD
 		// and causes migrateFromDeprecatedTWD to run.
-		Watches(&temporaliov1alpha1.TemporalWorkerDeployment{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+		builder = builder.Watches(&temporaliov1alpha1.TemporalWorkerDeployment{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 			return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}}}
-		})).
+		}))
+	}
+	return builder.
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 100,
 			RecoverPanic:            &recoverPanic,
