@@ -644,9 +644,17 @@ func getDeleteDeployments(
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
 			// 2. The deployment is scaled to 0 replicas.
+			// 3. The version is eligible for deletion (drained with no active
+			//    worker pods, i.e. Status.Replicas == 0). Requiring this lets
+			//    executePlan prune the Temporal-side version record in the same
+			//    reconcile as the Deployment delete: EligibleForDeletion is only
+			//    computable while the Deployment (and thus this DeprecatedVersions
+			//    entry) still exists, so this is the only point that can reliably
+			//    prune it. See execplan.deleteDrainedVersions.
 			if version.DrainedSince != nil &&
 				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
-				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				version.EligibleForDeletion {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		case temporaliov1alpha1.VersionStatusNotRegistered:

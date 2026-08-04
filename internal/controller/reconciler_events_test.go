@@ -197,10 +197,11 @@ func assertNoEventEmitted(t *testing.T, events []string, reason string) {
 // stubWDHandle implements sdkclient.WorkerDeploymentHandle with configurable per-method errors.
 type stubWDHandle struct {
 	sdkclient.WorkerDeploymentHandle
-	describeErr   error
-	setCurrentErr error
-	setRampingErr error
-	updateMetaErr error
+	describeErr      error
+	setCurrentErr    error
+	setRampingErr    error
+	updateMetaErr    error
+	deleteVersionErr error
 }
 
 func (s *stubWDHandle) Describe(_ context.Context, _ sdkclient.WorkerDeploymentDescribeOptions) (sdkclient.WorkerDeploymentDescribeResponse, error) {
@@ -217,6 +218,10 @@ func (s *stubWDHandle) SetRampingVersion(_ context.Context, _ sdkclient.WorkerDe
 
 func (s *stubWDHandle) UpdateVersionMetadata(_ context.Context, _ sdkclient.WorkerDeploymentUpdateVersionMetadataOptions) (sdkclient.WorkerDeploymentUpdateVersionMetadataResponse, error) {
 	return sdkclient.WorkerDeploymentUpdateVersionMetadataResponse{}, s.updateMetaErr
+}
+
+func (s *stubWDHandle) DeleteVersion(_ context.Context, _ sdkclient.WorkerDeploymentDeleteVersionOptions) (sdkclient.WorkerDeploymentDeleteVersionResponse, error) {
+	return sdkclient.WorkerDeploymentDeleteVersionResponse{}, s.deleteVersionErr
 }
 
 // stubWDClient implements sdkclient.WorkerDeploymentClient, returning a fixed handle.

@@ -18,6 +18,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
@@ -343,6 +344,8 @@ func (r *WorkerDeploymentReconciler) ensureWRTOwnerRefs(
 
 // executeWRTOperations handles the creation, patching and deletion of any
 // WorkerResourceTemplates associated with the WorkerDeployment.
+//
+//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
 func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	ctx context.Context,
 	l logr.Logger,
@@ -580,6 +583,56 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	return errors.Join(append(applyErrs, statusErrs...)...)
 }
 
+// deleteDrainedVersions prunes the Temporal server-side Worker Deployment Version
+// record for each Deployment deleted this reconcile (executeK8sOperations, called
+// first). The planner only adds a drained version to DeleteDeployments once it is
+// EligibleForDeletion (see planner.getDeleteDeployments): drained past the sunset
+// delays with no active worker pods. Deleting the Kubernetes Deployment alone would
+// leave the server-side version registered forever — the only other cleanup path is
+// the CRD-deletion finalizer, which never runs during a normal rollout. This is also
+// the only point that can reliably prune it: a version's status entry only exists in
+// status.DeprecatedVersions while its Deployment does (see state_mapper.go), so once
+// the Deployment is gone there is no way to retry on a later reconcile. Left unpruned,
+// these accumulate one per rollout and eventually hit the server's per-deployment
+// version cap, after which every new build ID fails to register (#377).
+//
+// Build IDs are read off the in-memory Deployment objects, which survive their cluster
+// deletion, so this runs in the Temporal phase without reaching back into k8sState.
+// Best-effort: the Kubernetes Deployment is already gone (the primary action), so a
+// failure here only means the Temporal-side record lingers until an operator prunes it
+// or the CRD is deleted. NotRegistered Deployments are also carried in DeleteDeployments;
+// they have no server-side version and return NotFound, which is skipped.
+func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
+	ctx context.Context,
+	l logr.Logger,
+	depHandle sdkclient.WorkerDeploymentHandle,
+	p *plan,
+) {
+	identity := getControllerIdentity()
+	for _, d := range p.DeleteDeployments {
+		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
+		if !ok {
+			l.Info("deployment has no build ID label, skipping Temporal server-side version cleanup", "deployment", d.Name)
+			continue
+		}
+		_, err := depHandle.DeleteVersion(
+			ctx,
+			sdkclient.WorkerDeploymentDeleteVersionOptions{
+				BuildID:  buildID,
+				Identity: identity,
+			},
+		)
+		if err != nil {
+			var notFound *serviceerror.NotFound
+			if errors.As(err, &notFound) {
+				continue
+			}
+			l.Info("could not delete worker deployment version, may require manual cleanup", "buildID", buildID, "error", err)
+		}
+		l.Info("deleted drained worker deployment version", "buildID", buildID)
+	}
+}
+
 // executePlan performs all required operations in the generated plan.
 func (r *WorkerDeploymentReconciler) executePlan(
 	ctx context.Context,
@@ -594,6 +647,11 @@ func (r *WorkerDeploymentReconciler) executePlan(
 	}
 
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+
+	// Prune Temporal server-side version records for the versions whose Deployments
+	// were just deleted in executeK8sOperations. Must happen in the same reconcile as
+	// the Deployment delete; see deleteDrainedVersions.
+	r.deleteDrainedVersions(ctx, l, deploymentHandler, p)
 
 	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
 		return err

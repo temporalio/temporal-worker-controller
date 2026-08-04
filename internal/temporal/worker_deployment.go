@@ -12,7 +12,7 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	deploymentv1 "go.temporal.io/api/deployment/v1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
@@ -136,14 +136,16 @@ func GetWorkerDeploymentState(
 
 // versionInfoFromVersionSummary returns a VersionInfo constructed from the
 // supplied Temporal VersionSummary message.
+//
+//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
 func versionInfoFromVersionSummary(
 	ctx context.Context,
 	client temporalClient.Client,
 	targetBuildID string,
 	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
 	depHandle temporalClient.WorkerDeploymentHandle,
-	routingConfig *deploymentv1.RoutingConfig,
-	summary *deploymentv1.WorkerDeploymentInfo_WorkerDeploymentVersionSummary,
+	routingConfig *deploymentpb.RoutingConfig,
+	summary *deploymentpb.WorkerDeploymentInfo_WorkerDeploymentVersionSummary,
 ) *VersionInfo {
 	out := &VersionInfo{
 		DeploymentName: summary.DeploymentVersion.DeploymentName,
@@ -194,7 +196,7 @@ func versionInfoFromVersionSummary(
 			// Note: We can only check whether the task queues that we know of have unversioned pollers.
 			//       If, later on, a poll request arrives tying a new task queue to the target summary, we
 			//       don't know whether that task queue has unversioned pollers.
-			if err = withBackoff(10*time.Second, 1*time.Second, describeVersion); err == nil {
+			if err = withBackoff(10*time.Second, 1*time.Second, describeVersion); err == nil { //revive:disable-line:max-control-nesting
 				out.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
 			}
 			// NOTE(jaypipes): We swallow any non-nil error here. Should we
