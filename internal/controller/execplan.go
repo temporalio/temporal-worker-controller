@@ -321,27 +321,16 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 	return nil
 }
 
-//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
-func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
-	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
-	if err != nil {
-		return err
-	}
-
-	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
-
-	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
-		return err
-	}
-
-	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
-		return err
-	}
-
-	// Patch any WRTs that are missing the owner reference to this TWD.
-	// Failures are logged but do not block the worker resource template apply step below —
-	// a WRT may have been deleted between plan generation and execution, and
-	// applying resources is more important than setting owner references.
+// ensureWRTOwnerRefs patches any WRTs that are missing the owner reference to
+// this TWD. Failures are logged but do not block the worker resource template
+// apply step below — a WRT may have been deleted between plan generation and
+// execution, and applying resources is more important than setting owner
+// references.
+func (r *WorkerDeploymentReconciler) ensureWRTOwnerRefs(
+	ctx context.Context,
+	l logr.Logger,
+	p *plan,
+) {
 	for _, ownerPatch := range p.EnsureWRTOwnerRefs {
 		if err := r.Patch(ctx, ownerPatch.Patched, client.MergeFrom(ownerPatch.Base)); err != nil {
 			l.Error(err, "failed to patch WRT with controller reference",
@@ -350,7 +339,18 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 			)
 		}
 	}
+}
 
+// executeWRTOperations handles the creation, patching and deletion of any
+// WorkerResourceTemplates associated with the WorkerDeployment.
+func (r *WorkerDeploymentReconciler) executeWRTOperations(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
+	temporalClient sdkclient.Client,
+	p *plan,
+	deletedWorkerResources []planner.WorkerResourceRef,
+) error {
 	// Apply worker resource templates via Server-Side Apply.
 	// Partial failure isolation: all resources are attempted even if some fail;
 	// errors are collected and returned together.
@@ -578,4 +578,34 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 	}
 
 	return errors.Join(append(applyErrs, statusErrs...)...)
+}
+
+// executePlan performs all required operations in the generated plan.
+func (r *WorkerDeploymentReconciler) executePlan(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
+	temporalClient sdkclient.Client,
+	p *plan,
+) error {
+	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
+	if err != nil {
+		return err
+	}
+
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+
+	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
+		return err
+	}
+
+	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
+		return err
+	}
+
+	r.ensureWRTOwnerRefs(ctx, l, p)
+
+	return r.executeWRTOperations(
+		ctx, l, workerDeploy, temporalClient, p, deletedWorkerResources,
+	)
 }
