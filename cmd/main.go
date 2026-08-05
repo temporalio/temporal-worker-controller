@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -46,6 +48,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var watchNamespaces string
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&watchNamespaces, "watch-namespaces", "",
@@ -78,7 +81,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	config := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme: scheme,
 		Cache:  cacheOptions,
 		Metrics: metricsserver.Options{
@@ -105,6 +109,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	detectionClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		setupLog.Error(err, "unable to create deprecated CRD detection client")
+		os.Exit(1)
+	}
+	detectionCtx, cancelDetection := context.WithTimeout(context.Background(), 10*time.Second)
+	deprecatedCRDWatches, err := controller.DetectDeprecatedCRDWatches(detectionCtx, detectionClient, namespaces)
+	cancelDetection()
+	if err != nil {
+		setupLog.Error(err, "unable to detect deprecated CRD watches")
+		os.Exit(1)
+	}
+	if !deprecatedCRDWatches.TemporalWorkerDeployments {
+		setupLog.Info("skipping deprecated TemporalWorkerDeployment watches")
+	}
+	if !deprecatedCRDWatches.TemporalConnections {
+		setupLog.Info("skipping deprecated TemporalConnection watches")
+	}
+
 	if err = (&controller.WorkerDeploymentReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -118,21 +141,26 @@ func main() {
 		),
 		Recorder: mgr.GetEventRecorderFor("temporal-worker-controller"),
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
+		DisableDeprecatedTWD:                       !deprecatedCRDWatches.TemporalWorkerDeployments,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
 		os.Exit(1)
 	}
-	if err = (&controller.DeprecatedTWDReconciler{
-		Client: mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "TemporalWorkerDeployment")
-		os.Exit(1)
+	if deprecatedCRDWatches.TemporalWorkerDeployments {
+		if err = (&controller.DeprecatedTWDReconciler{
+			Client: mgr.GetClient(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "TemporalWorkerDeployment")
+			os.Exit(1)
+		}
 	}
-	if err = (&controller.DeprecatedTCReconciler{
-		Client: mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "TemporalConnection")
-		os.Exit(1)
+	if deprecatedCRDWatches.TemporalConnections {
+		if err = (&controller.DeprecatedTCReconciler{
+			Client: mgr.GetClient(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "TemporalConnection")
+			os.Exit(1)
+		}
 	}
 	if err = temporaliov1alpha1.NewWorkerResourceTemplateValidator(mgr).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "WorkerResourceTemplate")
