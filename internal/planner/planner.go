@@ -945,7 +945,7 @@ func isRollbackScenario(
 		return false
 	}
 
-	// The target version was current in the last 1h, so rollback immediatley
+	// The target version was current in the last 1h, so rollback immediately
 	l.Info("Detected rollback scenario using LastCurrentTime. "+
 		"Warning: Auto-upgrade workflows that upgraded from a previous version to the current version may fail during this rollback, "+
 		"as they may not handle downgrades properly. Monitor workflow executions for failures.",

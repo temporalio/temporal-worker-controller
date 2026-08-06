@@ -1063,11 +1063,10 @@ func testWorkerDeploymentCreation(
 		t.Fatalf("failed to create WorkerDeployment: %v", err)
 	}
 
-	// Immediately apply the input status before the controller's first reconcile.
-	// k8sClient.Create strips the status subresource, so without this the first reconcile
-	// always sees an empty status (CurrentVersion == nil), which triggers the fast-track.
-	// The controller reconcile is queued asynchronously via the watch/informer
-	// path, so this synchronous Status().Update() reliably precedes it.
+	// k8sClient.Create strips the status subresource, so the TWD starts with an empty
+	// status. Not guaranteed to precede the controller's first reconcile, but seeding it
+	// here helps test cases with pre-existing target/deprecated versions converge faster
+	// and avoid flaking against the eventually timeouts below.
 	if twd.Status.TargetVersion.BuildID != "" {
 		if err := k8sClient.Status().Update(ctx, twd); err != nil {
 			t.Fatalf("failed to pre-apply TWD status: %v", err)
