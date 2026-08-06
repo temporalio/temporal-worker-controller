@@ -101,6 +101,7 @@ func TestGeneratePlan(t *testing.T) {
 						DrainedSince: &metav1.Time{
 							Time: time.Now().Add(-24 * time.Hour),
 						},
+						EligibleForDeletion: true,
 					},
 				},
 			},
@@ -618,6 +619,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 						DrainedSince: &metav1.Time{
 							Time: time.Now().Add(-24 * time.Hour),
 						},
+						EligibleForDeletion: true,
 					},
 				},
 			},
@@ -631,6 +633,42 @@ func TestGetDeleteDeployments(t *testing.T) {
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			expectDeletes:             1,
+			foundDeploymentInTemporal: true,
+		},
+		{
+			// Drained past the sunset delays and scaled to zero in spec, but not yet
+			// EligibleForDeletion: worker pods have not fully terminated (Status.Replicas > 0),
+			// so versioned pollers may still be registered and the Temporal-side DeleteVersion
+			// would fail. Deleting the Deployment now would strand that server-side version
+			// record with no way to retry (see execplan.deleteDrainedVersions), so hold off.
+			name: "drained long enough and scaled to zero in spec, but not eligible for deletion - not deleted",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"789": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "789",
+							Status:     temporaliov1alpha1.VersionStatusDrained,
+							Deployment: &corev1.ObjectReference{Name: "test-789"},
+						},
+						DrainedSince: &metav1.Time{
+							Time: time.Now().Add(-24 * time.Hour),
+						},
+						// EligibleForDeletion left false: pods not fully drained yet.
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					DeleteDelay: &metav1.Duration{Duration: 4 * time.Hour},
+				},
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			expectDeletes:             0,
 			foundDeploymentInTemporal: true,
 		},
 		{
@@ -2139,6 +2177,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 						DrainedSince: &metav1.Time{
 							Time: time.Now().Add(-48 * time.Hour), // Long time drained
 						},
+						EligibleForDeletion: true,
 					},
 				},
 			},

@@ -213,6 +213,7 @@ func TestExecutePlan_SunsetThenRedeploySameBuildID_ReappliesWorkerResource(t *te
 			{
 				BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusDrained),
 				DrainedSince:                &drainedSince,
+				EligibleForDeletion:         true,
 			},
 		},
 	}
@@ -295,6 +296,7 @@ func TestExecutePlan_WRTResourceDeleteFailure_RetriedNextCycle(t *testing.T) {
 			{
 				BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusDrained),
 				DrainedSince:                &drainedSince,
+				EligibleForDeletion:         true,
 			},
 		},
 	}

@@ -148,6 +148,39 @@ func setHealthyDeploymentStatus(t *testing.T, ctx context.Context, k8sClient cli
 	}
 }
 
+// scaleDeploymentToZero scales a versioned Deployment to zero replicas and reflects that
+// in its status (envtest has no kubelet to do so). A drained version only becomes
+// EligibleForDeletion once its Deployment reports zero replicas (see state_mapper.go), so
+// this is how a test drives a drained version to the point where the controller will prune
+// its Temporal server-side version record on sunset.
+func scaleDeploymentToZero(t *testing.T, ctx context.Context, k8sClient client.Client, name, namespace string) {
+	t.Helper()
+	zero := int32(0)
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var dep appsv1.Deployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &dep); err != nil {
+			return err
+		}
+		dep.Spec.Replicas = &zero
+		return k8sClient.Update(ctx, &dep)
+	}); err != nil {
+		t.Fatalf("failed to scale deployment %s to zero: %v", name, err)
+	}
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var dep appsv1.Deployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &dep); err != nil {
+			return err
+		}
+		dep.Status.Replicas = 0
+		dep.Status.ReadyReplicas = 0
+		dep.Status.AvailableReplicas = 0
+		dep.Status.UpdatedReplicas = 0
+		return k8sClient.Status().Update(ctx, &dep)
+	}); err != nil {
+		t.Fatalf("failed to zero status of deployment %s: %v", name, err)
+	}
+}
+
 // Uses input.Status + existingDeploymentReplicas to create (and maybe kill) pollers for deprecated versions in temporal
 // also gets routing config of the deployment into the starting state before running the test.
 // Does not set Status.VersionConflictToken, since that is only set internally by the server.
