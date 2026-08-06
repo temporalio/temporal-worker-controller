@@ -1085,7 +1085,7 @@ func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
 		},
 	}
 	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-		Strategy: &appsv1.DeploymentStrategy{
+		DeploymentStrategy: &appsv1.DeploymentStrategy{
 			RollingUpdate: &appsv1.RollingUpdateDeployment{
 				MaxUnavailable: &maxUnavailable,
 				MaxSurge:       &maxSurge,
@@ -1136,7 +1136,7 @@ func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
 	}
 
 	t.Run("updates when strategy differs", func(t *testing.T) {
-		spec := &temporaliov1alpha1.WorkerDeploymentSpec{Strategy: desiredStrategy}
+		spec := &temporaliov1alpha1.WorkerDeploymentSpec{DeploymentStrategy: desiredStrategy}
 		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
 		require.Len(t, updates, 1)
 		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, updates[0].Spec.Strategy.Type)
@@ -1147,9 +1147,9 @@ func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
 
 	t.Run("no update when strategy matches after defaults", func(t *testing.T) {
 		deployment.Spec.Strategy = k8s.DesiredDeploymentStrategy(&temporaliov1alpha1.WorkerDeploymentSpec{
-			Strategy: desiredStrategy,
+			DeploymentStrategy: desiredStrategy,
 		})
-		spec := &temporaliov1alpha1.WorkerDeploymentSpec{Strategy: desiredStrategy}
+		spec := &temporaliov1alpha1.WorkerDeploymentSpec{DeploymentStrategy: desiredStrategy}
 		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
 		assert.Empty(t, updates)
 	})

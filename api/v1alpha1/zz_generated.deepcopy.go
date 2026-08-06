@@ -631,11 +631,6 @@ func (in *TemporalWorkerDeploymentSpec) DeepCopyInto(out *TemporalWorkerDeployme
 		*out = new(int32)
 		**out = **in
 	}
-	if in.Strategy != nil {
-		in, out := &in.Strategy, &out.Strategy
-		*out = new(appsv1.DeploymentStrategy)
-		(*in).DeepCopyInto(*out)
-	}
 	in.RolloutStrategy.DeepCopyInto(&out.RolloutStrategy)
 	in.SunsetStrategy.DeepCopyInto(&out.SunsetStrategy)
 	out.WorkerOptions = in.WorkerOptions
@@ -783,8 +778,8 @@ func (in *WorkerDeploymentSpec) DeepCopyInto(out *WorkerDeploymentSpec) {
 		*out = new(int32)
 		**out = **in
 	}
-	if in.Strategy != nil {
-		in, out := &in.Strategy, &out.Strategy
+	if in.DeploymentStrategy != nil {
+		in, out := &in.DeploymentStrategy, &out.DeploymentStrategy
 		*out = new(appsv1.DeploymentStrategy)
 		(*in).DeepCopyInto(*out)
 	}

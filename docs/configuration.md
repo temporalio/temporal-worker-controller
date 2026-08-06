@@ -346,7 +346,7 @@ When omitted, Kubernetes defaults apply (`RollingUpdate` with `maxUnavailable`/`
 ```yaml
 spec:
   replicas: 100
-  strategy:
+  deploymentStrategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 5%

@@ -132,7 +132,7 @@ spec:
                     set
                   rule: '!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef)
                     != has(self.gate.inputFrom.secretKeyRef))'
-              strategy:
+              deploymentStrategy:
                 properties:
                   rollingUpdate:
                     properties:

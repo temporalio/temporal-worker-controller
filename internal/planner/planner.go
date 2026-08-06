@@ -569,20 +569,21 @@ func updateDeploymentWithPodTemplateSpec(
 		deployment.Spec.Replicas = spec.Replicas
 	}
 	deployment.Spec.MinReadySeconds = spec.MinReadySeconds
-	if spec.Strategy != nil {
+	if spec.DeploymentStrategy != nil {
 		deployment.Spec.Strategy = k8s.DesiredDeploymentStrategy(spec)
 	}
 }
 
 // checkAndUpdateDeploymentStrategy updates an owned Deployment when its rolling
-// update strategy differs from the WorkerDeployment spec. When spec.Strategy is
-// nil the controller does not manage strategy and leaves the live Deployment alone.
+// update strategy differs from the WorkerDeployment spec. When
+// spec.DeploymentStrategy is nil the controller does not manage strategy and
+// leaves the live Deployment alone.
 func checkAndUpdateDeploymentStrategy(
 	buildID string,
 	k8sState *k8s.DeploymentState,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 ) *appsv1.Deployment {
-	if spec.Strategy == nil {
+	if spec.DeploymentStrategy == nil {
 		return nil
 	}
 	existingDeployment, exists := k8sState.Deployments[buildID]
@@ -651,7 +652,7 @@ func getUpdateDeployments(
 	// also picks up strategy changes in the same write.
 	for _, buildID := range ownedBuildIDs(status) {
 		if updatedBuildIDs[buildID] {
-			if deployment, exists := k8sState.Deployments[buildID]; exists && spec.Strategy != nil {
+			if deployment, exists := k8sState.Deployments[buildID]; exists && spec.DeploymentStrategy != nil {
 				deployment.Spec.Strategy = k8s.DesiredDeploymentStrategy(spec)
 			}
 			continue

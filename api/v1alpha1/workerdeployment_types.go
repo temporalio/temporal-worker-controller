@@ -81,13 +81,13 @@ type WorkerDeploymentSpec struct {
 	// +kubebuilder:default=600
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
 
-	// Strategy describes how to replace Pods for each versioned Deployment this
-	// controller owns. Mirrors apps/v1 Deployment.spec.strategy. When omitted,
-	// Kubernetes defaults apply (RollingUpdate with maxUnavailable/maxSurge 25%).
-	// This is distinct from spec.rollout.strategy, which controls Temporal traffic
-	// routing across worker versions.
+	// DeploymentStrategy describes how to replace Pods for each versioned
+	// Deployment this controller owns. Mirrors apps/v1 Deployment.spec.strategy.
+	// When omitted, Kubernetes defaults apply (RollingUpdate with
+	// maxUnavailable/maxSurge 25%). This is distinct from spec.rollout.strategy,
+	// which controls Temporal traffic routing across worker versions.
 	// +optional
-	Strategy *appsv1.DeploymentStrategy `json:"strategy,omitempty"`
+	DeploymentStrategy *appsv1.DeploymentStrategy `json:"deploymentStrategy,omitempty"`
 
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`

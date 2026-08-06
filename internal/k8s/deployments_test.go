@@ -616,7 +616,7 @@ func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {
 			&metav1.TypeMeta{},
 			&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
 			&temporaliov1alpha1.WorkerDeploymentSpec{
-				Strategy: &appsv1.DeploymentStrategy{
+				DeploymentStrategy: &appsv1.DeploymentStrategy{
 					RollingUpdate: &appsv1.RollingUpdateDeployment{
 						MaxUnavailable: &maxUnavailable,
 						MaxSurge:       &maxSurge,

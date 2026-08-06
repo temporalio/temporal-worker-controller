@@ -309,14 +309,15 @@ func NewDeploymentWithOwnerRef(
 }
 
 // DesiredDeploymentStrategy returns the Deployment strategy to apply from the
-// WorkerDeployment spec. When spec.Strategy is nil, returns the zero value so
-// Kubernetes defaults apply. When set, unset subfields are filled with the same
-// defaults the Deployment API server uses so create/update/reconcile stay stable.
+// WorkerDeployment spec. When spec.DeploymentStrategy is nil, returns the zero
+// value so Kubernetes defaults apply. When set, unset subfields are filled with
+// the same defaults the Deployment API server uses so create/update/reconcile
+// stay stable.
 func DesiredDeploymentStrategy(spec *temporaliov1alpha1.WorkerDeploymentSpec) appsv1.DeploymentStrategy {
-	if spec == nil || spec.Strategy == nil {
+	if spec == nil || spec.DeploymentStrategy == nil {
 		return appsv1.DeploymentStrategy{}
 	}
-	return ApplyDeploymentStrategyDefaults(*spec.Strategy.DeepCopy())
+	return ApplyDeploymentStrategyDefaults(*spec.DeploymentStrategy.DeepCopy())
 }
 
 // ApplyDeploymentStrategyDefaults fills Deployment strategy fields the same way
