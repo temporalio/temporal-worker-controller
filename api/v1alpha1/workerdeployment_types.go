@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,6 +80,14 @@ type WorkerDeploymentSpec struct {
 	// not be estimated during the time a deployment is paused. Defaults to 600s.
 	// +kubebuilder:default=600
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
+
+	// DeploymentStrategy describes how to replace Pods for each versioned
+	// Deployment this controller owns. Mirrors apps/v1 Deployment.spec.strategy.
+	// When omitted, Kubernetes defaults apply (RollingUpdate with
+	// maxUnavailable/maxSurge 25%). This is distinct from spec.rollout.strategy,
+	// which controls Temporal traffic routing across worker versions.
+	// +optional
+	DeploymentStrategy *appsv1.DeploymentStrategy `json:"deploymentStrategy,omitempty"`
 
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`

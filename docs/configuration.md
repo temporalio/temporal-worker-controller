@@ -348,6 +348,24 @@ Gate workflow input details:
 
 ## Advanced Configuration
 
+### Deployment Rolling Update Strategy
+
+Controls how Pods are replaced within each versioned Kubernetes `Deployment` the controller owns (for example during an in-place restart of the Current version with a stable build ID).
+
+When omitted, Kubernetes defaults apply (`RollingUpdate` with `maxUnavailable`/`maxSurge` of `25%`).
+
+```yaml
+spec:
+  replicas: 100
+  deploymentStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 5%
+      maxSurge: 0
+  rollout:
+    strategy: Progressive
+```
+
 ### Environment-Specific Configurations
 
 **Production Configuration:**
