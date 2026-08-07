@@ -712,6 +712,45 @@ func TestIntegration(t *testing.T) {
 		})
 	}
 
+	rollbackStrategyTestCases := []testCase{
+		{
+			name: "all-at-once-rollback-expect-immediate-promotion",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1").
+						WithStatus(
+							testhelpers.NewStatusBuilder().
+								WithTargetVersion("v2", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+								WithCurrentVersion("v2", true, true),
+						),
+				).
+				WithExistingDeployments(
+					testhelpers.NewDeploymentInfo("v2", 1),
+				).
+				WithPreviouslyCurrentVersions("v1").
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1", true, false).
+						WithDeprecatedVersions(
+							testhelpers.NewDeprecatedVersionInfo("v2", temporaliov1alpha1.VersionStatusDrained, true, false, true),
+						),
+				).
+				WithExpectedDeployments(
+					testhelpers.NewDeploymentInfo("v2", 1),
+				),
+		},
+	}
+
+	for _, tc := range rollbackStrategyTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc.builder.BuildWithValues(tc.name, testNamespace.Name, ts.GetDefaultNamespace()))
+		})
+	}
+
 	// Create short TTL test Temporal server and client
 	dcShortTTL := dynamicconfig.NewMemoryClient()
 	// make versions eligible for deletion faster
@@ -1004,7 +1043,7 @@ func testWorkerDeploymentCreation(
 		ExpectedDeploymentReplicas: tc.GetExpectedDeploymentReplicas(),
 	}
 
-	makePreliminaryStatusTrue(ctx, t, env, twd)
+	makePreliminaryStatusTrue(ctx, t, env, twd, tc.GetPreviouslyCurrentImages())
 
 	// verify that temporal state matches the preliminary status, to confirm that makePreliminaryStatusTrue worked
 	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, twd.Status, 30*time.Second, 5*time.Second)
@@ -1022,6 +1061,16 @@ func testWorkerDeploymentCreation(
 	t.Log("Creating a WorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
 		t.Fatalf("failed to create WorkerDeployment: %v", err)
+	}
+
+	// k8sClient.Create strips the status subresource, so the TWD starts with an empty
+	// status. Not guaranteed to precede the controller's first reconcile, but seeding it
+	// here helps test cases with pre-existing target/deprecated versions converge faster
+	// and avoid flaking against the eventually timeouts below.
+	if twd.Status.TargetVersion.BuildID != "" {
+		if err := k8sClient.Status().Update(ctx, twd); err != nil {
+			t.Fatalf("failed to pre-apply TWD status: %v", err)
+		}
 	}
 
 	// Hook: runs after TWD creation but before waiting for the target Deployment.

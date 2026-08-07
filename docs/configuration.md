@@ -5,10 +5,13 @@ This document provides comprehensive configuration options for the Temporal Work
 ## Table of Contents
 
 1. [Rollout Strategies](#rollout-strategies)
-2. [Sunset Configuration](#sunset-configuration)
-3. [Worker Options](#worker-options)
-4. [Gate Configuration](#gate-configuration)
-5. [Advanced Configuration](#advanced-configuration)
+2. [Rollback Strategy](#rollback-strategy)
+3. [Sunset Configuration](#sunset-configuration)
+4. [Worker Options](#worker-options)
+5. [Gate Configuration](#gate-configuration)
+6. [Advanced Configuration](#advanced-configuration)
+
+
 
 ## Rollout Strategies
 
@@ -109,6 +112,14 @@ rollout:
     - rampPercentage: 100
       pauseDuration: 0s   # Full rollout after canary validation
 ```
+
+## Rollback Strategy
+
+The controller automatically detects rollbacks: if the target version was previously the current version within the last hour, it immediately routes 100% of traffic back to that version (AllAtOnce), regardless of the configured rollout strategy. This means setting your target version back to a prior build ID is enough to trigger a rollback — no special action or configuration required.
+
+Rollback behavior is not configurable: it always uses the AllAtOnce strategy with a fixed 1-hour eligibility window, so there is no `rollback` field in the spec.
+
+> **Note:** Rollback is suppressed when the rollout strategy is `Manual`, since manual mode implies full user control.
 
 ## Sunset Configuration
 
