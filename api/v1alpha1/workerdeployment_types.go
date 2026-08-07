@@ -101,9 +101,11 @@ const (
 	// when the target version has been successfully registered as the current version.
 	ReasonRolloutComplete = "RolloutComplete"
 
-	// ReasonWaitingForPollers is set on ConditionProgressing=True when the target
-	// version's Kubernetes Deployment has been created but the version is not yet
-	// registered with Temporal (workers have not started polling yet).
+	// ReasonWaitingForPollers is set on ConditionProgressing=True when workers are
+	// not yet (or are no longer) actively polling Temporal. This covers both:
+	// (1) the target version's Kubernetes Deployment has been created but the
+	// version is not yet registered with Temporal, and (2) the target version has
+	// become current but one or more of its task queues have no active poller.
 	ReasonWaitingForPollers = "WaitingForPollers"
 
 	// ReasonWaitingForPromotion is set on ConditionProgressing=True when the target
@@ -143,6 +145,22 @@ const (
 
 	// Deprecated: Use ReasonRolloutComplete on ConditionReady instead.
 	ReasonConnectionHealthy = "ConnectionHealthy"
+
+	// ReasonActivePollers is set on ConditionProgressing=False when the target
+	// version has become current and all known task queues have at least one
+	// active poller. This mirrors ReasonWaitingForPollers on
+	// ConditionProgressing=True: it reports only that workers are actively
+	// polling the server, not that the pollers themselves are otherwise healthy.
+	// Also used as the reason on the Normal Event emitted when a version
+	// transitions from having no active pollers (or unknown status) back to
+	// actively polling every known task queue.
+	ReasonActivePollers = "ActivePollers"
+
+	// ReasonPollerStatusUnknown is set on ConditionProgressing=False when poller
+	// status could not be determined for the current version (e.g. a transient
+	// DescribeTaskQueue error). This must NOT be treated as "no pollers" -- it
+	// means "don't know", not "broken".
+	ReasonPollerStatusUnknown = "PollerStatusUnknown"
 )
 
 // VersionStatus indicates the status of a version.

@@ -18,6 +18,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
@@ -348,19 +349,54 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ReadyWhenVersionIsCurrent", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-		r.syncConditions(twd)
+		// An empty (but non-nil) PollerHealth map represents a version with no task
+		// queues seen yet to check -- vacuously active -- as opposed to nil, which
+		// means poller status was never checked at all (Unknown).
+		temporalState := &temporal.TemporalWorkerState{
+			Versions: map[string]*temporal.VersionInfo{
+				twd.Status.TargetVersion.BuildID: {PollerHealth: map[string]bool{}},
+			},
+		}
+		r.syncConditions(twd, temporalState)
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
-		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonActivePollers)
 		// Deprecated conditions
 		assertCondition(t, twd, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy) //nolint:staticcheck // backward compat
 		assertCondition(t, twd, temporaliov1alpha1.ConditionRolloutComplete, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)     //nolint:staticcheck // backward compat
 	})
 
+	t.Run("ProgressingWhenCurrentVersionHasNoActivePollers", func(t *testing.T) {
+		twd := makeWD("test-worker", "default", "my-connection")
+		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
+		temporalState := &temporal.TemporalWorkerState{
+			Versions: map[string]*temporal.VersionInfo{
+				twd.Status.TargetVersion.BuildID: {PollerHealth: map[string]bool{"tq-1": false}},
+			},
+		}
+		r.syncConditions(twd, temporalState)
+
+		// Ready stays about rollout completion; poller presence is surfaced on Progressing.
+		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)
+	})
+
+	t.Run("ProgressingUnknownWhenCurrentVersionPollerStatusUnknown", func(t *testing.T) {
+		twd := makeWD("test-worker", "default", "my-connection")
+		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
+		temporalState := &temporal.TemporalWorkerState{
+			Versions: map[string]*temporal.VersionInfo{},
+		}
+		r.syncConditions(twd, temporalState)
+
+		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
+		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown)
+	})
+
 	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
-		r.syncConditions(twd)
+		r.syncConditions(twd, nil)
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping)
@@ -371,7 +407,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
-		r.syncConditions(twd)
+		r.syncConditions(twd, nil)
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion)
@@ -382,7 +418,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusNotRegistered
-		r.syncConditions(twd)
+		r.syncConditions(twd, nil)
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)
