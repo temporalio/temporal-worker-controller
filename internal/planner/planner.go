@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
@@ -165,7 +166,7 @@ func GeneratePlan(
 	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName, gateInput, isGateInputSecret)
 
 	// Determine version config changes
-	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config, workerDeploymentName)
+	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config)
 
 	// TODO(jlegrone): generate warnings/events on the WorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
@@ -891,16 +892,19 @@ func getTestWorkflows(
 	return testWorkflows
 }
 
-// getVersionConfigDiff determines the version configuration based on the rollout strategy
+// getVersionConfigDiff determines the version configuration based on the rollout/rollback strategies
 func getVersionConfigDiff(
 	l logr.Logger,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	temporalState *temporal.TemporalWorkerState,
 	config *Config,
-	workerDeploymentName string,
 ) *VersionConfig {
-	strategy := config.RolloutStrategy
-	conflictToken := status.VersionConflictToken
+	var strategy temporaliov1alpha1.RolloutStrategy
+	if isRollbackScenario(l, status, temporalState, config) {
+		strategy = temporaliov1alpha1.RolloutStrategy{Strategy: temporaliov1alpha1.UpdateAllAtOnce}
+	} else {
+		strategy = config.RolloutStrategy
+	}
 
 	if strategy.Strategy == temporaliov1alpha1.UpdateManual {
 		return nil
@@ -932,7 +936,7 @@ func getVersionConfigDiff(
 		managerIdentity = temporalState.ManagerIdentity
 	}
 	vcfg := &VersionConfig{
-		ConflictToken:   conflictToken,
+		ConflictToken:   status.VersionConflictToken,
 		BuildID:         status.TargetVersion.BuildID,
 		ManagerIdentity: managerIdentity,
 	}
@@ -970,6 +974,52 @@ func getVersionConfigDiff(
 	}
 
 	return nil
+}
+
+func isRollbackScenario(
+	l logr.Logger,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	temporalState *temporal.TemporalWorkerState,
+	config *Config,
+) bool {
+	// Do not rollback when the user takes control of deployments with manual mode
+	if config.RolloutStrategy.Strategy == temporaliov1alpha1.UpdateManual {
+		return false
+	}
+
+	// No versions yet to rollback to
+	if temporalState == nil {
+		return false
+	}
+
+	// The target version was not seen before, rollback is not possible
+	targetVersionInfo, exists := temporalState.Versions[status.TargetVersion.BuildID]
+	if !exists {
+		return false
+	}
+
+	// The target version never became current before, so keep rollout
+	if targetVersionInfo.LastCurrentTime == nil {
+		return false
+	}
+
+	// The target version was last current more than an hour ago, making it too old to trust immediate rollback
+	if time.Since(*targetVersionInfo.LastCurrentTime) > defaults.RollbackMaxVersionAge {
+		l.Info("Skipping rollback: the version's last current time exceeds the max rollback version age",
+			"targetBuildID", status.TargetVersion.BuildID,
+			"lastCurrentTime", targetVersionInfo.LastCurrentTime,
+			"maxVersionAge", defaults.RollbackMaxVersionAge)
+		return false
+	}
+
+	// The target version was current in the last 1h, so rollback immediately
+	l.Info("Detected rollback scenario using LastCurrentTime. "+
+		"Warning: Auto-upgrade workflows that upgraded from a previous version to the current version may fail during this rollback, "+
+		"as they may not handle downgrades properly. Monitor workflow executions for failures.",
+		"targetBuildID", status.TargetVersion.BuildID,
+		"lastCurrentTime", targetVersionInfo.LastCurrentTime)
+
+	return true
 }
 
 // handleProgressiveRollout handles the progressive rollout strategy logic
