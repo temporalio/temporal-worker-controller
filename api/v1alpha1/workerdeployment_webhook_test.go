@@ -12,10 +12,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -49,6 +52,40 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 				return obj
 			}),
 			errorMsg: "[spec.rollout.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.rollout.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
+		},
+		"invalid deployment strategy type": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("bad-deployment-strategy-type", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				obj.Spec.DeploymentStrategy = &appsv1.DeploymentStrategy{Type: "Bogus"}
+				return obj
+			}),
+			errorMsg: `spec.deploymentStrategy.type: Unsupported value: "Bogus"`,
+		},
+		"recreate with rollingUpdate forbidden": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("recreate-with-rolling-update", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				zero := intstr.FromInt32(0)
+				obj.Spec.DeploymentStrategy = &appsv1.DeploymentStrategy{
+					Type: appsv1.RecreateDeploymentStrategyType,
+					RollingUpdate: &appsv1.RollingUpdateDeployment{
+						MaxUnavailable: &zero,
+					},
+				}
+				return obj
+			}),
+			errorMsg: "spec.deploymentStrategy.rollingUpdate: Forbidden",
+		},
+		"maxUnavailable and maxSurge both zero": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("both-zero-surge", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				zero := intstr.FromInt32(0)
+				obj.Spec.DeploymentStrategy = &appsv1.DeploymentStrategy{
+					Type: appsv1.RollingUpdateDeploymentStrategyType,
+					RollingUpdate: &appsv1.RollingUpdateDeployment{
+						MaxUnavailable: &zero,
+						MaxSurge:       &zero,
+					},
+				}
+				return obj
+			}),
+			errorMsg: "maxUnavailable and maxSurge cannot both be 0",
 		},
 	}
 
@@ -137,6 +174,31 @@ func TestWorkerDeployment_Default(t *testing.T) {
 				assert.Equal(t, time.Hour, obj.Spec.SunsetStrategy.ScaledownDelay.Duration)
 				require.NotNil(t, obj.Spec.SunsetStrategy.DeleteDelay)
 				assert.Equal(t, 24*time.Hour, obj.Spec.SunsetStrategy.DeleteDelay.Duration)
+			},
+		},
+		"leaves nil deploymentStrategy unset": {
+			obj: testhelpers.MakeWDWithName("nil-deployment-strategy", ""),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment) {
+				assert.Nil(t, obj.Spec.DeploymentStrategy)
+			},
+		},
+		"defaults partial deploymentStrategy": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("partial-deployment-strategy", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				maxUnavailable := intstr.FromString("5%")
+				obj.Spec.DeploymentStrategy = &appsv1.DeploymentStrategy{
+					RollingUpdate: &appsv1.RollingUpdateDeployment{
+						MaxUnavailable: &maxUnavailable,
+					},
+				}
+				return obj
+			}),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment) {
+				require.NotNil(t, obj.Spec.DeploymentStrategy)
+				assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, obj.Spec.DeploymentStrategy.Type)
+				require.NotNil(t, obj.Spec.DeploymentStrategy.RollingUpdate)
+				assert.Equal(t, intstr.FromString("5%"), *obj.Spec.DeploymentStrategy.RollingUpdate.MaxUnavailable)
+				require.NotNil(t, obj.Spec.DeploymentStrategy.RollingUpdate.MaxSurge)
+				assert.Equal(t, intstr.FromString(defaults.DeploymentMaxSurge), *obj.Spec.DeploymentStrategy.RollingUpdate.MaxSurge)
 			},
 		},
 	}

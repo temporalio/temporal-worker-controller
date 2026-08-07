@@ -637,17 +637,22 @@ func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {
 
 func TestApplyDeploymentStrategyDefaults(t *testing.T) {
 	maxUnavailable := intstr.FromString("5%")
-	got := k8s.ApplyDeploymentStrategyDefaults(appsv1.DeploymentStrategy{
-		RollingUpdate: &appsv1.RollingUpdateDeployment{
-			MaxUnavailable: &maxUnavailable,
-		},
-	})
+	originalRollingUpdate := &appsv1.RollingUpdateDeployment{
+		MaxUnavailable: &maxUnavailable,
+	}
+	original := appsv1.DeploymentStrategy{RollingUpdate: originalRollingUpdate}
+
+	got := k8s.ApplyDeploymentStrategyDefaults(original)
 
 	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, got.Type)
 	require.NotNil(t, got.RollingUpdate)
 	assert.Equal(t, maxUnavailable, *got.RollingUpdate.MaxUnavailable)
 	require.NotNil(t, got.RollingUpdate.MaxSurge)
 	assert.Equal(t, intstr.FromString("25%"), *got.RollingUpdate.MaxSurge)
+
+	// Defaulting must not mutate the input (RollingUpdate is a shared pointer).
+	assert.Nil(t, originalRollingUpdate.MaxSurge)
+	assert.Nil(t, original.RollingUpdate.MaxSurge)
 }
 
 func TestComputeConnectionSpecHash(t *testing.T) {
