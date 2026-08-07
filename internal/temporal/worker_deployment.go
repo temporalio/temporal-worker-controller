@@ -38,6 +38,10 @@ type VersionInfo struct {
 	//   - Strategy is Progressive, and
 	//   - Presence of unversioned pollers in all task queues of target version cannot be confirmed.
 	AllTaskQueuesHaveUnversionedPoller bool
+	// LastCurrentTime is the timestamp when this version last became current.
+	// Used to determine if this is a rollback scenario (version was previously current).
+	// Nil if the version was never current or if the server doesn't support this field.
+	LastCurrentTime *time.Time
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -175,6 +179,11 @@ func GetWorkerDeploymentState(
 				}
 			}
 
+		}
+
+		if lct := version.GetLastCurrentTime(); lct != nil {
+			t := lct.AsTime()
+			versionInfo.LastCurrentTime = &t
 		}
 
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
