@@ -1,0 +1,45 @@
+name: Update Changelog
+
+on:
+  release:
+    types: [published]
+  # Allow manual runs for a specific tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to generate the changelog entry for"
+        required: false
+        default: ""
+      mode:
+        description: prepend (this tag only) or full (regenerate from all tags).
+          Tag is REQUIRED only if mode is prepend. full mode will
+          regenerate the entire file and WILL DISCARD any manual edits.
+        type: choice
+        options:
+          - prepend
+          - full
+
+permissions:
+  contents: write
+  pull-requests: write # required to open the changelog PR with github-actions[bot]
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          # Full history + tags are required to diff between releases.
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update changelog
+        uses: shazib-summar/automated-changelog-gh@05d6ccc344bc518f859e830a72137fb58616fb71 #v0.2.0
+        with:
+          # see inputs at https://github.com/shazib-summar/automated-changelog-gh#inputs
+          tag: ${{ github.event.inputs.tag }}
+          mode: ${{ github.event.inputs.mode || 'prepend' }}
+          pull-request: true
+          pr-labels: changelog,docs,automated
+          reviewers: temporalio/worker-controller
