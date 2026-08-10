@@ -57,6 +57,15 @@ jobs:
             --set kubeRBACProxy.image.tag=test \
             --set kubeRBACProxy.image.pullPolicy=Always
 
+      - name: Template with extra manager environment variables
+        run: |
+          helm template test-release helm/temporal-worker-controller \
+            --set-string extraEnv[0].name=HTTP_PROXY \
+            --set-string extraEnv[0].value=http://proxy.example.com:8080 \
+            --set-string extraEnv[1].name=API_TOKEN \
+            --set-string extraEnv[1].valueFrom.secretKeyRef.name=controller-secrets \
+            --set-string extraEnv[1].valueFrom.secretKeyRef.key=api-token
+
       - name: Template with restricted watch namespaces
         run: |
           helm template test-release helm/temporal-worker-controller \

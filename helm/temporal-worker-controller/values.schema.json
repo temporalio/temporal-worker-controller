@@ -41,6 +41,32 @@
         }
       }
     },
+    "extraEnv": {
+      "type": "array",
+      "default": [],
+      "description": "Additional Kubernetes EnvVar entries for the manager container",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Environment variable name"
+          },
+          "value": {
+            "type": "string",
+            "description": "Literal environment variable value"
+          },
+          "valueFrom": {
+            "type": "object",
+            "description": "Kubernetes EnvVarSource, such as secretKeyRef or configMapKeyRef"
+          }
+        }
+      }
+    },
     "podAnnotations": {
       "type": "object",
       "description": "Additional pod annotations",

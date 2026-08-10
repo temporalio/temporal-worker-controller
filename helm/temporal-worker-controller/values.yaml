@@ -4,6 +4,18 @@ image:
   pullPolicy: IfNotPresent
   pullSecrets: []
 
+# Additional environment variables for the manager container.
+# Example:
+# extraEnv:
+#   - name: HTTP_PROXY
+#     value: http://proxy.example.com:8080
+#   - name: API_TOKEN
+#     valueFrom:
+#       secretKeyRef:
+#         name: controller-secrets
+#         key: api-token
+extraEnv: []
+
 podAnnotations: {}
   # Additional pod annotations can be added here
 # example:
