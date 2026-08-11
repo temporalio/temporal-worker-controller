@@ -167,8 +167,15 @@ var _ = BeforeSuite(func() {
 // This makes the test authoritative against the Helm chart rather than a hand-maintained copy.
 func loadWebhookFromHelmChart(chartPath, webhookName string, extraArgs ...string) *admissionregistrationv1.ValidatingWebhookConfiguration {
 	args := append([]string{"template", "test", chartPath, "--show-only", "templates/webhook.yaml"}, extraArgs...)
-	out, err := exec.Command("helm", args...).Output()
-	Expect(err).NotTo(HaveOccurred(), "helm template failed — is helm installed?")
+	helmBin := os.Getenv("HELM")
+	if helmBin == "" {
+		helmBin = "helm"
+	}
+	out, err := exec.Command(helmBin, args...).Output()
+	Expect(err).NotTo(HaveOccurred(),
+		"helm template failed — is helm installed and the chart's dependencies built? "+
+			"Run via 'make test-unit' (which provisions ./bin/helm and the chart deps), "+
+			"or set HELM to a helm binary path.")
 
 	// The file contains multiple YAML documents; find the requested ValidatingWebhookConfiguration.
 	for _, doc := range bytes.Split(out, []byte("\n---\n")) {

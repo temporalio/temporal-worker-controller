@@ -1,0 +1,66 @@
+name: Update Changelog
+
+on:
+  release:
+    types: [published]
+  # Allow manual runs for a specific tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to generate the changelog entry for"
+        required: false
+        default: ""
+      mode:
+        description: prepend (this tag only) or full (regenerate from all tags).
+          Tag is REQUIRED only if mode is prepend. full mode will
+          regenerate the entire file and WILL DISCARD any manual edits.
+        type: choice
+        options:
+          - prepend
+          - full
+
+permissions:
+  contents: write
+  pull-requests: write # required to open the changelog PR with github-actions[bot]
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Generate a token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        with:
+          client-id: ${{ vars.CHANGELOG_APP_ID }}
+          private-key: ${{ secrets.CHANGELOG_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          # Full history + tags are required to diff between releases.
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Resolve bot identity
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          slug='${{ steps.app-token.outputs.app-slug }}'
+          id=$(gh api "/users/${slug}%5Bbot%5D" --jq '.id')
+          echo "name=${slug}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${id}+${slug}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - name: Update changelog
+        uses: shazib-summar/automated-changelog-gh@b0b9e8ba8eadae8d468650d60c00f0da2af157f2 #v0.3.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          # see inputs at https://github.com/shazib-summar/automated-changelog-gh#inputs
+          tag: ${{ github.event.inputs.tag }}
+          mode: ${{ github.event.inputs.mode || 'prepend' }}
+          pull-request: true
+          commit-user-name: ${{ steps.bot.outputs.name }}
+          commit-user-email: ${{ steps.bot.outputs.email }}
+          pr-labels: changelog,docs,automated
+          team-reviewers: temporalio/worker-controller
