@@ -519,7 +519,7 @@ func removeTLSVolume(volumes []corev1.Volume) []corev1.Volume {
 func ensureTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 	for i := range mounts {
 		if mounts[i].Name == "temporal-tls" {
-			mounts[i].Name = "/etc/temporal/tls"
+			mounts[i].MountPath = "/etc/temporal/tls"
 			return mounts
 		}
 	}
@@ -685,16 +685,6 @@ func getUpdateDeployments(
 		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.BuildID, k8sState, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 			updatedBuildIDs[status.CurrentVersion.BuildID] = true
-		}
-	}
-
-	// Check deprecated versions for expired connection spec hashes
-	for _, version := range status.DeprecatedVersions {
-		if !updatedBuildIDs[version.BuildID] {
-			if deployment := checkAndUpdateDeploymentConnectionSpec(version.BuildID, k8sState, connection); deployment != nil {
-				updateDeployments = append(updateDeployments, deployment)
-				updatedBuildIDs[version.BuildID] = true
-			}
 		}
 	}
 
