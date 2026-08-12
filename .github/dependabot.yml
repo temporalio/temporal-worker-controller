@@ -12,6 +12,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 14
+    ignore:
+      # We are deliberate about updating the temporal Go dependencies (api-go,
+      # sdk-go, server, etc) because dependabot's inter-package dependency
+      # resolution for the temporal Go packages is, well, terrible.
+      - dependency-name: "go.temporal.io/*"
     groups:
       go-modules:
         applies-to: version-updates
