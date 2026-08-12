@@ -16,9 +16,9 @@ require (
 	go.temporal.io/server v1.31.2
 	google.golang.org/grpc v1.82.1
 	k8s.io/api v0.36.3
-	k8s.io/apiextensions-apiserver v0.36.0
+	k8s.io/apiextensions-apiserver v0.36.3
 	k8s.io/apimachinery v0.36.3
-	k8s.io/client-go v0.36.0
+	k8s.io/client-go v0.36.3
 	sigs.k8s.io/controller-runtime v0.24.0
 	sigs.k8s.io/yaml v1.6.0
 )
