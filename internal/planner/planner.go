@@ -408,7 +408,7 @@ func checkAndUpdateDeploymentConnectionSpec(
 
 // updateDeploymentWithConnection updates an existing deployment in-place to match a new ConnectionSpec.
 // It rewrites the controller-managed connection env vars and the mTLS volume/mount, adding and removing them as needed,
-// So switching auth mode (mTLS <-> API key or to/from no-credentials) yields as fully-configured pod.
+// So switching auth mode (mTLS <-> API key or to/from no-credentials) yields a fully-configured pod.
 // It operates on the deployment's own pod template, so each version keeps its own image.
 func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection temporaliov1alpha1.ConnectionSpec) {
 	// Update the connection spec hash annotation
