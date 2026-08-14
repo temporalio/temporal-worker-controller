@@ -519,7 +519,7 @@ func TestGeneratePlan(t *testing.T) {
 			wrts: []temporaliov1alpha1.WorkerResourceTemplate{
 				createTestWRT("my-hpa", "my-worker"),
 			},
-			expectScale:                 1,
+			expectScale:                 0,
 			expectWorkerResourceApplies: 2,
 		},
 		{
@@ -835,11 +835,12 @@ func TestGetDeleteDeployments(t *testing.T) {
 
 func TestGetScaleDeployments(t *testing.T) {
 	testCases := []struct {
-		name     string
-		k8sState *k8s.DeploymentState
-		status   *temporaliov1alpha1.WorkerDeploymentStatus
-		spec     *temporaliov1alpha1.WorkerDeploymentSpec
-		state    *temporal.TemporalWorkerState
+		name        string
+		k8sState    *k8s.DeploymentState
+		status      *temporaliov1alpha1.WorkerDeploymentStatus
+		spec        *temporaliov1alpha1.WorkerDeploymentSpec
+		state       *temporal.TemporalWorkerState
+		hpaBuildIDs map[string]bool
 		// map of build id to scaled replicas
 		expectScales map[string]uint32
 	}{
@@ -1129,11 +1130,189 @@ func TestGetScaleDeployments(t *testing.T) {
 			},
 			expectScales: map[string]uint32{}, // No scaling yet because not enough time passed
 		},
+		{
+			name: "current version with HPA and spec.Replicas set is not scaled",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"cur": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "cur",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-cur"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "cur",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-cur"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			hpaBuildIDs: map[string]bool{"cur": true},
+			// controller defers to HPA, does not reset to spec.Replicas
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "current version without HPA and spec.Replicas set is scaled",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"cur": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "cur",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-cur"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "cur",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-cur"},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			// no HPA
+			hpaBuildIDs: nil,
+			// controller enforces spec.Replicas
+			expectScales: map[string]uint32{"test-cur": 1},
+		},
+		{
+			name: "target version with HPA and spec.Replicas set is not scaled",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"tgt": createDeploymentWithDefaultConnectionSpecHash(3), // HPA scaled this up
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "tgt",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-tgt"},
+					},
+				},
+				// no CurrentVersion, so the target branch runs
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			hpaBuildIDs: map[string]bool{"tgt": true},
+			// HPA owns replicas; enforcement skipped
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "target version with HPA and nil replicas and Deployment at 0 is bootstrapped to 1",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"tgt": createDeploymentWithDefaultConnectionSpecHash(0), // scaled to zero by sunset
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "tgt",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-tgt"},
+					},
+				},
+			},
+			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{}, // Replicas nil
+			hpaBuildIDs:  map[string]bool{"tgt": true},
+			expectScales: map[string]uint32{"test-tgt": 1},
+		},
+		{
+			name: "drained version with HPA is still scaled to zero (sunset cleanup unchanged)",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"cur": createDeploymentWithDefaultConnectionSpecHash(1),
+					"drn": createDeploymentWithDefaultConnectionSpecHash(2),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "cur",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-cur"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "drn",
+							Status:     temporaliov1alpha1.VersionStatusDrained,
+							Deployment: &corev1.ObjectReference{Name: "test-drn"},
+						},
+						DrainedSince: &metav1.Time{Time: time.Now().Add(-24 * time.Hour)},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: 0},
+				},
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			hpaBuildIDs:  map[string]bool{"drn": true},
+			expectScales: map[string]uint32{"test-drn": 0}, // sunset scale to zero ignores HPA presence
+		},
+		{
+			name: "draining version is never in scale set",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"cur":  createDeploymentWithDefaultConnectionSpecHash(1),
+					"drng": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "cur",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-cur"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "cur",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-cur"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "drng",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-drng"},
+						},
+					},
+				},
+			},
+			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{}, // Replicas nil
+			hpaBuildIDs:  nil,
+			expectScales: map[string]uint32{}, // draining versions are left untouched
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec)
+			scales := getScaleDeployments(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.hpaBuildIDs)
 			assert.Equal(t, len(tc.expectScales), len(scales), "unexpected number of scales")
 			actualScaleDeploymentNames := make([]string, 0)
 			for deploymentRef, actualReplicas := range scales {
@@ -1149,6 +1328,39 @@ func TestGetScaleDeployments(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHPABuildIDSet(t *testing.T) {
+	hpaWRT := temporaliov1alpha1.WorkerResourceTemplate{
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			Template: runtime.RawExtension{
+				Raw: []byte(`{"apiVersion":"autoscaling/v2","kind":"HorizontalPodAutoscaler"}`),
+			},
+		},
+	}
+	pdbWRT := temporaliov1alpha1.WorkerResourceTemplate{
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			Template: runtime.RawExtension{
+				Raw: []byte(`{"apiVersion":"policy/v1","kind":"PodDisruptionBudget"}`),
+			},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"abc": createDeploymentWithDefaultConnectionSpecHash(1),
+			"def": createDeploymentWithDefaultConnectionSpecHash(1),
+		},
+	}
+
+	t.Run("HPA-kind WRT marks all active build IDs", func(t *testing.T) {
+		got := hpaBuildIDSet([]temporaliov1alpha1.WorkerResourceTemplate{hpaWRT, pdbWRT}, k8sState)
+		assert.Equal(t, map[string]bool{"abc": true, "def": true}, got)
+	})
+
+	t.Run("PDB-only WRT marks nothing", func(t *testing.T) {
+		got := hpaBuildIDSet([]temporaliov1alpha1.WorkerResourceTemplate{pdbWRT}, k8sState)
+		assert.Empty(t, got)
+	})
 }
 
 // TestUpdateDeploymentInPlace_ReplicasNil verifies that updateDeploymentInPlace does not
