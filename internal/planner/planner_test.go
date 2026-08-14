@@ -361,7 +361,101 @@ func TestGeneratePlan(t *testing.T) {
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
-			expectUpdate: 1,
+			expectUpdate: 0,
+		},
+		{
+			name: "connection change updates target and current but not deprecated (pinned)",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"123": createDeploymentWithExpiredConnectionSpecHash(1),
+					"456": createDeploymentWithExpiredConnectionSpecHash(1),
+					"789": createDeploymentWithExpiredConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "123",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "456",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-456"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "789",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-789"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectUpdate: 2,
+		},
+		{
+			name: "multiple deprecated versions with expired hashes are all pinned",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"123": createDeploymentWithDefaultConnectionSpecHash(1),
+					"456": createDeploymentWithDefaultConnectionSpecHash(1),
+					"789": createDeploymentWithExpiredConnectionSpecHash(1),
+					"101": createDeploymentWithExpiredConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "123",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "456",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-456"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "789",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-789"},
+						},
+					},
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "101",
+							Status:     temporaliov1alpha1.VersionStatusDrained,
+							Deployment: &corev1.ObjectReference{Name: "test-101"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectUpdate: 0,
 		},
 		{
 			name: "update deployment when current version has an expired connection spec hash",
@@ -2491,6 +2585,132 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
+	mtlsConn := func(host, secret string) temporaliov1alpha1.ConnectionSpec {
+		return temporaliov1alpha1.ConnectionSpec{
+			HostPort:           host,
+			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: secret},
+		}
+	}
+	apiKeyConn := func(host, secret, key string) temporaliov1alpha1.ConnectionSpec {
+		return temporaliov1alpha1.ConnectionSpec{
+			HostPort: host,
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secret},
+				Key:                  key,
+			},
+		}
+	}
+	getEnv := func(c corev1.Container, name string) (corev1.EnvVar, bool) {
+		for _, e := range c.Env {
+			if e.Name == name {
+				return e, true
+			}
+		}
+		return corev1.EnvVar{}, false
+	}
+	hasVolume := func(d *appsv1.Deployment, name string) bool {
+		for _, v := range d.Spec.Template.Spec.Volumes {
+			if v.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	tlsSecretName := func(d *appsv1.Deployment) string {
+		for _, v := range d.Spec.Template.Spec.Volumes {
+			if v.Name == "temporal-tls" && v.Secret != nil {
+				return v.Secret.SecretName
+			}
+		}
+		return ""
+	}
+	hasMount := func(c corev1.Container, name string) bool {
+		for _, m := range c.VolumeMounts {
+			if m.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	run := func(existing temporaliov1alpha1.ConnectionSpec, newConn temporaliov1alpha1.ConnectionSpec, image string) *appsv1.Deployment {
+		dep := createTestDeploymentWithConnection("test-worker", "v1", existing)
+		dep.Spec.Template.Spec.Containers[0].Image = image
+		k8sState := &k8s.DeploymentState{Deployments: map[string]*appsv1.Deployment{"v1": dep}}
+		result := checkAndUpdateDeploymentConnectionSpec("v1", k8sState, newConn)
+		require.NotNil(t, result, "connection change should trigger an update")
+		return result
+	}
+
+	t.Run("mTLS to API key", func(t *testing.T) {
+		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), apiKeyConn("regional:7233", "api-secret", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_API_KEY")
+		require.True(t, ok, "TEMPORAL_API_KEY must be present")
+		require.NotNil(t, e.ValueFrom)
+		require.NotNil(t, e.ValueFrom.SecretKeyRef)
+		assert.Equal(t, "api-secret", e.ValueFrom.SecretKeyRef.Name)
+
+		_, ok = getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok, "TEMPORAL_TLS must be removed")
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.False(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasVolume(res, "temporal-tls"), "temporal-tls volume must be removed")
+		assert.False(t, hasMount(c, "temporal-tls"), "temporal-tls mount must be removed")
+
+		e, _ = getEnv(c, "TEMPORAL_ADDRESS")
+		assert.Equal(t, "regional:7233", e.Value)
+		assert.Equal(t, "v1-image:pinned", c.Image, "image must not be clobbered")
+	})
+
+	t.Run("API key to mTLS", func(t *testing.T) {
+		res := run(apiKeyConn(defaultHostPort(), "old-api", "key"), mtlsConn("mtls-host:7233", "tls-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok)
+		assert.Equal(t, "true", e.Value)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.True(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.True(t, ok)
+		assert.True(t, hasVolume(res, "temporal-tls"))
+		assert.Equal(t, "tls-secret", tlsSecretName(res))
+		assert.True(t, hasMount(c, "temporal-tls"))
+
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.False(t, ok, "TEMPORAL_API_KEY must be removed")
+		assert.Equal(t, "v1-image:pinned", c.Image)
+	})
+
+	t.Run("API key to API key secret rename", func(t *testing.T) {
+		res := run(apiKeyConn(defaultHostPort(), "old-api", "key"), apiKeyConn(defaultHostPort(), "new-api", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+		e, ok := getEnv(c, "TEMPORAL_API_KEY")
+		require.True(t, ok)
+		require.NotNil(t, e.ValueFrom)
+		require.NotNil(t, e.ValueFrom.SecretKeyRef)
+		assert.Equal(t, "new-api", e.ValueFrom.SecretKeyRef.Name)
+		assert.False(t, hasVolume(res, "temporal-tls"))
+	})
+
+	t.Run("same-mode mTLS secret rename (regression)", func(t *testing.T) {
+		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), mtlsConn(defaultHostPort(), "rotated-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+		assert.True(t, hasVolume(res, "temporal-tls"))
+		assert.Equal(t, "rotated-secret", tlsSecretName(res))
+		_, ok := getEnv(c, "TEMPORAL_TLS")
+		assert.True(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.False(t, ok)
+		assert.Equal(t, "v1-image:pinned", c.Image)
+	})
+
 }
 
 func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
