@@ -97,6 +97,15 @@ Configuration for the controller's Temporal connection and worker-version identi
 
 Note that the logical Temporal deployment name is not configurable: the controller always derives it from the Kubernetes namespace and `WorkerDeployment` name (see [TEMPORAL_DEPLOYMENT_NAME](#temporal_deployment_name)).
 
+**How `connectionRef` changes are applied.**
+
+A change to `connectionRef` does not create a new version. The controller applies
+the new `Connection` to the current and target versions only. Deprecated versions
+(Draining and Drained) keep the connection they were created with.
+
+Note: the old `Connection` CR and its referenced Secret must not be deleted while
+any deprecated version still uses them.
+
 ### Rollout Configuration
 Defines how new versions are promoted:
 - **strategy**: Manual, AllAtOnce, or Progressive
