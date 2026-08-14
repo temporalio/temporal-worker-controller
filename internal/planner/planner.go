@@ -157,8 +157,8 @@ func GeneratePlan(
 
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
-	hpaBuildIDs := hpaBuildIDSet(wrts, k8sState)
-	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec, hpaBuildIDs)
+	hpaManaged := hasHPAScaler(wrts)
+	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec, hpaManaged)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
@@ -736,18 +736,9 @@ func getDeleteDeployments(
 	return deleteDeployments
 }
 
-// hpaBuildIDSet returns a set of build IDs whose versions are managed by a
-// HorizontalPodAutoscaler through a WorkerResourceTemplate. When a version's build ID is in
-// this set, the controller must not manage that version's replica count, the HPA manages the scaling.
-//
-// A WRT renders one copy of its resource per active build ID (a build ID with a live Deployment in
-// k8sState), so an HPA-kind WRT marks every currently-active build ID.
-func hpaBuildIDSet(wrts []temporaliov1alpha1.WorkerResourceTemplate, k8sState *k8s.DeploymentState) map[string]bool {
-	hpaBuildIDs := make(map[string]bool)
-	if k8sState == nil {
-		return hpaBuildIDs
-	}
-
+// hasHPAScaler checks whether any WorkerResourceTemplate attaches a HorizontalPodAutoscaler to
+// this WorkerDeployment.When an HPA— the HPA manages the scaling not the Controller.
+func hasHPAScaler(wrts []temporaliov1alpha1.WorkerResourceTemplate) bool {
 	for i := range wrts {
 		// Parse kind from the WRT's spec.template
 		var templateMeta struct {
@@ -758,16 +749,11 @@ func hpaBuildIDSet(wrts []temporaliov1alpha1.WorkerResourceTemplate, k8sState *k
 		if err := json.Unmarshal(wrts[i].Spec.Template.Raw, &templateMeta); err != nil {
 			continue
 		}
-		if templateMeta.Kind != "HorizontalPodAutoscaler" {
-			continue
-		}
-
-		// This WRT is an HPA: it manages current active version's scaling
-		for buildID := range k8sState.Deployments {
-			hpaBuildIDs[buildID] = true
+		if templateMeta.Kind == "HorizontalPodAutoscaler" {
+			return true
 		}
 	}
-	return hpaBuildIDs
+	return false
 }
 
 // getScaleDeployments determines which deployments should be explicitly scaled and to what size.
@@ -778,7 +764,7 @@ func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-	hpaBuildIDs map[string]bool,
+	hpaManaged bool,
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
 
@@ -786,10 +772,9 @@ func getScaleDeployments(
 	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
 
 		// HPA exists — skip, don't touch replicas
-		if hpaBuildIDs[status.CurrentVersion.BuildID] {
+		if hpaManaged {
 			if spec.Replicas != nil {
-				l.Info("WorkerDeployment spec.Replicas is set but an HPA is managing this version's scaling; ignoring spec.Replicas",
-					"buildID", status.CurrentVersion.BuildID)
+				l.Info("HPA is managing this WorkerDeployment's scaling; ignoring spec.Replicas")
 			}
 		} else if spec.Replicas != nil {
 			// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
@@ -811,14 +796,12 @@ func getScaleDeployments(
 		status.TargetVersion.Deployment != nil {
 		if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
 
-			hasHPA := hpaBuildIDs[status.TargetVersion.BuildID]
-			if hasHPA && spec.Replicas != nil {
-				l.Info("WorkerDeployment spec.Replicas is set but an HPA is managing this version's scaling; ignoring spec.Replicas",
-					"buildID", status.TargetVersion.BuildID)
+			if hpaManaged && spec.Replicas != nil {
+				l.Info("HPA is managing this WorkerDeployment's scaling; ignoring spec.Replicas")
 			}
 
 			// Enforce spec.Replicas only when NO HPA manages this version — otherwise the HPA owns it.
-			enforceReplicas := spec.Replicas != nil && !hasHPA
+			enforceReplicas := spec.Replicas != nil && !hpaManaged
 			// Bootstrap 0 -> 1 regardless of HPA: an HPA cannot scale a Deployment up from zero, so if the
 			// Target Version was scaled to zero by Sunset Policy and nil replicas means a scaler owns it,
 			// the controller must bring it back to 1 for the HPA to take over.

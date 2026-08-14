@@ -840,7 +840,7 @@ func TestGetScaleDeployments(t *testing.T) {
 		status      *temporaliov1alpha1.WorkerDeploymentStatus
 		spec        *temporaliov1alpha1.WorkerDeploymentSpec
 		state       *temporal.TemporalWorkerState
-		hpaBuildIDs map[string]bool
+		hpaManaged  bool
 		// map of build id to scaled replicas
 		expectScales map[string]uint32
 	}{
@@ -1156,7 +1156,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			hpaBuildIDs: map[string]bool{"cur": true},
+			hpaManaged: true,
 			// controller defers to HPA, does not reset to spec.Replicas
 			expectScales: map[string]uint32{},
 		},
@@ -1187,7 +1187,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
 			// no HPA
-			hpaBuildIDs: nil,
+			hpaManaged: false,
 			// controller enforces spec.Replicas
 			expectScales: map[string]uint32{"test-cur": 1},
 		},
@@ -1211,7 +1211,7 @@ func TestGetScaleDeployments(t *testing.T) {
 			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			hpaBuildIDs: map[string]bool{"tgt": true},
+			hpaManaged: true,
 			// HPA owns replicas; enforcement skipped
 			expectScales: map[string]uint32{},
 		},
@@ -1232,7 +1232,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{}, // Replicas nil
-			hpaBuildIDs:  map[string]bool{"tgt": true},
+			hpaManaged:   true,
 			expectScales: map[string]uint32{"test-tgt": 1},
 		},
 		{
@@ -1268,7 +1268,7 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 				Replicas: func() *int32 { r := int32(1); return &r }(),
 			},
-			hpaBuildIDs:  map[string]bool{"drn": true},
+			hpaManaged:   true,
 			expectScales: map[string]uint32{"test-drn": 0}, // sunset scale to zero ignores HPA presence
 		},
 		{
@@ -1305,14 +1305,14 @@ func TestGetScaleDeployments(t *testing.T) {
 				},
 			},
 			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{}, // Replicas nil
-			hpaBuildIDs:  nil,
+			hpaManaged:   false,
 			expectScales: map[string]uint32{}, // draining versions are left untouched
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scales := getScaleDeployments(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.hpaBuildIDs)
+			scales := getScaleDeployments(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.hpaManaged)
 			assert.Equal(t, len(tc.expectScales), len(scales), "unexpected number of scales")
 			actualScaleDeploymentNames := make([]string, 0)
 			for deploymentRef, actualReplicas := range scales {
@@ -1330,7 +1330,7 @@ func TestGetScaleDeployments(t *testing.T) {
 	}
 }
 
-func TestHPABuildIDSet(t *testing.T) {
+func TestHasHPAScaler(t *testing.T) {
 	hpaWRT := temporaliov1alpha1.WorkerResourceTemplate{
 		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
 			Template: runtime.RawExtension{
@@ -1345,21 +1345,13 @@ func TestHPABuildIDSet(t *testing.T) {
 			},
 		},
 	}
-	k8sState := &k8s.DeploymentState{
-		Deployments: map[string]*appsv1.Deployment{
-			"abc": createDeploymentWithDefaultConnectionSpecHash(1),
-			"def": createDeploymentWithDefaultConnectionSpecHash(1),
-		},
-	}
 
-	t.Run("HPA-kind WRT marks all active build IDs", func(t *testing.T) {
-		got := hpaBuildIDSet([]temporaliov1alpha1.WorkerResourceTemplate{hpaWRT, pdbWRT}, k8sState)
-		assert.Equal(t, map[string]bool{"abc": true, "def": true}, got)
+	t.Run("HPA-kind WRT is detected", func(t *testing.T) {
+		assert.True(t, hasHPAScaler([]temporaliov1alpha1.WorkerResourceTemplate{hpaWRT, pdbWRT}))
 	})
 
-	t.Run("PDB-only WRT marks nothing", func(t *testing.T) {
-		got := hpaBuildIDSet([]temporaliov1alpha1.WorkerResourceTemplate{pdbWRT}, k8sState)
-		assert.Empty(t, got)
+	t.Run("PDB-only WRT is not an HPA", func(t *testing.T) {
+		assert.False(t, hasHPAScaler([]temporaliov1alpha1.WorkerResourceTemplate{pdbWRT}))
 	})
 }
 
