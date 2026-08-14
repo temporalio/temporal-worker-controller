@@ -737,7 +737,7 @@ func getDeleteDeployments(
 }
 
 // hasHPAScaler checks whether any WorkerResourceTemplate attaches a HorizontalPodAutoscaler to
-// this WorkerDeployment.When an HPA— the HPA manages the scaling not the Controller.
+// this WorkerDeployment.When an HPA exists, the HPA manages the scaling not the Controller.
 func hasHPAScaler(wrts []temporaliov1alpha1.WorkerResourceTemplate) bool {
 	for i := range wrts {
 		// Parse kind from the WRT's spec.template

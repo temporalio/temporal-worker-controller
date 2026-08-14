@@ -835,12 +835,12 @@ func TestGetDeleteDeployments(t *testing.T) {
 
 func TestGetScaleDeployments(t *testing.T) {
 	testCases := []struct {
-		name        string
-		k8sState    *k8s.DeploymentState
-		status      *temporaliov1alpha1.WorkerDeploymentStatus
-		spec        *temporaliov1alpha1.WorkerDeploymentSpec
-		state       *temporal.TemporalWorkerState
-		hpaManaged  bool
+		name       string
+		k8sState   *k8s.DeploymentState
+		status     *temporaliov1alpha1.WorkerDeploymentStatus
+		spec       *temporaliov1alpha1.WorkerDeploymentSpec
+		state      *temporal.TemporalWorkerState
+		hpaManaged bool
 		// map of build id to scaled replicas
 		expectScales map[string]uint32
 	}{
