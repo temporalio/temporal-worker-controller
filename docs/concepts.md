@@ -97,14 +97,14 @@ Configuration for the controller's Temporal connection and worker-version identi
 
 Note that the logical Temporal deployment name is not configurable: the controller always derives it from the Kubernetes namespace and `WorkerDeployment` name (see [TEMPORAL_DEPLOYMENT_NAME](#temporal_deployment_name)).
 
-**Warning — changing `connectionRef` affects all managed versions.**
-- A change to `connectionRef` does not create a new version.
-- The controller applies the new `Connection` to every version it manages,
-- including Draining versions that are still serving open pinned workflows.
-- Any retained version whose pod template is not compatible with the new `Connection` will fail to connect and crash loop.
-- Before changing `connectionRef`, ensure every retained version's pod template is compatible with the new `Connection`,
-- For example, if switching from mTLS to an API key, every retained version's worker image must be able to authenticate with the new auth method.
-- Treat a `connectionRef` change as affecting live, draining workloads — not as a forward-only operation.
+**How `connectionRef` changes are applied.**
+
+A change to `connectionRef` does not create a new version. The controller applies
+the new `Connection` to the current and target versions only. Deprecated versions
+(Draining and Drained) keep the connection they were created with.
+
+Note: the old `Connection` CR and its referenced Secret must not be deleted while
+any deprecated version still uses them.
 
 ### Rollout Configuration
 Defines how new versions are promoted:
