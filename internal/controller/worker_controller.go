@@ -534,13 +534,7 @@ func (r *WorkerDeploymentReconciler) markWRTsWDNotFound(ctx context.Context, wd 
 // The cleanup sequence:
 //  1. Clear the ramping version (must happen first to avoid a split-traffic window)
 //  2. Set the current version to "unversioned" (empty BuildID) so new tasks route to unversioned workers
-//  3. Delete the worker Deployments so their pods stop polling. This is required
-//     before a version can be deleted: the server rejects DeleteVersion (even with
-//     SkipDrainage) while a version still has active pollers. Normally this teardown
-//     happens in executePlan, but that path never runs during deletion, so without
-//     it the pods keep polling and cleanup deadlocks. Pollers linger in the server's
-//     cache for a few minutes after the pods die, so steps 4-5 requeue until they
-//     age out.
+//  3. Delete the k8s deployments so their pods stop polling
 //  4. Delete all registered versions (with SkipDrainage since the WD is being removed entirely)
 //  5. Delete the deployment record itself once all versions are gone
 func (r *WorkerDeploymentReconciler) handleDeletion(
@@ -650,14 +644,8 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		l.Info("No current version set, skipping unversioned redirect")
 	}
 
-	// Step 3: Tear down the k8s deployments backing these versions so their pods
-	// terminate and stop polling. This is required before a version can be deleted:
-	// the server rejects DeleteVersion (even with SkipDrainage=true) while a version
-	// still has active pollers. During normal reconciliation this teardown happens in
-	// executePlan, but that path is downstream of the deletion bail-out and never runs
-	// here. Without this step the pods keep polling, DeleteVersion keeps failing, and
-	// the finalizer is never removed (deadlock). Deleting them explicitly breaks it,
-	// rather than waiting for ownerRef GC, which is itself blocked on the finalizer.
+	// Step 3: Delete the k8s deployments so their pods stop polling. DeleteVersion is
+	// rejected while a version still has active pollers.
 	k8sState, err := k8s.GetDeploymentState(
 		ctx,
 		r.Client,
@@ -667,9 +655,6 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	if err != nil {
 		return fmt.Errorf("unable to list k8s deployments during deletion of worker deployment: %w", err)
 	}
-	// Deletion order is irrelevant, but iterating over the DeploymentsByTime slice instead
-	// of the Deployments map gives deterministic ordering, so the log lines below stay
-	// stable across the 10s retries.
 	for _, d := range k8sState.DeploymentsByTime {
 		l.Info("Deleting k8s worker deployment during cleanup", "deployment", d.Name)
 		if err := r.Delete(ctx, d); err != nil && !apierrors.IsNotFound(err) {
@@ -679,9 +664,9 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 
 	// Step 4: Delete every registered version. SkipDrainage lets DeleteVersion succeed on
 	// versions that are still draining, which is acceptable here since the whole WD is
-	// going away. If any version fails to delete (e.g. it still has recent pollers after the
-	// k8s Deployment delete above), return an error so the reconciler requeues. Pollers age
-	// out on the server minutes after the pods terminate, so a later attempt succeeds.
+	// going away. If any version fails to delete, return an error so the reconciler requeues.
+	// Pollers linger in the server's cache for matching.PollerHistoryTTL (dynamic config,
+	// 5m by default) after the pods terminate, so a later attempt succeeds.
 	for _, version := range resp.Info.VersionSummaries {
 		buildID := version.Version.BuildID
 		l.Info("Deleting worker deployment version", "buildID", buildID)
@@ -694,8 +679,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		}
 	}
 
-	// Step 5: Delete the worker deployment itself. This only succeeds if all versions and
-	// their associated k8s deployments are gone.
+	// Step 5: Delete the worker deployment itself. This only succeeds if all versions are gone.
 	l.Info("Attempting to delete worker deployment from Temporal server", "name", workerDeploymentName)
 	if _, err := temporalClient.WorkerDeploymentClient().Delete(ctx, sdkclient.WorkerDeploymentDeleteOptions{
 		Name:     workerDeploymentName,
