@@ -115,7 +115,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Namespaces the controller watches and is granted RBAC in. Empty (the default) watches all namespaces with cluster-wide RBAC (ClusterRole + ClusterRoleBinding); when set, the manager role is emitted as a namespaced Role (one per listed namespace) bound via a RoleBinding, plus a minimal cluster-scoped role for the two grants that cannot be namespaced (namespaces get, subjectaccessreviews create)."
+          "description": "Namespaces the controller watches and is granted RBAC in. Empty (the default) watches all namespaces with cluster-wide RBAC (ClusterRole + ClusterRoleBinding); when set, the manager role is emitted as a namespaced Role (one per listed namespace) bound via a RoleBinding, plus a temporary cluster-scoped role retaining namespaces get for the namespace-UID fallback and subjectaccessreviews create during the one-release webhook migration."
         },
         "createEndUserRoles": {
           "type": "boolean",

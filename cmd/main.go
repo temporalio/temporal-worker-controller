@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -220,13 +219,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	var ns corev1.Namespace
-	if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Name: podNamespace}, &ns); err != nil {
-		setupLog.Error(err, "unable to fetch namespace UID for controller identity suffix")
-		os.Exit(1)
+	if os.Getenv(controller.IdentitySuffixEnvKey) == "" {
+		var ns corev1.Namespace
+		if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Name: podNamespace}, &ns); err != nil {
+			setupLog.Error(err, "unable to fetch namespace UID for controller identity suffix")
+			os.Exit(1)
+		}
+		if err := os.Setenv(controller.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
+			setupLog.Error(err, "unable to set controller identity suffix")
+			os.Exit(1)
+		}
 	}
-	if err := os.Setenv(controller.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
-		setupLog.Error(err, fmt.Sprintf("unable to set %s", controller.IdentitySuffixEnvKey))
+
+	saName := os.Getenv("SERVICE_ACCOUNT_NAME")
+	if saName == "" {
+		setupLog.Error(nil, "SERVICE_ACCOUNT_NAME environment variable must be set")
 		os.Exit(1)
 	}
 
