@@ -79,6 +79,7 @@ func makeVersionedDeployment(twd *temporaliov1alpha1.WorkerDeployment, buildID s
 					Containers: []corev1.Container{{Name: "worker", Image: "temporal/worker:v1"}},
 				},
 			},
+			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }

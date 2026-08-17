@@ -444,6 +444,34 @@ gate:
 
 ## Advanced Configuration
 
+### Per-version Kubernetes Deployment Rollout Restart configuration
+
+`spec.rollout.maxUnavailable` and `spec.rollout.maxSurge`controls how Pods are
+replaced **within a single versioned Kubernetes `Deployment`** via
+`Deployment.spec.strategy`.
+
+These configuration settings impact the behaviour of Kubernetes when you issue
+a `kubectl rollout restart` CLI command.
+
+> **NOTE**: It does **not** affect Temporal traffic routing across worker
+> versions (see [Rollout Strategies](#rollout-strategies)).
+
+When omitted, Kubernetes defaults apply `maxUnavailable`/`maxSurge` of `25%`).
+
+> **NOTE**: The Kubernetes Deployment strategy is *always* `RollingUpdate`.
+
+On large fleets, set a more conservative strategy if you rely on in-place
+restarts of Current workers:
+
+```yaml
+spec:
+  replicas: 100
+  rollout:
+    strategy: Progressive
+    maxUnavailable: 5%
+    maxSurge: 0
+```
+
 ### Environment-Specific Configurations
 
 **Production Configuration:**
