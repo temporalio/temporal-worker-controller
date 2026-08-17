@@ -40,11 +40,19 @@ func TestControllers(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		Skip("Skipping controller envtest suite: KUBEBUILDER_ASSETS not set")
+	}
+
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			// CRDs live in the crds chart's templates directory; there is no
+			// config/crd/bases in this repo.
+			filepath.Join("..", "..", "helm", "temporal-worker-controller-crds", "templates"),
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 

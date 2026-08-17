@@ -78,6 +78,8 @@ kubectl apply -f workerdeployment.yaml
 
 The controller picks up the change on the next reconcile loop (within seconds) and begins the rollout.
 
+> **Rollback via image tag:** If the image tag you set matches a version that was current within the last hour, the controller treats it as a rollback rather than a normal rollout: it routes 100% of traffic back to that version immediately (AllAtOnce), regardless of the configured rollout strategy. So a `helm rollback` will trigger an immediate rollback rather than a gradual re-rollout. See [Rollback Strategy](configuration.md#rollback-strategy) for details.
+
 ## kubectl
 
 `kubectl wait` can block a pipeline script until `Ready=True`:

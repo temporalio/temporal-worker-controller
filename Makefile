@@ -14,8 +14,8 @@ LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 STAMPDIR := .stamp
-export PATH := $(ROOT)/$(LOCALBIN):$(PATH)
-GOINSTALL := GOBIN=$(ROOT)/$(LOCALBIN) go install
+export PATH := $(LOCALBIN):$(PATH)
+GOINSTALL := GOBIN=$(LOCALBIN) go install
 
 OTEL ?= false
 ifeq ($(OTEL),true)
@@ -220,11 +220,11 @@ start-temporal-server: ## Start an ephemeral Temporal server with versioning API
 		--dynamic-config-value system.enableDeploymentVersions=true
 
 .PHONY: test-all
-test-all: manifests generate envtest ## Run tests.
+test-all: manifests generate envtest helm-dependency-build ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags test_dep ./... -coverprofile cover.out
 
 .PHONY: test-unit
-test-unit: envtest ## Run unit tests and webhook integration tests (requires envtest binaries).
+test-unit: envtest helm-dependency-build ## Run unit tests and webhook integration tests (requires envtest binaries and a rendered-chart-capable helm).
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
 .PHONY: test-integration
@@ -302,11 +302,27 @@ $(HELM): $(LOCALBIN)
 		echo "$(LOCALBIN)/helm version is not expected $(HELM_VERSION). Removing it before installing."; \
 		rm -rf $(LOCALBIN)/helm; \
 	fi
-	test -s $(LOCALBIN)/helm || curl -fsSL -o get_helm.sh \
+	test -s $(LOCALBIN)/helm || { curl -fsSL -o get_helm.sh \
                                 https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 \
                                 && chmod 700 get_helm.sh \
-                                && GOBIN=$(LOCALBIN) GO111MODULE=on DESIRED_VERSION=$(HELM_VERSION) ./get_helm.sh \
-                                && rm get_helm.sh
+                                && HELM_INSTALL_DIR=$(LOCALBIN) USE_SUDO=false DESIRED_VERSION=$(HELM_VERSION) ./get_helm.sh --no-sudo \
+                                && rm get_helm.sh; }
+
+# The main chart declares a cert-manager subchart dependency (see Chart.lock), which
+# `helm template` — and therefore the webhook envtest suite run by test-unit — needs
+# fetched into helm/temporal-worker-controller/charts. The stamp is keyed to Chart.lock
+# so dependency changes rebuild, while repeat runs stay offline no-ops. Helm repository
+# config/cache are isolated under $(LOCALBIN) so this never reads or modifies the
+# developer's own helm configuration.
+HELM_MAIN_CHART := helm/temporal-worker-controller
+HELM_ISOLATED_ENV := HELM_REPOSITORY_CONFIG=$(LOCALBIN)/helm-repositories.yaml HELM_REPOSITORY_CACHE=$(LOCALBIN)/helm-repository-cache
+
+.PHONY: helm-dependency-build
+helm-dependency-build: $(STAMPDIR)/helm-deps ## Fetch helm chart dependencies needed to render the main chart.
+$(STAMPDIR)/helm-deps: $(HELM_MAIN_CHART)/Chart.lock | $(STAMPDIR) $(HELM)
+	$(HELM_ISOLATED_ENV) $(HELM) repo add jetstack https://charts.jetstack.io --force-update
+	$(HELM_ISOLATED_ENV) $(HELM) dependency build $(HELM_MAIN_CHART) --skip-refresh
+	@touch $@
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary. If wrong version is installed, it will be overwritten.

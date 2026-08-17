@@ -90,10 +90,21 @@ Gradually increases the percentage of new workflow executions routed to the new 
 ## Configuration Concepts
 
 ### Worker Options
-Configuration that tells the controller how to connect to the same Temporal cluster and namespace that the worker is connected to:
+Configuration for the controller's Temporal connection and worker-version identity:
 - **connectionRef**: A reference to a `Connection` custom resource. This object contains a `name` field to specify the `Connection` resource.
 - **temporalNamespace**: The Temporal namespace to connect to
-- **deploymentName**: The logical deployment name in Temporal (auto-generated if not specified)
+- **unsafeCustomBuildID**: Optionally overrides the auto-generated Build ID. When set, pod template changes trigger rolling updates of the existing version instead of new-version rollouts, so workers running different code can share one Build ID — if workflow code changes while the ID stays constant, Pinned workflows may execute on workers with incompatible code. Only use it with a reliable external change-detection scheme (for example, hashing workflow sources in CI).
+
+Note that the logical Temporal deployment name is not configurable: the controller always derives it from the Kubernetes namespace and `WorkerDeployment` name (see [TEMPORAL_DEPLOYMENT_NAME](#temporal_deployment_name)).
+
+**How `connectionRef` changes are applied.**
+
+A change to `connectionRef` does not create a new version. The controller applies
+the new `Connection` to the current and target versions only. Deprecated versions
+(Draining and Drained) keep the connection they were created with.
+
+Note: the old `Connection` CR and its referenced Secret must not be deleted while
+any deprecated version still uses them.
 
 ### Rollout Configuration
 Defines how new versions are promoted:
