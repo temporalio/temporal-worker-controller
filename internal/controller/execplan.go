@@ -128,6 +128,10 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 
 	// Update deployments
 	for _, d := range p.UpdateDeployments {
+		// No point in updating a deleted Deployment...
+		if containsDeployment(d, p.DeleteDeployments) {
+			continue
+		}
 		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
 		if err := r.Update(ctx, d); err != nil {
 			l.Error(err, "unable to update deployment", "deployment", d)
@@ -160,6 +164,17 @@ func buildIDForDeployment(workerDeploy *temporaliov1alpha1.WorkerDeployment, dep
 		}
 	}
 	return "unknown"
+}
+
+// containsDeployment returns true if the supplied Deployment is contained in
+// the supplied slice of Deployments.
+func containsDeployment(subject *appsv1.Deployment, search []*appsv1.Deployment) bool {
+	for _, d := range search {
+		if d.Name == subject.Name && d.Namespace == subject.Namespace {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
