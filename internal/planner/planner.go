@@ -18,6 +18,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -682,6 +683,43 @@ func updateDeploymentWithPodTemplateSpec(
 		deployment.Spec.Replicas = spec.Replicas
 	}
 	deployment.Spec.MinReadySeconds = spec.MinReadySeconds
+	deployment.Spec.Strategy = appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
+			MaxSurge:       spec.RolloutStrategy.MaxSurge,
+		},
+	}
+}
+
+// checkAndUpdateDeploymentStrategy updates an owned Deployment when its rolling
+// update strategy differs from the WorkerDeployment spec. When
+// spec.DeploymentStrategy is nil the controller does not manage strategy and
+// leaves the live Deployment alone.
+func checkAndUpdateDeploymentStrategy(
+	buildID string,
+	k8sState *k8s.DeploymentState,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[buildID]
+	if !exists {
+		return nil
+	}
+
+	desired := appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
+			MaxSurge:       spec.RolloutStrategy.MaxSurge,
+		},
+	}
+	actual := existingDeployment.Spec.Strategy
+	if apiequality.Semantic.DeepEqual(desired, actual) {
+		return nil
+	}
+
+	existingDeployment.Spec.Strategy = desired
+	return existingDeployment
 }
 
 func getUpdateDeployments(
@@ -720,7 +758,49 @@ func getUpdateDeployments(
 		}
 	}
 
+	// Sync Deployment rolling-update strategy on all owned versions. Do this after
+	// the pod-template / connection checks so a deployment already queued for update
+	// also picks up strategy changes in the same write.
+	for _, buildID := range ownedBuildIDs(status) {
+		if updatedBuildIDs[buildID] {
+			if deployment, exists := k8sState.Deployments[buildID]; exists {
+				deployment.Spec.Strategy = appsv1.DeploymentStrategy{
+					Type: appsv1.RollingUpdateDeploymentStrategyType,
+					RollingUpdate: &appsv1.RollingUpdateDeployment{
+						MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
+						MaxSurge:       spec.RolloutStrategy.MaxSurge,
+					},
+				}
+			}
+			continue
+		}
+		if deployment := checkAndUpdateDeploymentStrategy(buildID, k8sState, spec); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[buildID] = true
+		}
+	}
+
 	return updateDeployments
+}
+
+func ownedBuildIDs(status *temporaliov1alpha1.WorkerDeploymentStatus) []string {
+	var buildIDs []string
+	seen := make(map[string]bool)
+	add := func(buildID string) {
+		if buildID == "" || seen[buildID] {
+			return
+		}
+		seen[buildID] = true
+		buildIDs = append(buildIDs, buildID)
+	}
+	add(status.TargetVersion.BuildID)
+	if status.CurrentVersion != nil {
+		add(status.CurrentVersion.BuildID)
+	}
+	for _, version := range status.DeprecatedVersions {
+		add(version.BuildID)
+	}
+	return buildIDs
 }
 
 // getDeleteDeployments determines which deployments should be deleted
