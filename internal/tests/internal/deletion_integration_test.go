@@ -6,6 +6,7 @@ package internal
 //
 // Covered:
 //   - WD deletion sets current version to unversioned on Temporal server
+//   - WD deletion tears down the k8s deployments
 //   - WD deletion removes finalizer from Connection when no other WDs reference it
 //   - WD is fully deleted from K8s after cleanup (finalizer removed)
 //   - WD deletion with Connection deleted simultaneously (Helm race condition) still succeeds
@@ -185,6 +186,22 @@ func testDeletionSetsCurrentToUnversioned(
 		return errors.New("WD still exists, finalizer may not have completed")
 	})
 	t.Log("WD deleted successfully (finalizer completed)")
+
+	// Verify the WD's k8s deployments were deleted.
+	// In a real cluster active pollers linger for matching.PollerHistoryTTL (5m) after the pods
+	// die, delaying the finalizer; this test uses a 1s TTL, so cleanup completes quickly. The
+	// Get below proves the k8s deployments are gone.
+	for _, name := range []string{expectedDeploymentName, deploymentNameV2} {
+		eventually(t, 30*time.Second, time.Second, func() error {
+			var dep appsv1.Deployment
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &dep)
+			if err != nil {
+				return nil
+			}
+			return fmt.Errorf("k8s deployment %s still exists after WD cleanup", name)
+		})
+	}
+	t.Log("Verified: both k8s deployments were deleted during cleanup")
 
 	// Verify Temporal server-side state: current version should be unversioned
 	resp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
