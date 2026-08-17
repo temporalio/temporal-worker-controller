@@ -17,10 +17,12 @@ import (
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -271,6 +273,8 @@ func NewDeploymentWithOwnerRef(
 	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(spec.Template)
 	blockOwnerDeletion := true
 
+	ApplyDefaultRollingUpdateFields(&spec.RolloutStrategy)
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:                       ComputeVersionedDeploymentName(objectMeta.Name, buildID),
@@ -302,7 +306,47 @@ func NewDeploymentWithOwnerRef(
 				Spec: *podSpec,
 			},
 			MinReadySeconds: spec.MinReadySeconds,
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
+					MaxSurge:       spec.RolloutStrategy.MaxSurge,
+				},
+			},
 		},
+	}
+}
+
+// DefaultDeploymentStrategy returns the default appsv1.DeploymentStrategy
+// using RollingUpdate deployment strategy type and the default values for
+// MaxUnavailable and MaxSurge.
+func DefaultDeploymentStrategy() appsv1.DeploymentStrategy {
+	defaultMaxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
+	defaultMaxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
+	return appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &defaultMaxUnavailable,
+			MaxSurge:       &defaultMaxSurge,
+		},
+	}
+
+}
+
+// ApplyDefaultRollingUpdateFields mutates the supplied RolloutStrategy,
+// applying the same default values for MaxUnavailable and MaxSurge s as the
+// apps/v1 Deployment API.
+func ApplyDefaultRollingUpdateFields(s *temporaliov1alpha1.RolloutStrategy) {
+	if s == nil {
+		return
+	}
+	if s.MaxUnavailable == nil {
+		maxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
+		s.MaxUnavailable = &maxUnavailable
+	}
+	if s.MaxSurge == nil {
+		maxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
+		s.MaxSurge = &maxSurge
 	}
 }
 

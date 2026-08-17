@@ -106,6 +106,16 @@ spec:
                     required:
                     - workflowType
                     type: object
+                  maxSurge:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    x-kubernetes-int-or-string: true
+                  maxUnavailable:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    x-kubernetes-int-or-string: true
                   steps:
                     items:
                       properties:
