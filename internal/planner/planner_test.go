@@ -361,7 +361,101 @@ func TestGeneratePlan(t *testing.T) {
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
-			expectUpdate: 1,
+			expectUpdate: 0,
+		},
+		{
+			name: "connection change updates target and current but not deprecated (pinned)",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"123": createDeploymentWithExpiredConnectionSpecHash(1),
+					"456": createDeploymentWithExpiredConnectionSpecHash(1),
+					"789": createDeploymentWithExpiredConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "123",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "456",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-456"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "789",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-789"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectUpdate: 2,
+		},
+		{
+			name: "multiple deprecated versions with expired hashes are all pinned",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"123": createDeploymentWithDefaultConnectionSpecHash(1),
+					"456": createDeploymentWithDefaultConnectionSpecHash(1),
+					"789": createDeploymentWithExpiredConnectionSpecHash(1),
+					"101": createDeploymentWithExpiredConnectionSpecHash(1),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "123",
+						Status:     temporaliov1alpha1.VersionStatusRamping,
+						Deployment: &corev1.ObjectReference{Name: "test-123"},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "456",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-456"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "789",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-789"},
+						},
+					},
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "101",
+							Status:     temporaliov1alpha1.VersionStatusDrained,
+							Deployment: &corev1.ObjectReference{Name: "test-101"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			state: &temporal.TemporalWorkerState{},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
+			},
+			expectUpdate: 0,
 		},
 		{
 			name: "update deployment when current version has an expired connection spec hash",
