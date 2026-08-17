@@ -129,22 +129,28 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 
 func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
 	for _, wf := range p.startTestWorkflows {
+		// Identify the gate workflow on every log line for this iteration, so the call
+		// sites below only carry what differs between them. Declared per iteration, so
+		// the payload fields added below never carry over to the next gate workflow.
+		gl := l.WithValues(
+			"workflowType", wf.workflowType,
+			"taskQueue", wf.taskQueue,
+			"buildID", wf.buildID,
+		)
+
 		// Log workflow start details
 		if len(wf.input) > 0 {
 			// Payload encoding is only meaningful when there is an input to encode, so
 			// these fields are attached here rather than for every gate workflow. The
 			// message type is omitted unless set, so gates that do not use one are not
 			// annotated with a permanently empty field.
-			gl := l.WithValues("encoding", gateInputEncoding(wf))
+			gl = gl.WithValues("encoding", gateInputEncoding(wf))
 			if wf.messageType != "" {
 				gl = gl.WithValues("messageType", wf.messageType)
 			}
 			if wf.isInputSecret {
 				// Don't log the actual input if it came from a Secret
 				gl.Info("starting gate workflow",
-					"workflowType", wf.workflowType,
-					"taskQueue", wf.taskQueue,
-					"buildID", wf.buildID,
 					"inputBytes", len(wf.input),
 					"inputSource", "SecretRef (contents hidden)",
 				)
@@ -162,20 +168,12 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 
 				// Log the input keys for non-secret sources (inline or ConfigMap)
 				gl.Info("starting gate workflow",
-					"workflowType", wf.workflowType,
-					"taskQueue", wf.taskQueue,
-					"buildID", wf.buildID,
 					"inputBytes", len(wf.input),
 					"inputKeys", inputKeys,
 				)
 			}
 		} else {
-			l.Info("starting gate workflow",
-				"workflowType", wf.workflowType,
-				"taskQueue", wf.taskQueue,
-				"buildID", wf.buildID,
-				"inputBytes", 0,
-			)
+			gl.Info("starting gate workflow", "inputBytes", 0)
 		}
 		opts := sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
