@@ -361,6 +361,36 @@ const (
 	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
 )
 
+// PayloadMetadataEncodingType is the payload encoding the controller sets in the
+// "encoding" metadata key when starting a gate workflow. These values mirror the MetadataEncoding* constants in
+// go.temporal.io/sdk/converter/metadata.go.
+// The SDK's "binary/null" is deliberately omitted: it declares an empty payload, so it
+// would either be inert (no gate input to begin with) or discard an input the user went
+// to the trouble of configuring. Omit the input instead.
+// +enum
+// +kubebuilder:validation:Enum=binary/plain;json/plain;json/protobuf;binary/protobuf
+type PayloadMetadataEncodingType string
+
+const (
+	// PayloadMetadataEncodingTypeBinary is "binary/plain", for raw bytes passed
+	// through unmodified. Requires a byte-valued input source: a ConfigMap
+	// binaryData key or a Secret.
+	PayloadMetadataEncodingTypeBinary PayloadMetadataEncodingType = "binary/plain"
+
+	// PayloadMetadataEncodingTypeJSON is "json/plain", for a plain JSON message.
+	// This is the encoding the controller produces when Encoding is unset.
+	PayloadMetadataEncodingTypeJSON PayloadMetadataEncodingType = "json/plain"
+
+	// PayloadMetadataEncodingTypeProtoJSON is "json/protobuf", for a protobuf
+	// message serialized as JSON.
+	PayloadMetadataEncodingTypeProtoJSON PayloadMetadataEncodingType = "json/protobuf"
+
+	// PayloadMetadataEncodingTypeProto is "binary/protobuf", for a protobuf message
+	// in binary wire format. Requires a byte-valued input source: inline Input is
+	// JSON and cannot carry wire-format bytes.
+	PayloadMetadataEncodingTypeProto PayloadMetadataEncodingType = "binary/protobuf"
+)
+
 type GateWorkflowConfig struct {
 	WorkflowType string `json:"workflowType"`
 	// Input is an arbitrary JSON object passed as the first parameter to the gate workflow.
@@ -372,6 +402,21 @@ type GateWorkflowConfig struct {
 	// For inputs with secrets use SecretKeyRef to omit from logs.
 	// +optional
 	InputFrom *GateInputSource `json:"inputFrom,omitempty"`
+	// Encoding is the encoding type of the gate input. If unset, then the controller will use json/plain encoding.
+	// Both binary/plain and binary/protobuf encoding types require a byte-valued input source instead of inline input.
+	// +optional
+	Encoding PayloadMetadataEncodingType `json:"encoding,omitempty"`
+	// MessageType is the fully-qualified protobuf message name of the gate input,
+	// for example "my.package.DeployRequest". Workers do not need it to decode the input,
+	// since they resolve the message type from the gate workflow's own signature. It is
+	// recorded so that tools which only see the payload, such as the Temporal UI or a
+	// codec server, can identify it.
+	//
+	// Required when Encoding is binary/protobuf, where the payload is opaque bytes and
+	// nothing else identifies the message. Optional for json/protobuf, whose payload is
+	// already readable JSON. May not be set for the non-protobuf encodings.
+	// +optional
+	MessageType string `json:"messageType,omitempty"`
 }
 
 // GateInputSource references a value from a ConfigMap or a Secret
@@ -387,6 +432,8 @@ type GateInputSource struct {
 // RolloutStrategy defines strategy to apply during next rollout
 // +kubebuilder:validation:XValidation:rule="self.strategy != 'Progressive' || (has(self.steps) && size(self.steps) > 0)",message="steps are required for Progressive rollout"
 // +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef) != has(self.gate.inputFrom.secretKeyRef))",message="exactly one of configMapKeyRef or secretKeyRef must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.encoding) || self.gate.encoding != 'binary/protobuf' || has(self.gate.messageType)",message="gate.messageType is required when gate.encoding is binary/protobuf"
+// +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.messageType) || (has(self.gate.encoding) && (self.gate.encoding == 'json/protobuf' || self.gate.encoding == 'binary/protobuf'))",message="gate.messageType may only be set when gate.encoding is json/protobuf or binary/protobuf"
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
 	// Valid values are:

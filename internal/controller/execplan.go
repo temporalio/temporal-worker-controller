@@ -17,8 +17,10 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
@@ -129,9 +131,17 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 	for _, wf := range p.startTestWorkflows {
 		// Log workflow start details
 		if len(wf.input) > 0 {
+			// Payload encoding is only meaningful when there is an input to encode, so
+			// these fields are attached here rather than for every gate workflow. The
+			// message type is omitted unless set, so gates that do not use one are not
+			// annotated with a permanently empty field.
+			gl := l.WithValues("encoding", gateInputEncoding(wf))
+			if wf.messageType != "" {
+				gl = gl.WithValues("messageType", wf.messageType)
+			}
 			if wf.isInputSecret {
 				// Don't log the actual input if it came from a Secret
-				l.Info("starting gate workflow",
+				gl.Info("starting gate workflow",
 					"workflowType", wf.workflowType,
 					"taskQueue", wf.taskQueue,
 					"buildID", wf.buildID,
@@ -151,7 +161,7 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 				}
 
 				// Log the input keys for non-secret sources (inline or ConfigMap)
-				l.Info("starting gate workflow",
+				gl.Info("starting gate workflow",
 					"workflowType", wf.workflowType,
 					"taskQueue", wf.taskQueue,
 					"buildID", wf.buildID,
@@ -182,7 +192,7 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 		}
 		var err error
 		if len(wf.input) > 0 {
-			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType, json.RawMessage(wf.input))
+			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType, gateWorkflowArg(wf))
 		} else {
 			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType)
 		}
@@ -194,6 +204,43 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 		}
 	}
 	return nil
+}
+
+// gateWorkflowArg builds the first argument passed to a gate workflow.
+// When no encoding is declared the input is sent as plain JSON.
+//
+// When an encoding is declared the input bytes are passed through untouched, labelled
+// with that encoding. converter.NewRawValue tells the SDK to send the payload exactly
+// as constructed instead of running the value through its own converters, so the
+// encoding the user asked for is the one the worker sees. The worker then selects its
+// decoder from that label.
+//
+// A message type is recorded only when the user supplied one. The key is omitted rather
+// than set to an empty string, matching how the SDK builds payloads for non-protobuf
+// values.
+func gateWorkflowArg(wf startWorkflowConfig) interface{} {
+	if wf.encoding == "" {
+		return json.RawMessage(wf.input)
+	}
+	metadata := map[string][]byte{
+		converter.MetadataEncoding: []byte(wf.encoding),
+	}
+	if wf.messageType != "" {
+		metadata[converter.MetadataMessageType] = []byte(wf.messageType)
+	}
+	return converter.NewRawValue(&commonpb.Payload{
+		Metadata: metadata,
+		Data:     wf.input,
+	})
+}
+
+// gateInputEncoding returns the encoding the payload will actually carry, so an unset
+// encoding logs as the json/plain the controller falls back to rather than as empty.
+func gateInputEncoding(wf startWorkflowConfig) string {
+	if wf.encoding == "" {
+		return string(temporaliov1alpha1.PayloadMetadataEncodingTypeJSON)
+	}
+	return wf.encoding
 }
 
 func (r *WorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {

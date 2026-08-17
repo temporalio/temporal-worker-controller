@@ -4113,3 +4113,70 @@ func TestGetVersionConfigDiff_RollbackScenario(t *testing.T) {
 		})
 	}
 }
+
+// TestGetTestWorkflows_CarriesEncodingAndMessageType verifies the payload encoding and
+// protobuf message type reach every generated workflow config. These fields are pure
+// pass-through, so the failure mode is not bad logic but a dropped assignment — which
+// would silently downgrade the gate input to plain JSON rather than erroring.
+func TestGetTestWorkflows_CarriesEncodingAndMessageType(t *testing.T) {
+	testCases := []struct {
+		name            string
+		encoding        temporaliov1alpha1.PayloadMetadataEncodingType
+		messageType     string
+		wantEncoding    string
+		wantMessageType string
+	}{
+		{
+			name:            "encoding and message type",
+			encoding:        temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON,
+			messageType:     "my.package.DeployRequest",
+			wantEncoding:    "json/protobuf",
+			wantMessageType: "my.package.DeployRequest",
+		},
+		{
+			name:         "encoding without message type",
+			encoding:     temporaliov1alpha1.PayloadMetadataEncodingTypeBinary,
+			wantEncoding: "binary/plain",
+		},
+		{
+			// A gate authored before these fields existed must still produce workflow
+			// configs that fall through to the controller's plain JSON path.
+			name: "neither set",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "123",
+						Status:  temporaliov1alpha1.VersionStatusInactive,
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+							{Name: "queue2"},
+						},
+					},
+				},
+			}
+			config := &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Gate: &temporaliov1alpha1.GateWorkflowConfig{
+						WorkflowType: "TestWorkflow",
+						Encoding:     tc.encoding,
+						MessageType:  tc.messageType,
+					},
+				},
+			}
+
+			workflows := getTestWorkflows(status, config, "test/namespace", []byte(`{"key":"value"}`), false)
+
+			// Assigned inside the per-task-queue loop, so every workflow must carry it.
+			require.Len(t, workflows, 2, "expected one workflow per task queue")
+			for _, wf := range workflows {
+				assert.Equal(t, tc.wantEncoding, wf.GateEncoding, "task queue %q", wf.TaskQueue)
+				assert.Equal(t, tc.wantMessageType, wf.GateMessageType, "task queue %q", wf.TaskQueue)
+			}
+		})
+	}
+}
