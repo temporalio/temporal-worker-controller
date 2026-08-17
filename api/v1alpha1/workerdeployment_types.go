@@ -87,11 +87,7 @@ type WorkerDeploymentSpec struct {
 	// maxUnavailable/maxSurge 25%).
 	//
 	// This is distinct from spec.rollout.strategy, which controls Temporal
-	// traffic routing across worker versions. It also does not apply when the
-	// controller creates a new build ID / Deployment for a new worker version.
-	// It matters for in-place pod replacement on an existing version Deployment
-	// (for example kubectl rollout restart, or a pod-template change while
-	// spec.workerOptions.unsafeCustomBuildID stays the same).
+	// traffic routing across worker versions.
 	// +optional
 	DeploymentStrategy *appsv1.DeploymentStrategy `json:"deploymentStrategy,omitempty"`
 
