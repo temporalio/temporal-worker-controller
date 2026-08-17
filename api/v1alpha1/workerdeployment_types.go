@@ -403,18 +403,13 @@ type GateWorkflowConfig struct {
 	// +optional
 	InputFrom *GateInputSource `json:"inputFrom,omitempty"`
 	// Encoding is the encoding type of the gate input. If unset, then the controller will use json/plain encoding.
-	// Both binary/plain and binary/protobuf encoding types require a byte-valued input source instead of inline input.
+	// The binary encoding types require a byte-valued input source instead of inline input.
 	// +optional
 	Encoding PayloadMetadataEncodingType `json:"encoding,omitempty"`
-	// MessageType is the fully-qualified protobuf message name of the gate input,
-	// for example "my.package.DeployRequest". Workers do not need it to decode the input,
-	// since they resolve the message type from the gate workflow's own signature. It is
-	// recorded so that tools which only see the payload, such as the Temporal UI or a
-	// codec server, can identify it.
-	//
-	// Required when Encoding is binary/protobuf, where the payload is opaque bytes and
-	// nothing else identifies the message. Optional for json/protobuf, whose payload is
-	// already readable JSON. May not be set for the non-protobuf encodings.
+	// MessageType is the fully-qualified protobuf message name of the gate input, for example
+	// "my.package.DeployRequest". Workers resolve the message type from the gate workflow's own
+	// signature, so this is recorded for tools that only see the payload, such as the Temporal UI.
+	// Required when Encoding is binary/protobuf, optional for json/protobuf, rejected otherwise.
 	// +optional
 	MessageType string `json:"messageType,omitempty"`
 }

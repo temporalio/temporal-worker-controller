@@ -108,7 +108,7 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 			errorMsg: "require inputFrom",
 		},
 
-		// The text encodings are unaffected: inline input stays valid for both, which is
+		// The text encodings are unaffected. Inline input stays valid for them, which is
 		// the documented way to pass a protobuf message as JSON.
 		"gate with json/protobuf and inline input": {
 			obj: wdWithGate("gate-protojson-inline", temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON,
