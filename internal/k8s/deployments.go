@@ -302,8 +302,29 @@ func NewDeploymentWithOwnerRef(
 				Spec: *podSpec,
 			},
 			MinReadySeconds: spec.MinReadySeconds,
+			Strategy:        DesiredDeploymentStrategy(spec),
 		},
 	}
+}
+
+// DesiredDeploymentStrategy returns the Deployment strategy to apply from the
+// WorkerDeployment spec. When spec.DeploymentStrategy is nil, returns the zero
+// value so Kubernetes defaults apply. When set, unset subfields are filled with
+// the same defaults the Deployment API server uses so create/update/reconcile
+// stay stable. Defensive against webhook-disabled installs where CR defaulting
+// may not have run.
+func DesiredDeploymentStrategy(spec *temporaliov1alpha1.WorkerDeploymentSpec) appsv1.DeploymentStrategy {
+	if spec == nil || spec.DeploymentStrategy == nil {
+		return appsv1.DeploymentStrategy{}
+	}
+	return *temporaliov1alpha1.DefaultDeploymentStrategy(spec.DeploymentStrategy)
+}
+
+// ApplyDeploymentStrategyDefaults fills Deployment strategy fields the same way
+// the apps/v1 Deployment defaulter does, so comparisons against live objects do
+// not flap on omitted Type / maxUnavailable / maxSurge. The input is not mutated.
+func ApplyDeploymentStrategyDefaults(s appsv1.DeploymentStrategy) appsv1.DeploymentStrategy {
+	return *temporaliov1alpha1.DefaultDeploymentStrategy(&s)
 }
 
 // TODO (Shivam): Change hash when secret name is updated as well.

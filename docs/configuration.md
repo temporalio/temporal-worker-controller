@@ -348,6 +348,32 @@ Gate workflow input details:
 
 ## Advanced Configuration
 
+### Deployment Rolling Update Strategy
+
+Controls how Pods are replaced **within a single versioned Kubernetes `Deployment`**. It does **not** affect Temporal traffic routing across worker versions (`spec.rollout.strategy`), and it does **not** apply when the controller creates a new version.
+
+By default the controller derives a new build ID from the pod template. A new build ID creates a **new** Deployment object, so pod replacement for that rollout is just scaling up the new Deployment (and later scaling down/deleting the old one). In that common path, `deploymentStrategy` has no effect.
+
+`deploymentStrategy` matters only when pods roll on an **existing** version Deployment, for example:
+
+- You run `kubectl rollout restart` (or equivalent) against a specific versioned Deployment.
+- You set `spec.workerOptions.unsafeCustomBuildID` and change the pod template without changing that build ID — the controller updates that version's Deployment in place, which triggers a Kubernetes rolling update of its pods.
+- Connection-related fields change and the controller patches the existing Deployment's pod template (env vars / volumes), which also rolls pods in place.
+
+When omitted, Kubernetes defaults apply (`RollingUpdate` with `maxUnavailable`/`maxSurge` of `25%`). On large fleets, set a more conservative strategy if you rely on in-place restarts of Current workers:
+
+```yaml
+spec:
+  replicas: 100
+  deploymentStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 5%
+      maxSurge: 0
+  rollout:
+    strategy: Progressive
+```
+
 ### Environment-Specific Configurations
 
 **Production Configuration:**

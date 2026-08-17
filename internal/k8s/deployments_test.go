@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -592,6 +593,66 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 
 	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
 	assert.Equal(t, "build123", deployment.Labels[k8s.BuildIDLabel])
+}
+
+func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {
+	t.Run("omitted strategy leaves zero value for Kubernetes defaults", func(t *testing.T) {
+		deployment := k8s.NewDeploymentWithOwnerRef(
+			&metav1.TypeMeta{},
+			&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+			&temporaliov1alpha1.WorkerDeploymentSpec{},
+			"test-deployment",
+			"build123",
+			temporaliov1alpha1.ConnectionSpec{},
+		)
+
+		assert.Equal(t, appsv1.DeploymentStrategy{}, deployment.Spec.Strategy)
+	})
+
+	t.Run("applies rollingUpdate strategy with defaults filled in", func(t *testing.T) {
+		maxUnavailable := intstr.FromString("5%")
+		maxSurge := intstr.FromInt32(0)
+		deployment := k8s.NewDeploymentWithOwnerRef(
+			&metav1.TypeMeta{},
+			&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+			&temporaliov1alpha1.WorkerDeploymentSpec{
+				DeploymentStrategy: &appsv1.DeploymentStrategy{
+					RollingUpdate: &appsv1.RollingUpdateDeployment{
+						MaxUnavailable: &maxUnavailable,
+						MaxSurge:       &maxSurge,
+					},
+				},
+			},
+			"test-deployment",
+			"build123",
+			temporaliov1alpha1.ConnectionSpec{},
+		)
+
+		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, deployment.Spec.Strategy.Type)
+		require.NotNil(t, deployment.Spec.Strategy.RollingUpdate)
+		assert.Equal(t, maxUnavailable, *deployment.Spec.Strategy.RollingUpdate.MaxUnavailable)
+		assert.Equal(t, maxSurge, *deployment.Spec.Strategy.RollingUpdate.MaxSurge)
+	})
+}
+
+func TestApplyDeploymentStrategyDefaults(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	originalRollingUpdate := &appsv1.RollingUpdateDeployment{
+		MaxUnavailable: &maxUnavailable,
+	}
+	original := appsv1.DeploymentStrategy{RollingUpdate: originalRollingUpdate}
+
+	got := k8s.ApplyDeploymentStrategyDefaults(original)
+
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, got.Type)
+	require.NotNil(t, got.RollingUpdate)
+	assert.Equal(t, maxUnavailable, *got.RollingUpdate.MaxUnavailable)
+	require.NotNil(t, got.RollingUpdate.MaxSurge)
+	assert.Equal(t, intstr.FromString("25%"), *got.RollingUpdate.MaxSurge)
+
+	// Defaulting must not mutate the input (RollingUpdate is a shared pointer).
+	assert.Nil(t, originalRollingUpdate.MaxSurge)
+	assert.Nil(t, original.RollingUpdate.MaxSurge)
 }
 
 func TestComputeConnectionSpecHash(t *testing.T) {

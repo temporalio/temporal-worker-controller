@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -1167,6 +1168,98 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
+}
+
+func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	dep := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{}},
+		},
+	}
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		DeploymentStrategy: &appsv1.DeploymentStrategy{
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: &maxUnavailable,
+				MaxSurge:       &maxSurge,
+			},
+		},
+	}
+	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
+	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
+	assert.Equal(t, maxUnavailable, *dep.Spec.Strategy.RollingUpdate.MaxUnavailable)
+	assert.Equal(t, maxSurge, *dep.Spec.Strategy.RollingUpdate.MaxSurge)
+}
+
+func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	desiredStrategy := &appsv1.DeploymentStrategy{
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &maxUnavailable,
+			MaxSurge:       &maxSurge,
+		},
+	}
+
+	currentDefault := intstr.FromString("25%")
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-v1"},
+		Spec: appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &currentDefault,
+					MaxSurge:       &currentDefault,
+				},
+			},
+		},
+	}
+
+	status := &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"v1": deployment},
+	}
+
+	t.Run("updates when strategy differs", func(t *testing.T) {
+		spec := &temporaliov1alpha1.WorkerDeploymentSpec{DeploymentStrategy: desiredStrategy}
+		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
+		require.Len(t, updates, 1)
+		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, updates[0].Spec.Strategy.Type)
+		require.NotNil(t, updates[0].Spec.Strategy.RollingUpdate)
+		assert.Equal(t, maxUnavailable, *updates[0].Spec.Strategy.RollingUpdate.MaxUnavailable)
+		assert.Equal(t, maxSurge, *updates[0].Spec.Strategy.RollingUpdate.MaxSurge)
+	})
+
+	t.Run("no update when strategy matches after defaults", func(t *testing.T) {
+		deployment.Spec.Strategy = k8s.DesiredDeploymentStrategy(&temporaliov1alpha1.WorkerDeploymentSpec{
+			DeploymentStrategy: desiredStrategy,
+		})
+		spec := &temporaliov1alpha1.WorkerDeploymentSpec{DeploymentStrategy: desiredStrategy}
+		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
+		assert.Empty(t, updates)
+	})
+
+	t.Run("nil strategy does not manage deployment strategy", func(t *testing.T) {
+		deployment.Spec.Strategy = appsv1.DeploymentStrategy{
+			Type: appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: &currentDefault,
+				MaxSurge:       &currentDefault,
+			},
+		}
+		updates := getUpdateDeployments(k8sState, status, &temporaliov1alpha1.WorkerDeploymentSpec{}, temporaliov1alpha1.ConnectionSpec{})
+		assert.Empty(t, updates)
+		assert.Equal(t, currentDefault, *deployment.Spec.Strategy.RollingUpdate.MaxUnavailable)
+	})
 }
 
 func TestShouldCreateDeployment(t *testing.T) {

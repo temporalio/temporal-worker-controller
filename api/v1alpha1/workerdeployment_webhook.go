@@ -53,6 +53,10 @@ func (s *WorkerDeploymentSpec) Default(ctx context.Context) error {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
 	}
 
+	if s.DeploymentStrategy != nil {
+		s.DeploymentStrategy = DefaultDeploymentStrategy(s.DeploymentStrategy)
+	}
+
 	return nil
 }
 
@@ -82,6 +86,7 @@ func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj ru
 
 func validateForUpdateOrCreate(old, new *WorkerDeployment) (admission.Warnings, error) {
 	allErrs := validateRolloutStrategy(new.Spec.RolloutStrategy)
+	allErrs = append(allErrs, validateDeploymentStrategy(new.Spec.DeploymentStrategy)...)
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(new, allErrs)
 	}
