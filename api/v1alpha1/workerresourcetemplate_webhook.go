@@ -11,6 +11,7 @@ import (
 	authorizationv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -164,7 +165,7 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 		)
 	}
 
-	// API-dependent checks (RESTMapper scope + SubjectAccessReview)
+	// API-dependent checks (RESTMapper scope + LocalSubjectAccessReview)
 	apiWarnings, apiErrs := v.validateWithAPI(ctx, newWRT, verb)
 	warnings = append(warnings, apiWarnings...)
 	allErrs = append(allErrs, apiErrs...)
@@ -462,7 +463,7 @@ func convertUserInfoExtra(extra map[string]authenticationv1.ExtraValue) map[stri
 }
 
 // validateWithAPI performs API-dependent validation: RESTMapper scope check and
-// SubjectAccessReview for both the requesting user and the controller service account.
+// LocalSubjectAccessReview for both the requesting user and the controller service account.
 // verb is the RBAC verb to check ("create" on create/update, "delete" on delete).
 func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, wrt *WorkerResourceTemplate, verb string) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
@@ -520,10 +521,11 @@ func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, w
 		}
 	}
 
-	// 2. SubjectAccessReview: requesting user
+	// 2. LocalSubjectAccessReview: requesting user
 	req, reqErr := admission.RequestFromContext(ctx)
 	if reqErr == nil && req.UserInfo.Username != "" {
-		userSAR := &authorizationv1.SubjectAccessReview{
+		userSAR := &authorizationv1.LocalSubjectAccessReview{
+			ObjectMeta: metav1.ObjectMeta{Namespace: wrt.Namespace},
 			Spec: authorizationv1.SubjectAccessReviewSpec{
 				User:   req.UserInfo.Username,
 				Groups: req.UserInfo.Groups,
@@ -559,7 +561,7 @@ func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, w
 		}
 	}
 
-	// 3. SubjectAccessReview: controller service account.
+	// 3. LocalSubjectAccessReview: controller service account.
 	// When Kubernetes evaluates a real request from a service account token, it automatically
 	// considers the SA's username AND the groups the SA belongs to. When we construct a SAR
 	// manually (without a real token), we must supply those groups ourselves — Kubernetes will
@@ -569,7 +571,8 @@ func (v *WorkerResourceTemplateValidator) validateWithAPI(ctx context.Context, w
 	// the groups here mirrors what Kubernetes would do for a real request from the SA.
 	if v.ControllerSAName != "" && v.ControllerSANamespace != "" {
 		controllerUser := fmt.Sprintf("system:serviceaccount:%s:%s", v.ControllerSANamespace, v.ControllerSAName)
-		controllerSAR := &authorizationv1.SubjectAccessReview{
+		controllerSAR := &authorizationv1.LocalSubjectAccessReview{
+			ObjectMeta: metav1.ObjectMeta{Namespace: wrt.Namespace},
 			Spec: authorizationv1.SubjectAccessReviewSpec{
 				User: controllerUser,
 				Groups: []string{

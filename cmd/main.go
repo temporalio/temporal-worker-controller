@@ -192,13 +192,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	var ns corev1.Namespace
-	if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Name: podNamespace}, &ns); err != nil {
-		setupLog.Error(err, "unable to fetch namespace UID for controller identity suffix")
+	saName := os.Getenv("SERVICE_ACCOUNT_NAME")
+	if saName == "" {
+		setupLog.Error(nil, "SERVICE_ACCOUNT_NAME environment variable must be set")
 		os.Exit(1)
 	}
-	if err := os.Setenv(controller.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
+
+	var sa corev1.ServiceAccount
+	if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Namespace: podNamespace, Name: saName}, &sa); err != nil {
+		setupLog.Error(err, "unable to fetch service account UID for controller identity suffix")
+		os.Exit(1)
+	}
+	if err := os.Setenv(controller.IdentitySuffixEnvKey, string(sa.UID)); err != nil {
 		setupLog.Error(err, fmt.Sprintf("unable to set %s", controller.IdentitySuffixEnvKey))
+		os.Exit(1)
+	}
+
+	// Migration window: also record the namespace UID as the legacy identity suffix so the
+	// controller can re-claim Worker Deployments still managed under its previous
+	// (namespace-UID) identity instead of deadlocking after this upgrade. This requires the
+	// cluster-scoped namespaces "get" grant; both the read and the grant can be removed in a
+	// future release once all managed deployments have been re-claimed under the SA-UID identity.
+	var ns corev1.Namespace
+	if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{Name: podNamespace}, &ns); err != nil {
+		setupLog.Error(err, "unable to fetch namespace UID for legacy controller identity suffix")
+		os.Exit(1)
+	}
+	if err := os.Setenv(controller.LegacyIdentitySuffixEnvKey, string(ns.UID)); err != nil {
+		setupLog.Error(err, fmt.Sprintf("unable to set %s", controller.LegacyIdentitySuffixEnvKey))
 		os.Exit(1)
 	}
 

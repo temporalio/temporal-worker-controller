@@ -10,8 +10,8 @@ The Helm template contains two marker pairs:
   # GENERATED RULES (NAMESPACED) END      the namespaced Role (restrictWatchNamespaces)
 
 Both are updated from config/rbac/role.yaml.  The namespaced block excludes
-rules for cluster-scoped resources (namespaces, subjectaccessreviews) since
-those are handled by the separate manager-cluster-role.
+rules for cluster-scoped resources (namespaces) since those are handled by
+the separate manager-cluster-role.
 """
 import re
 import sys
@@ -24,7 +24,7 @@ END_MARKER = "  # GENERATED RULES END"
 BEGIN_MARKER_NS = "  # GENERATED RULES (NAMESPACED) BEGIN"
 END_MARKER_NS = "  # GENERATED RULES (NAMESPACED) END"
 
-CLUSTER_SCOPED_RESOURCES = {"namespaces", "subjectaccessreviews"}
+CLUSTER_SCOPED_RESOURCES = {"namespaces"}
 
 
 def extract_rules_text(path):
