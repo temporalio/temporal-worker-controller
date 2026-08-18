@@ -121,6 +121,12 @@ type WorkflowConfig struct {
 	// IsInputSecret indicates whether the GateInput came from a Secret reference
 	// and should be treated as sensitive (not logged)
 	IsInputSecret bool
+	// GateEncoding is the payload encoding to declare for GateInput when starting the
+	// workflow. Empty means the SDK will use json/plain encoding.
+	GateEncoding string
+	// GateMessageType is the fully-qualified protobuf message name to record alongside
+	// GateInput. Empty means no message type is declared.
+	GateMessageType string
 }
 
 // Config holds the configuration for planning
@@ -883,12 +889,14 @@ func getTestWorkflows(
 	for _, tq := range targetVersion.TaskQueues {
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
-				WorkflowType:  config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:    temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
-				BuildID:       targetVersion.BuildID,
-				TaskQueue:     tq.Name,
-				GateInput:     string(gateInput),
-				IsInputSecret: isGateInputSecret,
+				WorkflowType:    config.RolloutStrategy.Gate.WorkflowType,
+				WorkflowID:      temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
+				BuildID:         targetVersion.BuildID,
+				TaskQueue:       tq.Name,
+				GateInput:       string(gateInput),
+				IsInputSecret:   isGateInputSecret,
+				GateEncoding:    string(config.RolloutStrategy.Gate.Encoding),
+				GateMessageType: config.RolloutStrategy.Gate.MessageType,
 			})
 		}
 	}
