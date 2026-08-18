@@ -16,8 +16,10 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"go.temporal.io/sdk/converter"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -213,6 +215,7 @@ func TestExecutePlan_SunsetThenRedeploySameBuildID_ReappliesWorkerResource(t *te
 			{
 				BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusDrained),
 				DrainedSince:                &drainedSince,
+				EligibleForDeletion:         true,
 			},
 		},
 	}
@@ -295,6 +298,7 @@ func TestExecutePlan_WRTResourceDeleteFailure_RetriedNextCycle(t *testing.T) {
 			{
 				BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusDrained),
 				DrainedSince:                &drainedSince,
+				EligibleForDeletion:         true,
 			},
 		},
 	}
@@ -359,4 +363,137 @@ func TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite(t *testing
 	after := &temporaliov1alpha1.WorkerResourceTemplate{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, after))
 	require.Equal(t, before.ResourceVersion, after.ResourceVersion, "no-op cycle must not write WRT status")
+}
+
+// ─── gateWorkflowArg tests ───────────────────────────────────────────────────
+//
+// gateWorkflowArg decides how the gate input is handed to the Temporal SDK. The
+// assertions below run the result through the SDK's own default data converter —
+// the same path ExecuteWorkflow uses — so they verify the payload the worker
+// actually receives rather than just the shape of the intermediate value.
+
+// TestGateWorkflowArg_NoEncoding_ProducesJSONPlain pins the behavior that existed before
+// the encoding field: a gate with no declared encoding must still produce a json/plain
+// payload carrying the input verbatim. The Go type is what drives that choice, so
+// returning the same bytes wrapped differently would silently re-encode every existing
+// gate workflow.
+func TestGateWorkflowArg_NoEncoding_ProducesJSONPlain(t *testing.T) {
+	input := []byte(`{"service":"checkout"}`)
+
+	arg := gateWorkflowArg(startWorkflowConfig{input: input})
+
+	raw, ok := arg.(json.RawMessage)
+	require.True(t, ok, "expected json.RawMessage, got %T", arg)
+	require.Equal(t, input, []byte(raw))
+
+	payloads, err := converter.GetDefaultDataConverter().ToPayloads(arg)
+	require.NoError(t, err)
+	require.Len(t, payloads.GetPayloads(), 1)
+
+	p := payloads.GetPayloads()[0]
+	require.Equal(t, converter.MetadataEncodingJSON, string(p.Metadata[converter.MetadataEncoding]))
+	require.Equal(t, input, p.Data)
+	require.NotContains(t, p.Metadata, converter.MetadataMessageType)
+}
+
+// A message type with no encoding cannot reach the controller through the CRD (both the
+// CEL rules and the webhook reject it), but the helper must not treat it as a reason to
+// hand-build a payload: without an encoding there is nothing to declare.
+func TestGateWorkflowArg_MessageTypeWithoutEncoding_ProducesJSONPlain(t *testing.T) {
+	arg := gateWorkflowArg(startWorkflowConfig{
+		input:       []byte(`{"service":"checkout"}`),
+		messageType: "my.package.DeployRequest",
+	})
+
+	_, ok := arg.(json.RawMessage)
+	require.True(t, ok, "expected json.RawMessage, got %T", arg)
+}
+
+// Every encoding in the enum must reach the payload untouched, and the input bytes must
+// be passed through without transformation — the controller labels the data, it never
+// re-encodes it.
+func TestGateWorkflowArg_EachEncoding_IsDeclaredVerbatim(t *testing.T) {
+	for _, encoding := range []temporaliov1alpha1.PayloadMetadataEncodingType{
+		temporaliov1alpha1.PayloadMetadataEncodingTypeBinary,
+		temporaliov1alpha1.PayloadMetadataEncodingTypeJSON,
+		temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON,
+		temporaliov1alpha1.PayloadMetadataEncodingTypeProto,
+	} {
+		t.Run(string(encoding), func(t *testing.T) {
+			input := []byte{0x0a, 0x08, 0x63, 0x68, 0x65, 0x63, 0x6b}
+
+			payloads, err := converter.GetDefaultDataConverter().ToPayloads(
+				gateWorkflowArg(startWorkflowConfig{input: input, encoding: string(encoding)}),
+			)
+			require.NoError(t, err)
+			require.Len(t, payloads.GetPayloads(), 1)
+
+			p := payloads.GetPayloads()[0]
+			require.Equal(t, string(encoding), string(p.Metadata[converter.MetadataEncoding]))
+			require.Equal(t, input, p.Data)
+			require.NotContains(t, p.Metadata, converter.MetadataMessageType,
+				"messageType key must be absent, not empty, when no message type is set")
+		})
+	}
+}
+
+// When a message type is supplied it is recorded alongside the encoding. Both keys must
+// survive the SDK's converter untouched, which is the whole point of using RawValue.
+func TestGateWorkflowArg_MessageTypeSet_RecordedAlongsideEncoding(t *testing.T) {
+	input := []byte(`{"service":"checkout","replicas":3}`)
+
+	payloads, err := converter.GetDefaultDataConverter().ToPayloads(
+		gateWorkflowArg(startWorkflowConfig{
+			input:       input,
+			encoding:    string(temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON),
+			messageType: "my.package.DeployRequest",
+		}),
+	)
+	require.NoError(t, err)
+	require.Len(t, payloads.GetPayloads(), 1)
+
+	p := payloads.GetPayloads()[0]
+	require.Equal(t, converter.MetadataEncodingProtoJSON, string(p.Metadata[converter.MetadataEncoding]))
+	require.Equal(t, "my.package.DeployRequest", string(p.Metadata[converter.MetadataMessageType]))
+	require.Equal(t, input, p.Data)
+}
+
+// TestGeneratePlan_CarriesEncodingAndMessageType covers the second half of the transport:
+// the planner's WorkflowConfig is copied field by field into the controller's own
+// startWorkflowConfig, and a missed assignment there would drop the encoding just as
+// silently as one in the planner.
+func TestGeneratePlan_CarriesEncodingAndMessageType(t *testing.T) {
+	namespace := "default"
+	twd := makeExecplanTWD("gate-encoding-worker", namespace)
+	twd.Spec.RolloutStrategy.Gate = &temporaliov1alpha1.GateWorkflowConfig{
+		WorkflowType: "VerifyDeploy",
+		Input:        &apiextensionsv1.JSON{Raw: []byte(`{"service":"checkout"}`)},
+		Encoding:     temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON,
+		MessageType:  "my.package.DeployRequest",
+	}
+
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+				BuildID: "build-abc",
+				Status:  temporaliov1alpha1.VersionStatusInactive,
+				TaskQueues: []temporaliov1alpha1.TaskQueue{
+					{Name: "queue1"},
+				},
+			},
+		},
+	}
+
+	p, err := r.generatePlan(context.Background(), logr.Discard(), w,
+		temporaliov1alpha1.ConnectionSpec{}, &temporal.TemporalWorkerState{})
+	require.NoError(t, err)
+	require.Len(t, p.startTestWorkflows, 1)
+
+	wf := p.startTestWorkflows[0]
+	require.Equal(t, string(temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON), wf.encoding)
+	require.Equal(t, "my.package.DeployRequest", wf.messageType)
+	require.Equal(t, []byte(`{"service":"checkout"}`), wf.input)
 }

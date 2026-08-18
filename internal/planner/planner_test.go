@@ -102,6 +102,7 @@ func TestGeneratePlan(t *testing.T) {
 						DrainedSince: &metav1.Time{
 							Time: time.Now().Add(-24 * time.Hour),
 						},
+						EligibleForDeletion: true,
 					},
 				},
 			},
@@ -713,6 +714,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 						DrainedSince: &metav1.Time{
 							Time: time.Now().Add(-24 * time.Hour),
 						},
+						EligibleForDeletion: true,
 					},
 				},
 			},
@@ -726,6 +728,42 @@ func TestGetDeleteDeployments(t *testing.T) {
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{},
 			},
 			expectDeletes:             1,
+			foundDeploymentInTemporal: true,
+		},
+		{
+			// Drained past the sunset delays and scaled to zero in spec, but not yet
+			// EligibleForDeletion: worker pods have not fully terminated (Status.Replicas > 0),
+			// so versioned pollers may still be registered and the Temporal-side DeleteVersion
+			// would fail. Deleting the Deployment now would strand that server-side version
+			// record with no way to retry (see execplan.deleteDrainedVersions), so hold off.
+			name: "drained long enough and scaled to zero in spec, but not eligible for deletion - not deleted",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"789": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "789",
+							Status:     temporaliov1alpha1.VersionStatusDrained,
+							Deployment: &corev1.ObjectReference{Name: "test-789"},
+						},
+						DrainedSince: &metav1.Time{
+							Time: time.Now().Add(-24 * time.Hour),
+						},
+						// EligibleForDeletion left false: pods not fully drained yet.
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					DeleteDelay: &metav1.Duration{Duration: 4 * time.Hour},
+				},
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			expectDeletes:             0,
 			foundDeploymentInTemporal: true,
 		},
 		{
@@ -2326,6 +2364,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 						DrainedSince: &metav1.Time{
 							Time: time.Now().Add(-48 * time.Hour), // Long time drained
 						},
+						EligibleForDeletion: true,
 					},
 				},
 			},
@@ -4297,6 +4336,73 @@ func TestGetVersionConfigDiff_RollbackScenario(t *testing.T) {
 
 			assert.Equal(t, tc.expectSetCurrent, result.SetCurrent, tc.description)
 			assert.Equal(t, tc.status.VersionConflictToken, result.ConflictToken)
+		})
+	}
+}
+
+// TestGetTestWorkflows_CarriesEncodingAndMessageType verifies the payload encoding and
+// protobuf message type reach every generated workflow config. These fields are pure
+// pass-through, so the failure mode is not bad logic but a dropped assignment — which
+// would silently downgrade the gate input to plain JSON rather than erroring.
+func TestGetTestWorkflows_CarriesEncodingAndMessageType(t *testing.T) {
+	testCases := []struct {
+		name            string
+		encoding        temporaliov1alpha1.PayloadMetadataEncodingType
+		messageType     string
+		wantEncoding    string
+		wantMessageType string
+	}{
+		{
+			name:            "encoding and message type",
+			encoding:        temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON,
+			messageType:     "my.package.DeployRequest",
+			wantEncoding:    "json/protobuf",
+			wantMessageType: "my.package.DeployRequest",
+		},
+		{
+			name:         "encoding without message type",
+			encoding:     temporaliov1alpha1.PayloadMetadataEncodingTypeBinary,
+			wantEncoding: "binary/plain",
+		},
+		{
+			// A gate authored before these fields existed must still produce workflow
+			// configs that fall through to the controller's plain JSON path.
+			name: "neither set",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "123",
+						Status:  temporaliov1alpha1.VersionStatusInactive,
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+							{Name: "queue2"},
+						},
+					},
+				},
+			}
+			config := &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Gate: &temporaliov1alpha1.GateWorkflowConfig{
+						WorkflowType: "TestWorkflow",
+						Encoding:     tc.encoding,
+						MessageType:  tc.messageType,
+					},
+				},
+			}
+
+			workflows := getTestWorkflows(status, config, "test/namespace", []byte(`{"key":"value"}`), false)
+
+			// Assigned inside the per-task-queue loop, so every workflow must carry it.
+			require.Len(t, workflows, 2, "expected one workflow per task queue")
+			for _, wf := range workflows {
+				assert.Equal(t, tc.wantEncoding, wf.GateEncoding, "task queue %q", wf.TaskQueue)
+				assert.Equal(t, tc.wantMessageType, wf.GateMessageType, "task queue %q", wf.TaskQueue)
+			}
 		})
 	}
 }

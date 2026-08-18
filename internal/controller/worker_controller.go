@@ -534,8 +534,9 @@ func (r *WorkerDeploymentReconciler) markWRTsWDNotFound(ctx context.Context, wd 
 // The cleanup sequence:
 //  1. Clear the ramping version (must happen first to avoid a split-traffic window)
 //  2. Set the current version to "unversioned" (empty BuildID) so new tasks route to unversioned workers
-//  3. Delete all registered versions (with SkipDrainage since the WD is being removed entirely)
-//  4. Delete the deployment record itself once all versions are gone
+//  3. Delete the k8s deployments so their pods stop polling
+//  4. Delete all registered versions (with SkipDrainage since the WD is being removed entirely)
+//  5. Delete the deployment record itself once all versions are gone
 func (r *WorkerDeploymentReconciler) handleDeletion(
 	ctx context.Context,
 	l logr.Logger,
@@ -643,11 +644,29 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		l.Info("No current version set, skipping unversioned redirect")
 	}
 
-	// Step 3: Delete versions that are eligible. Versions that are still draining
-	// are force-deleted with SkipDrainage since the WD is being removed entirely.
-	// If any version fails to delete (e.g. active pollers), return an error so the
-	// reconciler requeues. Pollers disappear once pods terminate and the next
-	// reconciliation will succeed.
+	// Step 3: Delete the k8s deployments so their pods stop polling. DeleteVersion is
+	// rejected while a version still has active pollers.
+	k8sState, err := k8s.GetDeploymentState(
+		ctx,
+		r.Client,
+		workerDeploy.Namespace,
+		workerDeploy.Name,
+		workerDeploymentName)
+	if err != nil {
+		return fmt.Errorf("unable to list k8s deployments during deletion of worker deployment: %w", err)
+	}
+	for _, d := range k8sState.DeploymentsByTime {
+		l.Info("Deleting k8s worker deployment during cleanup", "deployment", d.Name)
+		if err := r.Delete(ctx, d); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("unable to delete k8s deployment %s during deletion of worker deployment (will retry): %w", d.Name, err)
+		}
+	}
+
+	// Step 4: Delete every registered version. SkipDrainage lets DeleteVersion succeed on
+	// versions that are still draining, which is acceptable here since the whole WD is
+	// going away. If any version fails to delete, return an error so the reconciler requeues.
+	// Pollers linger in the server's cache for matching.PollerHistoryTTL (dynamic config,
+	// 5m by default) after the pods terminate, so a later attempt succeeds.
 	for _, version := range resp.Info.VersionSummaries {
 		buildID := version.Version.BuildID
 		l.Info("Deleting worker deployment version", "buildID", buildID)
@@ -660,7 +679,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		}
 	}
 
-	// Step 4: Delete the deployment itself. This only succeeds if all versions are gone.
+	// Step 5: Delete the worker deployment itself. This only succeeds if all versions are gone.
 	l.Info("Attempting to delete worker deployment from Temporal server", "name", workerDeploymentName)
 	if _, err := temporalClient.WorkerDeploymentClient().Delete(ctx, sdkclient.WorkerDeploymentDeleteOptions{
 		Name:     workerDeploymentName,

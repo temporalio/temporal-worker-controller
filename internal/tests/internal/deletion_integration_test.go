@@ -6,6 +6,7 @@ package internal
 //
 // Covered:
 //   - WD deletion sets current version to unversioned on Temporal server
+//   - WD deletion tears down the k8s deployments
 //   - WD deletion removes finalizer from Connection when no other WDs reference it
 //   - WD is fully deleted from K8s after cleanup (finalizer removed)
 //   - WD deletion with Connection deleted simultaneously (Helm race condition) still succeeds
@@ -43,6 +44,10 @@ func runDeletionTests(
 
 	t.Run("deletion-removes-connection-finalizer", func(t *testing.T) {
 		testDeletionRemovesConnectionFinalizer(t, k8sClient, ts, testNamespace)
+	})
+
+	t.Run("drained-version-pruned-from-temporal-on-sunset", func(t *testing.T) {
+		testDrainedVersionPrunedOnSunset(t, k8sClient, ts, testNamespace)
 	})
 }
 
@@ -185,6 +190,22 @@ func testDeletionSetsCurrentToUnversioned(
 		return errors.New("WD still exists, finalizer may not have completed")
 	})
 	t.Log("WD deleted successfully (finalizer completed)")
+
+	// Verify the WD's k8s deployments were deleted.
+	// In a real cluster active pollers linger for matching.PollerHistoryTTL (5m) after the pods
+	// die, delaying the finalizer; this test uses a 1s TTL, so cleanup completes quickly. The
+	// Get below proves the k8s deployments are gone.
+	for _, name := range []string{expectedDeploymentName, deploymentNameV2} {
+		eventually(t, 30*time.Second, time.Second, func() error {
+			var dep appsv1.Deployment
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &dep)
+			if err != nil {
+				return nil
+			}
+			return fmt.Errorf("k8s deployment %s still exists after WD cleanup", name)
+		})
+	}
+	t.Log("Verified: both k8s deployments were deleted during cleanup")
 
 	// Verify Temporal server-side state: current version should be unversioned
 	resp, err := deploymentHandle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
@@ -335,4 +356,124 @@ func testDeletionRemovesConnectionFinalizer(
 		return errors.New("Connection still exists after WD cleanup")
 	})
 	t.Log("Connection deleted successfully (finalizer was removed by WD cleanup)")
+}
+
+// testDrainedVersionPrunedOnSunset verifies the fix for #377: when a deprecated version
+// drains and its Deployment is sunset during a normal rollout, the controller also deletes
+// the version record from the Temporal server, not only the Kubernetes Deployment. Without
+// this, server-side version records accumulate one per rollout until the per-deployment cap
+// (matching.maxVersionsInDeployment) is hit, after which every further rollout fails to
+// register a new build ID.
+func testDrainedVersionPrunedOnSunset(
+	t *testing.T,
+	k8sClient client.Client,
+	ts *temporaltest.TestServer,
+	namespace string,
+) {
+	ctx := context.Background()
+	testName := "del-sunset-prune"
+
+	// Manual strategy so the controller does not race to promote; zero sunset delays so a
+	// drained version becomes eligible for deletion immediately (real configs use minutes to
+	// hours). Runs against the short-poller-TTL server so v1.0 drains in ~1s.
+	tc := testhelpers.NewTestCase().
+		WithInput(
+			testhelpers.NewWorkerDeploymentBuilder().
+				WithManualStrategy().
+				WithTargetTemplate("v1.0"),
+		).
+		BuildWithValues(testName, namespace, ts.GetDefaultNamespace())
+	twd := tc.GetTWD()
+	twd.Spec.SunsetStrategy.ScaledownDelay = &metav1.Duration{Duration: 0}
+	twd.Spec.SunsetStrategy.DeleteDelay = &metav1.Duration{Duration: 0}
+
+	temporalConnection := &temporaliov1alpha1.Connection{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      twd.Spec.WorkerOptions.ConnectionRef.Name,
+			Namespace: namespace,
+		},
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: ts.GetFrontendHostPort(),
+		},
+	}
+	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
+		t.Fatalf("failed to create Connection: %v", err)
+	}
+	if err := k8sClient.Create(ctx, twd); err != nil {
+		t.Fatalf("failed to create WD: %v", err)
+	}
+
+	workerDeploymentName := k8s.ComputeWorkerDeploymentName(twd)
+	deploymentHandle := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(workerDeploymentName)
+
+	// v1.0: wait for its Deployment, start workers, set it as the current version.
+	buildIDv1 := k8s.ComputeBuildID(twd)
+	depNameV1 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv1)
+	eventually(t, 30*time.Second, time.Second, func() error {
+		var dep appsv1.Deployment
+		return k8sClient.Get(ctx, types.NamespacedName{Name: depNameV1, Namespace: namespace}, &dep)
+	})
+	v1StopFuncs := applyDeployment(t, ctx, k8sClient, depNameV1, namespace)
+	setCurrentVersion(t, ctx, ts, workerDeploymentName, buildIDv1)
+
+	// Roll out v2.0 and make it current, so v1.0 becomes deprecated and starts draining.
+	var twdV2 temporaliov1alpha1.WorkerDeployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdV2); err != nil {
+		t.Fatalf("failed to get TWD for v2.0 update: %v", err)
+	}
+	twdV2.Spec.Template.Spec.Containers[0].Image = "v2.0"
+	buildIDv2 := k8s.ComputeBuildID(&twdV2)
+	depNameV2 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv2)
+	if err := k8sClient.Update(ctx, &twdV2); err != nil {
+		t.Fatalf("failed to update TWD to v2.0: %v", err)
+	}
+	eventually(t, 30*time.Second, time.Second, func() error {
+		var dep appsv1.Deployment
+		return k8sClient.Get(ctx, types.NamespacedName{Name: depNameV2, Namespace: namespace}, &dep)
+	})
+	v2StopFuncs := applyDeployment(t, ctx, k8sClient, depNameV2, namespace)
+	defer handleStopFuncs(v2StopFuncs)
+	setCurrentVersion(t, ctx, ts, workerDeploymentName, buildIDv2)
+
+	// Wait for the controller to observe v1.0 as Drained (short-TTL server drains in ~1s).
+	// v1.0 still reports active replicas here, so it is not yet EligibleForDeletion and the
+	// controller will not prune it — this step just fails fast if drainage never happens.
+	eventually(t, 60*time.Second, time.Second, func() error {
+		var cur temporaliov1alpha1.WorkerDeployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &cur); err != nil {
+			return err
+		}
+		for _, dv := range cur.Status.DeprecatedVersions {
+			if dv.BuildID == buildIDv1 && dv.Status == temporaliov1alpha1.VersionStatusDrained {
+				return nil
+			}
+		}
+		return fmt.Errorf("v1.0 (buildID=%s) not yet Drained in TWD status", buildIDv1)
+	})
+
+	// Stop v1.0's workers and scale its Deployment to zero, so it becomes EligibleForDeletion
+	// and cannot re-register on the server after we prune it.
+	handleStopFuncs(v1StopFuncs)
+	scaleDeploymentToZero(t, ctx, k8sClient, depNameV1, namespace)
+
+	// The controller should now, on a normal reconcile, delete v1.0's Deployment AND prune
+	// its Temporal server-side version record.
+	eventually(t, 90*time.Second, 2*time.Second, func() error {
+		var dep appsv1.Deployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: depNameV1, Namespace: namespace}, &dep); err == nil {
+			return fmt.Errorf("v1.0 Deployment %s still exists", depNameV1)
+		} else if client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("unexpected error getting v1.0 Deployment: %w", err)
+		}
+		_, err := deploymentHandle.DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{BuildID: buildIDv1})
+		if err == nil {
+			return fmt.Errorf("v1.0 version record still registered on Temporal server")
+		}
+		var notFound *serviceerror.NotFound
+		if !errors.As(err, &notFound) {
+			return fmt.Errorf("unexpected error describing v1.0 version: %w", err)
+		}
+		return nil
+	})
+	t.Logf("Verified: drained v1.0 (buildID=%s) was pruned from the Temporal server on sunset", buildIDv1)
 }

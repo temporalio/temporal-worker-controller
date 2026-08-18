@@ -94,9 +94,11 @@ func validateForUpdateOrCreate(old, new *WorkerDeployment) (admission.Warnings, 
 }
 
 // validateRolloutStrategy checks constraints that the CRD schema cannot enforce:
-// rampPercentage must be strictly increasing across steps, and gate.input and
-// gate.inputFrom are mutually exclusive (gate.input is an unstructured JSON field
-// invisible to CEL). All other rollout constraints are enforced by the CRD CEL rules.
+// rampPercentage must be strictly increasing across steps, and the rules involving
+// gate.input, which is an unstructured JSON field invisible to CEL — a rule naming it
+// fails to compile and the CRD is rejected at install time. That covers gate.input and
+// gate.inputFrom being mutually exclusive, and the binary encodings requiring
+// gate.inputFrom. All other rollout constraints are enforced by the CRD CEL rules.
 func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 	var allErrs []*field.Error
 
@@ -117,6 +119,43 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 			field.Invalid(field.NewPath("spec.rollout.gate"), "input & inputFrom",
 				"only one of input or inputFrom may be set"),
 		)
+	}
+
+	if s.Gate != nil {
+		isProtoEncoding := s.Gate.Encoding == PayloadMetadataEncodingTypeProtoJSON ||
+			s.Gate.Encoding == PayloadMetadataEncodingTypeProto
+		switch {
+		case s.Gate.Encoding == PayloadMetadataEncodingTypeProto && s.Gate.MessageType == "":
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.rollout.gate.messageType"), s.Gate.MessageType,
+					"messageType is required when encoding is binary/protobuf"),
+			)
+		case s.Gate.MessageType != "" && !isProtoEncoding:
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.rollout.gate.messageType"), s.Gate.MessageType,
+					"messageType may only be set when encoding is json/protobuf or binary/protobuf"),
+			)
+		}
+
+		// The binary encodings describe raw bytes, which inline input cannot carry: it is
+		// written as JSON in the resource itself. The bytes have to come from a Secret or a
+		// ConfigMap binaryData key instead. Declaring one of these encodings with no input at
+		// all is rejected too, since the encoding would then describe a payload that is never
+		// sent. This reports encoding as the offending value rather than the input.
+		isBinaryEncoding := s.Gate.Encoding == PayloadMetadataEncodingTypeBinary ||
+			s.Gate.Encoding == PayloadMetadataEncodingTypeProto
+		switch {
+		case isBinaryEncoding && s.Gate.Input != nil:
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.rollout.gate.encoding"), s.Gate.Encoding,
+					"encoding binary/plain and binary/protobuf cannot be used with inline input, which cannot carry raw bytes; use inputFrom with a Secret or a ConfigMap binaryData key"),
+			)
+		case isBinaryEncoding && s.Gate.InputFrom == nil:
+			allErrs = append(allErrs,
+				field.Invalid(field.NewPath("spec.rollout.gate.encoding"), s.Gate.Encoding,
+					"encoding binary/plain and binary/protobuf require inputFrom with a Secret or a ConfigMap binaryData key"),
+			)
+		}
 	}
 
 	return allErrs
