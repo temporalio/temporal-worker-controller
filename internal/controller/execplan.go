@@ -17,8 +17,11 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
@@ -127,14 +130,28 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 
 func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
 	for _, wf := range p.startTestWorkflows {
+		// Identify the gate workflow on every log line for this iteration, so the call
+		// sites below only carry what differs between them. Declared per iteration, so
+		// the payload fields added below never carry over to the next gate workflow.
+		gl := l.WithValues(
+			"workflowType", wf.workflowType,
+			"taskQueue", wf.taskQueue,
+			"buildID", wf.buildID,
+		)
+
 		// Log workflow start details
 		if len(wf.input) > 0 {
+			// Payload encoding is only meaningful when there is an input to encode, so
+			// these fields are attached here rather than for every gate workflow. The
+			// message type is omitted unless set, so gates that do not use one are not
+			// annotated with a permanently empty field.
+			gl = gl.WithValues("encoding", gateInputEncoding(wf))
+			if wf.messageType != "" {
+				gl = gl.WithValues("messageType", wf.messageType)
+			}
 			if wf.isInputSecret {
 				// Don't log the actual input if it came from a Secret
-				l.Info("starting gate workflow",
-					"workflowType", wf.workflowType,
-					"taskQueue", wf.taskQueue,
-					"buildID", wf.buildID,
+				gl.Info("starting gate workflow",
 					"inputBytes", len(wf.input),
 					"inputSource", "SecretRef (contents hidden)",
 				)
@@ -151,21 +168,13 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 				}
 
 				// Log the input keys for non-secret sources (inline or ConfigMap)
-				l.Info("starting gate workflow",
-					"workflowType", wf.workflowType,
-					"taskQueue", wf.taskQueue,
-					"buildID", wf.buildID,
+				gl.Info("starting gate workflow",
 					"inputBytes", len(wf.input),
 					"inputKeys", inputKeys,
 				)
 			}
 		} else {
-			l.Info("starting gate workflow",
-				"workflowType", wf.workflowType,
-				"taskQueue", wf.taskQueue,
-				"buildID", wf.buildID,
-				"inputBytes", 0,
-			)
+			gl.Info("starting gate workflow", "inputBytes", 0)
 		}
 		opts := sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
@@ -182,7 +191,7 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 		}
 		var err error
 		if len(wf.input) > 0 {
-			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType, json.RawMessage(wf.input))
+			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType, gateWorkflowArg(wf))
 		} else {
 			_, err = temporalClient.ExecuteWorkflow(ctx, opts, wf.workflowType)
 		}
@@ -194,6 +203,43 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 		}
 	}
 	return nil
+}
+
+// gateWorkflowArg builds the first argument passed to a gate workflow.
+// When no encoding is declared the input is sent as plain JSON.
+//
+// When an encoding is declared the input bytes are passed through untouched, labelled
+// with that encoding. converter.NewRawValue tells the SDK to send the payload exactly
+// as constructed instead of running the value through its own converters, so the
+// encoding the user asked for is the one the worker sees. The worker then selects its
+// decoder from that label.
+//
+// A message type is recorded only when the user supplied one. The key is omitted rather
+// than set to an empty string, matching how the SDK builds payloads for non-protobuf
+// values.
+func gateWorkflowArg(wf startWorkflowConfig) interface{} {
+	if wf.encoding == "" {
+		return json.RawMessage(wf.input)
+	}
+	metadata := map[string][]byte{
+		converter.MetadataEncoding: []byte(wf.encoding),
+	}
+	if wf.messageType != "" {
+		metadata[converter.MetadataMessageType] = []byte(wf.messageType)
+	}
+	return converter.NewRawValue(&commonpb.Payload{
+		Metadata: metadata,
+		Data:     wf.input,
+	})
+}
+
+// gateInputEncoding returns the encoding the payload will actually carry, so an unset
+// encoding logs as the json/plain the controller falls back to rather than as empty.
+func gateInputEncoding(wf startWorkflowConfig) string {
+	if wf.encoding == "" {
+		return string(temporaliov1alpha1.PayloadMetadataEncodingTypeJSON)
+	}
+	return wf.encoding
 }
 
 func (r *WorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.VersionConfig) bool {
@@ -321,27 +367,16 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 	return nil
 }
 
-//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
-func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
-	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
-	if err != nil {
-		return err
-	}
-
-	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
-
-	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
-		return err
-	}
-
-	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
-		return err
-	}
-
-	// Patch any WRTs that are missing the owner reference to this TWD.
-	// Failures are logged but do not block the worker resource template apply step below —
-	// a WRT may have been deleted between plan generation and execution, and
-	// applying resources is more important than setting owner references.
+// ensureWRTOwnerRefs patches any WRTs that are missing the owner reference to
+// this TWD. Failures are logged but do not block the worker resource template
+// apply step below — a WRT may have been deleted between plan generation and
+// execution, and applying resources is more important than setting owner
+// references.
+func (r *WorkerDeploymentReconciler) ensureWRTOwnerRefs(
+	ctx context.Context,
+	l logr.Logger,
+	p *plan,
+) {
 	for _, ownerPatch := range p.EnsureWRTOwnerRefs {
 		if err := r.Patch(ctx, ownerPatch.Patched, client.MergeFrom(ownerPatch.Base)); err != nil {
 			l.Error(err, "failed to patch WRT with controller reference",
@@ -350,7 +385,20 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 			)
 		}
 	}
+}
 
+// executeWRTOperations handles the creation, patching and deletion of any
+// WorkerResourceTemplates associated with the WorkerDeployment.
+//
+//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
+func (r *WorkerDeploymentReconciler) executeWRTOperations(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
+	temporalClient sdkclient.Client,
+	p *plan,
+	deletedWorkerResources []planner.WorkerResourceRef,
+) error {
 	// Apply worker resource templates via Server-Side Apply.
 	// Partial failure isolation: all resources are attempted even if some fail;
 	// errors are collected and returned together.
@@ -578,4 +626,93 @@ func (r *WorkerDeploymentReconciler) executePlan(ctx context.Context, l logr.Log
 	}
 
 	return errors.Join(append(applyErrs, statusErrs...)...)
+}
+
+// deleteDrainedVersions prunes the Temporal server-side Worker Deployment Version
+// record for each Deployment deleted this reconcile (executeK8sOperations, called
+// first). The planner only adds a drained version to DeleteDeployments once it is
+// EligibleForDeletion (see planner.getDeleteDeployments): drained past the sunset
+// delays with no active worker pods. Deleting the Kubernetes Deployment alone would
+// leave the server-side version registered forever — the only other cleanup path is
+// the CRD-deletion finalizer, which never runs during a normal rollout. This is also
+// the only point that can reliably prune it: a version's status entry only exists in
+// status.DeprecatedVersions while its Deployment does (see state_mapper.go), so once
+// the Deployment is gone there is no way to retry on a later reconcile. Left unpruned,
+// these accumulate one per rollout and eventually hit the server's per-deployment
+// version cap, after which every new build ID fails to register (#377) if the
+// automated delete-oldest-drained-version-when-exceeding-version-limit
+// behaviour of temporal server is not working properly
+// (temporalio/temporal#10737).
+//
+// Build IDs are read off the in-memory Deployment objects, which survive their cluster
+// deletion, so this runs in the Temporal phase without reaching back into k8sState.
+// Best-effort: the Kubernetes Deployment is already gone (the primary action), so a
+// failure here only means the Temporal-side record lingers until an operator prunes it
+// or the CRD is deleted. NotRegistered Deployments are also carried in DeleteDeployments;
+// they have no server-side version and return NotFound, which is skipped.
+func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
+	ctx context.Context,
+	l logr.Logger,
+	depHandle sdkclient.WorkerDeploymentHandle,
+	p *plan,
+) {
+	identity := getControllerIdentity()
+	for _, d := range p.DeleteDeployments {
+		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
+		if !ok {
+			l.Info("deployment has no build ID label, skipping Temporal server-side version cleanup", "deployment", d.Name)
+			continue
+		}
+		_, err := depHandle.DeleteVersion(
+			ctx,
+			sdkclient.WorkerDeploymentDeleteVersionOptions{
+				BuildID:  buildID,
+				Identity: identity,
+			},
+		)
+		if err != nil {
+			var notFound *serviceerror.NotFound
+			if errors.As(err, &notFound) {
+				continue
+			}
+			l.Info("could not delete worker deployment version, may require manual cleanup", "buildID", buildID, "error", err)
+		} else {
+			l.Info("deleted drained worker deployment version", "buildID", buildID)
+		}
+	}
+}
+
+// executePlan performs all required operations in the generated plan.
+func (r *WorkerDeploymentReconciler) executePlan(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
+	temporalClient sdkclient.Client,
+	p *plan,
+) error {
+	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
+	if err != nil {
+		return err
+	}
+
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+
+	// Prune Temporal server-side version records for the versions whose Deployments
+	// were just deleted in executeK8sOperations. Must happen in the same reconcile as
+	// the Deployment delete; see deleteDrainedVersions.
+	r.deleteDrainedVersions(ctx, l, deploymentHandler, p)
+
+	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
+		return err
+	}
+
+	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
+		return err
+	}
+
+	r.ensureWRTOwnerRefs(ctx, l, p)
+
+	return r.executeWRTOperations(
+		ctx, l, workerDeploy, temporalClient, p, deletedWorkerResources,
+	)
 }

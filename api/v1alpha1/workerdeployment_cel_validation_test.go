@@ -8,6 +8,7 @@ package v1alpha1
 // testing what the API server enforces regardless of whether the webhook is enabled.
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -114,5 +115,101 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		err := k8sClient.Create(ctx, twd)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("exactly one of configMapKeyRef or secretKeyRef must be set"))
+	})
+
+	// gateTWD returns a TWD whose gate declares the given payload encoding and message
+	// type. Empty values are dropped by omitempty, so passing "" leaves the field unset
+	// as far as the API server (and therefore the CEL has() guards) is concerned.
+	gateTWD := func(name string, encoding PayloadMetadataEncodingType, messageType string, opts ...func(*GateWorkflowConfig)) *WorkerDeployment {
+		twd := baseTWD(name)
+		gate := &GateWorkflowConfig{
+			WorkflowType: "my-gate",
+			Encoding:     encoding,
+			MessageType:  messageType,
+		}
+		for _, opt := range opts {
+			opt(gate)
+		}
+		twd.Spec.RolloutStrategy = RolloutStrategy{
+			Strategy: UpdateAllAtOnce,
+			Gate:     gate,
+		}
+		return twd
+	}
+
+	// withSecretInput satisfies the webhook's requirement that the binary encodings read
+	// their bytes from a byte-valued source. The webhook runs against this envtest server
+	// too, so a binary encoding without it is rejected before the CEL rule under test is
+	// reached.
+	withSecretInput := func(g *GateWorkflowConfig) {
+		g.InputFrom = &GateInputSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "gate-input"},
+				Key:                  "request.bin",
+			},
+		}
+	}
+
+	const messageTypeRequiredErr = "gate.messageType is required when gate.encoding is binary/protobuf"
+	const messageTypeNotAllowedErr = "gate.messageType may only be set when gate.encoding is json/protobuf or binary/protobuf"
+
+	// Guards the pre-existing behavior: a gate that predates the encoding field must
+	// still be accepted unchanged.
+	It("accepts a gate with neither encoding nor messageType", func() {
+		Expect(k8sClient.Create(ctx, gateTWD("gate-no-encoding", "", ""))).To(Succeed())
+	})
+
+	It("accepts every encoding in the enum", func() {
+		// binary/protobuf is excluded here because it additionally requires messageType;
+		// it is covered by its own case below. Every gate reads from a Secret, which is a
+		// valid source for all of these encodings, so the only thing varying is the enum
+		// value itself.
+		for i, enc := range []PayloadMetadataEncodingType{
+			PayloadMetadataEncodingTypeBinary,
+			PayloadMetadataEncodingTypeJSON,
+			PayloadMetadataEncodingTypeProtoJSON,
+		} {
+			Expect(k8sClient.Create(ctx, gateTWD(fmt.Sprintf("gate-encoding-%d", i), enc, "", withSecretInput))).
+				To(Succeed(), "encoding %q should be accepted", enc)
+		}
+	})
+
+	It("rejects an encoding outside the enum", func() {
+		err := k8sClient.Create(ctx, gateTWD("gate-bad-encoding", "application/xml", ""))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Unsupported value"))
+	})
+
+	It("rejects binary/protobuf without messageType", func() {
+		err := k8sClient.Create(ctx, gateTWD("gate-proto-no-type", PayloadMetadataEncodingTypeProto, "", withSecretInput))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(messageTypeRequiredErr))
+	})
+
+	It("accepts binary/protobuf with messageType", func() {
+		Expect(k8sClient.Create(ctx,
+			gateTWD("gate-proto-with-type", PayloadMetadataEncodingTypeProto, "my.package.DeployRequest", withSecretInput),
+		)).To(Succeed())
+	})
+
+	It("accepts json/protobuf with messageType", func() {
+		Expect(k8sClient.Create(ctx,
+			gateTWD("gate-protojson-with-type", PayloadMetadataEncodingTypeProtoJSON, "my.package.DeployRequest"),
+		)).To(Succeed())
+	})
+
+	It("rejects messageType with a non-protobuf encoding", func() {
+		err := k8sClient.Create(ctx,
+			gateTWD("gate-json-with-type", PayloadMetadataEncodingTypeJSON, "my.package.DeployRequest"))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(messageTypeNotAllowedErr))
+	})
+
+	// Exercises the has(self.gate.encoding) guard specifically: without it the rule would
+	// error on the missing field rather than rejecting the resource with this message.
+	It("rejects messageType when no encoding is set", func() {
+		err := k8sClient.Create(ctx, gateTWD("gate-type-no-encoding", "", "my.package.DeployRequest"))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(messageTypeNotAllowedErr))
 	})
 })

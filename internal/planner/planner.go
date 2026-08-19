@@ -121,6 +121,12 @@ type WorkflowConfig struct {
 	// IsInputSecret indicates whether the GateInput came from a Secret reference
 	// and should be treated as sensitive (not logged)
 	IsInputSecret bool
+	// GateEncoding is the payload encoding to declare for GateInput when starting the
+	// workflow. Empty means the SDK will use json/plain encoding.
+	GateEncoding string
+	// GateMessageType is the fully-qualified protobuf message name to record alongside
+	// GateInput. Empty means no message type is declared.
+	GateMessageType string
 }
 
 // Config holds the configuration for planning
@@ -519,7 +525,7 @@ func removeTLSVolume(volumes []corev1.Volume) []corev1.Volume {
 func ensureTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 	for i := range mounts {
 		if mounts[i].Name == "temporal-tls" {
-			mounts[i].Name = "/etc/temporal/tls"
+			mounts[i].MountPath = "/etc/temporal/tls"
 			return mounts
 		}
 	}
@@ -688,16 +694,6 @@ func getUpdateDeployments(
 		}
 	}
 
-	// Check deprecated versions for expired connection spec hashes
-	for _, version := range status.DeprecatedVersions {
-		if !updatedBuildIDs[version.BuildID] {
-			if deployment := checkAndUpdateDeploymentConnectionSpec(version.BuildID, k8sState, connection); deployment != nil {
-				updateDeployments = append(updateDeployments, deployment)
-				updatedBuildIDs[version.BuildID] = true
-			}
-		}
-	}
-
 	return updateDeployments
 }
 
@@ -726,9 +722,17 @@ func getDeleteDeployments(
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
 			// 2. The deployment is scaled to 0 replicas.
+			// 3. The version is eligible for deletion (drained with no active
+			//    worker pods, i.e. Status.Replicas == 0). Requiring this lets
+			//    executePlan prune the Temporal-side version record in the same
+			//    reconcile as the Deployment delete: EligibleForDeletion is only
+			//    computable while the Deployment (and thus this DeprecatedVersions
+			//    entry) still exists, so this is the only point that can reliably
+			//    prune it. See execplan.deleteDrainedVersions.
 			if version.DrainedSince != nil &&
 				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
-				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				version.EligibleForDeletion {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		case temporaliov1alpha1.VersionStatusNotRegistered:
@@ -893,12 +897,14 @@ func getTestWorkflows(
 	for _, tq := range targetVersion.TaskQueues {
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
-				WorkflowType:  config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:    temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
-				BuildID:       targetVersion.BuildID,
-				TaskQueue:     tq.Name,
-				GateInput:     string(gateInput),
-				IsInputSecret: isGateInputSecret,
+				WorkflowType:    config.RolloutStrategy.Gate.WorkflowType,
+				WorkflowID:      temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
+				BuildID:         targetVersion.BuildID,
+				TaskQueue:       tq.Name,
+				GateInput:       string(gateInput),
+				IsInputSecret:   isGateInputSecret,
+				GateEncoding:    string(config.RolloutStrategy.Gate.Encoding),
+				GateMessageType: config.RolloutStrategy.Gate.MessageType,
 			})
 		}
 	}

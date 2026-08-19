@@ -59,6 +59,12 @@ type startWorkflowConfig struct {
 	taskQueue     string
 	input         []byte
 	isInputSecret bool // indicates if input should be treated as sensitive
+	// encoding is the payload encoding to declare for input when starting the
+	// workflow. Empty means the input is sent as plain JSON.
+	encoding string
+	// messageType is the fully-qualified protobuf message name to record alongside
+	// input. Empty means no message type is declared.
+	messageType string
 }
 
 // generatePlan creates a plan for the controller to execute
@@ -184,6 +190,8 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 			taskQueue:     wf.TaskQueue,
 			input:         []byte(wf.GateInput),
 			isInputSecret: wf.IsInputSecret,
+			encoding:      wf.GateEncoding,
+			messageType:   wf.GateMessageType,
 		})
 	}
 

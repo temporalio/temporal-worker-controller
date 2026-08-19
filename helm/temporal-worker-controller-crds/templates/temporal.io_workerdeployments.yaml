@@ -61,6 +61,13 @@ spec:
                 properties:
                   gate:
                     properties:
+                      encoding:
+                        enum:
+                        - binary/plain
+                        - json/plain
+                        - json/protobuf
+                        - binary/protobuf
+                        type: string
                       input:
                         x-kubernetes-preserve-unknown-fields: true
                       inputFrom:
@@ -92,6 +99,8 @@ spec:
                             type: object
                             x-kubernetes-map-type: atomic
                         type: object
+                      messageType:
+                        type: string
                       workflowType:
                         type: string
                     required:
@@ -132,6 +141,14 @@ spec:
                     set
                   rule: '!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef)
                     != has(self.gate.inputFrom.secretKeyRef))'
+                - message: gate.messageType is required when gate.encoding is binary/protobuf
+                  rule: '!has(self.gate) || !has(self.gate.encoding) || self.gate.encoding
+                    != ''binary/protobuf'' || has(self.gate.messageType)'
+                - message: gate.messageType may only be set when gate.encoding is
+                    json/protobuf or binary/protobuf
+                  rule: '!has(self.gate) || !has(self.gate.messageType) || (has(self.gate.encoding)
+                    && (self.gate.encoding == ''json/protobuf'' || self.gate.encoding
+                    == ''binary/protobuf''))'
               sunset:
                 properties:
                   deleteDelay:
@@ -2959,6 +2976,11 @@ spec:
                         x-kubernetes-list-map-keys:
                         - name
                         x-kubernetes-list-type: map
+                      schedulingGroup:
+                        properties:
+                          podGroupName:
+                            type: string
+                        type: object
                       securityContext:
                         properties:
                           appArmorProfile:
@@ -3950,18 +3972,6 @@ spec:
                         x-kubernetes-list-map-keys:
                         - name
                         x-kubernetes-list-type: map
-                      workloadRef:
-                        properties:
-                          name:
-                            type: string
-                          podGroup:
-                            type: string
-                          podGroupReplicaKey:
-                            type: string
-                        required:
-                        - name
-                        - podGroup
-                        type: object
                     required:
                     - containers
                     type: object
