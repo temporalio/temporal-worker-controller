@@ -17,6 +17,12 @@ updates:
       # sdk-go, server, etc) because dependabot's inter-package dependency
       # resolution for the temporal Go packages is, well, terrible.
       - dependency-name: "go.temporal.io/*"
+      # Likewise, we are deliberate about updating the Kubernetes Go
+      # dependencies (controller-runtime, api-machinery, etc) for the same
+      # reason. Dependabot gets easily confused and cannot properly resolve
+      # rebase conflicts.
+      - dependency-name: "k8s.io/*"
+      - dependency-name: "sigs.k8s.io/*"
     groups:
       go-modules:
         applies-to: version-updates
