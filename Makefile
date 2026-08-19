@@ -35,6 +35,13 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 TEMPORAL ?= temporal
 
+## Local Temporal dev server (see `make start-temporal-server`).
+## Used by the *-local load targets, which run on the host and therefore cannot
+## use the in-cluster address (host.minikube.internal) from skaffold.env.
+LOCAL_TEMPORAL_ADDRESS ?= 127.0.0.1:7233
+LOCAL_TEMPORAL_NAMESPACE ?= default
+LOCAL_TEMPORAL_TASK_QUEUE ?= default/helloworld
+
 ## Tool Versions
 HELM_VERSION ?= v3.14.3
 CONTROLLER_TOOLS_VERSION ?= v0.19.0
@@ -195,6 +202,31 @@ apply-hpa-load: ## Start ~2 workflows/sec to build a backlog and drive HPA scali
 	@echo "Starting load at ~2 workflows/sec. Press Ctrl-C to stop."
 	@while true; do \
 		$(MAKE) -s start-sample-workflow & \
+		sleep 0.5; \
+	done
+
+.PHONY: start-sample-workflow-local
+.SILENT: start-sample-workflow-local
+start-sample-workflow-local: ## Start one sample workflow against the local dev server (no credentials).
+	@$(TEMPORAL) workflow start --type "HelloWorld" \
+		--task-queue "$(LOCAL_TEMPORAL_TASK_QUEUE)" \
+		--address "$(LOCAL_TEMPORAL_ADDRESS)" \
+		--namespace "$(LOCAL_TEMPORAL_NAMESPACE)"
+
+.PHONY: apply-load-sample-workflow-local
+.SILENT: apply-load-sample-workflow-local
+apply-load-sample-workflow-local: ## Start a sample workflow every 15s against the local dev server.
+	@while true; do \
+		$(MAKE) -s start-sample-workflow-local; \
+		sleep 15; \
+	done
+
+.PHONY: apply-hpa-load-local
+.SILENT: apply-hpa-load-local
+apply-hpa-load-local: ## Start ~2 workflows/sec against the local dev server to drive HPA scaling.
+	@echo "Starting load at ~2 workflows/sec against $(LOCAL_TEMPORAL_ADDRESS). Press Ctrl-C to stop."
+	@while true; do \
+		$(MAKE) -s start-sample-workflow-local & \
 		sleep 0.5; \
 	done
 

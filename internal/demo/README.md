@@ -5,12 +5,26 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 ### Prerequisites
 
 - [Minikube](https://minikube.sigs.k8s.io/docs/start/)
-- [Helm](https://helm.sh/docs/intro/install/)
+- [Helm](https://helm.sh/docs/intro/install/) **v3.x** — the charts are tested against v3.14.3 (`HELM_VERSION` in the Makefile), and Skaffold shells out to whichever `helm` is on your `PATH`. Helm 4 is not tested here; if your package manager gave you Helm 4, run `make helm-dependency-build` and put the pinned binary first: `export PATH="$PWD/bin:$PATH"`.
 - [Skaffold](https://skaffold.dev/docs/install/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-- Temporal Cloud account with API key or mTLS certificates
+- A Temporal server, either:
+  - a **Temporal Cloud** account with an API key or mTLS certificates, or
+  - a **local dev server** — no account, no certificates. See [Option B](#option-b-local-dev-server-no-credentials) below.
 - Understanding of [Worker Versioning concepts](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) (Pinned and Auto-Upgrade versioning behaviors)
 - cert-manager is required for the `WorkerResourceTemplate` validating webhook (TLS). The controller Helm chart installs it automatically as a subchart (`certmanager.install: true` is set in the Skaffold profile).
+- The `jetstack` Helm repo must be registered **in the Helm configuration Skaffold sees**, or `skaffold run --profile worker-controller` fails with `building helm dependencies: exit status 1`. `make helm-dependency-build` deliberately writes to an isolated repo config under `bin/` so it never touches your global Helm setup, which means Skaffold does not inherit it. Either register it globally once:
+
+  ```bash
+  helm repo add jetstack https://charts.jetstack.io
+  ```
+
+  or point Skaffold at the isolated config:
+
+  ```bash
+  export HELM_REPOSITORY_CONFIG="$PWD/bin/helm-repositories.yaml"
+  export HELM_REPOSITORY_CACHE="$PWD/bin/helm-repository-cache"
+  ```
 
 > **Note**: This demo specifically showcases **Pinned** workflow behavior. All workflows in the demo will remain on the worker version where they started, demonstrating how the controller safely manages multiple worker versions simultaneously during deployments.
 
@@ -22,14 +36,18 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    ```
 
 2. Create the `skaffold.env` file:
-   - Run:
-     ```bash
-     cp skaffold.example.env skaffold.env
-     ```
+   ```bash
+   cp skaffold.example.env skaffold.env
+   ```
 
-   - Update the value of `TEMPORAL_NAMESPACE`, `TEMPORAL_ADDRESS`  in `skaffold.env` to match your configuration.
+   Then fill it in using **either** Option A (Temporal Cloud) or Option B (local dev server).
 
-2. Set up Temporal Cloud Authentication:
+#### Option A: Temporal Cloud
+
+   Set `TEMPORAL_NAMESPACE` and `TEMPORAL_ADDRESS` in `skaffold.env` to match your namespace,
+   then configure one of mTLS or API key authentication.
+
+   **Using mTLS**
    - Create a `certs` directory in the project root
    - Save your Temporal Cloud mTLS client certificates as:
      - `certs/client.pem`
@@ -44,9 +62,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      TEMPORAL_MTLS_SECRET_NAME=temporal-cloud-mtls-secret
      ```
 
-   NOTE: Alternatively, if you are using API keys, follow the steps below instead of mTLS:
-
-   #### Using API Keys (alternative to mTLS)
+   **Using API Keys**
    - Create a `certs` directory in the project root if not already present
    - Save your Temporal Cloud API key in a file (single line, no newline):
      ```bash
@@ -69,42 +85,91 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    - Note: Do not set both mTLS and API key for the same connection. If both present, the Connection Custom Resource
    Instance will not get installed in the k8s environment.
 
+#### Option B: local dev server (no credentials)
+
+   Runs the whole demo against `temporal server start-dev` on your host. No Temporal Cloud
+   account, no certificates, nothing to rotate. Good for working on the controller itself.
+
+   Start the server and leave it running in its own terminal:
+   ```bash
+   make start-temporal-server
+   ```
+   This binds `0.0.0.0` and enables the two dynamic configs the controller needs
+   (`frontend.workerVersioningWorkflowAPIs`, `system.enableDeploymentVersions`).
+
+   Then set `skaffold.env` to:
+   ```env
+   TEMPORAL_NAMESPACE=default
+   TEMPORAL_ADDRESS=host.minikube.internal:7233
+   TEMPORAL_MTLS_SECRET_NAME=""
+   TEMPORAL_API_KEY_SECRET_NAME=""
+   TEMPORAL_API_KEY_SECRET_KEY=""
+   SKAFFOLD_KUBE_CONTEXT=minikube
+   ```
+
+   Leaving both secret names empty makes `ConnectionSpec.AuthMode()` resolve to
+   `NO_CREDENTIALS` (see `api/v1alpha1/connection_types.go`), and the controller then injects
+   no TLS or API-key environment variables into the worker pods. The worker builds its client
+   with the Go SDK's `envconfig`, which defaults to plaintext, so it connects without further
+   configuration.
+
+   `host.minikube.internal` is how a pod reaches a process listening on your host. Verify it
+   before going further — if this fails, nothing downstream will work:
+   ```bash
+   kubectl run nettest --rm -i --restart=Never --image=busybox:1.36 -- \
+     nc -z -w 5 host.minikube.internal 7233 && echo REACHABLE
+   ```
+
+   > **Note**: gate and backlog behaviour differ slightly from Cloud. Everything in this guide
+   > works locally except the two "Task Backlog" dashboard panels, which need Temporal Cloud
+   > metrics — see [Grafana Dashboard](#grafana-dashboard).
+
 3. Build and deploy the Controller image to the local k8s cluster:
    ```bash
    skaffold run --profile worker-controller
    ```
 
+   This installs cert-manager, the CRDs chart, and the controller. If it fails with
+   `building helm dependencies: exit status 1`, the `jetstack` repo is not registered in the
+   Helm config Skaffold sees — see [Prerequisites](#prerequisites).
+
 ### Testing Progressive Deployments
 
 > **`WORKER_VERSION` is required** for every `skaffold run --profile helloworld-worker` invocation. It drives the image tag (and therefore the Temporal build ID), so each deploy must use a fresh value (`v1`, `v2`, …). If unset, skaffold silently falls back to tagging the image `:latest` while helm renders `image.tag` as `<no value>`, which deploys a broken pod.
 
-5. **Deploy the v1 worker**:
+4. **Deploy the v1 worker**:
    ```bash
    WORKER_VERSION=v1 skaffold run --profile helloworld-worker
    ```
    This deploys a WorkerDeployment and Connection Custom Resource using the **Progressive strategy**. Note that when there is no current version (as in an initial versioned worker deployment), the progressive steps are skipped and v1 becomes the current version immediately. All new workflow executions will now start on v1.
    
-6. Watch the deployment status:
+5. Watch the deployment status:
    ```bash
    watch kubectl get workerdeployment
    ```
 
-7. **Apply load** to the v1 worker to simulate production traffic:
+6. **Apply load** to the v1 worker to simulate production traffic:
     ```bash
-    make apply-load-sample-workflow
+    make apply-load-sample-workflow          # Temporal Cloud (Option A)
+    make apply-load-sample-workflow-local    # local dev server (Option B)
     ```
+
+    > The non-`-local` targets read `TEMPORAL_ADDRESS` from `skaffold.env` and always pass
+    > `--tls-cert-path certs/client.pem`, so they only work with Option A. The `-local`
+    > variants talk to `127.0.0.1:7233` with no credentials. (`host.minikube.internal` from
+    > `skaffold.env` resolves only inside the cluster, not on your host.)
 
 #### **Progressive Rollout of v2** (Non-Replay-Safe Change)
 
-8. **Deploy a non-replay-safe workflow change**:
+7. **Deploy a non-replay-safe workflow change**:
    ```bash
    git apply internal/demo/helloworld/changes/no-version-gate.patch
    WORKER_VERSION=v2 skaffold run --profile helloworld-worker
    ```
    This applies a **non-replay-safe change** (switching an activity response type from string to a struct).
 
-9. **Observe the progressive rollout managing incompatible versions**:
-   - New workflow executions gradually shift from v1 to v2 following the configured rollout steps (1% → 5% → 10% → 50% → 100%)
+8. **Observe the progressive rollout managing incompatible versions**:
+   - New workflow executions gradually shift from v1 to v2 following the configured rollout steps (25% → 50% → 75% → 100%, with a 120s pause at each step — see `internal/demo/helloworld/helm/helloworld/templates/deployment.yaml`)
    - **Both worker versions run simultaneously** - this is critical since the code changes are incompatible
    - v1 workers continue serving existing workflows (which would fail to replay on v2)
    - v2 workers handle new workflow executions with the updated code
@@ -147,7 +212,7 @@ You should see one HPA per worker version with running workers, with `scaleTarge
 
 When you deploy a new worker version (e.g., step 8), the controller creates a new HPA for the new Build ID and keeps the old one until that versioned Deployment is deleted during the sunset process.
 
-See [docs/owned-resources.md](../../docs/worker-resource-templates.md) for full documentation.
+See [docs/worker-resource-templates.md](../../docs/worker-resource-templates.md) for full documentation.
 
 > **Note**: If you plan to continue to the Metric-Based HPA Scaling Demo below, delete this WRT before proceeding. Two WRTs targeting the same WorkerDeployment with the same resource kind will create conflicting HPAs.
 > ```bash
@@ -164,22 +229,45 @@ A pre-built Grafana dashboard is included at `internal/demo/k8s/grafana-dashboar
 - Workflow and activity task backlog per version
 - Raw per-pod slot gauges (used vs available)
 
-**Import the dashboard:**
+> **Install the monitoring stack first.** Grafana, Prometheus and kube-state-metrics all come
+> from `kube-prometheus-stack` — see [Metric-Based HPA Scaling Demo → Prerequisites](#prerequisites-1)
+> below, then come back here.
 
-1. Port-forward Grafana:
-   ```bash
-   kubectl -n monitoring port-forward svc/prometheus-grafana 3000:80 &
-   ```
-2. Open http://localhost:3000 and log in
-    ```bash
-    Get your grafana admin user password by running:
-    
-      kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
-    ```
-3. Go to **Dashboards → Import** → **Upload JSON file**
-4. Select `internal/demo/k8s/grafana-dashboard.json`
+**Load the dashboard** as a ConfigMap. Grafana's sidecar watches for ConfigMaps labelled
+`grafana_dashboard=1` and imports them automatically, so this survives Grafana restarts and
+needs no clicking through the UI:
+
+```bash
+kubectl create configmap twc-hpa-scaling-dashboard -n monitoring \
+  --from-file=twc-hpa-scaling.json=internal/demo/k8s/grafana-dashboard.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl label configmap twc-hpa-scaling-dashboard -n monitoring grafana_dashboard=1 --overwrite
+```
+
+**Open it:**
+
+```bash
+kubectl -n monitoring port-forward svc/prometheus-grafana 3000:80 &
+```
+
+Then go straight to <http://localhost:3000/d/twc-hpa-scaling>.
+
+No login is required: `prometheus-stack-local-values.yaml` enables anonymous Admin access and
+disables the login form. That is safe here only because the cluster is local and reachable
+solely through `kubectl port-forward` — never use those Grafana settings anywhere else. If you
+installed **without** that values file, Grafana will prompt for credentials; retrieve them with:
+
+```bash
+kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret \
+  -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+```
 
 The dashboard auto-refreshes every 10s and defaults to a 30-minute time window. Use it to tune HPA targets and observe per-version scaling behaviour during progressive rollouts.
+
+> **On a local dev server, the two "Task Backlog" panels stay empty.** They query
+> `approximate_backlog_count`, which is a Temporal **Cloud** metric
+> (`temporal_cloud_v1_approximate_backlog_count`, scraped from `metrics.temporal.io`). A local
+> dev server publishes no equivalent series. Every other panel works locally.
 
 ---
 
@@ -199,9 +287,16 @@ In addition to the main demo prerequisites, you need `kube-prometheus-stack` wit
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
+# Temporal Cloud (Option A):
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
   -n monitoring --create-namespace \
   -f internal/demo/k8s/prometheus-stack-values.yaml
+
+# Local dev server (Option B) — adds the local overlay:
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+  -n monitoring --create-namespace \
+  -f internal/demo/k8s/prometheus-stack-values.yaml \
+  -f internal/demo/k8s/prometheus-stack-local-values.yaml
 
 helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
   -n monitoring \
@@ -209,6 +304,13 @@ helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapte
 
 kubectl apply -f internal/demo/k8s/servicemonitor.yaml
 ```
+
+> **Option B users must pass `prometheus-stack-local-values.yaml`.**
+> `prometheus-stack-values.yaml` mounts the secret `temporal-cloud-api-key` and adds a scrape
+> job against `metrics.temporal.io`. Without that secret the Prometheus pod never leaves
+> `ContainerCreating`. The overlay empties both, and additionally turns on anonymous Grafana
+> access. It keeps the `temporal_slot_utilization` recording rule, which is computed from
+> worker SDK metrics and needs no Temporal Cloud.
 
 Wait for the stack to be ready:
 ```bash
@@ -228,11 +330,22 @@ kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 909
 # http://localhost:9090/graph?g0.expr=temporal_slot_utilization
 ```
 
-If `temporal_slot_utilization` returns no data, check the metric names on a running pod:
+If `temporal_slot_utilization` returns no data, check the metric names a worker actually
+emits. The worker image is distroless — it has no shell, `curl` or `wget` — so `kubectl exec`
+will fail with `executable file not found in $PATH`. Port-forward to the pod instead:
 ```bash
-kubectl exec -n default \
+kubectl port-forward -n default \
   $(kubectl get pods -n default -l temporal.io/deployment-name=helloworld -o name | head -1) \
-  -- curl -s localhost:9090/metrics | grep -i slot
+  19090:9090 &
+curl -s localhost:19090/metrics | grep -i slot
+```
+
+Also confirm Prometheus actually picked up the ServiceMonitor — it takes a reconcile plus a
+config-reload cycle (up to ~1 minute) after `kubectl apply`, and an empty result before then is
+expected:
+```bash
+kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 &
+curl -s localhost:9090/api/v1/status/config | grep -c helloworld   # non-zero once picked up
 ```
 
 Update the recording rule `expr` in `internal/demo/k8s/prometheus-stack-values.yaml` if the metric names differ, then run `helm upgrade prometheus ... -f internal/demo/k8s/prometheus-stack-values.yaml`.
@@ -250,7 +363,8 @@ kubectl get hpa -w
 
 **Step 3 — Generate load.**
 ```bash
-make apply-hpa-load   # starts ~2 workflows/sec; Ctrl-C to stop
+make apply-hpa-load         # Temporal Cloud (Option A); ~2 workflows/sec, Ctrl-C to stop
+make apply-hpa-load-local   # local dev server (Option B)
 ```
 
 Watch the pods scale up to ~10 replicas over the next few minutes:
@@ -321,7 +435,7 @@ With load running, this demonstrates the core value proposition: v1 and v2 scale
 
 ```bash
 # Terminal 1: keep load running
-make apply-hpa-load
+make apply-hpa-load          # or: make apply-hpa-load-local  (Option B)
 
 # Terminal 2: deploy v2 while v1 is under load
 WORKER_VERSION=v2 skaffold run --profile helloworld-worker
@@ -340,12 +454,20 @@ The progressive rollout steps (1% → 10% → 50% → 100%) gradually shift new 
 
 To clean up the demo:
 ```bash
-# Delete the Helm release
+# Delete the demo worker and the controller
+helm uninstall helloworld
 helm uninstall temporal-worker-controller -n temporal-system
+
+# Monitoring stack, if you installed it
+helm uninstall prometheus-adapter -n monitoring
+helm uninstall prometheus -n monitoring
 
 # Stop Minikube
 minikube stop
 ```
+
+If you used Option B, also stop the `make start-temporal-server` process in its terminal
+(Ctrl-C). Its state is in-memory, so everything it held disappears with it.
 
 ### Additional Operational commands
 

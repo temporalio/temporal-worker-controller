@@ -1,0 +1,47 @@
+# kube-prometheus-stack overrides for running the demo against a LOCAL Temporal
+# dev server (`make start-temporal-server`) instead of Temporal Cloud.
+#
+# Layer this file AFTER prometheus-stack-values.yaml so it wins:
+#
+#   helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace \
+#     -f internal/demo/k8s/prometheus-stack-values.yaml \
+#     -f internal/demo/k8s/prometheus-stack-local-values.yaml
+#
+# Two things differ from the Temporal Cloud setup:
+#
+# 1. No Temporal Cloud metrics endpoint. prometheus-stack-values.yaml mounts the
+#    secret `temporal-cloud-api-key` and adds a scrape job against
+#    metrics.temporal.io. Locally that secret does not exist, and a Prometheus
+#    pod referencing a missing secret never leaves ContainerCreating. Both lists
+#    are emptied here. The `temporal_slot_utilization` recording rule from the
+#    base file is preserved -- it is computed purely from worker SDK metrics and
+#    works fine without Temporal Cloud.
+#
+#    Consequence: the two "Task Backlog" panels of the demo dashboard stay empty.
+#    approximate_backlog_count is a Temporal Cloud metric
+#    (temporal_cloud_v1_approximate_backlog_count); a local dev server has no
+#    equivalent. Everything else on the dashboard works.
+#
+# 2. No Grafana login. This is a throwaway local cluster reachable only through
+#    `kubectl port-forward`, so anonymous Admin access removes the
+#    fetch-the-generated-password step. NEVER use these Grafana settings for a
+#    cluster that is reachable by anyone else.
+
+prometheus:
+  prometheusSpec:
+    secrets: []
+    additionalScrapeConfigs: []
+
+grafana:
+  # Anonymous admin access: no login form, no credentials to look up.
+  # Local-only convenience -- see the warning above.
+  grafana.ini:
+    auth:
+      disable_login_form: true
+    auth.anonymous:
+      enabled: true
+      org_name: "Main Org."
+      org_role: Admin
+    users:
+      allow_sign_up: false
