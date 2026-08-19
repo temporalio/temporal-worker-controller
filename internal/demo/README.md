@@ -97,6 +97,18 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    This binds `0.0.0.0` and enables the two dynamic configs the controller needs
    (`frontend.workerVersioningWorkflowAPIs`, `system.enableDeploymentVersions`).
 
+   > **Make sure no other dev server is already running first.** `start-dev` does not fail if
+   > port 7233 is taken: a server already bound to `127.0.0.1:7233` keeps that address, while
+   > the new one binds the `*:7233` wildcard. Both then appear healthy, but the more specific
+   > bind wins for anything connecting over loopback — including `host.minikube.internal` from
+   > pods, which Docker Desktop routes to the host loopback. The result is a second server that
+   > silently receives no traffic, and CLI output that disagrees with what the workers see.
+   > Confirm there is exactly one listener:
+   >
+   > ```bash
+   > lsof -nP -iTCP:7233 -sTCP:LISTEN
+   > ```
+
    Then set `skaffold.env` to:
    ```env
    TEMPORAL_NAMESPACE=default
