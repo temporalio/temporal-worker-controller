@@ -185,6 +185,40 @@ nodeSelector: {}
 
 tolerations: []
 
+# extraEnv adds environment variables to the manager container.
+#
+# Use this together with extraVolumes/extraVolumeMounts to trust a private
+# certificate authority. The controller connects to Temporal as a gRPC client and
+# verifies the server certificate against the system trust store, so a self-signed
+# or internally-issued endpoint fails with:
+#   transport: authentication handshake failed: tls: failed to verify certificate:
+#   x509: certificate signed by unknown authority
+# The controller is written in Go, which reads SSL_CERT_FILE, so mounting the CA and
+# pointing SSL_CERT_FILE at it is sufficient.
+#
+# extraEnv:
+#   - name: SSL_CERT_FILE
+#     value: /etc/ssl/custom-ca/ca.crt
+extraEnv: []
+
+# extraVolumes adds volumes to the manager pod, alongside the webhook certificate
+# volume the chart already creates.
+#
+# extraVolumes:
+#   - name: custom-ca
+#     secret:
+#       secretName: custom-ca
+extraVolumes: []
+
+# extraVolumeMounts adds volume mounts to the manager container. Volumes must be
+# supplied via extraVolumes above.
+#
+# extraVolumeMounts:
+#   - name: custom-ca
+#     mountPath: /etc/ssl/custom-ca
+#     readOnly: true
+extraVolumeMounts: []
+
 # Configure the kube-rbac-proxy sidecar that protects the controller metrics
 # endpoint. The sidecar is enabled unless metrics.disableAuth is true.
 kubeRBACProxy:
