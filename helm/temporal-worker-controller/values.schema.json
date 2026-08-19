@@ -253,6 +253,30 @@
       "items": {},
       "type": "array"
     },
+    "extraEnv": {
+      "default": [],
+      "description": "Additional environment variables for the manager container.\n\nUse this with extraVolumes and extraVolumeMounts to trust a private certificate authority. The controller verifies the Temporal server certificate against the system trust store, so an internally-issued endpoint fails with \"x509: certificate signed by unknown authority\". The controller is written in Go, which reads SSL_CERT_FILE.\n\nFor example:\nextraEnv:\n- name: SSL_CERT_FILE\n  value: /etc/ssl/custom-ca/ca.crt",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "extraVolumes": {
+      "default": [],
+      "description": "Additional volumes for the manager Pod, alongside the webhook certificate volume the chart already creates.\n\nFor example:\nextraVolumes:\n- name: custom-ca\n  secret:\n    secretName: custom-ca",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "extraVolumeMounts": {
+      "default": [],
+      "description": "Additional volume mounts for the manager container. Volumes must be supplied via extraVolumes.\n\nFor example:\nextraVolumeMounts:\n- name: custom-ca\n  mountPath: /etc/ssl/custom-ca\n  readOnly: true",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
     "replicas": {
       "default": 1,
       "description": "Number of replicas of manager to run.\n\nThe default is 1, but in production set this to 2 or 3 to provide high availability.",
