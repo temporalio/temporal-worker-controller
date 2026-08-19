@@ -178,7 +178,7 @@
       "type": "row"
     },
     {
-      "description": "Tasks successfully matched to a poller, per second, broken down by task queue. Query A is the self-hosted series (poll_success, a counter, so rate() is applied); query B is the Temporal Cloud series, which is already a per-second rate and must not be wrapped in rate().",
+      "description": "Tasks successfully matched to a poller, per second. Query A is the self-hosted series (poll_success, a counter, so rate() is applied) grouped by task queue AND worker build ID; series with no build ID are labelled unversioned. Query B is the Temporal Cloud series, which is already a per-second rate and must not be wrapped in rate(); it is grouped by task queue only, because temporal_cloud_v1_poll_success_count does not carry a build ID label.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -195,8 +195,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (taskqueue) (rate(poll_success{namespace=\"default\", task_type=\"Workflow\"}[1m]))",
-          "legendFormat": "{{taskqueue}}",
+          "expr": "label_replace(sum by (taskqueue, worker_build_id) (rate(poll_success{namespace=\"default\", task_type=\"Workflow\"}[1m])), \"worker_build_id\", \"unversioned\", \"worker_build_id\", \"^$\")",
+          "legendFormat": "{{taskqueue}} / {{worker_build_id}}",
           "refId": "A"
         },
         {
@@ -205,11 +205,11 @@
           "refId": "B"
         }
       ],
-      "title": "Workflow Task Dispatch Rate per task queue",
+      "title": "Workflow Task Dispatch Rate per task queue / build ID",
       "type": "timeseries"
     },
     {
-      "description": "Tasks successfully matched to a poller, per second, broken down by task queue. Query A is the self-hosted series (poll_success, a counter, so rate() is applied); query B is the Temporal Cloud series, which is already a per-second rate and must not be wrapped in rate().",
+      "description": "Tasks successfully matched to a poller, per second. Query A is the self-hosted series (poll_success, a counter, so rate() is applied) grouped by task queue AND worker build ID; series with no build ID are labelled unversioned. Query B is the Temporal Cloud series, which is already a per-second rate and must not be wrapped in rate(); it is grouped by task queue only, because temporal_cloud_v1_poll_success_count does not carry a build ID label.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -226,8 +226,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (taskqueue) (rate(poll_success{namespace=\"default\", task_type=\"Activity\"}[1m]))",
-          "legendFormat": "{{taskqueue}}",
+          "expr": "label_replace(sum by (taskqueue, worker_build_id) (rate(poll_success{namespace=\"default\", task_type=\"Activity\"}[1m])), \"worker_build_id\", \"unversioned\", \"worker_build_id\", \"^$\")",
+          "legendFormat": "{{taskqueue}} / {{worker_build_id}}",
           "refId": "A"
         },
         {
@@ -236,7 +236,7 @@
           "refId": "B"
         }
       ],
-      "title": "Activity Task Dispatch Rate per task queue",
+      "title": "Activity Task Dispatch Rate per task queue / build ID",
       "type": "timeseries"
     },
     {

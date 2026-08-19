@@ -239,7 +239,7 @@ A pre-built Grafana dashboard is included at `internal/demo/k8s/grafana-dashboar
 - HPA current vs desired replicas per version
 - Activity slot utilization per version
 - Workflow and activity task backlog per version
-- Workflow and activity task dispatch rate per task queue
+- Workflow and activity task dispatch rate per task queue and build ID
 - Raw per-pod slot gauges (used vs available)
 
 > **Install the monitoring stack first.** Grafana, Prometheus and kube-state-metrics all come
@@ -300,16 +300,26 @@ The dashboard auto-refreshes every 10s and defaults to a 30-minute time window. 
 > cap the HPA's `maxReplicas`.
 
 > **The two "Task Dispatch Rate" panels split the same way**, and the units differ in a way that
-> matters. They show tasks successfully matched to a poller, per second, grouped by task queue:
+> matters. They show tasks successfully matched to a poller, per second:
 >
-> | Setup | Series | Type | Query |
-> |---|---|---|---|
-> | Temporal Cloud | `temporal_cloud_v1_poll_success_count` | already a per-second rate | use directly |
-> | Local dev server | `poll_success` | counter | wrap in `rate(...[1m])` |
+> | Setup | Series | Type | Query | Grouped by |
+> |---|---|---|---|---|
+> | Temporal Cloud | `temporal_cloud_v1_poll_success_count` | already a per-second rate | use directly | task queue only |
+> | Local dev server | `poll_success` | counter | wrap in `rate(...[1m])` | task queue **and build ID** |
 >
 > Applying `rate()` to the Cloud series would be wrong — `temporal_cloud_v1_*` metrics are
 > pre-computed rates. Applying it to the self-hosted counter is required. Each panel carries both
 > queries, so only the one matching your setup returns data.
+>
+> **Per-build-ID breakdown is only available self-hosted.** `poll_success` carries
+> `worker_build_id`, so the local query groups by it and you can watch dispatch shift between
+> versions during a rollout. The Cloud metric does not: `temporal_worker_build_id` is an opt-in
+> label on `temporal_cloud_v1_approximate_backlog_count`, but `poll_success_count` only exposes
+> `operation`, `task_type` and `temporal_task_queue` — so query B stays grouped by task queue.
+>
+> Series with an empty build ID (system task queues, sticky queues, unversioned pollers) are
+> relabelled `unversioned` via `label_replace` rather than dropped, so the panel totals stay
+> honest.
 
 ---
 
