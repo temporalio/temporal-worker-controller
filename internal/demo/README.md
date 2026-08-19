@@ -35,17 +35,21 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    minikube start
    ```
 
-2. Create the `skaffold.env` file:
+2. Create the `skaffold.env` file from whichever example matches where your Temporal
+   namespace lives — **either** Option A (Temporal Cloud) or Option B (local dev server):
    ```bash
-   cp skaffold.example.env skaffold.env
-   ```
+   # Option A: Temporal Cloud
+   cp skaffold.cloud.example.env skaffold.env
 
-   Then fill it in using **either** Option A (Temporal Cloud) or Option B (local dev server).
+   # Option B: local dev server
+   cp skaffold.local.example.env skaffold.env
+   ```
 
 #### Option A: Temporal Cloud
 
-   Set `TEMPORAL_NAMESPACE` and `TEMPORAL_ADDRESS` in `skaffold.env` to match your namespace,
-   then configure one of mTLS or API key authentication.
+   Starting from `skaffold.cloud.example.env`, set `TEMPORAL_NAMESPACE` and `TEMPORAL_ADDRESS`
+   in `skaffold.env` to match your namespace, then configure one of mTLS or API key
+   authentication.
 
    **Using mTLS**
    - Create a `certs` directory in the project root
@@ -116,7 +120,8 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    > lsof -nP -iTCP:7233 -sTCP:LISTEN
    > ```
 
-   Then set `skaffold.env` to:
+   `skaffold.local.example.env` already holds the values below, so copying it is the whole
+   configuration step — there is nothing to fill in:
    ```env
    TEMPORAL_NAMESPACE=default
    TEMPORAL_ADDRESS=host.minikube.internal:7233

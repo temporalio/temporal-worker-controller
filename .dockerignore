@@ -16,7 +16,7 @@ internal/tests
 .env.*
 *.log
 skaffold.yaml
-skaffold.example.env
+skaffold.*.example.env
 
 # Build artifacts
 bin/

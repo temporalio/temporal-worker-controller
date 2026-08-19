@@ -71,7 +71,7 @@ profiles:
             setValueTemplates:
               image.repository: "helloworld"
               image.tag: "{{ .WORKER_VERSION }}"
-              # These connection settings are meant to be defined in skaffold.env (see skaffold.example.env)
+              # These connection settings are meant to be defined in skaffold.env (see skaffold.cloud.example.env / skaffold.local.example.env)
               temporal.namespace: "{{ .TEMPORAL_NAMESPACE }}"
               temporal.address: "{{ .TEMPORAL_ADDRESS }}"
               temporal.mtlsSecretName: "{{ .TEMPORAL_MTLS_SECRET_NAME }}"
