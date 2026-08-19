@@ -19,11 +19,11 @@ spec:
 {{- if eq .Values.rollout.strategy "Progressive" }}
     steps:
       - rampPercentage: 25
-        pauseDuration: 120s
+        pauseDuration: 30s
       - rampPercentage: 50
-        pauseDuration: 120s
+        pauseDuration: 30s
       - rampPercentage: 75
-        pauseDuration: 120s
+        pauseDuration: 30s
 {{- end }}
     gate:
       workflowType: "RolloutGate"

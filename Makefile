@@ -253,7 +253,9 @@ start-temporal-server: ## Start an ephemeral Temporal server with versioning API
 	$(TEMPORAL) server start-dev --ip 0.0.0.0 \
 		--metrics-port $(LOCAL_TEMPORAL_METRICS_PORT) \
 		--dynamic-config-value frontend.workerVersioningWorkflowAPIs=true \
-		--dynamic-config-value system.enableDeploymentVersions=true
+		--dynamic-config-value system.enableDeploymentVersions=true \
+		--dynamic-config-value matching.wv.VersionDrainageStatusVisibilityGracePeriod=\"5s\" \
+		--dynamic-config-value matching.wv.VersionDrainageStatusRefreshInterval=\"5s\"
 
 .PHONY: test-all
 test-all: manifests generate envtest helm-dependency-build ## Run tests.

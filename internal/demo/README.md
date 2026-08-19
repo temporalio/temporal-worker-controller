@@ -97,6 +97,13 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    This binds `0.0.0.0` and enables the two dynamic configs the controller needs
    (`frontend.workerVersioningWorkflowAPIs`, `system.enableDeploymentVersions`).
 
+   `start-temporal-server` also shortens two drainage dynamic configs to `5s`
+   (`matching.wv.VersionDrainageStatusVisibilityGracePeriod` and
+   `...RefreshInterval`). The server defaults are on the order of minutes, and they gate how
+   quickly a deprecated version is reported **Drained** — which is what the controller waits for
+   before scaling down and deleting it. Leaving them at the defaults roughly doubles the time a
+   v1 → v2 demo takes. `internal/tests` overrides the same two knobs for the same reason.
+
    > **Make sure no other dev server is already running first.** `start-dev` does not fail if
    > port 7233 is taken: a server already bound to `127.0.0.1:7233` keeps that address, while
    > the new one binds the `*:7233` wildcard. Both then appear healthy, but the more specific
@@ -171,6 +178,26 @@ This guide will help you set up and run the Temporal Worker Controller locally u
     > variants talk to `127.0.0.1:7233` with no credentials. (`host.minikube.internal` from
     > `skaffold.env` resolves only inside the cluster, not on your host.)
 
+#### How long the demo takes
+
+A full v1 → v2 → v1-deleted cycle runs in just under **4 minutes**. Measured on minikube
+(Docker driver, warm build cache) with ~2 workflows/sec of load:
+
+| Elapsed | Phase | Governed by |
+|---|---|---|
+| 0-61s | Build + deploy the v2 image | Docker layer cache; the Go rebuild dominates |
+| 61-93s | Register, then gate workflow passes | 5s readiness delay in `util.NewVersionedWorker`, plus the gate's child `HelloWorld` (its activity sleeps up to 30s) |
+| 93-183s | Progressive ramp 25% → 50% → 75% → 100% | 3 steps x 30s `pauseDuration` |
+| 183-232s | v1 drains, scales to 0, Deployment deleted | pinned v1 workflows finishing, the drainage dynamic configs, then `deleteDelay: 30s` |
+
+**Total: 3m52s.**
+
+To go faster still, the levers are: fewer `rollout.steps`; a smaller `sunset.deleteDelay`; and a
+shorter activity sleep in `internal/demo/helloworld/worker.go`. **`pauseDuration` cannot go below
+30s** — the CRD enforces that with a CEL rule (`workerdeployment_types.go`). Note that the
+controller reconciles on a 10s loop, so each state transition can add up to 10s of latency on top
+of the configured delays.
+
 #### **Progressive Rollout of v2** (Non-Replay-Safe Change)
 
 7. **Deploy a non-replay-safe workflow change**:
@@ -181,7 +208,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
    This applies a **non-replay-safe change** (switching an activity response type from string to a struct).
 
 8. **Observe the progressive rollout managing incompatible versions**:
-   - New workflow executions gradually shift from v1 to v2 following the configured rollout steps (25% → 50% → 75% → 100%, with a 120s pause at each step — see `internal/demo/helloworld/helm/helloworld/templates/deployment.yaml`)
+   - New workflow executions gradually shift from v1 to v2 following the configured rollout steps (25% → 50% → 75% → 100%, with a 30s pause at each step — see `internal/demo/helloworld/helm/helloworld/templates/deployment.yaml`)
    - **Both worker versions run simultaneously** - this is critical since the code changes are incompatible
    - v1 workers continue serving existing workflows (which would fail to replay on v2)
    - v2 workers handle new workflow executions with the updated code
