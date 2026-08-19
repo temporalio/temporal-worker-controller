@@ -5,6 +5,56 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
+## [1.9.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.8.1...v1.9.0) - 2026-08-19
+
+### Features
+
+- add payload encoding to gate workflow ([#528](https://github.com/temporalio/temporal-worker-controller/pull/528)) ([`ad2dbaa`](https://github.com/temporalio/temporal-worker-controller/commit/ad2dbaa69f785de59b9ce8a53671fe9a0aa0b82a))
+- **helm:** configure kube-rbac-proxy sidecar ([#468](https://github.com/temporalio/temporal-worker-controller/pull/468)) ([`f3bc2ad`](https://github.com/temporalio/temporal-worker-controller/commit/f3bc2ad95b4a73e95dea2fc0e43f741e9b05c68a))
+
+### Bug Fixes
+
+- **controller:** prune Temporal server-side version record on normal drain ([#498](https://github.com/temporalio/temporal-worker-controller/pull/498)) ([`4227ae4`](https://github.com/temporalio/temporal-worker-controller/commit/4227ae456d784b0ed70d2e7b7447313174fd6c4c))
+- **controller:** delete k8s worker Deployments during WD cleanup ([#508](https://github.com/temporalio/temporal-worker-controller/pull/508)) ([`33585e8`](https://github.com/temporalio/temporal-worker-controller/commit/33585e858bbcafbb3e1d8e524f736360a9fa7410))
+- pin connection on deprecated versions ([#525](https://github.com/temporalio/temporal-worker-controller/pull/525)) ([`e029d36`](https://github.com/temporalio/temporal-worker-controller/commit/e029d36b139d84f0975e861a35768d81f57d5d87))
+- make 'make test-unit' work out of the box ([#499](https://github.com/temporalio/temporal-worker-controller/pull/499)) ([`9cd89c0`](https://github.com/temporalio/temporal-worker-controller/commit/9cd89c07b013e3929b8f36d837602a1841c9f2f1))
+- **clientpool:** attach namespace header to every request ([#467](https://github.com/temporalio/temporal-worker-controller/pull/467)) ([`921e5b4`](https://github.com/temporalio/temporal-worker-controller/commit/921e5b4413cd7b7ffbfae1a0db881d5d53423475))
+
+### Documentation
+
+- **concepts:** warn that changing connectionRef mutates all managed ([#512](https://github.com/temporalio/temporal-worker-controller/pull/512)) ([`16a1fdf`](https://github.com/temporalio/temporal-worker-controller/commit/16a1fdf4e67c919674db51753edf961a09d7170b))
+- **changelog:** backfill CHANGELOG.md ([#524](https://github.com/temporalio/temporal-worker-controller/pull/524)) ([`bed0114`](https://github.com/temporalio/temporal-worker-controller/commit/bed011411159dd0abe19d85434aad0c5d167947e))
+- align Worker Options with the API ([#500](https://github.com/temporalio/temporal-worker-controller/pull/500)) ([`dd5978d`](https://github.com/temporalio/temporal-worker-controller/commit/dd5978ddeedb55fb1e40f238a1fa168f2c1679e9))
+
+### Chores
+
+- added workflow for changelog file ([#495](https://github.com/temporalio/temporal-worker-controller/pull/495)) ([`35fd07e`](https://github.com/temporalio/temporal-worker-controller/commit/35fd07e61b794072d881a65821e1fd8d6e2c5e6f))
+
+### Other Changes
+
+- Bump github.com/prometheus/client_golang in /internal/demo ([#523](https://github.com/temporalio/temporal-worker-controller/pull/523)) ([`0943dfc`](https://github.com/temporalio/temporal-worker-controller/commit/0943dfc9e1436a756f89bb158800ddd0ff82b603))
+- BUG[493] sub-task 1 - complete connection env/volume updates ([#516](https://github.com/temporalio/temporal-worker-controller/pull/516)) ([`46f09ed`](https://github.com/temporalio/temporal-worker-controller/commit/46f09edaa7e336792db3706e7166879b0d21ed3b))
+- Bump k8s.io/client-go in / ([#521](https://github.com/temporalio/temporal-worker-controller/pull/521)) ([`261a782`](https://github.com/temporalio/temporal-worker-controller/commit/261a782d6f6ce0cfcb33223519622d4836ef613b))
+- Bump docker/login-action from 4.5.0 to 4.6.0 ([#518](https://github.com/temporalio/temporal-worker-controller/pull/518)) ([`3c5a04c`](https://github.com/temporalio/temporal-worker-controller/commit/3c5a04cee51bbdd4584ef6fd7a644793f4256ebf))
+- standardize all temporal Go package deps ([#517](https://github.com/temporalio/temporal-worker-controller/pull/517)) ([`c8dddf3`](https://github.com/temporalio/temporal-worker-controller/commit/c8dddf3a950aac343dc07e1d54b7e07adf220728))
+- Updated update-changelog.yml to request reviews from the worker-controller team ([#514](https://github.com/temporalio/temporal-worker-controller/pull/514)) ([`2ca9877`](https://github.com/temporalio/temporal-worker-controller/commit/2ca987792eff176a8117488df5a1b5b21547c78f))
+- [FR-126] Rollback ([#274](https://github.com/temporalio/temporal-worker-controller/pull/274)) ([`6e70184`](https://github.com/temporalio/temporal-worker-controller/commit/6e70184ab261196d9d70ba20dcced03a978abc7c))
+- Bump go.temporal.io/api in /internal/demo ([#501](https://github.com/temporalio/temporal-worker-controller/pull/501)) ([`f20efb6`](https://github.com/temporalio/temporal-worker-controller/commit/f20efb679e70e7169f1e47a70af643139c156907))
+- Bump docker/login-action from 4.4.0 to 4.5.0 ([#503](https://github.com/temporalio/temporal-worker-controller/pull/503)) ([`2c45961`](https://github.com/temporalio/temporal-worker-controller/commit/2c459610ae8b32561cc30c7a948f5bbdcf3d5183))
+- Bump actions/checkout from 7.0.0 to 7.0.1 ([#504](https://github.com/temporalio/temporal-worker-controller/pull/504)) ([`dacd0ec`](https://github.com/temporalio/temporal-worker-controller/commit/dacd0ec5ef02c876ebea54a4641f068e44eefa79))
+- Bump k8s.io/api in / ([#506](https://github.com/temporalio/temporal-worker-controller/pull/506)) ([`bf321ad`](https://github.com/temporalio/temporal-worker-controller/commit/bf321ade20ff98244d8abb75d6cf96b9349b64fa))
+- Skip unavailable deprecated CRD watches ([#469](https://github.com/temporalio/temporal-worker-controller/pull/469)) ([`db62cbb`](https://github.com/temporalio/temporal-worker-controller/commit/db62cbba7f6ad59534ecec2ed9acdac60a31a54f))
+- uplift temporal core deps ([#490](https://github.com/temporalio/temporal-worker-controller/pull/490)) ([`3e83925`](https://github.com/temporalio/temporal-worker-controller/commit/3e839257ba27a219b32cc472447504a48571718b))
+- Bump chart version to 0.27.1 [skip ci] ([`4fd32c8`](https://github.com/temporalio/temporal-worker-controller/commit/4fd32c8e07b4976188221ed9104304542c9395b7))
+- Bump google.golang.org/grpc in / ([#487](https://github.com/temporalio/temporal-worker-controller/pull/487)) ([`d503182`](https://github.com/temporalio/temporal-worker-controller/commit/d5031824b9266b9244e0b5877f811a3b48308e79))
+- tell dependabot to ignore cert-manager dep in Helm ([#489](https://github.com/temporalio/temporal-worker-controller/pull/489)) ([`6c5de89`](https://github.com/temporalio/temporal-worker-controller/commit/6c5de8975f309143608fd8e5a67bd222afffe2e6))
+- Bump actions/setup-go from 6.5.0 to 7.0.0 ([#483](https://github.com/temporalio/temporal-worker-controller/pull/483)) ([`36eb96a`](https://github.com/temporalio/temporal-worker-controller/commit/36eb96a547b6adf9d7a1d985fee12f2b656f1a5d))
+- Bump k8s.io/api in / ([#488](https://github.com/temporalio/temporal-worker-controller/pull/488)) ([`220117d`](https://github.com/temporalio/temporal-worker-controller/commit/220117df5e1701c91e69d4829e5aaa84ac9e0632))
+- uplift temporal core dependencies ([#480](https://github.com/temporalio/temporal-worker-controller/pull/480)) ([`01a92a0`](https://github.com/temporalio/temporal-worker-controller/commit/01a92a0410bbedf353030fcc5a686d00916ea417))
+- Bump google.golang.org/grpc in / ([#455](https://github.com/temporalio/temporal-worker-controller/pull/455)) ([`3f32da9`](https://github.com/temporalio/temporal-worker-controller/commit/3f32da98bf46865da27e82ddecbf3daf201fd89c))
+- Bump docker/login-action from 4.3.0 to 4.4.0 ([#454](https://github.com/temporalio/temporal-worker-controller/pull/454)) ([`c21a844`](https://github.com/temporalio/temporal-worker-controller/commit/c21a8447bc64b024806203a95cdf899441e95c8e))
+- add Eniko Dif to CODEOWNERS ([#464](https://github.com/temporalio/temporal-worker-controller/pull/464)) ([`01f3d9c`](https://github.com/temporalio/temporal-worker-controller/commit/01f3d9ca2a76deb85818362ae15c8aa45a177abd))
+
 ## [1.8.1](https://github.com/temporalio/temporal-worker-controller/compare/v1.8.0...v1.8.1) - 2026-07-30
 
 ### Features
