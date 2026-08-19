@@ -127,9 +127,14 @@
       },
       "targets": [
         {
-          "expr": "temporal_cloud_v1_approximate_backlog_count{task_type=\"Workflow\", temporal_worker_deployment_name=\"default_helloworld\"}",
-          "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
+          "expr": "sum by (worker_build_id) (approximate_backlog_count{namespace=\"default\", task_type=\"Workflow\", worker_deployment_name=\"default_helloworld\", worker_build_id!=\"\"})",
+          "legendFormat": "{{worker_build_id}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum by (temporal_worker_build_id) (temporal_cloud_v1_approximate_backlog_count{task_type=\"Workflow\", temporal_worker_deployment_name=\"default_helloworld\"})",
+          "legendFormat": "{{temporal_worker_build_id}}",
+          "refId": "B"
         }
       ],
       "title": "Workflow Task Backlog per version",
@@ -152,9 +157,14 @@
       },
       "targets": [
         {
-          "expr": "temporal_cloud_v1_approximate_backlog_count{task_type=\"Activity\", temporal_worker_deployment_name=\"default_helloworld\"}",
-          "legendFormat": "{{temporal_worker_deployment_name}} / {{temporal_worker_build_id}}",
+          "expr": "sum by (worker_build_id) (approximate_backlog_count{namespace=\"default\", task_type=\"Activity\", worker_deployment_name=\"default_helloworld\", worker_build_id!=\"\"})",
+          "legendFormat": "{{worker_build_id}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum by (temporal_worker_build_id) (temporal_cloud_v1_approximate_backlog_count{task_type=\"Activity\", temporal_worker_deployment_name=\"default_helloworld\"})",
+          "legendFormat": "{{temporal_worker_build_id}}",
+          "refId": "B"
         }
       ],
       "title": "Activity Task Backlog per version",

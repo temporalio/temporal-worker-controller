@@ -132,9 +132,9 @@ This guide will help you set up and run the Temporal Worker Controller locally u
      nc -z -w 5 host.minikube.internal 7233 && echo REACHABLE
    ```
 
-   > **Note**: gate and backlog behaviour differ slightly from Cloud. Everything in this guide
-   > works locally except the two "Task Backlog" dashboard panels, which need Temporal Cloud
-   > metrics — see [Grafana Dashboard](#grafana-dashboard).
+   > **Note**: the backlog metric comes from a different source locally — the dev server's own
+   > `/metrics` endpoint rather than Temporal Cloud. The demo dashboard queries both, so the
+   > "Task Backlog" panels work either way. See [Grafana Dashboard](#grafana-dashboard).
 
 3. Build and deploy the Controller image to the local k8s cluster:
    ```bash
@@ -276,10 +276,27 @@ kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-s
 
 The dashboard auto-refreshes every 10s and defaults to a 30-minute time window. Use it to tune HPA targets and observe per-version scaling behaviour during progressive rollouts.
 
-> **On a local dev server, the two "Task Backlog" panels stay empty.** They query
-> `approximate_backlog_count`, which is a Temporal **Cloud** metric
-> (`temporal_cloud_v1_approximate_backlog_count`, scraped from `metrics.temporal.io`). A local
-> dev server publishes no equivalent series. Every other panel works locally.
+> **The two "Task Backlog" panels read from a different source depending on your setup.**
+> Backlog is not an SDK metric — no worker emits it — so it has to come from the server:
+>
+> | Setup | Series | Scraped from |
+> |---|---|---|
+> | Temporal Cloud | `temporal_cloud_v1_approximate_backlog_count` | `metrics.temporal.io` |
+> | Local dev server | `approximate_backlog_count` | the server's own `/metrics` port |
+>
+> The label names differ too (`temporal_worker_deployment_name` vs `worker_deployment_name`),
+> and the self-hosted series is split across task queue partitions, so it needs a `sum by`.
+> Each panel therefore carries two queries — `A` for self-hosted, `B` for Cloud — and whichever
+> source is present populates the panel while the other returns nothing.
+>
+> The local series is only exported if the dev server was started with a fixed metrics port;
+> `make start-temporal-server` pins it to `LOCAL_TEMPORAL_METRICS_PORT` (default 7239) and
+> `prometheus-stack-local-values.yaml` scrapes it. Without `--metrics-port`, `start-dev` picks a
+> random free port on every start that no scrape config can target.
+>
+> A backlog of `0` is the expected steady state once the HPA has scaled out — the panel plots a
+> real series at zero rather than showing "No data". To see it climb, raise the workflow rate or
+> cap the HPA's `maxReplicas`.
 
 ---
 

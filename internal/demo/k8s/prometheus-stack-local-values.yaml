@@ -18,10 +18,9 @@
 #    base file is preserved -- it is computed purely from worker SDK metrics and
 #    works fine without Temporal Cloud.
 #
-#    Consequence: the two "Task Backlog" panels of the demo dashboard stay empty.
-#    approximate_backlog_count is a Temporal Cloud metric
-#    (temporal_cloud_v1_approximate_backlog_count); a local dev server has no
-#    equivalent. Everything else on the dashboard works.
+#    The Cloud backlog metric (temporal_cloud_v1_approximate_backlog_count) is
+#    replaced by the dev server's own approximate_backlog_count, scraped from the
+#    server process directly, so the "Task Backlog" dashboard panels still work.
 #
 # 2. No Grafana login. This is a throwaway local cluster reachable only through
 #    `kubectl port-forward`, so anonymous Admin access removes the
@@ -31,7 +30,24 @@
 prometheus:
   prometheusSpec:
     secrets: []
-    additionalScrapeConfigs: []
+    # Replaces the Temporal Cloud scrape job with the local dev server's own
+    # /metrics endpoint (`make start-temporal-server` pins it to
+    # LOCAL_TEMPORAL_METRICS_PORT, default 7239). This is a *self-hosted cluster*
+    # metrics source, not the Cloud OpenMetrics one, so the series and label names
+    # differ -- see the dashboard queries.
+    #
+    # The dev server exports ~21k series; metric_relabel_configs keeps only the
+    # task-queue backlog gauges that the dashboard needs. Widen the regex if you
+    # want more of the matching/history/frontend service metrics.
+    additionalScrapeConfigs:
+      - job_name: temporal_dev_server
+        scrape_interval: 10s
+        static_configs:
+          - targets: ["host.minikube.internal:7239"]
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: 'approximate_backlog_count|approximate_backlog_age_seconds'
+            action: keep
 
 grafana:
   # Anonymous admin access: no login form, no credentials to look up.

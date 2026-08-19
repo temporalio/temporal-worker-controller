@@ -41,6 +41,9 @@ TEMPORAL ?= temporal
 LOCAL_TEMPORAL_ADDRESS ?= 127.0.0.1:7233
 LOCAL_TEMPORAL_NAMESPACE ?= default
 LOCAL_TEMPORAL_TASK_QUEUE ?= default/helloworld
+## Fixed metrics port for the dev server. Without --metrics-port the server picks a
+## random free port each start, which no scrape config can target.
+LOCAL_TEMPORAL_METRICS_PORT ?= 7239
 
 ## Tool Versions
 HELM_VERSION ?= v3.14.3
@@ -248,6 +251,7 @@ deploy-sample-worker: build-sample-worker ## Deploy the sample worker to the clu
 .PHONY: start-temporal-server
 start-temporal-server: ## Start an ephemeral Temporal server with versioning APIs enabled.
 	$(TEMPORAL) server start-dev --ip 0.0.0.0 \
+		--metrics-port $(LOCAL_TEMPORAL_METRICS_PORT) \
 		--dynamic-config-value frontend.workerVersioningWorkflowAPIs=true \
 		--dynamic-config-value system.enableDeploymentVersions=true
 
