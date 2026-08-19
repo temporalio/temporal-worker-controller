@@ -173,6 +173,75 @@
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 104,
+      "title": "Task Dispatch Rate",
+      "type": "row"
+    },
+    {
+      "description": "Tasks successfully matched to a poller, per second, broken down by task queue. Query A is the self-hosted series (poll_success, a counter, so rate() is applied); query B is the Temporal Cloud series, which is already a per-second rate and must not be wrapped in rate().",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 },
+          "unit": "ops",
+          "min": 0
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 8,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (taskqueue) (rate(poll_success{namespace=\"default\", task_type=\"Workflow\"}[1m]))",
+          "legendFormat": "{{taskqueue}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (temporal_task_queue) (temporal_cloud_v1_poll_success_count{task_type=\"Workflow\"})",
+          "legendFormat": "{{temporal_task_queue}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Workflow Task Dispatch Rate per task queue",
+      "type": "timeseries"
+    },
+    {
+      "description": "Tasks successfully matched to a poller, per second, broken down by task queue. Query A is the self-hosted series (poll_success, a counter, so rate() is applied); query B is the Temporal Cloud series, which is already a per-second rate and must not be wrapped in rate().",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 },
+          "unit": "ops",
+          "min": 0
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 9,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (taskqueue) (rate(poll_success{namespace=\"default\", task_type=\"Activity\"}[1m]))",
+          "legendFormat": "{{taskqueue}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (temporal_task_queue) (temporal_cloud_v1_poll_success_count{task_type=\"Activity\"})",
+          "legendFormat": "{{temporal_task_queue}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Activity Task Dispatch Rate per task queue",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
       "id": 103,
       "title": "Raw Slot Gauges",
       "type": "row"
@@ -186,7 +255,7 @@
           "min": 0
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
       "id": 6,
       "options": {
         "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" },
@@ -216,7 +285,7 @@
           "min": 0
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
       "id": 7,
       "options": {
         "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" },

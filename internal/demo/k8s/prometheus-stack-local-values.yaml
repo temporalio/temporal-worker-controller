@@ -37,8 +37,11 @@ prometheus:
     # differ -- see the dashboard queries.
     #
     # The dev server exports ~21k series; metric_relabel_configs keeps only the
-    # task-queue backlog gauges that the dashboard needs. Widen the regex if you
-    # want more of the matching/history/frontend service metrics.
+    # task-queue series the dashboard needs: the backlog gauges and poll_success
+    # (tasks matched to a poller, used for the dispatch-rate panels). The regex is
+    # fully anchored by Prometheus, so 'poll_success' does not also match
+    # poll_success_sync or pri_poll_success. Widen it if you want more of the
+    # matching/history/frontend service metrics.
     additionalScrapeConfigs:
       - job_name: temporal_dev_server
         scrape_interval: 10s
@@ -46,7 +49,7 @@ prometheus:
           - targets: ["host.minikube.internal:7239"]
         metric_relabel_configs:
           - source_labels: [__name__]
-            regex: 'approximate_backlog_count|approximate_backlog_age_seconds'
+            regex: 'approximate_backlog_count|approximate_backlog_age_seconds|poll_success'
             action: keep
 
 grafana:

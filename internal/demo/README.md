@@ -239,6 +239,7 @@ A pre-built Grafana dashboard is included at `internal/demo/k8s/grafana-dashboar
 - HPA current vs desired replicas per version
 - Activity slot utilization per version
 - Workflow and activity task backlog per version
+- Workflow and activity task dispatch rate per task queue
 - Raw per-pod slot gauges (used vs available)
 
 > **Install the monitoring stack first.** Grafana, Prometheus and kube-state-metrics all come
@@ -297,6 +298,18 @@ The dashboard auto-refreshes every 10s and defaults to a 30-minute time window. 
 > A backlog of `0` is the expected steady state once the HPA has scaled out — the panel plots a
 > real series at zero rather than showing "No data". To see it climb, raise the workflow rate or
 > cap the HPA's `maxReplicas`.
+
+> **The two "Task Dispatch Rate" panels split the same way**, and the units differ in a way that
+> matters. They show tasks successfully matched to a poller, per second, grouped by task queue:
+>
+> | Setup | Series | Type | Query |
+> |---|---|---|---|
+> | Temporal Cloud | `temporal_cloud_v1_poll_success_count` | already a per-second rate | use directly |
+> | Local dev server | `poll_success` | counter | wrap in `rate(...[1m])` |
+>
+> Applying `rate()` to the Cloud series would be wrong — `temporal_cloud_v1_*` metrics are
+> pre-computed rates. Applying it to the self-hosted counter is required. Each panel carries both
+> queries, so only the one matching your setup returns data.
 
 ---
 
