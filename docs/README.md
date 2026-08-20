@@ -36,6 +36,9 @@ How to migrate from the deprecated `TemporalWorkerDeployment` and `TemporalConne
 Comprehensive guide for migrating from existing unversioned worker deployment systems to the Temporal Worker Controller. Includes step-by-step instructions, configuration mapping, and common patterns.
 See [Migration to Unversioned](migration-to-unversioned.md) for how to migrate back to an unversioned deployment system.
 
+### [Patching Live Worker Versions In Place](patching-live-versions.md)
+How to ship an urgent fix (base-image CVE, vulnerable OS package, sidecar) to every worker version that is currently running, without creating a new version and without breaking replay for in-flight Pinned workflows. Covers when a patch is eligible, what the controller will and will not overwrite, and the `unsafeCustomBuildID` alternative.
+
 ### [Ownership](manager-identity.md)
 How the controller gets permission to manage a Worker Deployment, how a human client can take or give back control.
 
