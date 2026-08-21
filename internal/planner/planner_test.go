@@ -3534,7 +3534,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil)
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of worker resource applies")
 		})
 	}
@@ -3551,7 +3551,7 @@ func TestGetWorkerResourceApplies_RenderError(t *testing.T) {
 		createTestWRT("my-hpa", "my-worker"),
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil)
+	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil)
 	require.Len(t, applies, 2)
 
 	var errEntry, okEntry *WorkerResourceApply
@@ -3583,7 +3583,7 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil)
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -3675,7 +3675,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil)
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -3746,13 +3746,13 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 	}
 
 	t.Run("no delete deployments and no status entries produces no refs", func(t *testing.T) {
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, nil, stateWith())
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, nil, stateWith(), nil)
 		assert.Nil(t, refs)
 	})
 
 	t.Run("no wrts produces no refs", func(t *testing.T) {
 		dep := makeDeployment("worker-abc", "abc")
-		refs := getDeleteWorkerResources(nil, []*appsv1.Deployment{dep}, stateWith(dep))
+		refs := getDeleteWorkerResources(nil, []*appsv1.Deployment{dep}, stateWith(dep), nil)
 		assert.Nil(t, refs)
 	})
 
@@ -3760,7 +3760,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		// The resource name must be computable even when wrt.Status.Versions is empty —
 		// i.e. the WRT was never applied for this buildID before the Deployment was deleted.
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep))
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
 		require.Len(t, refs, 1)
 		expectedName := k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")
 		assert.Equal(t, expectedName, refs[0].Name)
@@ -3787,7 +3787,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			},
 		}
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt, wrt2}, []*appsv1.Deployment{dep}, stateWith(dep))
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt, wrt2}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
 		require.Len(t, refs, 2)
 		kinds := map[string]bool{refs[0].Kind: true, refs[1].Kind: true}
 		assert.True(t, kinds["HorizontalPodAutoscaler"], "expected HPA ref")
@@ -3797,7 +3797,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 	t.Run("single WRT × multiple deployments produces one ref per deployment", func(t *testing.T) {
 		dep1 := makeDeployment("worker-abc", "build-abc")
 		dep2 := makeDeployment("worker-def", "build-def")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep1, dep2}, stateWith(dep1, dep2))
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep1, dep2}, stateWith(dep1, dep2), nil)
 		require.Len(t, refs, 2)
 		names := map[string]bool{refs[0].Name: true, refs[1].Name: true}
 		assert.True(t, names[k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")])
@@ -3808,7 +3808,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		dep := &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Name: "worker-no-label"},
 		}
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep))
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
 		assert.Nil(t, refs)
 	})
 
@@ -3821,7 +3821,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			},
 		}
 		dep := makeDeployment("worker-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{badWRT, wrt}, []*appsv1.Deployment{dep}, stateWith(dep))
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{badWRT, wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
 		require.Len(t, refs, 1) // only the valid WRT
 		assert.Equal(t, "HorizontalPodAutoscaler", refs[0].Kind)
 	})
@@ -3835,7 +3835,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		orphanWRT.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
 			{BuildID: "build-gone", LastAppliedHash: "somehash", ResourceName: "stale-resource"},
 		}
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{orphanWRT}, nil, stateWith())
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{orphanWRT}, nil, stateWith(), nil)
 		require.Len(t, refs, 1)
 		assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-gone"), refs[0].Name)
 		assert.Equal(t, "autoscaling/v2", refs[0].APIVersion)
@@ -3850,7 +3850,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			{BuildID: "build-abc", LastAppliedHash: "somehash"},
 		}
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{liveWRT}, nil, stateWith(dep))
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{liveWRT}, nil, stateWith(dep), nil)
 		assert.Nil(t, refs)
 	})
 
@@ -3862,7 +3862,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			{BuildID: "build-abc", LastAppliedHash: "somehash"},
 		}
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{entryWRT}, []*appsv1.Deployment{dep}, stateWith(dep))
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{entryWRT}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
 		require.Len(t, refs, 1)
 		assert.Equal(t, "build-abc", refs[0].BuildID)
 	})
@@ -4310,6 +4310,323 @@ func TestGetTestWorkflows_CarriesEncodingAndMessageType(t *testing.T) {
 				assert.Equal(t, tc.wantEncoding, wf.GateEncoding, "task queue %q", wf.TaskQueue)
 				assert.Equal(t, tc.wantMessageType, wf.GateMessageType, "task queue %q", wf.TaskQueue)
 			}
+		})
+	}
+}
+
+// TestGetWorkerResourceApplies_SunsetBuildIDs covers the sunset skip. Once the controller
+// starts holding a drained version's replicas at zero, that version's autoscaler must stop
+// being rendered, or the next reconcile re-applies the resource the delete path just removed.
+// Resources that do not drive replicas are unaffected and keep being applied until their
+// k8s Deployment is deleted.
+func TestGetWorkerResourceApplies_SunsetBuildIDs(t *testing.T) {
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+			"build-b": createDeploymentWithUID("worker-build-b", "uid-b"),
+		},
+	}
+	hpa := createTestWRT("my-hpa", "my-worker")
+	pdb := createTestPDBWRT("my-pdb", "my-worker")
+
+	applyKeys := func(applies []WorkerResourceApply) []string {
+		keys := make([]string, 0, len(applies))
+		for _, a := range applies {
+			keys = append(keys, a.WRTName+"/"+a.BuildID)
+		}
+		return keys
+	}
+
+	testCases := []struct {
+		name           string
+		wrts           []temporaliov1alpha1.WorkerResourceTemplate
+		sunsetBuildIDs map[string]struct{}
+		expectKeys     []string
+	}{
+		{
+			name:           "autoscaler WRT is withheld for the sunsetting build ID only",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{hpa},
+			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectKeys:     []string{"my-hpa/build-a"},
+		},
+		{
+			name:           "non-autoscaler WRT is still applied for the sunsetting build ID",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{pdb},
+			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectKeys:     []string{"my-pdb/build-a", "my-pdb/build-b"},
+		},
+		{
+			name:           "only the autoscaler is withheld when both WRT kinds target the same build ID",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{hpa, pdb},
+			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectKeys:     []string{"my-hpa/build-a", "my-pdb/build-a", "my-pdb/build-b"},
+		},
+		{
+			name:           "no build IDs sunsetting leaves every apply in place",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{hpa},
+			sunsetBuildIDs: map[string]struct{}{},
+			expectKeys:     []string{"my-hpa/build-a", "my-hpa/build-b"},
+		},
+		{
+			name:           "every build ID sunsetting withholds the autoscaler entirely",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{hpa},
+			sunsetBuildIDs: map[string]struct{}{"build-a": {}, "build-b": {}},
+			expectKeys:     nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs)
+			assert.ElementsMatch(t, tc.expectKeys, applyKeys(applies))
+		})
+	}
+}
+
+// createTestPDBWRT builds a WRT whose template is a PodDisruptionBudget and has no scaleTargetRef
+func createTestPDBWRT(name, workerDeploymentRefName string) temporaliov1alpha1.WorkerResourceTemplate {
+	pdbSpec := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"spec": map[string]interface{}{
+			"minAvailable": float64(1),
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{}, // opt in to auto-injection
+			},
+		},
+	}
+	raw, _ := json.Marshal(pdbSpec)
+	return temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: workerDeploymentRefName},
+			Template:            runtime.RawExtension{Raw: raw},
+		},
+	}
+}
+
+// TestGetDeleteWorkerResources_SunsetBuildIDs covers the deletion path of drained autoscalers.
+// Normally a build ID with a live k8s Deployment is skipped, but autoscalers are the exception.
+// Once the controller holds a drained version at zero, its autoscaler has to go, even though
+// k8s the Deployment lives on for another deleteDelay
+func TestGetDeleteWorkerResources_SunsetBuildIDs(t *testing.T) {
+	makeDeployment := func(name, buildID string) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{k8s.BuildIDLabel: buildID},
+			},
+		}
+	}
+	stateWith := func(deps ...*appsv1.Deployment) *k8s.DeploymentState {
+		state := &k8s.DeploymentState{Deployments: make(map[string]*appsv1.Deployment)}
+		for _, d := range deps {
+			if bid := d.Labels[k8s.BuildIDLabel]; bid != "" {
+				state.Deployments[bid] = d
+			}
+		}
+		return state
+	}
+	withStatus := func(wrt temporaliov1alpha1.WorkerResourceTemplate, buildIDs ...string) temporaliov1alpha1.WorkerResourceTemplate {
+		out := *wrt.DeepCopy()
+		for _, bid := range buildIDs {
+			out.Status.Versions = append(out.Status.Versions, temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
+				BuildID:         bid,
+				LastAppliedHash: "somehash",
+			})
+		}
+		return out
+	}
+	hpaRef := func(buildID string) WorkerResourceRef {
+		return WorkerResourceRef{
+			Namespace:  "default",
+			Name:       k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", buildID),
+			APIVersion: "autoscaling/v2",
+			Kind:       "HorizontalPodAutoscaler",
+			WRTName:    "my-hpa",
+			BuildID:    buildID,
+		}
+	}
+
+	hpa := createTestWRT("my-hpa", "my-worker")
+	pdb := createTestPDBWRT("my-pdb", "my-worker")
+	depA := makeDeployment("worker-build-a", "build-a")
+	depB := makeDeployment("worker-build-b", "build-b")
+
+	testCases := []struct {
+		name              string
+		wrts              []temporaliov1alpha1.WorkerResourceTemplate
+		deleteDeployments []*appsv1.Deployment
+		sunsetBuildIDs    map[string]struct{}
+		expectRefs        []WorkerResourceRef
+	}{
+		{
+			name:           "autoscaler for a live sunsetting build ID is deleted",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{withStatus(hpa, "build-a", "build-b")},
+			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectRefs:     []WorkerResourceRef{hpaRef("build-b")},
+		},
+		{
+			name:           "non-autoscaler for a live sunsetting build ID is kept",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{withStatus(pdb, "build-a", "build-b")},
+			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectRefs:     nil,
+		},
+		{
+			name:           "only the autoscaler is deleted when both WRT kinds cover the sunsetting build ID",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{withStatus(hpa, "build-b"), withStatus(pdb, "build-b")},
+			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectRefs:     []WorkerResourceRef{hpaRef("build-b")},
+		},
+		{
+			name:           "autoscaler with no status entry has nothing to delete",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{hpa},
+			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectRefs:     nil,
+		},
+		{
+			name:           "no build IDs sunsetting leaves every live autoscaler in place",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{withStatus(hpa, "build-a", "build-b")},
+			sunsetBuildIDs: map[string]struct{}{},
+			expectRefs:     nil,
+		},
+		{
+			name:              "build ID both sunsetting and being deleted produces exactly one ref",
+			wrts:              []temporaliov1alpha1.WorkerResourceTemplate{withStatus(hpa, "build-b")},
+			deleteDeployments: []*appsv1.Deployment{depB},
+			sunsetBuildIDs:    map[string]struct{}{"build-b": {}},
+			expectRefs:        []WorkerResourceRef{hpaRef("build-b")},
+		},
+		{
+			name:           "every build ID sunsetting deletes every autoscaler",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{withStatus(hpa, "build-a", "build-b")},
+			sunsetBuildIDs: map[string]struct{}{"build-a": {}, "build-b": {}},
+			expectRefs:     []WorkerResourceRef{hpaRef("build-a"), hpaRef("build-b")},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			refs := getDeleteWorkerResources(tc.wrts, tc.deleteDeployments, stateWith(depA, depB), tc.sunsetBuildIDs)
+			assert.ElementsMatch(t, tc.expectRefs, refs)
+		})
+	}
+}
+
+// TestGetSunsetScaleDownBuildIDs covers which drained versions the controller has begun
+// forcing to zero.
+func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
+	const (
+		drained  = temporaliov1alpha1.VersionStatusDrained
+		inactive = temporaliov1alpha1.VersionStatusInactive
+		ramping  = temporaliov1alpha1.VersionStatusRamping
+		current  = temporaliov1alpha1.VersionStatusCurrent
+	)
+
+	ago := func(d time.Duration) *metav1.Time {
+		return &metav1.Time{Time: time.Now().Add(-d)}
+	}
+	ver := func(buildID string, status temporaliov1alpha1.VersionStatus, drainedSince *metav1.Time) *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+		return &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+				BuildID:    buildID,
+				Status:     status,
+				Deployment: &corev1.ObjectReference{Name: "test-" + buildID},
+			},
+			DrainedSince: drainedSince,
+		}
+	}
+
+	noDeployment := ver("build-nodep", drained, ago(2*time.Hour))
+	noDeployment.Deployment = nil
+
+	testCases := []struct {
+		name           string
+		versions       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion
+		scaledownDelay time.Duration
+		expect         []string
+	}{
+		{
+			name:           "drained past the delay is included",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-a", drained, ago(2*time.Hour))},
+			scaledownDelay: time.Hour,
+			expect:         []string{"build-a"},
+		},
+		{
+			name:           "drained within the delay is excluded",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-a", drained, ago(30*time.Minute))},
+			scaledownDelay: time.Hour,
+			expect:         nil,
+		},
+		{
+			// A missing timestamp must not read as "drained forever ago".
+			name:           "drained with no DrainedSince is excluded",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-a", drained, nil)},
+			scaledownDelay: time.Hour,
+			expect:         nil,
+		},
+		{
+			// What the integration tests configure, so a version sunsets immediately.
+			name:           "a zero delay includes a drained version right away",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-a", drained, ago(time.Second))},
+			scaledownDelay: 0,
+			expect:         []string{"build-a"},
+		},
+		{
+			name: "non-drained statuses are excluded however old the timestamp",
+			versions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+				ver("build-inactive", inactive, ago(24*time.Hour)),
+				ver("build-ramping", ramping, ago(24*time.Hour)),
+				ver("build-current", current, ago(24*time.Hour)),
+			},
+			scaledownDelay: time.Hour,
+			expect:         nil,
+		},
+		{
+			name: "only the qualifying versions of a mixed set",
+			versions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+				ver("build-old", drained, ago(2*time.Hour)),
+				ver("build-recent", drained, ago(30*time.Minute)),
+				ver("build-inactive", inactive, ago(24*time.Hour)),
+				ver("build-no-ts", drained, nil),
+				ver("build-older", drained, ago(48*time.Hour)),
+			},
+			scaledownDelay: time.Hour,
+			expect:         []string{"build-old", "build-older"},
+		},
+		{
+			name:           "drained version with no Deployment is still included",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{noDeployment},
+			scaledownDelay: time.Hour,
+			expect:         []string{"build-nodep"},
+		},
+		{
+			name:           "no deprecated versions produces an empty set",
+			versions:       nil,
+			scaledownDelay: time.Hour,
+			expect:         nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &temporaliov1alpha1.WorkerDeploymentStatus{DeprecatedVersions: tc.versions}
+			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: tc.scaledownDelay},
+				},
+			}
+
+			got := getSunsetScaleDownBuildIDs(status, spec)
+
+			buildIDs := make([]string, 0, len(got))
+			for id := range got {
+				buildIDs = append(buildIDs, id)
+			}
+			assert.ElementsMatch(t, tc.expect, buildIDs)
 		})
 	}
 }

@@ -473,3 +473,127 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	require.True(t, ok, "scaleTargetRef should have been auto-injected")
 	assert.Equal(t, "my-worker-abc123", ref["name"])
 }
+
+func TestHasScaleTarget(t *testing.T) {
+	t.Run("detects the sentinel in a KEDA ScaledObject", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "keda.sh/v1alpha1",
+			"kind": "ScaledObject",
+			"spec": {
+				"scaleTargetRef": {},
+				"minReplicaCount": 1,
+				"triggers": [
+					{"type": "temporal", "metadata": {"workerDeploymentName": "", "workerDeploymentBuildId": ""}}
+				]
+			}
+		}`)
+		assert.True(t, HasScaleTarget(raw))
+	})
+
+	t.Run("detects the sentinel in an HPA", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "autoscaling/v2",
+			"kind": "HorizontalPodAutoscaler",
+			"spec": {
+				"scaleTargetRef": {},
+				"minReplicas": 2,
+				"maxReplicas": 10
+			}
+		}`)
+		assert.True(t, HasScaleTarget(raw))
+	})
+
+	t.Run("detects a pre-populated scaleTargetRef", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "autoscaling/v2",
+			"kind": "HorizontalPodAutoscaler",
+			"spec": {
+				"scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": "some-other-deployment"},
+				"minReplicas": 2,
+				"maxReplicas": 10
+			}
+		}`)
+		assert.True(t, HasScaleTarget(raw))
+	})
+
+	t.Run("detects a scaleTargetRef nested deeper in the spec", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "example.io/v1",
+			"kind": "CustomScaler",
+			"spec": {
+				"scaling": {
+					"target": {
+						"scaleTargetRef": {}
+					}
+				}
+			}
+		}`)
+		assert.True(t, HasScaleTarget(raw))
+	})
+
+	t.Run("detects a scaleTargetRef inside an array element", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "keda.sh/v1alpha1",
+			"kind": "ScaledObject",
+			"spec": {
+				"triggers": [
+					{"type": "cpu"},
+					{"type": "temporal", "scaleTargetRef": {}}
+				]
+			}
+		}`)
+		assert.True(t, HasScaleTarget(raw))
+	})
+
+	t.Run("returns false for a PodDisruptionBudget", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "policy/v1",
+			"kind": "PodDisruptionBudget",
+			"spec": {
+				"minAvailable": 1,
+				"selector": {"matchLabels": {}}
+			}
+		}`)
+		assert.False(t, HasScaleTarget(raw))
+	})
+
+	t.Run("returns false for an HPA that did not opt in", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "autoscaling/v2",
+			"kind": "HorizontalPodAutoscaler",
+			"spec": {
+				"minReplicas": 2,
+				"maxReplicas": 10
+			}
+		}`)
+		assert.False(t, HasScaleTarget(raw))
+	})
+
+	t.Run("returns false when the template is unparseable", func(t *testing.T) {
+		raw := []byte(`{"apiVersion": "autoscaling/v2", "spec": {`)
+		assert.False(t, HasScaleTarget(raw))
+	})
+
+	t.Run("returns false when the template is empty", func(t *testing.T) {
+		assert.False(t, HasScaleTarget(nil))
+	})
+
+	t.Run("returns false when the template has no spec", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "autoscaling/v2",
+			"kind": "HorizontalPodAutoscaler",
+			"metadata": {"name": "no-spec"}
+		}`)
+		assert.False(t, HasScaleTarget(raw))
+	})
+
+	t.Run("ignores a scaleTargetRef outside spec", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "policy/v1",
+			"kind": "PodDisruptionBudget",
+			"metadata": {"annotations": {"scaleTargetRef": "not-a-real-target"}},
+			"spec": {"minAvailable": 1}
+		}`)
+		assert.False(t, HasScaleTarget(raw))
+	})
+}
