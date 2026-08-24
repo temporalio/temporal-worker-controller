@@ -176,8 +176,12 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the WorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments)
-	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState)
+	// Determine build IDs we're holding at zero for sunset. Their autoscalers must
+	// not exist while that's true
+	sunsetBuildIDs := getSunsetScaleDownBuildIDs(status, spec)
+
+	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments, sunsetBuildIDs)
+	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
 	return plan, nil
@@ -192,6 +196,7 @@ func getWorkerResourceApplies(
 	k8sState *k8s.DeploymentState,
 	temporalNamespace string,
 	deleteDeployments []*appsv1.Deployment,
+	sunsetBuildIDs map[string]struct{},
 ) []WorkerResourceApply {
 	// Build a set of deployment names that are scheduled for deletion so we can
 	// skip rendering WRTs for them. Their rendered resources are deleted explicitly
@@ -214,9 +219,18 @@ func getWorkerResourceApplies(
 			existingStatus[v.BuildID] = v
 		}
 
+		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for buildID, deployment := range k8sState.Deployments {
 			if _, deleting := deletingDeployments[deployment.Name]; deleting {
 				continue
+			}
+			if hasScaleTarget {
+				// The controller is holding this version's replicas at zero, so
+				// getDeleteWorkerResources removes its autoscaler. We don't want
+				// to render this autoscaler again
+				if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+					continue
+				}
 			}
 			rendered, renderErr := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
 			if renderErr != nil {
@@ -316,6 +330,7 @@ func getDeleteWorkerResources(
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	deleteDeployments []*appsv1.Deployment,
 	k8sState *k8s.DeploymentState,
+	sunsetBuildIDs map[string]struct{},
 ) []WorkerResourceRef {
 	if len(wrts) == 0 {
 		return nil
@@ -345,15 +360,26 @@ func getDeleteWorkerResources(
 			continue
 		}
 
-		// Union of builds being sunset this cycle and orphaned status entries.
+		// Union of builds being sunset this cycle, orphaned status entries and builds
+		// pinned to zero (autoscalers only)
 		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
 		buildIDs = append(buildIDs, deletingBuildIDs...)
+
+		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for _, v := range wrt.Status.Versions {
 			if v.BuildID == "" {
 				continue
 			}
 			if k8sState != nil {
 				if _, live := k8sState.Deployments[v.BuildID]; live {
+					if hasScaleTarget {
+						// Remove the autoscaler as soon as the controller starts holding
+						// replicas at zero. The k8s Deployment outlives it by deleteDelay.
+						// Any other rendered resource is cleaned up with the Deployment
+						if _, sunsetting := sunsetBuildIDs[v.BuildID]; sunsetting {
+							buildIDs = append(buildIDs, v.BuildID)
+						}
+					}
 					continue // build still has a Deployment; its resource is managed by applies
 				}
 			}
@@ -840,6 +866,22 @@ func getScaleDeployments(
 	}
 
 	return scaleDeployments
+}
+
+// getSunsetScaleDownBuildIDs returns the build IDs of drained versions the controller has
+// begun forcing to zero.
+func getSunsetScaleDownBuildIDs(
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) map[string]struct{} {
+	buildIDs := map[string]struct{}{}
+	for _, version := range status.DeprecatedVersions {
+		if version.Status == temporaliov1alpha1.VersionStatusDrained &&
+			version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
+			buildIDs[version.BuildID] = struct{}{}
+		}
+	}
+	return buildIDs
 }
 
 // shouldCreateDeployment determines if a new deployment needs to be created
