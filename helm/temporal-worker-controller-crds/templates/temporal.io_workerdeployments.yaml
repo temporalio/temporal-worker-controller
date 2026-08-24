@@ -3980,6 +3980,12 @@ spec:
                 properties:
                   connectionRef:
                     properties:
+                      kind:
+                        default: Connection
+                        enum:
+                        - Connection
+                        - ClusterConnection
+                        type: string
                       name:
                         pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                         type: string

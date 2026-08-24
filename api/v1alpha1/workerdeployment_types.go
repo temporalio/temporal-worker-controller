@@ -12,17 +12,30 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// ConnectionReference contains the name of a Connection resource
-// in the same namespace as the WorkerDeployment.
+// ConnectionReference identifies a connection resource to use. By default it
+// refers to a namespaced Connection in the same namespace as the
+// WorkerDeployment. When Kind is "ClusterConnection", it refers to a
+// cluster-scoped ClusterConnection instead; The authentication
+// secret is still resolved from the WorkerDeployment's own namespace.
 type ConnectionReference struct {
 	// Name of the Connection resource.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
+	// Kind is the type of connection resource.
+	// ClusterConnection selects a cluster-scoped ClusterConnection.
+	// Omitting this field preserves the pre-existing behavior of referencing a
+	// namespaced Connection.
+	// +optional
+	// +kubebuilder:default=Connection
+	// +kubebuilder:validation:Enum=Connection;ClusterConnection
+	Kind string `json:"kind,omitempty"`
 }
 
 type WorkerOptions struct {
-	// The name of a Connection in the same namespace as the WorkerDeployment.
+	// ConnectionRef selects the connection resource for this worker. By default
+	// it names a Connection in the same namespace; set connectionRef.kind to
+	// "ClusterConnection" to reference a cluster-scoped ClusterConnection.
 	ConnectionRef ConnectionReference `json:"connectionRef"`
 	// The Temporal namespace for the worker to connect to.
 	// +kubebuilder:validation:MinLength=1

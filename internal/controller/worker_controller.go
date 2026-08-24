@@ -88,6 +88,8 @@ type WorkerDeploymentReconciler struct {
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalworkerdeployments/finalizers,verbs=update
 // +kubebuilder:rbac:groups=temporal.io,resources=connections,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=connections/finalizers,verbs=update
+// +kubebuilder:rbac:groups=temporal.io,resources=clusterconnections,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=temporal.io,resources=clusterconnections/finalizers,verbs=update
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=temporal.io,resources=workerdeployments/finalizers,verbs=update
@@ -220,11 +222,8 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Note: ConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
 
 	// Fetch the connection parameters
-	var connection temporaliov1alpha1.Connection
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      workerDeploy.Spec.WorkerOptions.ConnectionRef.Name,
-		Namespace: workerDeploy.Namespace,
-	}, &connection); err != nil {
+	connSpec, connObj, err := r.resolveConnection(ctx, &workerDeploy)
+	if err != nil {
 		l.Error(err, "unable to fetch Connection")
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonConnectionNotFound,
@@ -233,10 +232,11 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	// Ensure our finalizer is on the Connection so it cannot be deleted
-	// while this WD still references it. This guarantees the connection is available
-	// during WD deletion cleanup.
-	if err := r.ensureConnectionFinalizer(ctx, l, &connection); err != nil {
+	connection := temporaliov1alpha1.Connection{Spec: connSpec}
+
+	// Ensure the finalizer is on the connection object so it cannot be deleted
+	// while this WD still references it.
+	if err := r.ensureConnectionFinalizer(ctx, l, connObj); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -248,7 +248,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		// validation failures.
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonAuthSecretInvalid,
-			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", connection.Name, err),
+			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", connObj.GetName(), err),
 			fmt.Sprintf("Unable to resolve auth secret: %v", err))
 		return ctrl.Result{}, err
 	}
@@ -563,13 +563,11 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	// Resolve Connection.
 	// The Connection is guaranteed to exist because we hold a finalizer on it
 	// that prevents deletion while any WD references it.
-	var connection temporaliov1alpha1.Connection
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      workerDeploy.Spec.WorkerOptions.ConnectionRef.Name,
-		Namespace: workerDeploy.Namespace,
-	}, &connection); err != nil {
+	connSpec, _, err := r.resolveConnection(ctx, workerDeploy)
+	if err != nil {
 		return fmt.Errorf("unable to fetch Connection: %w", err)
 	}
+	connection := temporaliov1alpha1.Connection{Spec: connSpec}
 
 	if err := connection.Spec.Validate(); err != nil {
 		// TODO(jaypipes): As of TWC release <=v1.8.1, the only validation
@@ -808,18 +806,51 @@ func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	_ = r.Status().Update(ctx, workerDeploy)
 }
 
+// connectionRefIsCluster reports whether a connectionRef targets a
+// cluster-scoped ClusterConnection.
+func connectionRefIsCluster(ref temporaliov1alpha1.ConnectionReference) bool {
+	return ref.Kind == "ClusterConnection"
+}
+
+// resolveConnection fetches the connection resource referenced by the
+// WorkerDeployment's connectionRef and returns its spec and the underlying object.
+// The object is returned as a client.Object so callers can
+// manage the finalizer on it regardless of whether it is a namespaced
+// Connection or a cluster-scoped ClusterConnection.
+func (r *WorkerDeploymentReconciler) resolveConnection(
+	ctx context.Context,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
+) (temporaliov1alpha1.ConnectionSpec, client.Object, error) {
+	connName := workerDeploy.Spec.WorkerOptions.ConnectionRef.Name
+	if workerDeploy.Spec.WorkerOptions.ConnectionRef.Kind == "ClusterConnection" {
+		var cc temporaliov1alpha1.ClusterConnection
+		if err := r.Get(ctx, types.NamespacedName{Name: connName}, &cc); err != nil {
+			return temporaliov1alpha1.ConnectionSpec{}, nil, err
+		}
+		return cc.Spec, &cc, nil
+	}
+	var conn temporaliov1alpha1.Connection
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      connName,
+		Namespace: workerDeploy.Namespace,
+	}, &conn); err != nil {
+		return temporaliov1alpha1.ConnectionSpec{}, nil, err
+	}
+	return conn.Spec, &conn, nil
+}
+
 // ensureConnectionFinalizer adds our finalizer to the Connection so it
 // cannot be deleted while this WD still needs it for cleanup.
 func (r *WorkerDeploymentReconciler) ensureConnectionFinalizer(
 	ctx context.Context,
 	l logr.Logger,
-	tc *temporaliov1alpha1.Connection,
+	conn client.Object,
 ) error {
-	if !controllerutil.ContainsFinalizer(tc, finalizerName) {
-		l.Info("Adding finalizer to Connection", "connection", tc.Name)
-		controllerutil.AddFinalizer(tc, finalizerName)
-		if err := r.Update(ctx, tc); err != nil {
-			return fmt.Errorf("unable to add finalizer to Connection %q: %w", tc.Name, err)
+	if !controllerutil.ContainsFinalizer(conn, finalizerName) {
+		l.Info("Adding finalizer to connection", "connection", conn.GetName())
+		controllerutil.AddFinalizer(conn, finalizerName)
+		if err := r.Update(ctx, conn); err != nil {
+			return fmt.Errorf("unable to add finalizer to connection %q: %w", conn.GetName(), err)
 		}
 	}
 	return nil
@@ -832,44 +863,56 @@ func (r *WorkerDeploymentReconciler) removeConnectionFinalizerIfUnused(
 	l logr.Logger,
 	deletingWD *temporaliov1alpha1.WorkerDeployment,
 ) error {
-	connectionName := deletingWD.Spec.WorkerOptions.ConnectionRef.Name
+	ref := deletingWD.Spec.WorkerOptions.ConnectionRef
+	isCluster := connectionRefIsCluster(ref)
 
-	// List all WDs in the same namespace
-	var wds temporaliov1alpha1.WorkerDeploymentList
-	if err := r.List(ctx, &wds, client.InNamespace(deletingWD.Namespace)); err != nil {
-		return fmt.Errorf("unable to list WDs: %w", err)
+	// Scope the "is it still used?" query correctly for the kind:
+	//   - Namespaced Connection: only WDs in its own namespace can reference it,
+	//     so restrict the list to deletingWD.Namespace.
+	//   - ClusterConnection: a WD in ANY namespace can reference it, so we must
+	//     list across all namespaces.
+	var listOpts []client.ListOption
+	if !isCluster {
+		listOpts = append(listOpts, client.InNamespace(deletingWD.Namespace))
 	}
 
-	// Check if any other WD (not the one being deleted) references this connection
+	var wds temporaliov1alpha1.WorkerDeploymentList
+	if err := r.List(ctx, &wds, listOpts...); err != nil {
+		return fmt.Errorf("unable to list WorkerDeployments: %w", err)
+	}
+
 	for i := range wds.Items {
 		wd := &wds.Items[i]
-		if wd.Name == deletingWD.Name {
+		// Skip self by namespace and name: under a cluster-wide list, two WDs in
+		// different namespaces can share the same name, so name alone is not a
+		// unique identity.
+		if wd.Namespace == deletingWD.Namespace && wd.Name == deletingWD.Name {
 			continue
 		}
-		if wd.Spec.WorkerOptions.ConnectionRef.Name == connectionName {
-			l.Info("Connection still referenced by another WD, keeping finalizer",
-				"connection", connectionName, "referencedBy", wd.Name)
+		otherRef := wd.Spec.WorkerOptions.ConnectionRef
+		// Same target only if BOTH name and (normalized) kind match, so a
+		// namespaced Connection "foo" and a ClusterConnection "foo" are distinct.
+		if otherRef.Name == ref.Name && connectionRefIsCluster(otherRef) == isCluster {
+			l.Info("Connection still referenced by another WorkerDeployment, keeping finalizer",
+				"connection", ref.Name, "kind", ref.Kind,
+				"referencedBy", wd.Name, "referencedByNamespace", wd.Namespace)
 			return nil
 		}
 	}
 
-	// No other WDs reference this connection, remove the finalizer
-	var tc temporaliov1alpha1.Connection
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      connectionName,
-		Namespace: deletingWD.Namespace,
-	}, &tc); err != nil {
+	_, connObj, err := r.resolveConnection(ctx, deletingWD)
+	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil // already gone
+			return nil
 		}
-		return fmt.Errorf("unable to fetch Connection %q: %w", connectionName, err)
+		return fmt.Errorf("unable to fetch connection %q: %w", ref.Name, err)
 	}
 
-	if controllerutil.ContainsFinalizer(&tc, finalizerName) {
-		l.Info("Removing finalizer from Connection", "connection", connectionName)
-		controllerutil.RemoveFinalizer(&tc, finalizerName)
-		if err := r.Update(ctx, &tc); err != nil {
-			return fmt.Errorf("unable to remove finalizer from Connection %q: %w", connectionName, err)
+	if controllerutil.ContainsFinalizer(connObj, finalizerName) {
+		l.Info("Removing finalizer from connection", "connection", ref.Name, "kind", ref.Kind)
+		controllerutil.RemoveFinalizer(connObj, finalizerName)
+		if err := r.Update(ctx, connObj); err != nil {
+			return fmt.Errorf("unable to remove finalizer from connection %q: %w", ref.Name, err)
 		}
 	}
 
@@ -915,6 +958,7 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&temporaliov1alpha1.WorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
+		Watches(&temporaliov1alpha1.ClusterConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingClusterConnection)).
 		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT))
 	if !r.DisableDeprecatedTWD {
 		// Watch deprecated TemporalWorkerDeployments so that any modification to an existing TWD
@@ -960,8 +1004,9 @@ func (r *WorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context
 
 	// Filter to ones using this connection
 	for _, twd := range twds.Items {
-		if twd.Spec.WorkerOptions.ConnectionRef.Name == tc.GetName() {
-			// Enqueue a reconcile request for this TWD
+		ref := twd.Spec.WorkerOptions.ConnectionRef
+		// Only namespaced Connection refs are driven by this (Connection) watch.
+		if !connectionRefIsCluster(ref) && ref.Name == tc.GetName() {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      twd.Name,
@@ -971,6 +1016,29 @@ func (r *WorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context
 		}
 	}
 
+	return requests
+}
+
+func (r *WorkerDeploymentReconciler) findTWDsUsingClusterConnection(
+	ctx context.Context,
+	cc client.Object,
+) []reconcile.Request {
+	var requests []reconcile.Request
+	var twds temporaliov1alpha1.WorkerDeploymentList
+	if err := r.List(ctx, &twds); err != nil {
+		return requests
+	}
+	for _, twd := range twds.Items {
+		ref := twd.Spec.WorkerOptions.ConnectionRef
+		if connectionRefIsCluster(ref) && ref.Name == cc.GetName() {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      twd.Name,
+					Namespace: twd.Namespace,
+				},
+			})
+		}
+	}
 	return requests
 }
 
