@@ -293,7 +293,7 @@ func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
 		},
 	}
 
-	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts)
+	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
@@ -313,7 +313,7 @@ func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
 		},
 	}
 
-	clientOpts, key, auth, err := cp.fetchClientUsingNoCredentials(opts)
+	clientOpts, key, auth, err := cp.fetchClientUsingNoCredentials(opts, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
@@ -359,7 +359,7 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 		},
 	}
 
-	clientOpts, key, auth, err := cp.fetchClientUsingAPIKeySecret(opts)
+	clientOpts, key, auth, err := cp.fetchClientUsingAPIKeySecret(opts, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, key.AuthMode)
@@ -367,6 +367,210 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 	assert.Nil(t, auth.mTLS)
 	assert.NotNil(t, clientOpts.Credentials, "API key credentials must be set")
 	assert.NotNil(t, clientOpts.ConnectionOptions.TLS, "TLS config must be non-nil for gRPC API key transport")
+}
+
+// TestFetchAPIKey_CACertAppendsToSystemPool verifies that TLS.CACertSecretRef, resolved by
+// the caller into a caCert argument, is appended to the system CA pool for API-key auth —
+// the same additive behavior TestFetchMTLS_CACertAppendsToSystemPool covers for mTLS auth
+// (PR #227). Before this change, fetchClientUsingAPIKeySecret had no way to trust a private
+// CA at all: RootCAs was always left nil, so the only way to reach a privately-signed
+// Temporal server over API-key auth was a process-wide SSL_CERT_FILE override.
+func TestFetchAPIKey_CACertAppendsToSystemPool(t *testing.T) {
+	now := time.Now()
+
+	sysCACert, sysCAPKey, sysCAPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, sysLeafPEM, _ := generateLeafCert(t, sysCACert, sysCAPKey, "system.example.com", now.Add(-time.Hour), now.Add(time.Hour))
+	sysLeafCert, err := decodePEMCert(sysLeafPEM)
+	require.NoError(t, err)
+
+	customCACert, customCAKey, customCAPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, customLeafPEM, _ := generateLeafCert(t, customCACert, customCAKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
+	customLeafCert, err := decodePEMCert(customLeafPEM)
+	require.NoError(t, err)
+
+	apiKeySecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	cp := newTestPoolWithFakeClient(&apiKeySecret)
+	cp.systemCertPoolFn = func() (*x509.CertPool, error) {
+		pool := x509.NewCertPool()
+		pool.AppendCertsFromPEM(sysCAPEM)
+		return pool, nil
+	}
+
+	opts := NewClientOptions{
+		TemporalNamespace: "default",
+		K8sNamespace:      "test-ns",
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+			},
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+		},
+	}
+
+	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts, customCAPEM)
+	require.NoError(t, err)
+
+	pool := clientOpts.ConnectionOptions.TLS.RootCAs
+	require.NotNil(t, pool, "RootCAs must be set when a CA cert is supplied")
+	assert.Equal(t, "ca-secret", key.CACertSecretName, "CA secret name must be part of the pool cache key")
+
+	_, err = sysLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "system.example.com"})
+	assert.NoError(t, err, "system CA should still be trusted alongside the custom CA")
+	_, err = customLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "custom.example.com"})
+	assert.NoError(t, err, "custom CA should be trusted")
+}
+
+// TestFetchAPIKey_NoCACert_RootCAsNil verifies that omitting TLS.CACertSecretRef leaves
+// RootCAs nil, preserving today's behavior (Go falls back to the system CA bundle).
+func TestFetchAPIKey_NoCACert_RootCAsNil(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	cp := newTestPoolWithFakeClient(&secret)
+	opts := NewClientOptions{
+		TemporalNamespace: "default",
+		K8sNamespace:      "test-ns",
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+		},
+	}
+
+	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts, nil)
+
+	require.NoError(t, err)
+	assert.Nil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
+	assert.Equal(t, "", key.CACertSecretName)
+}
+
+// TestFetchNoCredentials_CACertSetsRootCAs verifies that fetchClientUsingNoCredentials
+// applies a supplied CA cert even when no TLS.ServerName override is set, since previously
+// this path only allocated a TLS config at all when ServerName was non-empty.
+func TestFetchNoCredentials_CACertSetsRootCAs(t *testing.T) {
+	now := time.Now()
+	caCert, caKey, caPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, leafPEM, _ := generateLeafCert(t, caCert, caKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
+	leafCert, err := decodePEMCert(leafPEM)
+	require.NoError(t, err)
+
+	cp := newTestPool()
+	opts := NewClientOptions{
+		TemporalNamespace: "default",
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+			},
+		},
+	}
+
+	clientOpts, key, _, err := cp.fetchClientUsingNoCredentials(opts, caPEM)
+
+	require.NoError(t, err)
+	require.NotNil(t, clientOpts.ConnectionOptions.TLS, "TLS config must be allocated once a CA cert is supplied")
+	require.NotNil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
+	_, err = leafCert.Verify(x509.VerifyOptions{Roots: clientOpts.ConnectionOptions.TLS.RootCAs, CurrentTime: now, DNSName: "custom.example.com"})
+	assert.NoError(t, err)
+	assert.Equal(t, "ca-secret", key.CACertSecretName)
+}
+
+// TestParseClientSecret_APIKeyWithCACertSecretRef is the end-to-end regression test: it
+// exercises ParseClientSecret (not the fetchClientUsing* functions directly) to confirm the
+// CA secret is actually read from the fake k8s client and threaded through to the TLS config.
+func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
+	now := time.Now()
+	caCert, caKey, caPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, leafPEM, _ := generateLeafCert(t, caCert, caKey, "temporal.internal", now.Add(-time.Hour), now.Add(time.Hour))
+	leafCert, err := decodePEMCert(leafPEM)
+	require.NoError(t, err)
+
+	apiKeySecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	caSecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"ca.crt": caPEM},
+	}
+	cp := newTestPoolWithFakeClient(&apiKeySecret, &caSecret)
+
+	opts := NewClientOptions{
+		TemporalNamespace: "default",
+		K8sNamespace:      "test-ns",
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: "wf-scheduler.example.com:443",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+			},
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+		},
+	}
+
+	clientOpts, key, _, err := cp.ParseClientSecret(context.Background(), "api-key-secret", temporaliov1alpha1.AuthModeAPIKey, opts)
+
+	require.NoError(t, err)
+	require.NotNil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
+	_, err = leafCert.Verify(x509.VerifyOptions{Roots: clientOpts.ConnectionOptions.TLS.RootCAs, CurrentTime: now, DNSName: "temporal.internal"})
+	assert.NoError(t, err)
+	assert.Equal(t, "ca-secret", key.CACertSecretName)
+}
+
+// TestParseClientSecret_CACertSecretMissingKey_ReturnsError verifies that a CA secret
+// referenced by tls.caCertSecretRef but missing its ca.crt key is a hard error, not a
+// silent no-op. Unlike MutualTLSSecretRef's ca.crt (optional, since that secret's primary
+// job is tls.crt/tls.key), this field's only purpose is carrying a CA — a missing key here
+// is a misconfiguration that must surface, not silently fall back to system-trust-only.
+func TestParseClientSecret_CACertSecretMissingKey_ReturnsError(t *testing.T) {
+	apiKeySecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	caSecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"wrong-key": []byte("not-a-cert")},
+	}
+	cp := newTestPoolWithFakeClient(&apiKeySecret, &caSecret)
+
+	opts := NewClientOptions{
+		TemporalNamespace: "default",
+		K8sNamespace:      "test-ns",
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: "wf-scheduler.example.com:443",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+			},
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+		},
+	}
+
+	_, _, _, err := cp.ParseClientSecret(context.Background(), "api-key-secret", temporaliov1alpha1.AuthModeAPIKey, opts)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ca-secret")
+	assert.Contains(t, err.Error(), "ca.crt")
 }
 
 // TestFetchAPIKey_CredentialClosureReadsLiveSecret verifies that fetchAPIKeyFromSecret

@@ -38,10 +38,18 @@ type ConnectionTLSConfig struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+$`
 	ServerName string `json:"serverName,omitempty"`
+
+	// CACertSecretRef references a Secret (key "ca.crt") whose certificate is appended to
+	// the system trust store for this connection, independent of AuthMode.
+	// The Secret must be of type Opaque or
+	// kubernetes.io/tls and exist in the same Kubernetes namespace as the Connection.
+	// +optional
+	CACertSecretRef *SecretReference `json:"caCertSecretRef,omitempty"`
 }
 
 // ConnectionSpec defines the desired state of Connection
 // +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))",message="Only one of mutualTLSSecretRef or apiKeySecretRef may be set"
+// +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.tls) && has(self.tls.caCertSecretRef))",message="tls.caCertSecretRef cannot be combined with mutualTLSSecretRef; bundle the CA into that secret's own ca.crt key instead"
 type ConnectionSpec struct {
 	// The host and port of the Temporal server.
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
@@ -122,6 +130,15 @@ func (s ConnectionSpec) TLSServerName() string {
 		return ""
 	}
 	return s.TLS.ServerName
+}
+
+// CACertSecretName returns the name of the Secret referenced by TLS.CACertSecretRef, or an
+// empty string when unset.
+func (s ConnectionSpec) CACertSecretName() string {
+	if s.TLS == nil || s.TLS.CACertSecretRef == nil {
+		return ""
+	}
+	return s.TLS.CACertSecretRef.Name
 }
 
 // ConnectionStatus defines the observed state of Connection
