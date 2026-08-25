@@ -423,7 +423,7 @@ func TestFindTWDsUsingClusterConnection(t *testing.T) {
 	})
 }
 
-//releaseConnectionFinalizerIfUnused: migration path
+// ReleaseConnectionFinalizerIfUnused: migration path
 
 // After a WD switches to a different connection,
 // releasing the OLD (now-unused) connection's finalizer must succeed.
