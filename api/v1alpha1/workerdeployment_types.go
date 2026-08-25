@@ -242,6 +242,12 @@ type WorkerDeploymentStatus struct {
 	// Conditions represent the latest available observations of the WorkerDeployment's current state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ObservedConnectionRef records the connectionRef the controller last
+	// finalized, so the reconciler can detect when connectionRef changes
+	// (name or kind) and release the finalizer from the previously-referenced
+	// connection.
+	ObservedConnectionRef *ConnectionReference `json:"observedConnectionRef,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.

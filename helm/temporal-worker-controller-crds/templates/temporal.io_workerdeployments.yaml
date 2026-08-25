@@ -4142,6 +4142,20 @@ spec:
                 type: string
               managerIdentity:
                 type: string
+              observedConnectionRef:
+                properties:
+                  kind:
+                    default: Connection
+                    enum:
+                    - Connection
+                    - ClusterConnection
+                    type: string
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
               targetVersion:
                 properties:
                   buildID:

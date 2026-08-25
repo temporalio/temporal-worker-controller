@@ -422,3 +422,90 @@ func TestFindTWDsUsingClusterConnection(t *testing.T) {
 		assert.Empty(t, reqs)
 	})
 }
+
+//releaseConnectionFinalizerIfUnused: migration path
+
+// After a WD switches to a different connection,
+// releasing the OLD (now-unused) connection's finalizer must succeed.
+func TestReleaseConnectionFinalizerIfUnused_ReleasesUnused(t *testing.T) {
+	ctx := context.Background()
+	// old-conn still carries the finalizer from before the switch.
+	oldConn := makeNoCredsConnection("old-conn", "default", "h:7233")
+	oldConn.Finalizers = []string{finalizerName}
+	// The WD ("w") now points at a DIFFERENT connection, so nothing references
+	// old-conn anymore.
+	self := makeWDWithKind("w", "default", "new-conn", "Connection")
+	r, _ := newTestReconciler([]client.Object{oldConn, self})
+
+	oldRef := temporaliov1alpha1.ConnectionReference{Name: "old-conn", Kind: "Connection"}
+	require.NoError(t, r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), oldRef, "default", "w"))
+
+	assert.False(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.Connection{},
+		types.NamespacedName{Name: "old-conn", Namespace: "default"}),
+		"old connection's finalizer must be released once no WD references it")
+}
+
+// Migrating away from a shared ClusterConnection must NOT
+// release its finalizer while a WD in another namespace still references it.
+func TestReleaseConnectionFinalizerIfUnused_KeepsSharedStillUsed(t *testing.T) {
+	ctx := context.Background()
+	shared := makeClusterConnection("shared", "h:7233")
+	shared.Finalizers = []string{finalizerName}
+	// A WD in ns-b still references the shared ClusterConnection.
+	wdB := makeWDWithKind("wb", "ns-b", "shared", "ClusterConnection")
+	r, _ := newTestReconciler([]client.Object{shared, wdB})
+
+	// Simulate the WD "w" in ns-a migrating away from "shared".
+	sharedRef := temporaliov1alpha1.ConnectionReference{Name: "shared", Kind: "ClusterConnection"}
+	require.NoError(t, r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), sharedRef, "ns-a", "w"))
+
+	assert.True(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.ClusterConnection{},
+		types.NamespacedName{Name: "shared"}),
+		"shared ClusterConnection finalizer must be KEPT while a WD in another namespace references it")
+}
+
+// A connectionRef whose Kind was defaulted from
+// "" to "Connection" must NOT be seen as a change, or every pre-existing WD would
+// try to release its own connection on the first reconcile after upgrade.
+func TestSameConnectionRef(t *testing.T) {
+	ref := func(name, kind string) temporaliov1alpha1.ConnectionReference {
+		return temporaliov1alpha1.ConnectionReference{Name: name, Kind: kind}
+	}
+
+	tests := []struct {
+		name string
+		a, b temporaliov1alpha1.ConnectionReference
+		want bool
+	}{
+		{
+			name: "empty kind equals Connection (normalization)",
+			a:    ref("c", ""),
+			b:    ref("c", "Connection"),
+			want: true,
+		},
+		{
+			name: "Connection differs from ClusterConnection",
+			a:    ref("c", "Connection"),
+			b:    ref("c", "ClusterConnection"),
+			want: false,
+		},
+		{
+			name: "different names differ",
+			a:    ref("a", "Connection"),
+			b:    ref("b", "Connection"),
+			want: false,
+		},
+		{
+			name: "same cluster ref equals itself",
+			a:    ref("c", "ClusterConnection"),
+			b:    ref("c", "ClusterConnection"),
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, sameConnectionRef(tc.a, tc.b))
+		})
+	}
+}
