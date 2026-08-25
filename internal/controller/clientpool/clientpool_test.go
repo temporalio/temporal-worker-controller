@@ -420,7 +420,7 @@ func TestFetchAPIKey_CACertAppendsToSystemPool(t *testing.T) {
 
 	pool := clientOpts.ConnectionOptions.TLS.RootCAs
 	require.NotNil(t, pool, "RootCAs must be set when a CA cert is supplied")
-	assert.Equal(t, "ca-secret", key.CACertSecretName, "CA secret name must be part of the pool cache key")
+	assert.Equal(t, "ca-secret", key.TLSCACertSecretName, "CA secret name must be part of the pool cache key")
 
 	_, err = sysLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "system.example.com"})
 	assert.NoError(t, err, "system CA should still be trusted alongside the custom CA")
@@ -453,7 +453,7 @@ func TestFetchAPIKey_NoCACert_RootCAsNil(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Nil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
-	assert.Equal(t, "", key.CACertSecretName)
+	assert.Equal(t, "", key.TLSCACertSecretName)
 }
 
 // TestFetchNoCredentials_CACertSetsRootCAs verifies that fetchClientUsingNoCredentials
@@ -484,7 +484,7 @@ func TestFetchNoCredentials_CACertSetsRootCAs(t *testing.T) {
 	require.NotNil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
 	_, err = leafCert.Verify(x509.VerifyOptions{Roots: clientOpts.ConnectionOptions.TLS.RootCAs, CurrentTime: now, DNSName: "custom.example.com"})
 	assert.NoError(t, err)
-	assert.Equal(t, "ca-secret", key.CACertSecretName)
+	assert.Equal(t, "ca-secret", key.TLSCACertSecretName)
 }
 
 // TestParseClientSecret_APIKeyWithCACertSecretRef is the end-to-end regression test: it
@@ -530,7 +530,7 @@ func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
 	require.NotNil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
 	_, err = leafCert.Verify(x509.VerifyOptions{Roots: clientOpts.ConnectionOptions.TLS.RootCAs, CurrentTime: now, DNSName: "temporal.internal"})
 	assert.NoError(t, err)
-	assert.Equal(t, "ca-secret", key.CACertSecretName)
+	assert.Equal(t, "ca-secret", key.TLSCACertSecretName)
 }
 
 // TestParseClientSecret_CACertSecretMissingKey_ReturnsError verifies that a CA secret

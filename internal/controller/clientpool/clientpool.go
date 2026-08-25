@@ -23,12 +23,12 @@ import (
 )
 
 type ClientPoolKey struct {
-	HostPort         string
-	TLSServerName    string
-	Namespace        string            // Temporal namespace
-	SecretName       string            // Include secret name in key to invalidate cache when the secret name changes
-	CACertSecretName string            // Include CA secret name in key to invalidate cache when TLS.CACertSecretRef changes
-	AuthMode         v1alpha1.AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
+	HostPort            string
+	TLSServerName       string
+	Namespace           string            // Temporal namespace
+	SecretName          string            // Include secret name in key to invalidate cache when the secret name changes
+	TLSCACertSecretName string            // Include CA secret name in key to invalidate cache when TLS.CACertSecretRef changes
+	AuthMode            v1alpha1.AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
 }
 
 type MTLSAuth struct {
@@ -169,7 +169,7 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	// Cloud. When ca.crt is absent, RootCAs remains unset and Go's TLS implementation
 	// uses the system CA bundle by default.
 	if caCert, ok := secret.Data["ca.crt"]; ok && len(caCert) > 0 {
-		rootCAs, err := cp.mergeCACert(caCert)
+		rootCAs, err := cp.TLSCertPool(caCert)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -184,8 +184,8 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 		Namespace:     opts.TemporalNamespace,
 		SecretName:    opts.Spec.MutualTLSSecretRef.Name,
 		// Always empty here: CEL validation forbids combining mutualTLSSecretRef with tls.caCertSecretRef.
-		CACertSecretName: "",
-		AuthMode:         v1alpha1.AuthModeTLS,
+		TLSCACertSecretName: "",
+		AuthMode:            v1alpha1.AuthModeTLS,
 	}
 	auth := ClientAuth{
 		mode: v1alpha1.AuthModeTLS,
@@ -198,7 +198,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions, caCert
 	tlsServerName := opts.Spec.TLSServerName()
 	clientOpts := cp.newClientOptions(opts)
 	tlsCfg := &tls.Config{ServerName: tlsServerName}
-	rootCAs, err := cp.mergeCACert(caCert)
+	rootCAs, err := cp.TLSCertPool(caCert)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -213,12 +213,12 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions, caCert
 	})
 
 	key := ClientPoolKey{
-		HostPort:         opts.Spec.HostPort,
-		TLSServerName:    tlsServerName,
-		Namespace:        opts.TemporalNamespace,
-		SecretName:       opts.Spec.APIKeySecretRef.Name,
-		CACertSecretName: opts.Spec.CACertSecretName(),
-		AuthMode:         v1alpha1.AuthModeAPIKey,
+		HostPort:            opts.Spec.HostPort,
+		TLSServerName:       tlsServerName,
+		Namespace:           opts.TemporalNamespace,
+		SecretName:          opts.Spec.APIKeySecretRef.Name,
+		TLSCACertSecretName: opts.Spec.TLSCACertSecretName(),
+		AuthMode:            v1alpha1.AuthModeAPIKey,
 	}
 	auth := ClientAuth{
 		mode: v1alpha1.AuthModeAPIKey,
@@ -231,7 +231,7 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions, caCert
 func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions, caCert []byte) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
 	tlsServerName := opts.Spec.TLSServerName()
 	clientOpts := cp.newClientOptions(opts)
-	rootCAs, err := cp.mergeCACert(caCert)
+	rootCAs, err := cp.TLSCertPool(caCert)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -240,12 +240,12 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions, caCer
 	}
 
 	key := ClientPoolKey{
-		HostPort:         opts.Spec.HostPort,
-		TLSServerName:    tlsServerName,
-		Namespace:        opts.TemporalNamespace,
-		SecretName:       "",
-		CACertSecretName: opts.Spec.CACertSecretName(),
-		AuthMode:         v1alpha1.AuthModeNoCredentials,
+		HostPort:            opts.Spec.HostPort,
+		TLSServerName:       tlsServerName,
+		Namespace:           opts.TemporalNamespace,
+		SecretName:          "",
+		TLSCACertSecretName: opts.Spec.TLSCACertSecretName(),
+		AuthMode:            v1alpha1.AuthModeNoCredentials,
 	}
 	auth := ClientAuth{
 		mode: v1alpha1.AuthModeNoCredentials,
@@ -255,10 +255,10 @@ func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions, caCer
 	return &clientOpts, &key, &auth, nil
 }
 
-// mergeCACert returns the system CA pool with caCert appended, so a connection can trust a
+// TLSCertPool returns the system CA pool with caCert appended, so a connection can trust a
 // private CA while still trusting publicly-signed endpoints (e.g. Temporal Cloud). Returns
 // (nil, nil) when caCert is empty, leaving RootCAs unset so Go falls back to the system pool.
-func (cp *ClientPool) mergeCACert(caCert []byte) (*x509.CertPool, error) {
+func (cp *ClientPool) TLSCertPool(caCert []byte) (*x509.CertPool, error) {
 	if len(caCert) == 0 {
 		return nil, nil
 	}
@@ -290,11 +290,11 @@ func (cp *ClientPool) ParseClientSecret(
 		}
 	}
 
-	// TLS.CACertSecretRef is independent of AuthMode, so it applies here regardless of
-	// which branch below runs. AuthModeTLS ignores it — MutualTLSSecretRef's own ca.crt
+	// TLS.CACertSecretRef is applicable when AuthMode is either AuthModeAPIKey or
+	// AuthModeNoCredentials. AuthModeTLS ignores it — MutualTLSSecretRef's own ca.crt
 	// key already covers that case, and the two are mutually exclusive by CEL validation.
 	var caCert []byte
-	if caCertSecretName := opts.Spec.CACertSecretName(); caCertSecretName != "" {
+	if caCertSecretName := opts.Spec.TLSCACertSecretName(); caCertSecretName != "" {
 		var caSecret corev1.Secret
 		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
 			Name:      caCertSecretName,

@@ -39,8 +39,10 @@ type ConnectionTLSConfig struct {
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+$`
 	ServerName string `json:"serverName,omitempty"`
 
-	// CACertSecretRef references a Secret (key "ca.crt") whose certificate is appended to
-	// the system trust store for this connection, independent of AuthMode.
+	// CACertSecretRef references a Secret with a required "ca.crt" key whose certificate is appended to
+	// the system trust store for this connection. Applicable when the auth mode is either
+	// AuthModeAPIKey or AuthModeNoCredentials; for AuthModeTLS, bundle the CA into
+	// MutualTLSSecretRef's own "ca.crt" key instead.
 	// The Secret must be of type Opaque or
 	// kubernetes.io/tls and exist in the same Kubernetes namespace as the Connection.
 	// +optional
@@ -132,9 +134,9 @@ func (s ConnectionSpec) TLSServerName() string {
 	return s.TLS.ServerName
 }
 
-// CACertSecretName returns the name of the Secret referenced by TLS.CACertSecretRef, or an
+// TLSCACertSecretName returns the name of the Secret referenced by TLS.CACertSecretRef, or an
 // empty string when unset.
-func (s ConnectionSpec) CACertSecretName() string {
+func (s ConnectionSpec) TLSCACertSecretName() string {
 	if s.TLS == nil || s.TLS.CACertSecretRef == nil {
 		return ""
 	}
