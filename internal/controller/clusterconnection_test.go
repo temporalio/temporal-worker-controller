@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -33,11 +34,20 @@ func makeClusterConnection(name, hostPort string) *temporaliov1alpha1.ClusterCon
 	}
 }
 
-// makeWDWithKind builds a WorkerDeployment whose connectionRef carries an
-// explicit Kind ("", "Connection", or "ClusterConnection").
+// makeWDWithKind builds a WorkerDeployment whose connectionRef targets a
+// connection of the given kind ("", "Connection", or "ClusterConnection").
+// "" and "Connection" use the Name shorthand; "ClusterConnection" uses ObjectRef.
 func makeWDWithKind(name, namespace, connName, kind string) *temporaliov1alpha1.WorkerDeployment {
 	wd := makeWD(name, namespace, connName)
-	wd.Spec.WorkerOptions.ConnectionRef.Kind = kind
+	if kind == "ClusterConnection" {
+		wd.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup: ptr("temporal.io"),
+				Kind:     "ClusterConnection",
+				Name:     connName,
+			},
+		}
+	}
 	return wd
 }
 
@@ -56,7 +66,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "conn", "Connection")
 		r, _ := newTestReconciler([]client.Object{conn, wd})
 
-		spec, obj, err := r.resolveConnection(ctx, wd)
+		spec, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.NoError(t, err)
 		assert.Equal(t, "h:7233", spec.HostPort)
 		_, ok := obj.(*temporaliov1alpha1.Connection)
@@ -68,7 +78,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "conn", "")
 		r, _ := newTestReconciler([]client.Object{conn, wd})
 
-		spec, obj, err := r.resolveConnection(ctx, wd)
+		spec, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.NoError(t, err)
 		assert.Equal(t, "h:7233", spec.HostPort)
 		_, ok := obj.(*temporaliov1alpha1.Connection)
@@ -80,7 +90,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{cc, wd})
 
-		spec, obj, err := r.resolveConnection(ctx, wd)
+		spec, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.NoError(t, err)
 		assert.Equal(t, "h:7233", spec.HostPort)
 		got, ok := obj.(*temporaliov1alpha1.ClusterConnection)
@@ -95,13 +105,13 @@ func TestResolveConnection(t *testing.T) {
 		wdCC := makeWDWithKind("wd-cc", "default", "foo", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{conn, cc, wdNS, wdCC})
 
-		specNS, objNS, err := r.resolveConnection(ctx, wdNS)
+		specNS, objNS, err := r.getConnectionByRef(ctx, wdNS.Spec.WorkerOptions.ConnectionRef, wdNS.Namespace)
 		require.NoError(t, err)
 		assert.Equal(t, "ns-conn:7233", specNS.HostPort)
 		_, ok := objNS.(*temporaliov1alpha1.Connection)
 		assert.True(t, ok)
 
-		specCC, objCC, err := r.resolveConnection(ctx, wdCC)
+		specCC, objCC, err := r.getConnectionByRef(ctx, wdCC.Spec.WorkerOptions.ConnectionRef, wdCC.Namespace)
 		require.NoError(t, err)
 		assert.Equal(t, "cluster-conn:7233", specCC.HostPort)
 		_, ok = objCC.(*temporaliov1alpha1.ClusterConnection)
@@ -113,7 +123,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "foo", "Connection")
 		r, _ := newTestReconciler([]client.Object{cc, wd})
 
-		_, obj, err := r.resolveConnection(ctx, wd)
+		_, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.Error(t, err)
 		assert.True(t, apierrors.IsNotFound(err), "must be NotFound, not a stray cluster resolve")
 		assert.Nil(t, obj)
@@ -123,7 +133,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "missing", "Connection")
 		r, _ := newTestReconciler([]client.Object{wd})
 
-		_, obj, err := r.resolveConnection(ctx, wd)
+		_, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.Error(t, err)
 		assert.True(t, apierrors.IsNotFound(err))
 		assert.Nil(t, obj)
@@ -133,7 +143,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "missing", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{wd})
 
-		_, obj, err := r.resolveConnection(ctx, wd)
+		_, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.Error(t, err)
 		assert.True(t, apierrors.IsNotFound(err))
 		assert.Nil(t, obj)
@@ -230,7 +240,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		del := makeWDWithKind("del", "default", "conn", "Connection")
 		r, _ := newTestReconciler([]client.Object{conn, del})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err)
 		assert.False(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.Connection{},
 			types.NamespacedName{Name: "conn", Namespace: "default"}))
@@ -242,7 +252,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		other := makeWDWithKind("other", "default", "conn", "Connection")
 		r, _ := newTestReconciler([]client.Object{conn, del, other})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err)
 		assert.True(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.Connection{},
 			types.NamespacedName{Name: "conn", Namespace: "default"}))
@@ -255,7 +265,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		otherNS := makeWDWithKind("other", "ns-b", "conn", "Connection")
 		r, _ := newTestReconciler([]client.Object{conn, del, otherNS})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err)
 		assert.False(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.Connection{},
 			types.NamespacedName{Name: "conn", Namespace: "default"}))
@@ -266,7 +276,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		del := makeWDWithKind("del", "ns-a", "conn", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{cc, del})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err)
 		assert.False(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.ClusterConnection{},
 			types.NamespacedName{Name: "conn"}))
@@ -281,7 +291,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		otherNS := makeWDWithKind("other", "ns-b", "conn", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{cc, del, otherNS})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err)
 		assert.True(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.ClusterConnection{},
 			types.NamespacedName{Name: "conn"}),
@@ -298,7 +308,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		nsUser := makeWDWithKind("ns-user", "default", "foo", "Connection")
 		r, _ := newTestReconciler([]client.Object{conn, cc, del, nsUser})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err)
 		// ClusterConnection "foo" released (no other cluster referrer)
 		assert.False(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.ClusterConnection{},
@@ -315,7 +325,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		other := makeWDWithKind("samename", "ns-b", "conn", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{cc, del, other})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err)
 		// the other "samename" in ns-b is a real referrer, not "self" — keep finalizer
 		assert.True(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.ClusterConnection{},
@@ -328,7 +338,7 @@ func TestRemoveConnectionFinalizerIfUnused(t *testing.T) {
 		del := makeWDWithKind("del", "default", "missing", "Connection")
 		r, _ := newTestReconciler([]client.Object{del})
 
-		err := r.removeConnectionFinalizerIfUnused(ctx, logr.Discard(), del)
+		err := r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), del.Spec.WorkerOptions.ConnectionRef, del.Namespace, del.Name)
 		require.NoError(t, err, "missing connection must be treated as already released")
 	})
 }
@@ -437,7 +447,7 @@ func TestReleaseConnectionFinalizerIfUnused_ReleasesUnused(t *testing.T) {
 	self := makeWDWithKind("w", "default", "new-conn", "Connection")
 	r, _ := newTestReconciler([]client.Object{oldConn, self})
 
-	oldRef := temporaliov1alpha1.ConnectionReference{Name: "old-conn", Kind: "Connection"}
+	oldRef := temporaliov1alpha1.ConnectionReference{Name: "old-conn"}
 	require.NoError(t, r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), oldRef, "default", "w"))
 
 	assert.False(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.Connection{},
@@ -456,7 +466,13 @@ func TestReleaseConnectionFinalizerIfUnused_KeepsSharedStillUsed(t *testing.T) {
 	r, _ := newTestReconciler([]client.Object{shared, wdB})
 
 	// Simulate the WD "w" in ns-a migrating away from "shared".
-	sharedRef := temporaliov1alpha1.ConnectionReference{Name: "shared", Kind: "ClusterConnection"}
+	sharedRef := temporaliov1alpha1.ConnectionReference{
+		ObjectRef: &corev1.TypedObjectReference{
+			APIGroup: ptr("temporal.io"),
+			Kind:     "ClusterConnection",
+			Name:     "shared",
+		},
+	}
 	require.NoError(t, r.releaseConnectionFinalizerIfUnused(ctx, logr.Discard(), sharedRef, "ns-a", "w"))
 
 	assert.True(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.ClusterConnection{},
@@ -464,12 +480,23 @@ func TestReleaseConnectionFinalizerIfUnused_KeepsSharedStillUsed(t *testing.T) {
 		"shared ClusterConnection finalizer must be KEPT while a WD in another namespace references it")
 }
 
-// A connectionRef whose Kind was defaulted from
-// "" to "Connection" must NOT be seen as a change, or every pre-existing WD would
-// try to release its own connection on the first reconcile after upgrade.
+// TestSameConnectionRef verifies that the shorthand (Name) and full (ObjectRef)
+// forms of the same connection compare equal — so re-expressing a ref from
+// shorthand to ObjectRef isn't mistaken for a migration.
 func TestSameConnectionRef(t *testing.T) {
-	ref := func(name, kind string) temporaliov1alpha1.ConnectionReference {
-		return temporaliov1alpha1.ConnectionReference{Name: name, Kind: kind}
+	// shorthand: namespaced Connection by name
+	short := func(name string) temporaliov1alpha1.ConnectionReference {
+		return temporaliov1alpha1.ConnectionReference{Name: name}
+	}
+	// full form: ObjectRef with explicit kind
+	full := func(name, kind string) temporaliov1alpha1.ConnectionReference {
+		return temporaliov1alpha1.ConnectionReference{
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup: ptr("temporal.io"),
+				Kind:     kind,
+				Name:     name,
+			},
+		}
 	}
 
 	tests := []struct {
@@ -478,27 +505,27 @@ func TestSameConnectionRef(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "empty kind equals Connection (normalization)",
-			a:    ref("c", ""),
-			b:    ref("c", "Connection"),
+			name: "shorthand equals ObjectRef Connection form (normalization)",
+			a:    short("foo"),
+			b:    full("foo", "Connection"),
 			want: true,
 		},
 		{
 			name: "Connection differs from ClusterConnection",
-			a:    ref("c", "Connection"),
-			b:    ref("c", "ClusterConnection"),
+			a:    full("foo", "Connection"),
+			b:    full("foo", "ClusterConnection"),
 			want: false,
 		},
 		{
 			name: "different names differ",
-			a:    ref("a", "Connection"),
-			b:    ref("b", "Connection"),
+			a:    short("a"),
+			b:    short("b"),
 			want: false,
 		},
 		{
 			name: "same cluster ref equals itself",
-			a:    ref("c", "ClusterConnection"),
-			b:    ref("c", "ClusterConnection"),
+			a:    full("foo", "ClusterConnection"),
+			b:    full("foo", "ClusterConnection"),
 			want: true,
 		},
 	}
