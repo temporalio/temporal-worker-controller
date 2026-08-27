@@ -202,6 +202,7 @@ type stubWDHandle struct {
 	setRampingErr    error
 	updateMetaErr    error
 	deleteVersionErr error
+	deletedVersions  []string
 }
 
 func (s *stubWDHandle) Describe(_ context.Context, _ sdkclient.WorkerDeploymentDescribeOptions) (sdkclient.WorkerDeploymentDescribeResponse, error) {
@@ -220,7 +221,8 @@ func (s *stubWDHandle) UpdateVersionMetadata(_ context.Context, _ sdkclient.Work
 	return sdkclient.WorkerDeploymentUpdateVersionMetadataResponse{}, s.updateMetaErr
 }
 
-func (s *stubWDHandle) DeleteVersion(_ context.Context, _ sdkclient.WorkerDeploymentDeleteVersionOptions) (sdkclient.WorkerDeploymentDeleteVersionResponse, error) {
+func (s *stubWDHandle) DeleteVersion(_ context.Context, opts sdkclient.WorkerDeploymentDeleteVersionOptions) (sdkclient.WorkerDeploymentDeleteVersionResponse, error) {
+	s.deletedVersions = append(s.deletedVersions, opts.BuildID)
 	return sdkclient.WorkerDeploymentDeleteVersionResponse{}, s.deleteVersionErr
 }
 
@@ -279,6 +281,14 @@ func newStubTemporalClient(execErr error) *stubTemporalClient {
 	return &stubTemporalClient{
 		wdClient: &stubWDClient{handle: handle},
 		execErr:  execErr,
+	}
+}
+
+// newStubTemporalClientWithHandle wraps the given handle in a stub client, so that
+// executePlan's WorkerDeploymentClient().GetHandle(...) returns that exact handle.
+func newStubTemporalClientWithHandle(handle sdkclient.WorkerDeploymentHandle) *stubTemporalClient {
+	return &stubTemporalClient{
+		wdClient: &stubWDClient{handle: handle},
 	}
 }
 
