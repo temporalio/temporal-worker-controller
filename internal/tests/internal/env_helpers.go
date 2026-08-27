@@ -47,7 +47,7 @@ const (
 
 	// How long postMortemDrainageWatch keeps observing after a failure, and how often.
 	// Only ever spent on an already-failing test. (#542)
-	postMortemBudget   = 5 * time.Minute
+	postMortemBudget   = 2 * time.Minute
 	postMortemInterval = 5 * time.Second
 )
 
