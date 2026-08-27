@@ -44,6 +44,11 @@ const (
 	testControllerIdentityPrefix         = "test-controller-identity"
 	testControllerIdentitySuffix         = "123"
 	testControllerIdentity               = testControllerIdentityPrefix + "/" + testControllerIdentitySuffix
+
+	// How long postMortemDrainageWatch keeps observing after a failure, and how often.
+	// Only ever spent on an already-failing test. (#542)
+	postMortemBudget   = 5 * time.Minute
+	postMortemInterval = 5 * time.Second
 )
 
 // setupKubebuilderAssets sets up the KUBEBUILDER_ASSETS environment variable if not already set

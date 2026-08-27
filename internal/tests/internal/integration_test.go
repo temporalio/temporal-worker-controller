@@ -1043,6 +1043,14 @@ func testWorkerDeploymentCreation(
 		ExpectedDeploymentReplicas: tc.GetExpectedDeploymentReplicas(),
 	}
 
+	diagOnFailure = func(label string) {
+		logRolloutDiagnostics(t, ctx, env, twd, label, true)
+		postMortemDrainageWatch(t, ctx, env, twd,
+			k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd)),
+			postMortemBudget, postMortemInterval)
+	}
+	defer func() { diagOnFailure = nil }()
+
 	makePreliminaryStatusTrue(ctx, t, env, twd, tc.GetPreviouslyCurrentImages())
 
 	// verify that temporal state matches the preliminary status, to confirm that makePreliminaryStatusTrue worked
@@ -1058,6 +1066,8 @@ func testWorkerDeploymentCreation(
 		f(twd)
 	}
 
+	logRolloutDiagnostics(t, ctx, env, twd, "pre-create", true)
+
 	t.Log("Creating a WorkerDeployment")
 	if err := k8sClient.Create(ctx, twd); err != nil {
 		t.Fatalf("failed to create WorkerDeployment: %v", err)
@@ -1072,6 +1082,8 @@ func testWorkerDeploymentCreation(
 			t.Fatalf("failed to pre-apply TWD status: %v", err)
 		}
 	}
+
+	logRolloutDiagnostics(t, ctx, env, twd, "twd-created", false)
 
 	// Hook: runs after TWD creation but before waiting for the target Deployment.
 	// Use this to assert blocking behaviour and then unblock the rollout.

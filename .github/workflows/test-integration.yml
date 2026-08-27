@@ -57,7 +57,12 @@ jobs:
   test-integration:
     name: Run Integration Tests
     runs-on: ubuntu-latest
-    
+    # TRIAGE ONLY (#542) -- do not merge.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,7 +113,10 @@ jobs:
       if: always()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
-        name: test-results
+        # Per-shard name: artifact names must be unique within a run, otherwise 9 of
+        # the 10 jobs fail on "an artifact with this name already exists" and read as
+        # test failures. (#542 triage)
+        name: test-results-${{ matrix.shard }}
         path: |
           cover.out
           bin/
