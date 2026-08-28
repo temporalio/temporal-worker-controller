@@ -759,6 +759,31 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 	}
 }
 
+func TestBuildIDForDeployment(t *testing.T) {
+	targetRef := &corev1.ObjectReference{Namespace: "default", Name: "target"}
+	currentRef := &corev1.ObjectReference{Namespace: "default", Name: "current"}
+	deprecatedRef := &corev1.ObjectReference{Namespace: "default", Name: "deprecated"}
+	twd := makeWD("test-worker", "default", "my-conn")
+	twd.Status.TargetVersion.BuildID, twd.Status.TargetVersion.Deployment = "target-build", targetRef
+	twd.Status.CurrentVersion = &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "current-build", Deployment: currentRef}}
+	twd.Status.DeprecatedVersions = []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{{BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "deprecated-build", Deployment: deprecatedRef}}}
+
+	tests := map[string]struct {
+		deployment *corev1.ObjectReference
+		buildID    string
+	}{
+		"target":     {targetRef, "target-build"},
+		"current":    {currentRef, "current-build"},
+		"deprecated": {deprecatedRef, "deprecated-build"},
+		"unknown":    {&corev1.ObjectReference{Namespace: "default", Name: "unknown"}, "unknown"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.buildID, buildIDForDeployment(twd, tt.deployment))
+		})
+	}
+}
+
 // ─── startTestWorkflows tests ────────────────────────────────────────────────
 
 func TestStartTestWorkflows_StartFailed_EmitsEvent(t *testing.T) {
