@@ -166,6 +166,7 @@ func versionInfoFromVersionSummary(
 	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CREATED:
 		out.Status = temporaliov1alpha1.VersionStatusCreated
 	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE:
+		out.Status = temporaliov1alpha1.VersionStatusInactive
 		// get unversioned poller info to decide whether to fast-track rollout
 		if summary.DeploymentVersion.BuildId == targetBuildID &&
 			routingConfig.CurrentDeploymentVersion == nil &&
