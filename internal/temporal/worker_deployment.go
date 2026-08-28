@@ -157,28 +157,12 @@ func versionInfoFromVersionSummary(
 	}
 
 	// Determine summary status
-	drainageStatus := summary.DrainageInfo.GetStatus()
-	if routingConfig.CurrentDeploymentVersion != nil &&
-		summary.DeploymentVersion.DeploymentName == routingConfig.CurrentDeploymentVersion.DeploymentName &&
-		summary.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
-		out.Status = temporaliov1alpha1.VersionStatusCurrent
-	} else if routingConfig.RampingDeploymentVersion != nil &&
-		summary.DeploymentVersion.DeploymentName == routingConfig.RampingDeploymentVersion.DeploymentName &&
-		summary.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
-		out.Status = temporaliov1alpha1.VersionStatusRamping
-	} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINING {
-		out.Status = temporaliov1alpha1.VersionStatusDraining
-	} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINED {
-		out.Status = temporaliov1alpha1.VersionStatusDrained
-
-		// Extract DrainedSince directly from the summary's drainage info,
-		// avoiding a per-summary DescribeVersion call.
-		if summary.DrainageInfo != nil && summary.DrainageInfo.LastChangedTime != nil {
-			drainedSince := summary.DrainageInfo.LastChangedTime.AsTime()
-			out.DrainedSince = &drainedSince
-		}
-	} else {
-		out.Status = temporaliov1alpha1.VersionStatusInactive
+	switch summary.GetStatus() {
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_UNSPECIFIED:
+		out.Status = temporaliov1alpha1.VersionStatusNotRegistered
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CREATED:
+		out.Status = temporaliov1alpha1.VersionStatusCreated
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE:
 		// get unversioned poller info to decide whether to fast-track rollout
 		if summary.DeploymentVersion.BuildId == targetBuildID &&
 			routingConfig.CurrentDeploymentVersion == nil &&
@@ -205,6 +189,32 @@ func versionInfoFromVersionSummary(
 			}
 			// NOTE(jaypipes): We swallow any non-nil error here. Should we
 			// at least log the error?
+		}
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_RAMPING:
+		if routingConfig.RampingDeploymentVersion != nil &&
+			summary.DeploymentVersion.DeploymentName == routingConfig.RampingDeploymentVersion.DeploymentName &&
+			summary.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
+			out.Status = temporaliov1alpha1.VersionStatusRamping
+		} else {
+			// TODO(carly-now): log error saying "version xxx thinks it is Ramping but routing config says yyy is Ramping. Trusting routing config more."
+		}
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT:
+		if routingConfig.CurrentDeploymentVersion != nil &&
+			summary.DeploymentVersion.DeploymentName == routingConfig.CurrentDeploymentVersion.DeploymentName &&
+			summary.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
+			out.Status = temporaliov1alpha1.VersionStatusCurrent
+		} else {
+			// TODO(carly-now): log error saying "version xxx thinks it is Current but routing config says yyy is Current. Trusting routing config more."
+		}
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING:
+		out.Status = temporaliov1alpha1.VersionStatusDraining
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED:
+		out.Status = temporaliov1alpha1.VersionStatusDrained
+		// Extract DrainedSince directly from the summary's drainage info,
+		// avoiding a per-summary DescribeVersion call.
+		if summary.DrainageInfo != nil && summary.DrainageInfo.LastChangedTime != nil {
+			drainedSince := summary.DrainageInfo.LastChangedTime.AsTime()
+			out.DrainedSince = &drainedSince
 		}
 	}
 

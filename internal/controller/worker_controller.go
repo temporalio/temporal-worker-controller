@@ -323,8 +323,8 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if errors.As(err, &rateLimitErr) {
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonTemporalStateFetchFailed,
-				fmt.Sprintf("Rate limited fetching worker deployment state: %v", err),
-				fmt.Sprintf("Rate limited by Temporal server: %v", err))
+				fmt.Sprintf("Got ResourceExhausted error fetching worker deployment state from Temporal server: %v", err),
+				fmt.Sprintf("Got ResourceExhausted error fetching worker deployment state from Temporal server: %v", err))
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
@@ -364,6 +364,14 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
 		if isAccessDeniedErr(err) {
 			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
+		var rateLimitErr *serviceerror.ResourceExhausted
+		if errors.As(err, &rateLimitErr) {
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+				ReasonPlanExecutionFailed,
+				fmt.Sprintf("Got ResourceExhausted error executing plan: %v", err),
+				fmt.Sprintf("Got ResourceExhausted error executing plan: %v", err))
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanExecutionFailed,
