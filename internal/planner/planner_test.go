@@ -1266,6 +1266,26 @@ func TestGetTestWorkflows(t *testing.T) {
 			expectWorkflows: 0,
 		},
 		{
+			name: "created version is not ready for gate workflows",
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "123",
+						Status:  temporaliov1alpha1.VersionStatusCreated,
+						TaskQueues: []temporaliov1alpha1.TaskQueue{
+							{Name: "queue1"},
+						},
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Gate: &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: "TestWorkflow"},
+				},
+			},
+			expectWorkflows: 0,
+		},
+		{
 			name: "gate workflow with empty task queues",
 			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
@@ -1362,6 +1382,29 @@ func TestGetVersionConfigDiff(t *testing.T) {
 			spec:             &temporaliov1alpha1.WorkerDeploymentSpec{},
 			expectConfig:     true,
 			expectSetCurrent: true,
+		},
+		{
+			name: "created version waits for pollers",
+			strategy: temporaliov1alpha1.RolloutStrategy{
+				Strategy: temporaliov1alpha1.UpdateAllAtOnce,
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:      "test/namespace.123",
+						Status:       temporaliov1alpha1.VersionStatusCreated,
+						HealthySince: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+					},
+				},
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "456",
+						Status:  temporaliov1alpha1.VersionStatusCurrent,
+					},
+				},
+			},
+			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{},
+			expectConfig: false,
 		},
 		{
 			name: "progressive strategy",

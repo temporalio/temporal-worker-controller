@@ -81,7 +81,13 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 
 	// Scale deployments
 	for d, replicas := range p.ScaleDeployments {
-		l.Info("scaling deployment", "deployment", d, "replicas", replicas)
+		buildID := buildIDForDeployment(workerDeploy, d)
+		l.Info(
+			"scaling deployment",
+			"deployment", d,
+			"buildID", buildID,
+			"replicas", replicas,
+		)
 		dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
 			Namespace:       d.Namespace,
 			Name:            d.Name,
@@ -91,9 +97,15 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 
 		scale := &autoscalingv1.Scale{Spec: autoscalingv1.ScaleSpec{Replicas: int32(replicas)}}
 		if err := r.Client.SubResource("scale").Update(ctx, dep, client.WithSubResourceBody(scale)); err != nil {
-			l.Error(err, "unable to scale deployment", "deployment", d, "replicas", replicas)
+			l.Error(
+				err,
+				"unable to scale deployment",
+				"deployment", d,
+				"buildID", buildID,
+				"replicas", replicas,
+			)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentScaleFailed,
-				"Failed to scale Deployment %q to %d replicas: %v", d.Name, replicas, err)
+				"Failed to scale Deployment %q for Build ID %q to %d replicas: %v", d.Name, buildID, replicas, err)
 			return fmt.Errorf("unable to scale deployment: %w", err)
 		}
 	}
@@ -110,6 +122,28 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 	}
 
 	return nil
+}
+
+func buildIDForDeployment(workerDeploy *temporaliov1alpha1.WorkerDeployment, deployment *corev1.ObjectReference) string {
+	matches := func(versionDeployment *corev1.ObjectReference) bool {
+		return versionDeployment != nil &&
+			deployment != nil &&
+			versionDeployment.Namespace == deployment.Namespace &&
+			versionDeployment.Name == deployment.Name
+	}
+
+	if matches(workerDeploy.Status.TargetVersion.Deployment) {
+		return workerDeploy.Status.TargetVersion.BuildID
+	}
+	if workerDeploy.Status.CurrentVersion != nil && matches(workerDeploy.Status.CurrentVersion.Deployment) {
+		return workerDeploy.Status.CurrentVersion.BuildID
+	}
+	for _, version := range workerDeploy.Status.DeprecatedVersions {
+		if version != nil && matches(version.Deployment) {
+			return version.BuildID
+		}
+	}
+	return "unknown"
 }
 
 func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
