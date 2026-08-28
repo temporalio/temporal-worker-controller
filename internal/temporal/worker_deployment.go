@@ -144,6 +144,7 @@ func GetWorkerDeploymentState(
 // TWC k8s API VersionStatus
 var versionStatusMap = map[enumspb.WorkerDeploymentVersionStatus]temporaliov1alpha1.VersionStatus{
 	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT:     temporaliov1alpha1.VersionStatusCurrent,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CREATED:     temporaliov1alpha1.VersionStatusCreated,
 	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING:    temporaliov1alpha1.VersionStatusDraining,
 	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED:     temporaliov1alpha1.VersionStatusDrained,
 	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE:    temporaliov1alpha1.VersionStatusInactive,
