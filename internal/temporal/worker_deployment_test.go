@@ -72,7 +72,7 @@ func TestVersionInfoFromVersionSummaryLogsRoutingConfigStatusConflicts(t *testin
 				context.Background(), logger, nil, "", "", nil, tt.routingConfig, summary,
 			)
 
-			assert.NotEqual(t, tt.reportedStatus, info.Status)
+			assert.Equal(t, tt.reportedStatus, info.Status)
 			logs := strings.Join(logLines, "\n")
 			assert.Contains(t, logs, tt.expectedLogMessage)
 			assert.Contains(t, logs, "build-a")
