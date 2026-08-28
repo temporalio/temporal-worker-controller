@@ -312,6 +312,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Fetch Temporal worker deployment state
 	temporalState, err := temporal.GetWorkerDeploymentState(
 		ctx,
+		l,
 		temporalClient,
 		workerDeploymentName,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,

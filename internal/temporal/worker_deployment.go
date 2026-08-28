@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -59,6 +60,7 @@ type TemporalWorkerState struct {
 // GetWorkerDeploymentState queries Temporal to get the state of a worker deployment
 func GetWorkerDeploymentState(
 	ctx context.Context,
+	l logr.Logger,
 	client temporalClient.Client,
 	workerDeploymentName string,
 	namespace string,
@@ -126,7 +128,7 @@ func GetWorkerDeploymentState(
 
 	for _, version := range workerDeploymentInfo.VersionSummaries {
 		versionInfo := versionInfoFromVersionSummary(
-			ctx, client, targetBuildID, strategy,
+			ctx, l, client, targetBuildID, strategy,
 			deploymentHandler, routingConfig, version,
 		)
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
@@ -141,6 +143,7 @@ func GetWorkerDeploymentState(
 //nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
 func versionInfoFromVersionSummary(
 	ctx context.Context,
+	l logr.Logger,
 	client temporalClient.Client,
 	targetBuildID string,
 	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
@@ -193,7 +196,12 @@ func versionInfoFromVersionSummary(
 			summary.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
 			out.Status = temporaliov1alpha1.VersionStatusRamping
 		} else {
-			// TODO(carly-now): log error saying "version xxx thinks it is Ramping but routing config says yyy is Ramping. Trusting routing config more."
+			l.Error(
+				errors.New("worker deployment version status conflicts with routing config"),
+				"version reports Ramping but routing config identifies a different Ramping version; trusting routing config",
+				"buildID", summary.DeploymentVersion.BuildId,
+				"routingConfigBuildID", routingConfig.RampingDeploymentVersion.BuildId,
+			)
 		}
 	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT:
 		if routingConfig.CurrentDeploymentVersion != nil &&
@@ -201,7 +209,12 @@ func versionInfoFromVersionSummary(
 			summary.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
 			out.Status = temporaliov1alpha1.VersionStatusCurrent
 		} else {
-			// TODO(carly-now): log error saying "version xxx thinks it is Current but routing config says yyy is Current. Trusting routing config more."
+			l.Error(
+				errors.New("worker deployment version status conflicts with routing config"),
+				"version reports Current but routing config identifies a different Current version; trusting routing config",
+				"buildID", summary.DeploymentVersion.BuildId,
+				"routingConfigBuildID", routingConfig.CurrentDeploymentVersion.BuildId,
+			)
 		}
 	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING:
 		out.Status = temporaliov1alpha1.VersionStatusDraining

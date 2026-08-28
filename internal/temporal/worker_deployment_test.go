@@ -5,13 +5,82 @@
 package temporal
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 )
+
+func TestVersionInfoFromVersionSummaryLogsRoutingConfigStatusConflicts(t *testing.T) {
+	tests := []struct {
+		name                  string
+		summaryStatus         enumspb.WorkerDeploymentVersionStatus
+		routingConfig         *deploymentpb.RoutingConfig
+		reportedStatus        temporaliov1alpha1.VersionStatus
+		expectedLogMessage    string
+		expectedConfigBuildID string
+	}{
+		{
+			name:          "ramping",
+			summaryStatus: enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_RAMPING,
+			routingConfig: &deploymentpb.RoutingConfig{
+				RampingDeploymentVersion: &deploymentpb.WorkerDeploymentVersion{
+					DeploymentName: "workers",
+					BuildId:        "build-b",
+				},
+			},
+			reportedStatus:        temporaliov1alpha1.VersionStatusRamping,
+			expectedLogMessage:    "version reports Ramping but routing config identifies a different Ramping version; trusting routing config",
+			expectedConfigBuildID: "build-b",
+		},
+		{
+			name:          "current",
+			summaryStatus: enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT,
+			routingConfig: &deploymentpb.RoutingConfig{
+				CurrentDeploymentVersion: &deploymentpb.WorkerDeploymentVersion{
+					DeploymentName: "workers",
+					BuildId:        "build-b",
+				},
+			},
+			reportedStatus:        temporaliov1alpha1.VersionStatusCurrent,
+			expectedLogMessage:    "version reports Current but routing config identifies a different Current version; trusting routing config",
+			expectedConfigBuildID: "build-b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logLines []string
+			logger := funcr.New(func(prefix, args string) {
+				logLines = append(logLines, prefix+" "+args)
+			}, funcr.Options{})
+			summary := &deploymentpb.WorkerDeploymentInfo_WorkerDeploymentVersionSummary{
+				DeploymentVersion: &deploymentpb.WorkerDeploymentVersion{
+					DeploymentName: "workers",
+					BuildId:        "build-a",
+				},
+				Status: tt.summaryStatus,
+			}
+
+			info := versionInfoFromVersionSummary(
+				context.Background(), logger, nil, "", "", nil, tt.routingConfig, summary,
+			)
+
+			assert.NotEqual(t, tt.reportedStatus, info.Status)
+			logs := strings.Join(logLines, "\n")
+			assert.Contains(t, logs, tt.expectedLogMessage)
+			assert.Contains(t, logs, "build-a")
+			assert.Contains(t, logs, tt.expectedConfigBuildID)
+			assert.NotContains(t, logs, "workers:")
+		})
+	}
+}
 
 func TestMapWorkflowStatus(t *testing.T) {
 	tests := []struct {
