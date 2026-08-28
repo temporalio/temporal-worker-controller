@@ -127,6 +127,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 func buildIDForDeployment(workerDeploy *temporaliov1alpha1.WorkerDeployment, deployment *corev1.ObjectReference) string {
 	matches := func(versionDeployment *corev1.ObjectReference) bool {
 		return versionDeployment != nil &&
+			deployment != nil &&
 			versionDeployment.Namespace == deployment.Namespace &&
 			versionDeployment.Name == deployment.Name
 	}
