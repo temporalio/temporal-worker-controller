@@ -83,8 +83,8 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 	for d, replicas := range p.ScaleDeployments {
 		buildID := buildIDForDeployment(workerDeploy, d)
 		l.Info(
-			fmt.Sprintf("scaling deployment %q for Build ID %q to %d replicas", d.Name, buildID, replicas),
-			"deployment", d.Name,
+			"scaling deployment",
+			"deployment", d,
 			"buildID", buildID,
 			"replicas", replicas,
 		)
@@ -99,8 +99,8 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		if err := r.Client.SubResource("scale").Update(ctx, dep, client.WithSubResourceBody(scale)); err != nil {
 			l.Error(
 				err,
-				fmt.Sprintf("unable to scale deployment %q for Build ID %q to %d replicas", d.Name, buildID, replicas),
-				"deployment", d.Name,
+				"unable to scale deployment",
+				"deployment", d,
 				"buildID", buildID,
 				"replicas", replicas,
 			)
