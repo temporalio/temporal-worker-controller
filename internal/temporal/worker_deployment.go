@@ -140,6 +140,17 @@ func GetWorkerDeploymentState(
 	return state, nil
 }
 
+// versionStatusMap translates between the temporal SDK VersionStatus and the
+// TWC k8s API VersionStatus
+var versionStatusMap = map[enumspb.WorkerDeploymentVersionStatus]temporaliov1alpha1.VersionStatus{
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT:     temporaliov1alpha1.VersionStatusCurrent,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING:    temporaliov1alpha1.VersionStatusDraining,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED:     temporaliov1alpha1.VersionStatusDrained,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE:    temporaliov1alpha1.VersionStatusInactive,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_RAMPING:     temporaliov1alpha1.VersionStatusRamping,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_UNSPECIFIED: temporaliov1alpha1.VersionStatusNotRegistered,
+}
+
 // versionInfoFromVersionSummary returns a VersionInfo constructed from the
 // supplied Temporal VersionSummary message.
 //
@@ -159,14 +170,43 @@ func versionInfoFromVersionSummary(
 		BuildID:        summary.DeploymentVersion.BuildId,
 	}
 
-	// Determine summary status
-	switch summary.GetStatus() {
-	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_UNSPECIFIED:
-		out.Status = temporaliov1alpha1.VersionStatusNotRegistered
-	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CREATED:
-		out.Status = temporaliov1alpha1.VersionStatusCreated
-	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE:
-		out.Status = temporaliov1alpha1.VersionStatusInactive
+	apiVersionStatus, ok := versionStatusMap[summary.GetStatus()]
+	if !ok {
+		l.Error(fmt.Errorf("unknown worker version status %s", summary.GetStatus()), "unable to determine version status")
+		return nil
+	}
+	out.Status = apiVersionStatus
+
+	sumDeploymentName := summary.DeploymentVersion.DeploymentName
+	sumBuildID := summary.DeploymentVersion.BuildId
+
+	// There may be inconsistencies in the data returned from temporal server. Check
+	// for these inconsistencies and warn if found.
+	if apiVersionStatus == temporaliov1alpha1.VersionStatusCurrent {
+		if routingConfig.CurrentDeploymentVersion != nil {
+			rcDeployName := routingConfig.CurrentDeploymentVersion.DeploymentName
+			rcBuildID := routingConfig.CurrentDeploymentVersion.BuildId
+			if sumDeploymentName != rcDeployName || sumBuildID != rcBuildID {
+				l.Info(
+					"warning: version reports Current but routing config identifies a different Current version; trusting routing config",
+					"buildID", sumBuildID,
+					"routingConfigBuildID", rcBuildID,
+				)
+			}
+		}
+	} else if apiVersionStatus == temporaliov1alpha1.VersionStatusRamping {
+		if routingConfig.RampingDeploymentVersion != nil {
+			rcDeployName := routingConfig.RampingDeploymentVersion.DeploymentName
+			rcBuildID := routingConfig.RampingDeploymentVersion.BuildId
+			if sumDeploymentName != rcDeployName || sumBuildID != rcBuildID {
+				l.Info(
+					"warning: version reports Ramping but routing config identifies a different Ramping version; trusting routing config",
+					"buildID", sumBuildID,
+					"routingConfigBuildID", rcBuildID,
+				)
+			}
+		}
+	} else if apiVersionStatus == temporaliov1alpha1.VersionStatusInactive {
 		// get unversioned poller info to decide whether to fast-track rollout
 		if summary.DeploymentVersion.BuildId == targetBuildID &&
 			routingConfig.CurrentDeploymentVersion == nil &&
@@ -194,36 +234,7 @@ func versionInfoFromVersionSummary(
 			// NOTE(jaypipes): We swallow any non-nil error here. Should we
 			// at least log the error?
 		}
-	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_RAMPING:
-		if routingConfig.RampingDeploymentVersion != nil &&
-			summary.DeploymentVersion.DeploymentName == routingConfig.RampingDeploymentVersion.DeploymentName &&
-			summary.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
-			out.Status = temporaliov1alpha1.VersionStatusRamping
-		} else {
-			l.Error(
-				errors.New("worker deployment version status conflicts with routing config"),
-				"version reports Ramping but routing config identifies a different Ramping version; trusting routing config",
-				"buildID", summary.DeploymentVersion.BuildId,
-				"routingConfigBuildID", routingConfig.RampingDeploymentVersion.BuildId,
-			)
-		}
-	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT:
-		if routingConfig.CurrentDeploymentVersion != nil &&
-			summary.DeploymentVersion.DeploymentName == routingConfig.CurrentDeploymentVersion.DeploymentName &&
-			summary.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
-			out.Status = temporaliov1alpha1.VersionStatusCurrent
-		} else {
-			l.Error(
-				errors.New("worker deployment version status conflicts with routing config"),
-				"version reports Current but routing config identifies a different Current version; trusting routing config",
-				"buildID", summary.DeploymentVersion.BuildId,
-				"routingConfigBuildID", routingConfig.CurrentDeploymentVersion.BuildId,
-			)
-		}
-	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING:
-		out.Status = temporaliov1alpha1.VersionStatusDraining
-	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED:
-		out.Status = temporaliov1alpha1.VersionStatusDrained
+	} else if apiVersionStatus == temporaliov1alpha1.VersionStatusDrained {
 		// Extract DrainedSince directly from the summary's drainage info,
 		// avoiding a per-summary DescribeVersion call.
 		if summary.DrainageInfo != nil && summary.DrainageInfo.LastChangedTime != nil {
