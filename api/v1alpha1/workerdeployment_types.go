@@ -151,8 +151,14 @@ type VersionStatus string
 
 const (
 	// VersionStatusNotRegistered indicates that the version is not registered
-	// with Temporal for any worker deployment.
+	// with Temporal for any worker deployment. It may be not yet created, or
+	// may have been deleted.
 	VersionStatusNotRegistered VersionStatus = "NotRegistered"
+
+	// VersionStatusCreated indicates that the version has been created explicitly.
+	// When the first poll requests for this version come in, the version status
+	// will change to Inactive.
+	VersionStatusCreated VersionStatus = "Created"
 
 	// VersionStatusInactive indicates that the version is registered in a Temporal
 	// worker deployment, but has not been set to current or ramping.

@@ -590,6 +590,7 @@ func getDeleteDeployments(
 				// NotRegistered versions are versions that the server doesn't know about.
 				// Only delete if it's not the target version.
 				status.TargetVersion.BuildID != version.BuildID {
+				// Consider: Could call DescribeVersion here to assert NotFound before deleting, in case version summaries have diverged from version state
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}

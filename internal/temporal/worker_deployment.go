@@ -12,6 +12,7 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
@@ -123,64 +124,98 @@ func GetWorkerDeploymentState(
 		}
 	}
 
-	// Process each version
 	for _, version := range workerDeploymentInfo.VersionSummaries {
-		versionInfo := &VersionInfo{
-			DeploymentName: version.DeploymentVersion.DeploymentName,
-			BuildID:        version.DeploymentVersion.BuildId,
-		}
-
-		// Determine version status
-		drainageStatus := version.DrainageInfo.GetStatus()
-		if routingConfig.CurrentDeploymentVersion != nil &&
-			version.DeploymentVersion.DeploymentName == routingConfig.CurrentDeploymentVersion.DeploymentName &&
-			version.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
-			versionInfo.Status = temporaliov1alpha1.VersionStatusCurrent
-		} else if routingConfig.RampingDeploymentVersion != nil &&
-			version.DeploymentVersion.DeploymentName == routingConfig.RampingDeploymentVersion.DeploymentName &&
-			version.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
-			versionInfo.Status = temporaliov1alpha1.VersionStatusRamping
-		} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINING {
-			versionInfo.Status = temporaliov1alpha1.VersionStatusDraining
-		} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINED {
-			versionInfo.Status = temporaliov1alpha1.VersionStatusDrained
-
-			// Extract DrainedSince directly from the version summary's drainage info,
-			// avoiding a per-version DescribeVersion call.
-			if version.DrainageInfo != nil && version.DrainageInfo.LastChangedTime != nil {
-				drainedSince := version.DrainageInfo.LastChangedTime.AsTime()
-				versionInfo.DrainedSince = &drainedSince
-			}
-		} else {
-			versionInfo.Status = temporaliov1alpha1.VersionStatusInactive
-			// get unversioned poller info to decide whether to fast-track rollout
-			if version.DeploymentVersion.BuildId == targetBuildID &&
-				routingConfig.CurrentDeploymentVersion == nil &&
-				strategy == temporaliov1alpha1.UpdateProgressive {
-				var desc temporalClient.WorkerDeploymentVersionDescription
-				describeVersion := func() error {
-					desc, err = deploymentHandler.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
-						BuildID: version.DeploymentVersion.BuildId,
-					})
-					return err
-				}
-				// At first, version is found in DeploymentInfo.VersionSummaries but not ready for describe, so we have
-				// to describe with backoff.
-				//
-				// Note: We can only check whether the task queues that we know of have unversioned pollers.
-				//       If, later on, a poll request arrives tying a new task queue to the target version, we
-				//       don't know whether that task queue has unversioned pollers.
-				if err = withBackoff(10*time.Second, 1*time.Second, describeVersion); err == nil { //revive:disable-line:max-control-nesting
-					versionInfo.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
-				}
-			}
-
-		}
-
+		versionInfo := versionInfoFromVersionSummary(
+			ctx, client, targetBuildID, strategy,
+			deploymentHandler, routingConfig, version,
+		)
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
 	return state, nil
+}
+
+// versionInfoFromVersionSummary returns a VersionInfo constructed from the
+// supplied Temporal VersionSummary message.
+//
+//nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
+func versionInfoFromVersionSummary(
+	ctx context.Context,
+	client temporalClient.Client,
+	targetBuildID string,
+	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
+	depHandle temporalClient.WorkerDeploymentHandle,
+	routingConfig *deploymentpb.RoutingConfig,
+	summary *deploymentpb.WorkerDeploymentInfo_WorkerDeploymentVersionSummary,
+) *VersionInfo {
+	out := &VersionInfo{
+		DeploymentName: summary.DeploymentVersion.DeploymentName,
+		BuildID:        summary.DeploymentVersion.BuildId,
+	}
+
+	// Determine summary status
+	switch summary.GetStatus() {
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_UNSPECIFIED:
+		out.Status = temporaliov1alpha1.VersionStatusNotRegistered
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CREATED:
+		out.Status = temporaliov1alpha1.VersionStatusCreated
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE:
+		// get unversioned poller info to decide whether to fast-track rollout
+		if summary.DeploymentVersion.BuildId == targetBuildID &&
+			routingConfig.CurrentDeploymentVersion == nil &&
+			strategy == temporaliov1alpha1.UpdateProgressive {
+			var err error
+			var desc temporalClient.WorkerDeploymentVersionDescription
+			describeVersion := func() error {
+				desc, err = depHandle.DescribeVersion(
+					ctx,
+					temporalClient.WorkerDeploymentDescribeVersionOptions{
+						BuildID: summary.DeploymentVersion.BuildId,
+					},
+				)
+				return err
+			}
+			// At first, summary is found in DeploymentInfo.VersionSummaries but not ready for describe, so we have
+			// to describe with backoff.
+			//
+			// Note: We can only check whether the task queues that we know of have unversioned pollers.
+			//       If, later on, a poll request arrives tying a new task queue to the target summary, we
+			//       don't know whether that task queue has unversioned pollers.
+			if err = withBackoff(10*time.Second, 1*time.Second, describeVersion); err == nil { //revive:disable-line:max-control-nesting
+				out.AllTaskQueuesHaveUnversionedPoller = allTaskQueuesHaveUnversionedPoller(ctx, client, desc.Info.TaskQueuesInfos)
+			}
+			// NOTE(jaypipes): We swallow any non-nil error here. Should we
+			// at least log the error?
+		}
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_RAMPING:
+		if routingConfig.RampingDeploymentVersion != nil &&
+			summary.DeploymentVersion.DeploymentName == routingConfig.RampingDeploymentVersion.DeploymentName &&
+			summary.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
+			out.Status = temporaliov1alpha1.VersionStatusRamping
+		} else {
+			// TODO(carly-now): log error saying "version xxx thinks it is Ramping but routing config says yyy is Ramping. Trusting routing config more."
+		}
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT:
+		if routingConfig.CurrentDeploymentVersion != nil &&
+			summary.DeploymentVersion.DeploymentName == routingConfig.CurrentDeploymentVersion.DeploymentName &&
+			summary.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
+			out.Status = temporaliov1alpha1.VersionStatusCurrent
+		} else {
+			// TODO(carly-now): log error saying "version xxx thinks it is Current but routing config says yyy is Current. Trusting routing config more."
+		}
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING:
+		out.Status = temporaliov1alpha1.VersionStatusDraining
+	case enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED:
+		out.Status = temporaliov1alpha1.VersionStatusDrained
+		// Extract DrainedSince directly from the summary's drainage info,
+		// avoiding a per-summary DescribeVersion call.
+		if summary.DrainageInfo != nil && summary.DrainageInfo.LastChangedTime != nil {
+			drainedSince := summary.DrainageInfo.LastChangedTime.AsTime()
+			out.DrainedSince = &drainedSince
+		}
+	}
+
+	return out
 }
 
 func withBackoff(timeout time.Duration, tick time.Duration, fn func() error) error {
