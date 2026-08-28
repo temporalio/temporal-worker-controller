@@ -97,7 +97,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 
 	// Scale deployments
 	for d, replicas := range p.ScaleDeployments {
-		l.Info("scaling deployment", "deployment", d, "replicas", replicas)
+		l.Info("scaling deployment", "deploymentName", d.Name, "deploymentNamespace", d.Namespace, "replicas", replicas)
 		dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
 			Namespace:       d.Namespace,
 			Name:            d.Name,
