@@ -19,7 +19,7 @@ import (
 // runRateLimitTest verifies that when multiple TWDs in the same Temporal namespace
 // burst-reconcile concurrently against a 1 RPS DescribeWorkerDeployment limit, the
 // controller surfaces the error as ConditionProgressing=False with
-// ReasonTemporalStateFetchFailed and a "Rate limited" message.
+// ReasonTemporalStateFetchFailed and a ResourceExhausted message.
 //
 // The server passed in must have frontend.globalNamespaceWorkerDeploymentReadRPS=1.
 // With 10 TWDs each reconciling every 1s (RECONCILE_INTERVAL=1s set by setupTestEnvironment),
@@ -68,7 +68,7 @@ func runRateLimitTest(
 
 		// With 10 TWDs reconciling concurrently every 1s and a 1 RPS limit, most will be
 		// rate-limited almost immediately. Verify at least one surfaces the error with the
-		// expected condition reason and "Rate limited" message (set by our ResourceExhausted
+		// expected condition reason and ResourceExhausted message (set by our ResourceExhausted
 		// handler in worker_controller.go).
 		eventually(t, 30*time.Second, time.Second, func() error {
 			for _, twd := range twds {
@@ -83,13 +83,13 @@ func runRateLimitTest(
 					if c.Type == temporaliov1alpha1.ConditionProgressing &&
 						c.Status == metav1.ConditionFalse &&
 						c.Reason == temporaliov1alpha1.ReasonTemporalStateFetchFailed &&
-						strings.Contains(c.Message, "Rate limited") {
+						strings.Contains(c.Message, "Got ResourceExhausted error") {
 						t.Logf("TWD %s confirmed rate-limited: %s", twd.Name, c.Message)
 						return nil
 					}
 				}
 			}
-			return errors.New("no TWD has been rate-limited yet")
+			return errors.New("no TWD has surfaced a ResourceExhausted error yet")
 		})
 	})
 }
