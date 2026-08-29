@@ -185,20 +185,29 @@ nodeSelector: {}
 
 tolerations: []
 
-# extraEnv adds environment variables to the manager container.
+# extraEnv adds Kubernetes EnvVar entries to the manager container. Each entry
+# needs a name and either a literal value or a valueFrom source
+# (secretKeyRef / configMapKeyRef). The Go runtime, gRPC (Temporal SDK), and
+# net/http (controller-runtime / client-go) honor standard proxy variables.
 #
-# Use this together with extraVolumes/extraVolumeMounts to trust a private
-# certificate authority. The controller connects to Temporal as a gRPC client and
-# verifies the server certificate against the system trust store, so a self-signed
-# or internally-issued endpoint fails with:
-#   transport: authentication handshake failed: tls: failed to verify certificate:
-#   x509: certificate signed by unknown authority
-# The controller is written in Go, which reads SSL_CERT_FILE, so mounting the CA and
-# pointing SSL_CERT_FILE at it is sufficient.
+# Use extraVolumes/extraVolumeMounts together with SSL_CERT_FILE to trust a
+# private CA. The controller verifies the Temporal server certificate against
+# the system trust store; Go reads SSL_CERT_FILE.
 #
 # extraEnv:
+#   - name: HTTP_PROXY
+#     value: "http://proxy.corp.example.com:8080"
+#   - name: HTTPS_PROXY
+#     value: "http://proxy.corp.example.com:8080"
+#   - name: NO_PROXY
+#     value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8"
 #   - name: SSL_CERT_FILE
 #     value: /etc/ssl/custom-ca/ca.crt
+#   - name: API_TOKEN
+#     valueFrom:
+#       secretKeyRef:
+#         name: controller-secrets
+#         key: api-token
 extraEnv: []
 
 # extraVolumes adds volumes to the manager pod, alongside the webhook certificate
