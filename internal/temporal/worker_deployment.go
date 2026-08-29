@@ -159,6 +159,9 @@ func GetWorkerDeploymentState(
 		if err != nil {
 			var notFound *serviceerror.NotFound
 			if errors.As(err, &notFound) {
+				// This means that the version is truly absent from both entities, i.e, from the worker-deployment summary list
+				// and that there is no presence of it's own version workflow in Temporal. This is enough evidence to conclude that we can scale
+				// this k8s Deployment down.
 				continue
 			}
 			return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
@@ -178,9 +181,6 @@ func GetWorkerDeploymentState(
 				LastCurrentTime:   info.GetLastCurrentTime(),
 			},
 		)
-		if versionInfo == nil || versionInfo.Status == temporaliov1alpha1.VersionStatusNotRegistered {
-			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no registered status", buildID)
-		}
 		state.Versions[buildID] = versionInfo
 	}
 
