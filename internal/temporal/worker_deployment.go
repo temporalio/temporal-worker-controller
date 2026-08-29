@@ -137,6 +137,52 @@ func GetWorkerDeploymentState(
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
+	// A version can continue processing Pinned workloads even when it is absent
+	// from VersionSummaries. Confirm missing Kubernetes versions individually
+	// before allowing them to map to NotRegistered.
+	for buildID := range k8sDeployments {
+		if _, exists := state.Versions[buildID]; exists {
+			continue
+		}
+
+		desc, err := client.WorkflowService().DescribeWorkerDeploymentVersion(
+			ctx,
+			&workflowservice.DescribeWorkerDeploymentVersionRequest{
+				Namespace: namespace,
+				DeploymentVersion: &deploymentpb.WorkerDeploymentVersion{
+					DeploymentName: workerDeploymentName,
+					BuildId:        buildID,
+				},
+			},
+		)
+		if err != nil {
+			var notFound *serviceerror.NotFound
+			if errors.As(err, &notFound) {
+				continue
+			}
+			return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
+		}
+
+		info := desc.GetWorkerDeploymentVersionInfo()
+		if info == nil || info.GetDeploymentVersion() == nil {
+			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no version info", buildID)
+		}
+
+		versionInfo := versionInfoFromVersionSummary(
+			ctx, l, client, targetBuildID, strategy, depHandle, routingConfig,
+			&deploymentpb.WorkerDeploymentInfo_WorkerDeploymentVersionSummary{
+				DeploymentVersion: info.GetDeploymentVersion(),
+				Status:            info.GetStatus(),
+				DrainageInfo:      info.GetDrainageInfo(),
+				LastCurrentTime:   info.GetLastCurrentTime(),
+			},
+		)
+		if versionInfo == nil || versionInfo.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no registered status", buildID)
+		}
+		state.Versions[buildID] = versionInfo
+	}
+
 	return state, nil
 }
 
