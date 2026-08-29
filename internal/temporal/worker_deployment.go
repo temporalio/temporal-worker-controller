@@ -181,6 +181,9 @@ func GetWorkerDeploymentState(
 				LastCurrentTime:   info.GetLastCurrentTime(),
 			},
 		)
+		if versionInfo == nil || versionInfo.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no registered status", buildID)
+		}
 		state.Versions[buildID] = versionInfo
 	}
 
