@@ -137,9 +137,10 @@ func GetWorkerDeploymentState(
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
-	// A version can continue processing Pinned workloads even when it is absent
-	// from VersionSummaries. Confirm missing Kubernetes versions individually
-	// before allowing them to map to NotRegistered.
+	// A version could be missing from the VersionSummaries in the odd event that there is
+	// state divergence between the deployment workflow's local state and the actual versions
+	// that are present. Confirm if those missing Kubernetes versions have any existing workloads
+	// running before allowing them to map to NotRegistered.
 	for buildID := range k8sDeployments {
 		if _, exists := state.Versions[buildID]; exists {
 			continue
