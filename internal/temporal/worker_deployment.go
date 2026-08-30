@@ -139,8 +139,8 @@ func GetWorkerDeploymentState(
 
 	// A version could be missing from the VersionSummaries in the odd event that there is
 	// state divergence between the deployment workflow's local state and the actual versions
-	// that are present. For versions that are known to TWC but absent from the Worker Deployment 
-	// description's version summaries, double-check their state before allowing them to map to 
+	// that are present. For versions that are known to TWC but absent from the Worker Deployment
+	// description's version summaries, double-check their state before allowing them to map to
 	// NotRegistered and get scaled down.
 	for buildID := range k8sDeployments {
 		if _, exists := state.Versions[buildID]; exists {
