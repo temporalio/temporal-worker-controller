@@ -7,6 +7,8 @@ require (
 	go.temporal.io/api v1.62.2
 	go.temporal.io/sdk v1.38.0
 	go.temporal.io/server v1.30.4
+	google.golang.org/grpc v1.79.3
+	google.golang.org/protobuf v1.36.10
 	k8s.io/api v0.34.0
 	k8s.io/apimachinery v0.34.0
 	k8s.io/client-go v0.34.0
@@ -166,8 +168,6 @@ require (
 	google.golang.org/genproto v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
-	google.golang.org/grpc v1.79.3 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/validator.v2 v2.0.1 // indirect

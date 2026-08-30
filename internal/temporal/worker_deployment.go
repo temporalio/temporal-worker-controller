@@ -135,6 +135,57 @@ func GetWorkerDeploymentState(
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
+	// A version could be missing from the VersionSummaries in the odd event that there is
+	// state divergence between the deployment workflow's local state and the actual versions
+	// that are present. For versions that are known to TWC but absent from the Worker Deployment
+	// description's version summaries, double-check their state before allowing them to map to
+	// NotRegistered and get scaled down.
+	for buildID := range k8sDeployments {
+		if _, exists := state.Versions[buildID]; exists {
+			continue
+		}
+
+		desc, err := client.WorkflowService().DescribeWorkerDeploymentVersion(
+			ctx,
+			&workflowservice.DescribeWorkerDeploymentVersionRequest{
+				Namespace: namespace,
+				DeploymentVersion: &deploymentpb.WorkerDeploymentVersion{
+					DeploymentName: workerDeploymentName,
+					BuildId:        buildID,
+				},
+			},
+		)
+		if err != nil {
+			var notFound *serviceerror.NotFound
+			if errors.As(err, &notFound) {
+				// This means that the version is truly absent from both entities, i.e, from the worker-deployment summary list
+				// and that there is no presence of it's own version workflow in Temporal. This is enough evidence to conclude that we can scale
+				// this k8s Deployment down.
+				continue
+			}
+			return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
+		}
+
+		info := desc.GetWorkerDeploymentVersionInfo()
+		if info == nil || info.GetDeploymentVersion() == nil {
+			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no version info", buildID)
+		}
+
+		versionInfo := versionInfoFromVersionSummary(
+			ctx, l, client, targetBuildID, strategy, deploymentHandler, routingConfig,
+			&deploymentpb.WorkerDeploymentInfo_WorkerDeploymentVersionSummary{
+				DeploymentVersion: info.GetDeploymentVersion(),
+				Status:            info.GetStatus(),
+				DrainageInfo:      info.GetDrainageInfo(),
+				LastCurrentTime:   info.GetLastCurrentTime(),
+			},
+		)
+		if versionInfo == nil || versionInfo.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no registered status", buildID)
+		}
+		state.Versions[buildID] = versionInfo
+	}
+
 	return state, nil
 }
 
