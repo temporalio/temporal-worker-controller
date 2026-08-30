@@ -246,7 +246,7 @@ func testMissingSummaryVersionIsDescribedBeforeDeletion(
 	poolKey := clientpool.ClientPoolKey{
 		HostPort:  temporalConnection.Spec.HostPort,
 		Namespace: twd.Spec.WorkerOptions.TemporalNamespace,
-		AuthMode:  temporaliov1alpha1.AuthModeNoCredentials,
+		AuthMode:  clientpool.AuthModeNoCredentials,
 	}
 	originalClient, ok := clientPool.GetSDKClient(poolKey)
 	if !ok {
