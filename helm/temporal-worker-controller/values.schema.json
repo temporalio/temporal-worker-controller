@@ -255,9 +255,27 @@
     },
     "extraEnv": {
       "default": [],
-      "description": "Additional environment variables for the manager container.\n\nUse this with extraVolumes and extraVolumeMounts to trust a private certificate authority. The controller verifies the Temporal server certificate against the system trust store, so an internally-issued endpoint fails with \"x509: certificate signed by unknown authority\". The controller is written in Go, which reads SSL_CERT_FILE.\n\nFor example:\nextraEnv:\n- name: SSL_CERT_FILE\n  value: /etc/ssl/custom-ca/ca.crt",
+      "description": "Additional Kubernetes EnvVar entries for the manager container. Each entry needs a name and either a literal value or a valueFrom source.\n\nUse this for corporate HTTP(S) proxies (HTTP_PROXY, HTTPS_PROXY, NO_PROXY) — the Go runtime, gRPC, and net/http honor those variables. Use it with extraVolumes and extraVolumeMounts to trust a private CA via SSL_CERT_FILE.\n\nFor example:\nextraEnv:\n- name: HTTP_PROXY\n  value: http://proxy.corp.example.com:8080\n- name: SSL_CERT_FILE\n  value: /etc/ssl/custom-ca/ca.crt\n- name: API_TOKEN\n  valueFrom:\n    secretKeyRef:\n      name: controller-secrets\n      key: api-token",
       "items": {
-        "type": "object"
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Environment variable name"
+          },
+          "value": {
+            "type": "string",
+            "description": "Literal environment variable value"
+          },
+          "valueFrom": {
+            "type": "object",
+            "description": "Kubernetes EnvVarSource, such as secretKeyRef or configMapKeyRef"
+          }
+        }
       },
       "type": "array"
     },

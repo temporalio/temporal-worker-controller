@@ -767,6 +767,7 @@ func getDeleteDeployments(
 				// NotRegistered versions are versions that the server doesn't know about.
 				// Only delete if it's not the target version.
 				status.TargetVersion.BuildID != version.BuildID {
+				// Consider: Could call DescribeVersion here to assert NotFound before deleting, in case version summaries have diverged from version state
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}
@@ -920,10 +921,11 @@ func getTestWorkflows(
 	var testWorkflows []WorkflowConfig
 
 	// Skip if there's no gate workflow defined, if the target version is already the current, or if the target
-	// version is not yet registered in temporal
+	// version is not yet ready to run workflows
 	if config.RolloutStrategy.Gate == nil ||
 		(status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID) ||
-		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusCreated {
 		return nil
 	}
 
@@ -972,9 +974,12 @@ func getVersionConfigDiff(
 		return nil
 	}
 
-	// Do nothing if target version's deployment is not healthy yet, or if the version is not yet registered in temporal
+	// Do nothing if the target Deployment is not healthy yet, or until Temporal reports
+	// the version as Inactive, indicating that workers have started polling. Created
+	// versions exist in Temporal but do not have pollers yet.
 	if status.TargetVersion.HealthySince == nil ||
-		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusCreated {
 		return nil
 	}
 

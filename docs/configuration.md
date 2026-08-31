@@ -248,9 +248,14 @@ metadata:
   name: production-temporal
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
-  # Optional: override the TLS server name used for certificate verification
   tls:
+    # Optional: override the TLS server name used for certificate verification
     serverName: "production.abc123.tmprl.cloud"
+    # Optional: trust an additional CA (e.g. a private/internal one) alongside the system
+    # trust store. Only needed when the server certificate isn't publicly signed — most
+    # Temporal Cloud connections don't need this.
+    caCertSecretRef:
+      name: temporal-ca-cert  # Name of a Secret containing a `ca.crt` key
   apiKeySecretRef:
     name: temporal-api-key  # Name of the Secret
     key: api-key            # Key within the Secret containing the API key token
@@ -310,6 +315,7 @@ echo -n "your-api-key-token-here" | base64
 - The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
 - `tls.serverName` affects TLS certificate verification by the controller and is injected into Worker Pods as `TEMPORAL_TLS_SERVER_NAME` for SDK envconfig users.
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
+- `tls.caCertSecretRef` trusts an extra CA for API-key or no-credentials connections (mTLS already covers this via its own secret's `ca.crt` key, and cannot be combined with `tls.caCertSecretRef`). The referenced Secret must have a `ca.crt` key.
 
 ## Gate Configuration
 

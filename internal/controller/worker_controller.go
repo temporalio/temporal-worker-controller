@@ -21,6 +21,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -139,6 +140,10 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, r.markWRTsWDNotFound(ctx, req.NamespacedName)
 	}
 
+	// This is the status currently stored in the API server. It is diffed later against the
+	// status computed by this reconcile.
+	observedStatus := workerDeploy.Status.DeepCopy()
+
 	// Migration: if a deprecated TemporalWorkerDeployment with the same name/namespace
 	// exists and has not yet been migrated, transfer ownership of its child Deployments
 	// and WorkerResourceTemplates to this WorkerDeployment.
@@ -254,11 +259,12 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Get or update temporal client for connection
 	clientPoolKey := clientpool.ClientPoolKey{
-		HostPort:      connection.Spec.HostPort,
-		TLSServerName: connection.Spec.TLSServerName(),
-		Namespace:     workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName:    secretName,
-		AuthMode:      authMode,
+		HostPort:            connection.Spec.HostPort,
+		TLSServerName:       connection.Spec.TLSServerName(),
+		Namespace:           workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		SecretName:          secretName,
+		TLSCACertSecretName: connection.Spec.TLSCACertSecretName(),
+		AuthMode:            authMode,
 	}
 	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
 	if !ok {
@@ -307,6 +313,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Fetch Temporal worker deployment state
 	temporalState, err := temporal.GetWorkerDeploymentState(
 		ctx,
+		l,
 		temporalClient,
 		workerDeploymentName,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
@@ -316,15 +323,15 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		getControllerIdentity(),
 	)
 	if err != nil {
-		if isAccessDeniedErr(err) {
+		if shouldEvictClient(err) {
 			r.TemporalClientPool.EvictClient(clientPoolKey)
 		}
 		var rateLimitErr *serviceerror.ResourceExhausted
 		if errors.As(err, &rateLimitErr) {
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonTemporalStateFetchFailed,
-				fmt.Sprintf("Rate limited fetching worker deployment state: %v", err),
-				fmt.Sprintf("Rate limited by Temporal server: %v", err))
+				fmt.Sprintf("Got ResourceExhausted error fetching worker deployment state from Temporal server: %v", err),
+				fmt.Sprintf("Got ResourceExhausted error fetching worker deployment state from Temporal server: %v", err))
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
@@ -362,8 +369,16 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Execute the plan, handling any errors
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
-		if isAccessDeniedErr(err) {
+		if shouldEvictClient(err) {
 			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
+		var rateLimitErr *serviceerror.ResourceExhausted
+		if errors.As(err, &rateLimitErr) {
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+				ReasonPlanExecutionFailed,
+				fmt.Sprintf("Got ResourceExhausted error executing plan: %v", err),
+				fmt.Sprintf("Got ResourceExhausted error executing plan: %v", err))
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanExecutionFailed,
@@ -376,16 +391,19 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	r.syncConditions(&workerDeploy)
 
 	// Single status write per reconcile: persists the generated status and
-	// conditions set during this loop (Ready, Progressing).
-	if err := r.Status().Update(ctx, &workerDeploy); err != nil {
-		if apierrors.IsConflict(err) {
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Second,
-			}, nil
+	// conditions set during this loop (Ready, Progressing). Do not send the update
+	// when the status has not changed.
+	if !equality.Semantic.DeepEqual(observedStatus, &workerDeploy.Status) {
+		if err := r.Status().Update(ctx, &workerDeploy); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: time.Second,
+				}, nil
+			}
+			l.Error(err, "unable to update TemporalWorker status")
+			return ctrl.Result{}, err
 		}
-		l.Error(err, "unable to update TemporalWorker status")
-		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{
@@ -541,7 +559,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	ctx context.Context,
 	l logr.Logger,
 	workerDeploy *temporaliov1alpha1.WorkerDeployment,
-) error {
+) (retErr error) {
 	// Resolve Connection.
 	// The Connection is guaranteed to exist because we hold a finalizer on it
 	// that prevents deletion while any WD references it.
@@ -564,13 +582,16 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	authMode := connection.Spec.AuthMode()
 	secretName := connection.Spec.SecretName()
 
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientpool.ClientPoolKey{
-		HostPort:      connection.Spec.HostPort,
-		TLSServerName: connection.Spec.TLSServerName(),
-		Namespace:     workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName:    secretName,
-		AuthMode:      authMode,
-	})
+	clientPoolKey := clientpool.ClientPoolKey{
+		HostPort:            connection.Spec.HostPort,
+		TLSServerName:       connection.Spec.TLSServerName(),
+		Namespace:           workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		SecretName:          secretName,
+		TLSCACertSecretName: connection.Spec.TLSCACertSecretName(),
+		AuthMode:            authMode,
+	}
+
+	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
 	if !ok {
 		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
 			K8sNamespace:      workerDeploy.Namespace,
@@ -587,6 +608,15 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		}
 		temporalClient = c
 	}
+
+	// Evict cached SDK clients on failures that indicate the cached client may
+	// no longer be usable. Domain responses such as NotFound are handled as
+	// success below and should not churn otherwise healthy clients.
+	defer func() {
+		if shouldEvictClient(retErr) {
+			r.TemporalClientPool.EvictClient(clientPoolKey)
+		}
+	}()
 
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(workerDeploy)
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(workerDeploymentName)
@@ -950,4 +980,18 @@ func isAccessDeniedErr(err error) bool {
 		return true
 	}
 	return grpcstatus.Code(err) == codes.Unauthenticated
+}
+
+func shouldEvictClient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isAccessDeniedErr(err) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var unavailable *serviceerror.Unavailable
+	return errors.As(err, &unavailable)
 }

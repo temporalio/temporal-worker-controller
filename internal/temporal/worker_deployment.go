@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -63,6 +64,7 @@ type TemporalWorkerState struct {
 // GetWorkerDeploymentState queries Temporal to get the state of a worker deployment
 func GetWorkerDeploymentState(
 	ctx context.Context,
+	l logr.Logger,
 	client temporalClient.Client,
 	workerDeploymentName string,
 	namespace string,
@@ -129,13 +131,76 @@ func GetWorkerDeploymentState(
 
 	for _, version := range workerDeploymentInfo.VersionSummaries {
 		versionInfo := versionInfoFromVersionSummary(
-			ctx, client, targetBuildID, strategy,
+			ctx, l, client, targetBuildID, strategy,
 			depHandle, routingConfig, version,
 		)
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
+	// A version could be missing from the VersionSummaries in the odd event that there is
+	// state divergence between the deployment workflow's local state and the actual versions
+	// that are present. For versions that are known to TWC but absent from the Worker Deployment
+	// description's version summaries, double-check their state before allowing them to map to
+	// NotRegistered and get scaled down.
+	for buildID := range k8sDeployments {
+		if _, exists := state.Versions[buildID]; exists {
+			continue
+		}
+
+		desc, err := client.WorkflowService().DescribeWorkerDeploymentVersion(
+			ctx,
+			&workflowservice.DescribeWorkerDeploymentVersionRequest{
+				Namespace: namespace,
+				DeploymentVersion: &deploymentpb.WorkerDeploymentVersion{
+					DeploymentName: workerDeploymentName,
+					BuildId:        buildID,
+				},
+			},
+		)
+		if err != nil {
+			var notFound *serviceerror.NotFound
+			if errors.As(err, &notFound) {
+				// This means that the version is truly absent from both entities, i.e, from the worker-deployment summary list
+				// and that there is no presence of it's own version workflow in Temporal. This is enough evidence to conclude that we can scale
+				// this k8s Deployment down.
+				continue
+			}
+			return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
+		}
+
+		info := desc.GetWorkerDeploymentVersionInfo()
+		if info == nil || info.GetDeploymentVersion() == nil {
+			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no version info", buildID)
+		}
+
+		versionInfo := versionInfoFromVersionSummary(
+			ctx, l, client, targetBuildID, strategy, depHandle, routingConfig,
+			&deploymentpb.WorkerDeploymentInfo_WorkerDeploymentVersionSummary{
+				DeploymentVersion: info.GetDeploymentVersion(),
+				Status:            info.GetStatus(),
+				DrainageInfo:      info.GetDrainageInfo(),
+				LastCurrentTime:   info.GetLastCurrentTime(),
+			},
+		)
+		if versionInfo == nil || versionInfo.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+			return nil, fmt.Errorf("describe worker deployment version for buildID %q returned no registered status", buildID)
+		}
+		state.Versions[buildID] = versionInfo
+	}
+
 	return state, nil
+}
+
+// versionStatusMap translates between the temporal SDK VersionStatus and the
+// TWC k8s API VersionStatus
+var versionStatusMap = map[enumspb.WorkerDeploymentVersionStatus]temporaliov1alpha1.VersionStatus{
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT:     temporaliov1alpha1.VersionStatusCurrent,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CREATED:     temporaliov1alpha1.VersionStatusCreated,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING:    temporaliov1alpha1.VersionStatusDraining,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED:     temporaliov1alpha1.VersionStatusDrained,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE:    temporaliov1alpha1.VersionStatusInactive,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_RAMPING:     temporaliov1alpha1.VersionStatusRamping,
+	enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_UNSPECIFIED: temporaliov1alpha1.VersionStatusNotRegistered,
 }
 
 // versionInfoFromVersionSummary returns a VersionInfo constructed from the
@@ -144,6 +209,7 @@ func GetWorkerDeploymentState(
 //nolint:revive // cyclomatic complexity acceptable given breadth of plan execution
 func versionInfoFromVersionSummary(
 	ctx context.Context,
+	l logr.Logger,
 	client temporalClient.Client,
 	targetBuildID string,
 	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
@@ -156,29 +222,43 @@ func versionInfoFromVersionSummary(
 		BuildID:        summary.DeploymentVersion.BuildId,
 	}
 
-	// Determine summary status
-	drainageStatus := summary.DrainageInfo.GetStatus()
-	if routingConfig.CurrentDeploymentVersion != nil &&
-		summary.DeploymentVersion.DeploymentName == routingConfig.CurrentDeploymentVersion.DeploymentName &&
-		summary.DeploymentVersion.BuildId == routingConfig.CurrentDeploymentVersion.BuildId {
-		out.Status = temporaliov1alpha1.VersionStatusCurrent
-	} else if routingConfig.RampingDeploymentVersion != nil &&
-		summary.DeploymentVersion.DeploymentName == routingConfig.RampingDeploymentVersion.DeploymentName &&
-		summary.DeploymentVersion.BuildId == routingConfig.RampingDeploymentVersion.BuildId {
-		out.Status = temporaliov1alpha1.VersionStatusRamping
-	} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINING {
-		out.Status = temporaliov1alpha1.VersionStatusDraining
-	} else if drainageStatus == enumspb.VERSION_DRAINAGE_STATUS_DRAINED {
-		out.Status = temporaliov1alpha1.VersionStatusDrained
+	apiVersionStatus, ok := versionStatusMap[summary.GetStatus()]
+	if !ok {
+		l.Error(fmt.Errorf("unknown worker version status %s", summary.GetStatus()), "unable to determine version status")
+		return nil
+	}
+	out.Status = apiVersionStatus
 
-		// Extract DrainedSince directly from the summary's drainage info,
-		// avoiding a per-summary DescribeVersion call.
-		if summary.DrainageInfo != nil && summary.DrainageInfo.LastChangedTime != nil {
-			drainedSince := summary.DrainageInfo.LastChangedTime.AsTime()
-			out.DrainedSince = &drainedSince
+	sumDeploymentName := summary.DeploymentVersion.DeploymentName
+	sumBuildID := summary.DeploymentVersion.BuildId
+
+	// There may be inconsistencies in the data returned from temporal server. Check
+	// for these inconsistencies and warn if found.
+	if apiVersionStatus == temporaliov1alpha1.VersionStatusCurrent {
+		if routingConfig.CurrentDeploymentVersion != nil {
+			rcDeployName := routingConfig.CurrentDeploymentVersion.DeploymentName
+			rcBuildID := routingConfig.CurrentDeploymentVersion.BuildId
+			if sumDeploymentName != rcDeployName || sumBuildID != rcBuildID {
+				l.Info(
+					"warning: version reports Current but routing config identifies a different Current version; trusting routing config",
+					"buildID", sumBuildID,
+					"routingConfigBuildID", rcBuildID,
+				)
+			}
 		}
-	} else {
-		out.Status = temporaliov1alpha1.VersionStatusInactive
+	} else if apiVersionStatus == temporaliov1alpha1.VersionStatusRamping {
+		if routingConfig.RampingDeploymentVersion != nil {
+			rcDeployName := routingConfig.RampingDeploymentVersion.DeploymentName
+			rcBuildID := routingConfig.RampingDeploymentVersion.BuildId
+			if sumDeploymentName != rcDeployName || sumBuildID != rcBuildID {
+				l.Info(
+					"warning: version reports Ramping but routing config identifies a different Ramping version; trusting routing config",
+					"buildID", sumBuildID,
+					"routingConfigBuildID", rcBuildID,
+				)
+			}
+		}
+	} else if apiVersionStatus == temporaliov1alpha1.VersionStatusInactive {
 		// get unversioned poller info to decide whether to fast-track rollout
 		if summary.DeploymentVersion.BuildId == targetBuildID &&
 			routingConfig.CurrentDeploymentVersion == nil &&
@@ -205,6 +285,13 @@ func versionInfoFromVersionSummary(
 			}
 			// NOTE(jaypipes): We swallow any non-nil error here. Should we
 			// at least log the error?
+		}
+	} else if apiVersionStatus == temporaliov1alpha1.VersionStatusDrained {
+		// Extract DrainedSince directly from the summary's drainage info,
+		// avoiding a per-summary DescribeVersion call.
+		if summary.DrainageInfo != nil && summary.DrainageInfo.LastChangedTime != nil {
+			drainedSince := summary.DrainageInfo.LastChangedTime.AsTime()
+			out.DrainedSince = &drainedSince
 		}
 	}
 
