@@ -9,6 +9,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch;update;patch
@@ -110,6 +111,11 @@ func (r *DeprecatedTCReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *DeprecatedTCReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.TemporalConnection{}).
+		// A Connection is the replacement for the same-named TemporalConnection,
+		// so creating one changes the deprecated resource's status. Without this
+		// watch that status stays stale until an unrelated event happens to
+		// trigger a reconcile.
+		Watches(&temporaliov1alpha1.Connection{}, &handler.EnqueueRequestForObject{}).
 		Named("deprecated-tc").
 		Complete(r)
 }
