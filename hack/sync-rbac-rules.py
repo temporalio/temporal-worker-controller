@@ -70,7 +70,7 @@ def filter_namespaced(rules_text):
     if current:
         blocks.append("".join(current))
 
-        filtered = []
+    filtered = []
     for block in blocks:
         out_lines = []
         in_resources = False

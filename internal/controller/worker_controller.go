@@ -1053,6 +1053,10 @@ func (r *WorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context
 	return requests
 }
 
+// Note: findTWDsUsingClusterConnection performs a cluster-wide list and O(n) scan of WorkerDeployments
+// for each ClusterConnection event. This is expected to be acceptable while
+// the number of Workerdeployments isn't large, but may increase the controller load
+// as the number of workerdeployments grow.
 func (r *WorkerDeploymentReconciler) findTWDsUsingClusterConnection(
 	ctx context.Context,
 	cc client.Object,
