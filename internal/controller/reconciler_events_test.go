@@ -716,7 +716,9 @@ func TestReconcile_SteadyState_SkipsStatusWrite(t *testing.T) {
 	)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}}
-	// Reconcile enough times to reach steady state (it settles after two reconciles)
+	// Reconcile enough times to reach steady state. The first pass computes the status before creating
+	// the k8s Deployment, then the second pass adds the k8s Deployment reference to the status once it
+	// exists. On the third pass there is nothing new to write.
 	for i := 0; i < 5; i++ {
 		_, err := r.Reconcile(ctx, req)
 		require.NoError(t, err)
@@ -748,7 +750,7 @@ func TestReconcile_SpecChange_StillWritesStatus(t *testing.T) {
 	)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}}
-	// Reconcile enough times to reach steady state (it settles after two reconciles)
+	// Reconcile enough times to reach steady state (settles on pass 3, see test case above)
 	for i := 0; i < 5; i++ {
 		_, err := r.Reconcile(ctx, req)
 		require.NoError(t, err)
