@@ -21,6 +21,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -138,6 +139,10 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		// status updates fail (transient API errors), return the error to requeue with backoff.
 		return ctrl.Result{}, r.markWRTsWDNotFound(ctx, req.NamespacedName)
 	}
+
+	// This is the status currently stored in the API server. It is diffed later against the
+	// status computed by this reconcile.
+	observedStatus := workerDeploy.Status.DeepCopy()
 
 	// Migration: if a deprecated TemporalWorkerDeployment with the same name/namespace
 	// exists and has not yet been migrated, transfer ownership of its child Deployments
@@ -386,16 +391,19 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	r.syncConditions(&workerDeploy)
 
 	// Single status write per reconcile: persists the generated status and
-	// conditions set during this loop (Ready, Progressing).
-	if err := r.Status().Update(ctx, &workerDeploy); err != nil {
-		if apierrors.IsConflict(err) {
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Second,
-			}, nil
+	// conditions set during this loop (Ready, Progressing). Do not send the update
+	// when the status has not changed.
+	if !equality.Semantic.DeepEqual(observedStatus, &workerDeploy.Status) {
+		if err := r.Status().Update(ctx, &workerDeploy); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: time.Second,
+				}, nil
+			}
+			l.Error(err, "unable to update TemporalWorker status")
+			return ctrl.Result{}, err
 		}
-		l.Error(err, "unable to update TemporalWorker status")
-		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{

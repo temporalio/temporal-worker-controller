@@ -193,6 +193,25 @@ func assertNoEventEmitted(t *testing.T, events []string, reason string) {
 	}
 }
 
+// countWDStatusWrites returns interceptor funcs that count status writes issued for a
+// WorkerDeployment, passing each one through to the fake client.
+func countWDStatusWrites(count *int) interceptor.Funcs {
+	return interceptor.Funcs{
+		SubResourceUpdate: func(
+			ctx context.Context,
+			c client.Client,
+			subResourceName string,
+			obj client.Object,
+			opts ...client.SubResourceUpdateOption,
+		) error {
+			if _, ok := obj.(*temporaliov1alpha1.WorkerDeployment); ok && subResourceName == "status" {
+				*count++
+			}
+			return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+		},
+	}
+}
+
 // ─── Stub types ──────────────────────────────────────────────────────────────
 
 // stubWDHandle implements sdkclient.WorkerDeploymentHandle with configurable per-method errors.
@@ -250,6 +269,10 @@ func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, 
 			RoutingConfig: &deploymentpb.RoutingConfig{},
 		},
 	}, nil
+}
+
+func (s *stubWorkflowServiceClient) DescribeWorkerDeploymentVersion(_ context.Context, _ *workflowservice.DescribeWorkerDeploymentVersionRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentVersionResponse, error) {
+	return nil, &serviceerror.NotFound{}
 }
 
 // stubTemporalClient implements sdkclient.Client, routing WorkerDeploymentClient and
@@ -734,6 +757,78 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	// with no reconciliation errors.
 	require.NoError(t, err)
 	assertNoEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
+}
+
+// TestReconcile_SteadyState_SkipsStatusWrite verifies that once the rollout settles, a
+// reconcile that recomputes the same status does not send it back to the API server.
+func TestReconcile_SteadyState_SkipsStatusWrite(t *testing.T) {
+	ctx := context.Background()
+	k8sNamespace := "default"
+
+	tc := makeNoCredsConnection("my-conn", k8sNamespace, "localhost:7233")
+	twd := makeWD("test-worker", k8sNamespace, tc.Name)
+
+	writes := 0
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, countWDStatusWrites(&writes))
+	r.TemporalClientPool.SetClientForTesting(
+		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
+		newStubTemporalClient(nil),
+	)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}}
+	// Reconcile enough times to reach steady state. The first pass computes the status before creating
+	// the k8s Deployment, then the second pass adds the k8s Deployment reference to the status once it
+	// exists. On the third pass there is nothing new to write.
+	for i := 0; i < 5; i++ {
+		_, err := r.Reconcile(ctx, req)
+		require.NoError(t, err)
+	}
+
+	// Nothing has changed and there should be no further status updates after a few reconciles.
+	writes = 0
+	for i := 0; i < 5; i++ {
+		_, err := r.Reconcile(ctx, req)
+		require.NoError(t, err)
+	}
+	assert.Zero(t, writes)
+}
+
+// TestReconcile_SpecChange_StillWritesStatus verifies that once the rollout settles, a change that
+// makes the status differ again is still written to the API server.
+func TestReconcile_SpecChange_StillWritesStatus(t *testing.T) {
+	ctx := context.Background()
+	k8sNamespace := "default"
+
+	tc := makeNoCredsConnection("my-conn", k8sNamespace, "localhost:7233")
+	twd := makeWD("test-worker", k8sNamespace, tc.Name)
+
+	writes := 0
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, countWDStatusWrites(&writes))
+	r.TemporalClientPool.SetClientForTesting(
+		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
+		newStubTemporalClient(nil),
+	)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}}
+	// Reconcile enough times to reach steady state (settles on pass 3, see test case above)
+	for i := 0; i < 5; i++ {
+		_, err := r.Reconcile(ctx, req)
+		require.NoError(t, err)
+	}
+
+	var settled temporaliov1alpha1.WorkerDeployment
+	require.NoError(t, r.Get(ctx, req.NamespacedName, &settled))
+
+	// Trigger a status change by updating the image tag
+	settled.Spec.Template.Spec.Containers[0].Image = "temporal/worker:v2"
+	require.NoError(t, r.Update(ctx, &settled))
+
+	writes = 0
+	_, err := r.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	// A changed status must have been written, exactly once for the one reconcile
+	assert.Equal(t, 1, writes)
 }
 
 // TestReconcile_EvictsCachedClientOnTransportFailure verifies that transport-level
