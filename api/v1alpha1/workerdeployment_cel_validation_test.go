@@ -18,6 +18,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func ptr[T any](v T) *T { return &v }
+
 var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 	var ns string
 
@@ -212,4 +214,95 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring(messageTypeNotAllowedErr))
 	})
+
+	It("accepts connectionRef with objectRef (Connection kind)", func() {
+		twd := baseTWD("objref-connection")
+		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup: ptr("temporal.io"),
+				Kind:     "Connection",
+				Name:     "my-connection",
+			},
+		}
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
+	})
+
+	It("accepts connectionRef with objectRef (ClusterConnection kind)", func() {
+		twd := baseTWD("objref-cluster")
+		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup: ptr("temporal.io"),
+				Kind:     "ClusterConnection",
+				Name:     "shared-connection",
+			},
+		}
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
+	})
+
+	It("rejects connectionRef with both name and objectRef set", func() {
+		twd := baseTWD("both-set")
+		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{
+			Name: "my-connection",
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup: ptr("temporal.io"),
+				Kind:     "Connection",
+				Name:     "my-connection",
+			},
+		}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("exactly one of name or objectRef"))
+	})
+
+	It("rejects connectionRef with neither name nor objectRef set", func() {
+		twd := baseTWD("neither-set")
+		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("exactly one of name or objectRef"))
+	})
+
+	It("rejects objectRef with an invalid kind", func() {
+		twd := baseTWD("bad-kind")
+		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup: ptr("temporal.io"),
+				Kind:     "SomethingRandom",
+				Name:     "my-connection",
+			},
+		}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("objectRef.kind must be Connection or ClusterConnection"))
+	})
+
+	It("rejects objectRef with a non-temporal.io apiGroup", func() {
+		twd := baseTWD("bad-apigroup")
+		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup: ptr("example.com"),
+				Kind:     "Connection",
+				Name:     "my-connection",
+			},
+		}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("objectRef.apiGroup must be temporal.io"))
+	})
+
+	It("rejects objectRef with a populated namespace (cross-namespace not supported yet)", func() {
+		twd := baseTWD("with-namespace")
+		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{
+			ObjectRef: &corev1.TypedObjectReference{
+				APIGroup:  ptr("temporal.io"),
+				Kind:      "Connection",
+				Name:      "my-connection",
+				Namespace: ptr("other-namespace"),
+			},
+		}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("objectRef.namespace is not supported"))
+	})
+
 })

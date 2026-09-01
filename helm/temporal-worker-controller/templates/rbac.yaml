@@ -228,6 +228,7 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
+      - clusterconnections
       - connections
       - temporalconnections
       - workerresourcetemplates
@@ -240,6 +241,7 @@ rules:
   - apiGroups:
       - temporal.io
     resources:
+      - clusterconnections/finalizers
       - connections/finalizers
       - temporalconnections/finalizers
       - temporalworkerdeployments/finalizers
