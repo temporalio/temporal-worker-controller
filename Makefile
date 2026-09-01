@@ -324,6 +324,10 @@ $(STAMPDIR)/helm-deps: $(HELM_MAIN_CHART)/Chart.lock | $(STAMPDIR) $(HELM)
 	$(HELM_ISOLATED_ENV) $(HELM) dependency build $(HELM_MAIN_CHART) --skip-refresh
 	@touch $@
 
+.PHONY: helm-values-schema
+helm-values-schema: ## Generate helm/temporal-worker-controller/values.schema.json from values.yaml.
+	go run ./hack/helm-values-schema
+
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary. If wrong version is installed, it will be overwritten.
 $(CONTROLLER_GEN): $(LOCALBIN)
