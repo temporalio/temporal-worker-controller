@@ -663,8 +663,13 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 }
 
 // deleteDrainedVersions prunes the Temporal server-side Worker Deployment Version
-// record for each Deployment deleted this reconcile (executeK8sOperations, called
-// first). The planner only adds a drained version to DeleteDeployments once it is
+// record for each k8s Deployment in DeleteDeployments, before executeK8sOperations
+// deletes them. It is mutated to remove the k8s Deployments that should not be
+// deleted because their Temporal server-side WDV record could not be removed or
+// because the k8s Deployment has no build ID label. The removed k8s deployments
+// stay in the cluster so that a later reconcile retries the pruning.
+//
+// The planner only adds a drained version to DeleteDeployments once it is
 // EligibleForDeletion (see planner.getDeleteDeployments): drained past the sunset
 // delays with no active worker pods. Deleting the Kubernetes Deployment alone would
 // leave the server-side version registered forever — the only other cleanup path is
@@ -678,23 +683,31 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 // behaviour of temporal server is not working properly
 // (temporalio/temporal#10737).
 //
-// Build IDs are read off the in-memory Deployment objects, which survive their cluster
-// deletion, so this runs in the Temporal phase without reaching back into k8sState.
-// Best-effort: the Kubernetes Deployment is already gone (the primary action), so a
-// failure here only means the Temporal-side record lingers until an operator prunes it
-// or the CRD is deleted. NotRegistered Deployments are also carried in DeleteDeployments;
-// they have no server-side version and return NotFound, which is skipped.
+// Build IDs are read off the in-memory Deployment objects, so this runs in the Temporal
+// phase without reaching back into k8sState. NotRegistered Deployments are also carried
+// in DeleteDeployments; they have no server-side version, so they skip DeleteVersion and
+// are retained for deletion.
 func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
 	ctx context.Context,
 	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	depHandle sdkclient.WorkerDeploymentHandle,
 	p *plan,
 ) {
 	identity := getControllerIdentity()
+	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
 	for _, d := range p.DeleteDeployments {
 		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
 		if !ok {
-			l.Info("deployment has no build ID label, skipping Temporal server-side version cleanup", "deployment", d.Name)
+			// No build ID means we cannot specify which version to prune. We should
+			// never get here, but one way we could is, if someone stripped the build ID
+			// label off the k8s Deployment. If they did, assume the cleanup is intentional
+			// and leave the Deployment alone.
+			l.Info("deployment has no build ID label, leaving the k8s Deployment alone", "deployment", d.Name)
+			continue
+		}
+		if isVersionNotRegistered(workerDeploy, buildID) {
+			markedForDeletion = append(markedForDeletion, d)
 			continue
 		}
 		_, err := depHandle.DeleteVersion(
@@ -706,14 +719,29 @@ func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
 		)
 		if err != nil {
 			var notFound *serviceerror.NotFound
-			if errors.As(err, &notFound) {
+			if !errors.As(err, &notFound) {
+				l.Info("could not delete worker deployment version, keeping its k8s Deployment to reconcile",
+					"buildID", buildID, "deployment", d.Name, "error", err)
 				continue
 			}
-			l.Info("could not delete worker deployment version, may require manual cleanup", "buildID", buildID, "error", err)
+			l.Info("worker deployment version already deleted", "buildID", buildID)
 		} else {
 			l.Info("deleted drained worker deployment version", "buildID", buildID)
 		}
+		markedForDeletion = append(markedForDeletion, d)
 	}
+	p.DeleteDeployments = markedForDeletion
+}
+
+// isVersionNotRegistered checks whether the Temporal server had no record of buildID when
+// the status was generated.
+func isVersionNotRegistered(workerDeploy *temporaliov1alpha1.WorkerDeployment, buildID string) bool {
+	for _, v := range workerDeploy.Status.DeprecatedVersions {
+		if v.BuildID == buildID {
+			return v.Status == temporaliov1alpha1.VersionStatusNotRegistered
+		}
+	}
+	return false
 }
 
 // executePlan performs all required operations in the generated plan.
@@ -724,17 +752,17 @@ func (r *WorkerDeploymentReconciler) executePlan(
 	temporalClient sdkclient.Client,
 	p *plan,
 ) error {
+	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+
+	// Prune the Temporal server-side version records before their k8s Deployments are
+	// deleted, and narrow the plan to the versions the server confirmed gone. A Deployment
+	// held back here keeps its version nominated for deletion, so a failed deletion is retried
+	// on the next reconcile instead of orphaning the record; see deleteDrainedVersions.
+	r.deleteDrainedVersions(ctx, l, workerDeploy, deploymentHandler, p)
 	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
 	if err != nil {
 		return err
 	}
-
-	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
-
-	// Prune Temporal server-side version records for the versions whose Deployments
-	// were just deleted in executeK8sOperations. Must happen in the same reconcile as
-	// the Deployment delete; see deleteDrainedVersions.
-	r.deleteDrainedVersions(ctx, l, deploymentHandler, p)
 
 	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
 		return err

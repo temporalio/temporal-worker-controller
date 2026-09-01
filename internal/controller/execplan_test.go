@@ -16,6 +16,8 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"go.temporal.io/api/serviceerror"
+	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -145,12 +147,19 @@ func baseVersion(buildID string, dep *appsv1.Deployment, status temporaliov1alph
 // reconcile cycle's k8s-side effects. Returns the generated plan so tests can assert on it.
 func runPlanCycle(t *testing.T, r *WorkerDeploymentReconciler, twd *temporaliov1alpha1.WorkerDeployment, connection temporaliov1alpha1.ConnectionSpec, status temporaliov1alpha1.WorkerDeploymentStatus) *plan {
 	t.Helper()
+	return runPlanCycleWith(t, r, twd, connection, status, newStubTemporalClient(nil))
+}
+
+// runPlanCycleWith is runPlanCycle with control over the Temporal client that plan execution
+// uses, for tests that assert on the server-side calls executePlan makes.
+func runPlanCycleWith(t *testing.T, r *WorkerDeploymentReconciler, twd *temporaliov1alpha1.WorkerDeployment, connection temporaliov1alpha1.ConnectionSpec, status temporaliov1alpha1.WorkerDeploymentStatus, tc sdkclient.Client) *plan {
+	t.Helper()
 	ctx := context.Background()
 	w := twd.DeepCopy()
 	w.Status = status
 	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, &temporal.TemporalWorkerState{})
 	require.NoError(t, err, "generatePlan failed")
-	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p), "executePlan failed")
+	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, tc, p), "executePlan failed")
 	return p
 }
 
@@ -363,6 +372,108 @@ func TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite(t *testing
 	after := &temporaliov1alpha1.WorkerResourceTemplate{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, after))
 	require.Equal(t, before.ResourceVersion, after.ResourceVersion, "no-op cycle must not write WRT status")
+}
+
+// ─── Version prune regression tests ──────────────────────────────────────────
+
+// drainedVersion builds a drained, deletion eligible DeprecatedVersions entry for buildID.
+func drainedVersion(buildID string, dep *appsv1.Deployment, drainedSince metav1.Time) *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion {
+	return &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+		BaseWorkerDeploymentVersion: baseVersion(buildID, dep, temporaliov1alpha1.VersionStatusDrained),
+		DrainedSince:                &drainedSince,
+		EligibleForDeletion:         true,
+	}
+}
+
+// statusWithDeprecated builds a status whose current and target version is currentBuildID,
+// with the given deprecated version entries.
+func statusWithDeprecated(currentBuildID string, currentDep *appsv1.Deployment, deprecated ...*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) temporaliov1alpha1.WorkerDeploymentStatus {
+	cur := baseVersion(currentBuildID, currentDep, temporaliov1alpha1.VersionStatusCurrent)
+	return temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion:      temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: cur},
+		CurrentVersion:     &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: cur},
+		DeprecatedVersions: deprecated,
+	}
+}
+
+// deploymentExists checks whether the named Deployment is still in the fake cluster.
+func deploymentExists(t *testing.T, r *WorkerDeploymentReconciler, namespace, name string) bool {
+	t.Helper()
+	err := r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: name}, &appsv1.Deployment{})
+	if err == nil {
+		return true
+	}
+	require.True(t, apierrors.IsNotFound(err), "unexpected error getting Deployment %s: %v", name, err)
+	return false
+}
+
+// newPruneStubHandle returns a handle that behaves like the one newStubTemporalClient builds,
+// with DeleteVersion failing with deleteErr.
+func newPruneStubHandle(deleteErr error) *stubWDHandle {
+	return &stubWDHandle{
+		describeErr:      &serviceerror.NotFound{},
+		deleteVersionErr: deleteErr,
+	}
+}
+
+// TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesNextCycle checks that when the
+// server refuses to delete a version, its Deployment stays put.
+func TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesNextCycle(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 0, connection) // drained, scaled to zero
+	depB := makeVersionedDeployment(twd, buildB, 1, connection) // current
+	r, _ := newTestReconciler([]client.Object{twd, depA, depB})
+
+	handle := newPruneStubHandle(errors.New("version cannot be deleted since it has active pollers"))
+	tc := newStubTemporalClientWithHandle(handle)
+
+	drainedSince := metav1.NewTime(time.Now().Add(-time.Hour))
+	status := statusWithDeprecated(buildB, depB, drainedVersion(buildA, depA, drainedSince))
+
+	// ── Cycle 1: the prune fails, so the Deployment must be held back ──
+	p1 := runPlanCycleWith(t, r, twd, connection, status, tc)
+	require.Equal(t, []string{buildA}, handle.deletedVersions)
+	require.Empty(t, p1.DeleteDeployments)
+	require.True(t, deploymentExists(t, r, namespace, depA.Name))
+
+	// ── Cycle 2: the prune succeeds, so version and Deployment both go ──
+	handle.deleteVersionErr = nil
+	p2 := runPlanCycleWith(t, r, twd, connection, status, tc)
+	require.Equal(t, []string{buildA, buildA}, handle.deletedVersions)
+	require.Len(t, p2.DeleteDeployments, 1)
+	require.False(t, deploymentExists(t, r, namespace, depA.Name))
+}
+
+// TestExecutePlan_VersionAlreadyDeletedOnServer_DeletesDeployment checks that when the server
+// reports the version is already gone, its Deployment is still deleted rather than held back.
+func TestExecutePlan_VersionAlreadyDeletedOnServer_DeletesDeployment(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 0, connection)
+	depB := makeVersionedDeployment(twd, buildB, 1, connection)
+	r, _ := newTestReconciler([]client.Object{twd, depA, depB})
+
+	handle := newPruneStubHandle(&serviceerror.NotFound{})
+	tc := newStubTemporalClientWithHandle(handle)
+
+	drainedSince := metav1.NewTime(time.Now().Add(-time.Hour))
+	status := statusWithDeprecated(buildB, depB, drainedVersion(buildA, depA, drainedSince))
+
+	p := runPlanCycleWith(t, r, twd, connection, status, tc)
+	require.Equal(t, []string{buildA}, handle.deletedVersions)
+	require.Len(t, p.DeleteDeployments, 1)
+	require.False(t, deploymentExists(t, r, namespace, depA.Name))
 }
 
 // ─── gateWorkflowArg tests ───────────────────────────────────────────────────

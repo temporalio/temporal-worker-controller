@@ -24,7 +24,12 @@ END_MARKER = "  # GENERATED RULES END"
 BEGIN_MARKER_NS = "  # GENERATED RULES (NAMESPACED) BEGIN"
 END_MARKER_NS = "  # GENERATED RULES (NAMESPACED) END"
 
-CLUSTER_SCOPED_RESOURCES = {"namespaces", "subjectaccessreviews"}
+CLUSTER_SCOPED_RESOURCES = {
+    "namespaces",
+    "subjectaccessreviews",
+    "clusterconnections",
+    "clusterconnections/finalizers",
+}
 
 
 def extract_rules_text(path):
@@ -67,18 +72,27 @@ def filter_namespaced(rules_text):
 
     filtered = []
     for block in blocks:
-        resources = set()
+        out_lines = []
         in_resources = False
-        for line in block.splitlines():
+        kept_resources = 0
+        for line in block.splitlines(keepends=True):
             stripped = line.strip()
             if stripped == "resources:":
                 in_resources = True
-            elif in_resources and stripped.startswith("- "):
-                resources.add(stripped[2:].strip())
-            elif in_resources and not stripped.startswith("- "):
+                out_lines.append(line)
+                continue
+            if in_resources and stripped.startswith("- "):
+                resource = stripped[2:].strip()
+                if resource in CLUSTER_SCOPED_RESOURCES:
+                    continue
+                kept_resources += 1
+                out_lines.append(line)
+                continue
+            if in_resources and not stripped.startswith("- "):
                 in_resources = False
-        if not CLUSTER_SCOPED_RESOURCES.intersection(resources):
-            filtered.append(block)
+            out_lines.append(line)
+        if kept_resources > 0:
+            filtered.append("".join(out_lines))
 
     return "".join(filtered)
 

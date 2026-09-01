@@ -3983,9 +3983,30 @@ spec:
                       name:
                         pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                         type: string
-                    required:
-                    - name
+                      objectRef:
+                        properties:
+                          apiGroup:
+                            type: string
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        type: object
                     type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of name or objectRef must be set
+                      rule: has(self.name) != has(self.objectRef)
+                    - message: objectRef.kind must be Connection or ClusterConnection
+                      rule: '!has(self.objectRef) || self.objectRef.kind in [''Connection'',''ClusterConnection'']'
+                    - message: objectRef.apiGroup must be temporal.io
+                      rule: '!has(self.objectRef) || self.objectRef.apiGroup == ''temporal.io'''
+                    - message: objectRef.namespace is not supported yet
+                      rule: '!has(self.objectRef) || !has(self.objectRef.__namespace__)'
                   temporalNamespace:
                     minLength: 1
                     type: string
@@ -4136,6 +4157,38 @@ spec:
                 type: string
               managerIdentity:
                 type: string
+              observedConnectionRef:
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  objectRef:
+                    properties:
+                      apiGroup:
+                        type: string
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - kind
+                    - name
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name or objectRef must be set
+                  rule: has(self.name) != has(self.objectRef)
+                - message: objectRef.kind must be Connection or ClusterConnection
+                  rule: '!has(self.objectRef) || self.objectRef.kind in [''Connection'',''ClusterConnection'']'
+                - message: objectRef.apiGroup must be temporal.io
+                  rule: '!has(self.objectRef) || self.objectRef.apiGroup == ''temporal.io'''
+                - message: objectRef.namespace is not supported yet
+                  rule: '!has(self.objectRef) || !has(self.objectRef.__namespace__)'
+              observedGeneration:
+                format: int64
+                type: integer
               targetVersion:
                 properties:
                   buildID:
