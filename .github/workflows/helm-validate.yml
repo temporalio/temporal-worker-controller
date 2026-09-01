@@ -28,8 +28,7 @@ jobs:
 
       - name: Check values.schema.json stays in sync with values.yaml
         env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GIT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: hack/check-helm-values-schema.sh
 
   helm-template:

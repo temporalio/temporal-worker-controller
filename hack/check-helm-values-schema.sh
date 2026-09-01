@@ -1,38 +1,20 @@
 #!/usr/bin/env bash
-# Fail when helm/temporal-worker-controller/values.yaml has non-comment changes
-# but values.schema.json was not updated in the same range.
+# check-helm-values-schema.sh compares helm/temporal-worker-controller/values.yaml
+# between the current working tree and the Git ref in GIT_REF.
+# If any non-comment changes have been made to values.yaml, values.schema.json
+# is checked for a non-empty diff. If that diff is NOT empty, the script
+# returns 0 (success); otherwise it returns a non-zero exit code.
 #
-# CI (pull_request): compare against the PR base SHA.
-# CI (push): compare against the previous commit on the branch.
-# Local: compare against the merge-base with origin/main (or main).
+# GIT_REF defaults to HEAD, so running this script against a dirty working tree
+# checks that the committer updated the JSON Schema when they changed values.yaml.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 VALUES="helm/temporal-worker-controller/values.yaml"
 SCHEMA="helm/temporal-worker-controller/values.schema.json"
 
-resolve_base() {
-  if [[ -n "${PR_BASE_SHA:-}" ]]; then
-    echo "${PR_BASE_SHA}"
-    return
-  fi
-
-  if [[ -n "${PUSH_BEFORE_SHA:-}" && "${PUSH_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
-    echo "${PUSH_BEFORE_SHA}"
-    return
-  fi
-
-  local candidate
-  for candidate in "${BASE_REF:-}" origin/main main; do
-    if [[ -n "${candidate}" ]] && git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
-      git merge-base HEAD "${candidate}"
-      return
-    fi
-  done
-
-  echo "unable to determine a base commit; set PR_BASE_SHA, PUSH_BEFORE_SHA, or BASE_REF" >&2
-  exit 2
-}
+GIT_REF="${GIT_REF:-$(git rev-parse --verify --quiet HEAD)}"
+base="${GIT_REF}"
 
 # Print non-comment, non-blank added/removed lines from a unified diff.
 non_comment_diff_lines() {
@@ -46,16 +28,15 @@ non_comment_diff_lines() {
 # Compare against the working tree so the check works locally and in CI
 # (CI checkouts are clean, so this matches HEAD).
 file_changed() {
-  local base="$1"
+  local ref="$1"
   local path="$2"
-  ! git diff --quiet "${base}" -- "${path}"
+  ! git diff --quiet "${ref}" -- "${path}"
 }
 
 cd "${ROOT}"
 
-base="$(resolve_base)"
-if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-  echo "base commit ${base} is not available in this clone; fetch the PR base or main history" >&2
+if [[ -z "${base}" ]] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+  echo "GIT_REF '${base}' is not a usable commit; set GIT_REF to a fetched ref" >&2
   exit 2
 fi
 
