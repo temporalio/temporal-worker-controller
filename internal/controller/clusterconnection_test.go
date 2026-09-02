@@ -10,8 +10,10 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -535,4 +537,83 @@ func TestSameConnectionRef(t *testing.T) {
 			assert.Equal(t, tc.want, sameConnectionRef(tc.a, tc.b))
 		})
 	}
+}
+
+// TestReconcile_ClusterConnectionNamespaceScoped covers the namespace-scoped controller,
+// which cannot read cluster-scoped resources and so cannot support ClusterConnection.
+func TestReconcile_ClusterConnectionNamespaceScoped(t *testing.T) {
+	ctx := context.Background()
+	key := func(wd *temporaliov1alpha1.WorkerDeployment) types.NamespacedName {
+		return types.NamespacedName{Name: wd.Name, Namespace: wd.Namespace}
+	}
+
+	t.Run("clusterRef_blockedWithClearReason", func(t *testing.T) {
+		cc := makeClusterConnection("conn", "h:7233")
+		wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
+		r, recorder := newTestReconciler([]client.Object{cc, wd})
+		r.DisableClusterConnections = true
+
+		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key(wd)})
+		require.NoError(t, err)
+		assert.Zero(t, result.RequeueAfter, "must not requeue: only a spec or deployment-mode change can resolve this")
+
+		assertEventEmitted(t, drainEvents(recorder), temporaliov1alpha1.ReasonClusterConnectionUnsupported)
+
+		var updated temporaliov1alpha1.WorkerDeployment
+		require.NoError(t, r.Get(ctx, key(wd), &updated))
+		for _, condType := range []string{
+			temporaliov1alpha1.ConditionProgressing,
+			temporaliov1alpha1.ConditionReady,
+			temporaliov1alpha1.ConditionConnectionHealthy, //nolint:staticcheck // backward compat
+		} {
+			cond := meta.FindStatusCondition(updated.Status.Conditions, condType)
+			require.NotNil(t, cond, "%s should be set", condType)
+			assert.Equal(t, metav1.ConditionFalse, cond.Status, condType)
+			assert.Equal(t, temporaliov1alpha1.ReasonClusterConnectionUnsupported, cond.Reason, condType)
+		}
+
+		assert.False(t, controllerutil.ContainsFinalizer(&updated, finalizerName),
+			"WorkerDeployment must stay deletable: it holds no Temporal state to clean up")
+	})
+
+	// The namespaced Connection path must be untouched by the flag.
+	t.Run("namespacedRef_unaffected", func(t *testing.T) {
+		wd := makeWDWithKind("wd", "default", "missing", "Connection")
+		r, recorder := newTestReconciler([]client.Object{wd})
+		r.DisableClusterConnections = true
+
+		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key(wd)})
+		require.Error(t, err, "expected the usual ConnectionNotFound failure")
+
+		events := drainEvents(recorder)
+		assertEventEmitted(t, events, temporaliov1alpha1.ReasonConnectionNotFound)
+		assertNoEventEmitted(t, events, temporaliov1alpha1.ReasonClusterConnectionUnsupported)
+	})
+
+	// A cluster-scoped controller keeps resolving ClusterConnection as before.
+	t.Run("clusterRef_notBlockedWhenClusterScoped", func(t *testing.T) {
+		wd := makeWDWithKind("wd", "default", "missing", "ClusterConnection")
+		r, recorder := newTestReconciler([]client.Object{wd})
+
+		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key(wd)})
+		require.Error(t, err, "expected the usual ConnectionNotFound failure")
+
+		assertNoEventEmitted(t, drainEvents(recorder), temporaliov1alpha1.ReasonClusterConnectionUnsupported)
+	})
+}
+
+// A namespace-scoped controller never added a finalizer to a ClusterConnection, so releasing
+// one must be a no-op rather than a read it is not allowed to perform.
+func TestReleaseConnectionFinalizerIfUnused_NamespaceScoped(t *testing.T) {
+	cc := makeClusterConnection("conn", "h:7233")
+	controllerutil.AddFinalizer(cc, finalizerName)
+	wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
+	r, _ := newTestReconciler([]client.Object{cc, wd})
+	r.DisableClusterConnections = true
+
+	require.NoError(t, r.releaseConnectionFinalizerIfUnused(
+		context.Background(), logr.Discard(), wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace, wd.Name))
+
+	assert.True(t, hasFinalizer(t, r.Client, &temporaliov1alpha1.ClusterConnection{},
+		types.NamespacedName{Name: "conn"}), "the ClusterConnection must be left untouched")
 }
