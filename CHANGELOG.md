@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
+## [1.10.1](https://github.com/temporalio/temporal-worker-controller/compare/v1.10.0...v1.10.1) - 2026-09-02
+
+### Bug Fixes
+
+- **controller:** skip ClusterConnection watch when namespace-scoped ([#567](https://github.com/temporalio/temporal-worker-controller/pull/567)) ([`6fa7b68`](https://github.com/temporalio/temporal-worker-controller/commit/6fa7b683dcc6e65999566d0d62aeb1444a25f384))
+
+### Other Changes
+
+- Bump chart version to 0.29.0 [skip ci] ([`4f7e0be`](https://github.com/temporalio/temporal-worker-controller/commit/4f7e0bee79a1afb620b61f2fa598e62bf2cc1aae))
+
 ## [1.9.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.8.1...v1.9.0) - 2026-08-19
 
 ### Features
