@@ -67,6 +67,11 @@ type WorkerDeploymentReconciler struct {
 	DisableRecoverPanic  bool
 	DisableDeprecatedTWD bool
 
+	// DisableClusterConnections drops ClusterConnection support. Set when the manager is
+	// namespace-scoped: ClusterConnection is cluster-scoped, so a namespaced Role can never
+	// authorize listing it and the watch would retry forever against a 403.
+	DisableClusterConnections bool
+
 	// When a Worker Deployment has the maximum number of versions (100 per Worker Deployment by default),
 	// it will delete the oldest eligible version when a worker with the 101st version arrives.
 	// If no versions are eligible for deletion, that worker's poll will fail, which is dangerous.
@@ -185,6 +190,17 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			}
 			l.Info("Temporal server-side cleanup complete, finalizer removed")
 		}
+		return ctrl.Result{}, nil
+	}
+
+	// This WorkerDeployment can never reconcile. Reported before the finalizer is added so it
+	// stays deletable, and without requeueing since only a spec or deployment-mode change can
+	// resolve it.
+	if r.DisableClusterConnections && connectionRefIsCluster(workerDeploy.Spec.WorkerOptions.ConnectionRef) {
+		msg := fmt.Sprintf("ClusterConnection %q cannot be used because the controller is namespace-scoped",
+			connectionRefName(workerDeploy.Spec.WorkerOptions.ConnectionRef))
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+			temporaliov1alpha1.ReasonClusterConnectionUnsupported, msg, msg)
 		return ctrl.Result{}, nil
 	}
 
@@ -813,6 +829,7 @@ func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	// failures are unrelated to connection health and should not trigger this condition.
 	switch reason {
 	case temporaliov1alpha1.ReasonConnectionNotFound,
+		temporaliov1alpha1.ReasonClusterConnectionUnsupported,
 		temporaliov1alpha1.ReasonAuthSecretInvalid,
 		temporaliov1alpha1.ReasonTemporalClientCreationFailed,
 		temporaliov1alpha1.ReasonTemporalStateFetchFailed:
@@ -896,6 +913,12 @@ func (r *WorkerDeploymentReconciler) releaseConnectionFinalizerIfUnused(
 	selfNamespace, selfName string,
 ) error {
 	isCluster := connectionRefIsCluster(ref)
+
+	// A namespace-scoped controller never placed a finalizer on a ClusterConnection, and
+	// cannot read one to check. Nothing to release.
+	if isCluster && r.DisableClusterConnections {
+		return nil
+	}
 
 	// Scope the "is it still used?" query correctly for the kind:
 	//   - Namespaced Connection: only WDs in its own namespace can reference it,
@@ -992,8 +1015,10 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&temporaliov1alpha1.WorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
-		Watches(&temporaliov1alpha1.ClusterConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingClusterConnection)).
 		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT))
+	if !r.DisableClusterConnections {
+		builder = builder.Watches(&temporaliov1alpha1.ClusterConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingClusterConnection))
+	}
 	if !r.DisableDeprecatedTWD {
 		// Watch deprecated TemporalWorkerDeployments so that any modification to an existing TWD
 		// (e.g. a status update before migration completes) triggers a reconcile of the matching WD
