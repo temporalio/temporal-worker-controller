@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -657,7 +658,10 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
+			spec := tc.spec
+			k8s.ApplyDefaultRollingUpdateFields(&spec.RolloutStrategy)
+
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -1205,6 +1209,86 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
+}
+
+func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	dep := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{}},
+		},
+	}
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+			MaxUnavailable: &maxUnavailable,
+			MaxSurge:       &maxSurge,
+		},
+	}
+	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
+	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
+	assert.Equal(t, maxUnavailable, *dep.Spec.Strategy.RollingUpdate.MaxUnavailable)
+	assert.Equal(t, maxSurge, *dep.Spec.Strategy.RollingUpdate.MaxSurge)
+}
+
+func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	desiredRolloutStrategy := temporaliov1alpha1.RolloutStrategy{
+		MaxUnavailable: &maxUnavailable,
+		MaxSurge:       &maxSurge,
+	}
+	desiredDeploymentStrategy := appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &maxUnavailable,
+			MaxSurge:       &maxSurge,
+		},
+	}
+
+	currentDefault := intstr.FromString("25%")
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-v1"},
+		Spec: appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &currentDefault,
+					MaxSurge:       &currentDefault,
+				},
+			},
+		},
+	}
+
+	status := &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"v1": deployment},
+	}
+
+	t.Run("updates when strategy differs", func(t *testing.T) {
+		spec := &temporaliov1alpha1.WorkerDeploymentSpec{RolloutStrategy: desiredRolloutStrategy}
+		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
+		require.Len(t, updates, 1)
+		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, updates[0].Spec.Strategy.Type)
+		require.NotNil(t, updates[0].Spec.Strategy.RollingUpdate)
+		assert.Equal(t, maxUnavailable, *updates[0].Spec.Strategy.RollingUpdate.MaxUnavailable)
+		assert.Equal(t, maxSurge, *updates[0].Spec.Strategy.RollingUpdate.MaxSurge)
+	})
+
+	t.Run("no update when strategy same", func(t *testing.T) {
+		spec := &temporaliov1alpha1.WorkerDeploymentSpec{RolloutStrategy: desiredRolloutStrategy}
+		deployment.Spec.Strategy = desiredDeploymentStrategy
+		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
+		assert.Empty(t, updates)
+	})
 }
 
 func TestShouldCreateDeployment(t *testing.T) {
@@ -3010,6 +3094,7 @@ func createDeploymentWithDefaultConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
+			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3029,6 +3114,7 @@ func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
+			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3080,6 +3166,7 @@ func createDeploymentForDriftTest(replicas int32, buildID string, image string) 
 					},
 				},
 			},
+			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3132,6 +3219,7 @@ func createDeploymentForDriftTestWithEnv(replicas int32, buildID string, image s
 					},
 				},
 			},
+			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3172,6 +3260,7 @@ func createDeploymentWithoutHashAnnotation(replicas int32, buildID string, image
 					},
 				},
 			},
+			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3688,6 +3777,7 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 					},
 				},
 			},
+			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }

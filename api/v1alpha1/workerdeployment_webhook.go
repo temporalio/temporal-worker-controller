@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -51,6 +52,16 @@ func (s *WorkerDeploymentSpec) Default(ctx context.Context) error {
 
 	if s.SunsetStrategy.DeleteDelay == nil {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
+	}
+
+	if s.RolloutStrategy.MaxUnavailable == nil {
+		maxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
+		s.RolloutStrategy.MaxUnavailable = &maxUnavailable
+	}
+
+	if s.RolloutStrategy.MaxSurge == nil {
+		maxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
+		s.RolloutStrategy.MaxSurge = &maxSurge
 	}
 
 	return nil
@@ -109,6 +120,21 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 		}
 	}
 
+	if isExplicitlyZeroIntOrString(s.MaxUnavailable) &&
+		isExplicitlyZeroIntOrString(s.MaxSurge) {
+		allErrs = append(
+			allErrs,
+			field.Invalid(
+				field.NewPath("spec.rollout.maxUnvailable"),
+				fmt.Sprintf(
+					"maxUnavailable=%v, maxSurge=%v",
+					s.MaxUnavailable, s.MaxSurge,
+				),
+				"maxUnavailable and maxSurge cannot both be 0",
+			),
+		)
+	}
+
 	if s.Gate != nil && s.Gate.Input != nil && s.Gate.InputFrom != nil {
 		allErrs = append(allErrs,
 			field.Invalid(field.NewPath("spec.rollout.gate"), "input & inputFrom",
@@ -158,4 +184,14 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 
 func newInvalidErr(dep *WorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
 	return apierrors.NewInvalid(dep.GroupVersionKind().GroupKind(), dep.GetName(), errs)
+}
+
+func isExplicitlyZeroIntOrString(v *intstr.IntOrString) bool {
+	if v == nil {
+		return false
+	}
+	if v.Type == intstr.Int {
+		return v.IntVal == 0
+	}
+	return v.StrVal == "0" || v.StrVal == "0%"
 }
