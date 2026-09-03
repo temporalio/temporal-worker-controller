@@ -71,8 +71,10 @@ func main() {
 	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	ctrl.SetLogger(zap.New(zap.JSONEncoder()))
 
-	if len(namespaces) > 0 {
+	namespaceScoped := len(namespaces) > 0
+	if namespaceScoped {
 		setupLog.Info("running controller in namespace-scoped mode", "namespaces", namespaces)
+		setupLog.Info("skipping ClusterConnection watches")
 	}
 
 	cacheOptions, err := controller.NewCacheOptions(namespaces)
@@ -142,6 +144,7 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("temporal-worker-controller"),
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 		DisableDeprecatedTWD:                       !deprecatedCRDWatches.TemporalWorkerDeployments,
+		DisableClusterConnections:                  namespaceScoped,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
 		os.Exit(1)

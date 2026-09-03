@@ -309,6 +309,49 @@ func isEmptyMap(v interface{}) bool {
 	return ok && len(m) == 0
 }
 
+// HasScaleTarget reports whether a WRT's raw template declares a scaleTargetRef, the
+// kind-agnostic signal for a resource that drives the versioned Deployment's replica
+// count. It searches the same spec subtree injectScaleTargetRefRecursive injects into
+func HasScaleTarget(raw []byte) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false
+	}
+	spec, ok := obj["spec"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	return hasScaleTargetRef(spec)
+}
+
+// hasScaleTargetRef walks and reports whether a scaleTargetRef key
+// exists anywhere in the tree
+func hasScaleTargetRef(obj map[string]interface{}) bool {
+	for k, v := range obj {
+		if k == "scaleTargetRef" {
+			return true
+		}
+		switch nested := v.(type) {
+		case map[string]interface{}:
+			if hasScaleTargetRef(nested) {
+				return true
+			}
+		case []interface{}:
+			for _, item := range nested {
+				if nestedItem, ok := item.(map[string]interface{}); ok {
+					if hasScaleTargetRef(nestedItem) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // buildScaleTargetRef constructs the scaleTargetRef map pointing at the versioned Deployment.
 func buildScaleTargetRef(deploymentName string) map[string]interface{} {
 	return map[string]interface{}{

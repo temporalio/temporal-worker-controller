@@ -10,19 +10,39 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// ConnectionReference contains the name of a Connection resource
-// in the same namespace as the WorkerDeployment.
+// ConnectionReference identifies a connection resource to use. Exactly one of
+// Name or ObjectRef must be set.
+//
+// Name is a shorthand that selects a namespaced Connection in the
+// WorkerDeployment's own namespace. ObjectRef is the general form carrying full
+// type information (apiGroup + kind + name) and selects either a namespaced
+// Connection or a cluster-scoped ClusterConnection.
+//
+// The authentication secret is always in the WorkerDeployment's own
+// namespace regardless of which connection is referenced. Cross-namespace
+// connection is not yet implemented, so objectRef.namespace must NOT
+// be set.
+// +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.objectRef)",message="exactly one of name or objectRef must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || self.objectRef.kind in ['Connection','ClusterConnection']",message="objectRef.kind must be Connection or ClusterConnection"
+// +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || self.objectRef.apiGroup == 'temporal.io'",message="objectRef.apiGroup must be temporal.io"
+// +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || !has(self.objectRef.__namespace__)",message="objectRef.namespace is not supported yet"
 type ConnectionReference struct {
-	// Name of the Connection resource.
-	// +kubebuilder:validation:Required
+	// Name of a namespaced Connection in the WorkerDeployment's namespace.
+	// Shorthand for objectRef: {apiGroup: temporal.io, kind: Connection, name: <name>}.
+	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
+	// ObjectRef references the connection resource by full type information.
+	// kind must be "Connection" or "ClusterConnection", apiGroup must be
+	// "temporal.io", and namespace must not be set (not yet supported).
+	// +optional
+	ObjectRef *corev1.TypedObjectReference `json:"objectRef,omitempty"`
 }
 
 type WorkerOptions struct {
-	// The name of a Connection in the same namespace as the WorkerDeployment.
+	// ConnectionRef selects the connection resource for this worker. By default
+	// it names a Connection in the same namespace; set connectionRef.kind to
+	// "ClusterConnection" to reference a cluster-scoped ClusterConnection.
 	ConnectionRef ConnectionReference `json:"connectionRef"`
 	// The Temporal namespace for the worker to connect to.
 	// +kubebuilder:validation:MinLength=1
@@ -119,6 +139,11 @@ const (
 	// referenced Connection resource cannot be found.
 	ReasonConnectionNotFound = "ConnectionNotFound"
 
+	// ReasonClusterConnectionUnsupported is set on ConditionProgressing=False when a
+	// WorkerDeployment references a ClusterConnection but the controller is namespace-scoped.
+	// ClusterConnection is cluster-scoped, so such a controller can never read it.
+	ReasonClusterConnectionUnsupported = "ClusterConnectionUnsupported"
+
 	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the credential
 	// secret referenced by the Connection is misconfigured. This covers:
 	// (1) the secret reference has an empty name, (2) the named Kubernetes Secret
@@ -151,8 +176,14 @@ type VersionStatus string
 
 const (
 	// VersionStatusNotRegistered indicates that the version is not registered
-	// with Temporal for any worker deployment.
+	// with Temporal for any worker deployment. It may be not yet created, or
+	// may have been deleted.
 	VersionStatusNotRegistered VersionStatus = "NotRegistered"
+
+	// VersionStatusCreated indicates that the version has been created explicitly.
+	// When the first poll requests for this version come in, the version status
+	// will change to Inactive.
+	VersionStatusCreated VersionStatus = "Created"
 
 	// VersionStatusInactive indicates that the version is registered in a Temporal
 	// worker deployment, but has not been set to current or ramping.
@@ -223,6 +254,18 @@ type WorkerDeploymentStatus struct {
 	// Conditions represent the latest available observations of the WorkerDeployment's current state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ObservedConnectionRef records the connectionRef the controller last
+	// finalized, so the reconciler can detect when connectionRef changes
+	// (name or kind) and release the finalizer from the previously-referenced
+	// connection.
+	ObservedConnectionRef *ConnectionReference `json:"observedConnectionRef,omitempty"`
+
+	// ObservedGeneration is the .metadata.generation the controller last
+	// reconciled. Compare against .metadata.generation to tell whether the
+	// controller has caught up with the latest spec change.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // WorkflowExecutionStatus describes the current state of a workflow.
@@ -361,6 +404,36 @@ const (
 	UpdateProgressive DefaultVersionUpdateStrategy = "Progressive"
 )
 
+// PayloadMetadataEncodingType is the payload encoding the controller sets in the
+// "encoding" metadata key when starting a gate workflow. These values mirror the MetadataEncoding* constants in
+// go.temporal.io/sdk/converter/metadata.go.
+// The SDK's "binary/null" is deliberately omitted: it declares an empty payload, so it
+// would either be inert (no gate input to begin with) or discard an input the user went
+// to the trouble of configuring. Omit the input instead.
+// +enum
+// +kubebuilder:validation:Enum=binary/plain;json/plain;json/protobuf;binary/protobuf
+type PayloadMetadataEncodingType string
+
+const (
+	// PayloadMetadataEncodingTypeBinary is "binary/plain", for raw bytes passed
+	// through unmodified. Requires a byte-valued input source: a ConfigMap
+	// binaryData key or a Secret.
+	PayloadMetadataEncodingTypeBinary PayloadMetadataEncodingType = "binary/plain"
+
+	// PayloadMetadataEncodingTypeJSON is "json/plain", for a plain JSON message.
+	// This is the encoding the controller produces when Encoding is unset.
+	PayloadMetadataEncodingTypeJSON PayloadMetadataEncodingType = "json/plain"
+
+	// PayloadMetadataEncodingTypeProtoJSON is "json/protobuf", for a protobuf
+	// message serialized as JSON.
+	PayloadMetadataEncodingTypeProtoJSON PayloadMetadataEncodingType = "json/protobuf"
+
+	// PayloadMetadataEncodingTypeProto is "binary/protobuf", for a protobuf message
+	// in binary wire format. Requires a byte-valued input source: inline Input is
+	// JSON and cannot carry wire-format bytes.
+	PayloadMetadataEncodingTypeProto PayloadMetadataEncodingType = "binary/protobuf"
+)
+
 type GateWorkflowConfig struct {
 	WorkflowType string `json:"workflowType"`
 	// Input is an arbitrary JSON object passed as the first parameter to the gate workflow.
@@ -372,6 +445,16 @@ type GateWorkflowConfig struct {
 	// For inputs with secrets use SecretKeyRef to omit from logs.
 	// +optional
 	InputFrom *GateInputSource `json:"inputFrom,omitempty"`
+	// Encoding is the encoding type of the gate input. If unset, then the controller will use json/plain encoding.
+	// The binary encoding types require a byte-valued input source instead of inline input.
+	// +optional
+	Encoding PayloadMetadataEncodingType `json:"encoding,omitempty"`
+	// MessageType is the fully-qualified protobuf message name of the gate input, for example
+	// "my.package.DeployRequest". Workers resolve the message type from the gate workflow's own
+	// signature, so this is recorded for tools that only see the payload, such as the Temporal UI.
+	// Required when Encoding is binary/protobuf, optional for json/protobuf, rejected otherwise.
+	// +optional
+	MessageType string `json:"messageType,omitempty"`
 }
 
 // GateInputSource references a value from a ConfigMap or a Secret
@@ -387,6 +470,8 @@ type GateInputSource struct {
 // RolloutStrategy defines strategy to apply during next rollout
 // +kubebuilder:validation:XValidation:rule="self.strategy != 'Progressive' || (has(self.steps) && size(self.steps) > 0)",message="steps are required for Progressive rollout"
 // +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef) != has(self.gate.inputFrom.secretKeyRef))",message="exactly one of configMapKeyRef or secretKeyRef must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.encoding) || self.gate.encoding != 'binary/protobuf' || has(self.gate.messageType)",message="gate.messageType is required when gate.encoding is binary/protobuf"
+// +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.messageType) || (has(self.gate.encoding) && (self.gate.encoding == 'json/protobuf' || self.gate.encoding == 'binary/protobuf'))",message="gate.messageType may only be set when gate.encoding is json/protobuf or binary/protobuf"
 type RolloutStrategy struct {
 	// Specifies how to treat concurrent executions of a Job.
 	// Valid values are:

@@ -248,9 +248,14 @@ metadata:
   name: production-temporal
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
-  # Optional: override the TLS server name used for certificate verification
   tls:
+    # Optional: override the TLS server name used for certificate verification
     serverName: "production.abc123.tmprl.cloud"
+    # Optional: trust an additional CA (e.g. a private/internal one) alongside the system
+    # trust store. Only needed when the server certificate isn't publicly signed — most
+    # Temporal Cloud connections don't need this.
+    caCertSecretRef:
+      name: temporal-ca-cert  # Name of a Secret containing a `ca.crt` key
   apiKeySecretRef:
     name: temporal-api-key  # Name of the Secret
     key: api-key            # Key within the Secret containing the API key token
@@ -310,6 +315,7 @@ echo -n "your-api-key-token-here" | base64
 - The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
 - `tls.serverName` affects TLS certificate verification by the controller and is injected into Worker Pods as `TEMPORAL_TLS_SERVER_NAME` for SDK envconfig users.
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
+- `tls.caCertSecretRef` trusts an extra CA for API-key or no-credentials connections (mTLS already covers this via its own secret's `ca.crt` key, and cannot be combined with `tls.caCertSecretRef`). The referenced Secret must have a `ca.crt` key.
 
 ## Gate Configuration
 
@@ -338,6 +344,8 @@ rollout:
     #   secretKeyRef:
     #     name: gate-input
     #     key: payload.json
+    # By default the input is sent as plain JSON. For protobuf and other payload
+    # types, see "Gate Input Encoding" below.
 ```
 
 Gate workflow input details:
@@ -345,6 +353,94 @@ Gate workflow input details:
 - `input` accepts any JSON object and is passed as the first parameter to the gate workflow.
 - `inputFrom` reads a JSON document from the specified `ConfigMap` or `Secret` key.
 - The target workflow should declare a single argument matching the JSON shape (e.g., a struct or `json.RawMessage`).
+
+### Gate Input Encoding
+
+By default the gate input is sent to the workflow as a plain JSON payload. Set `encoding` when
+the input is something else — most commonly a protobuf message:
+
+```yaml
+gate:
+  workflowType: "HealthCheck"
+  encoding: json/protobuf
+  messageType: my.package.DeployRequest   # optional for json/protobuf
+  input:
+    service: checkout
+    replicas: 3
+```
+
+The controller does not parse or convert the input. It passes the bytes through unchanged and
+labels them with the encoding you declare, so the worker knows how to decode them. Declaring an
+encoding that does not match the actual input causes the gate workflow to fail to start its
+argument.
+
+Supported values for `encoding`:
+
+| Value | Input is | Usable with |
+|---|---|---|
+| `json/plain` | A plain JSON document. Same as leaving `encoding` unset. | `input`, `inputFrom` |
+| `json/protobuf` | A protobuf message serialized as JSON. | `input`, `inputFrom` |
+| `binary/plain` | Raw bytes, passed through untouched. | `inputFrom` only |
+| `binary/protobuf` | A protobuf message in binary wire format. | `inputFrom` only |
+
+The two `binary/*` encodings cannot be used with inline `input`, because a YAML/JSON document
+cannot carry raw bytes. Use `inputFrom` with a `Secret`, or a `ConfigMap` `binaryData` key; a
+binary encoding paired with inline `input`, or with no input at all, is rejected on apply.
+
+`messageType` is the fully-qualified protobuf message name. Workers do not need it — they resolve
+the message type from the gate workflow's own signature — but tools that only see the payload,
+such as the Temporal UI or a codec server, do:
+
+- **Required** for `binary/protobuf`. The payload is opaque bytes, so nothing else identifies it.
+- **Optional** for `json/protobuf`. The payload is already readable JSON; the message name is only
+  a label.
+- **Not allowed** for the other encodings, which are not protobuf.
+
+Omitting both `encoding` and `messageType` preserves the previous behavior exactly, so existing
+gate configurations need no changes.
+
+**Protobuf example.** Given this message:
+
+```proto
+message DeployRequest {
+  string service  = 1;
+  int32  replicas = 2;
+}
+```
+
+its JSON form goes inline, since protobuf-as-JSON is still JSON:
+
+```yaml
+gate:
+  workflowType: "VerifyDeploy"
+  encoding: json/protobuf
+  messageType: my.package.DeployRequest
+  input:
+    service: checkout
+    replicas: 3
+```
+
+and the gate workflow receives it as the declared type:
+
+```go
+func VerifyDeploy(ctx workflow.Context, req *DeployRequest) error {
+    // req.Service == "checkout", req.Replicas == 3
+}
+```
+
+For the binary wire format, put the bytes in a `Secret` (or a `ConfigMap` `binaryData` key) and
+reference them instead:
+
+```yaml
+gate:
+  workflowType: "VerifyDeploy"
+  encoding: binary/protobuf
+  messageType: my.package.DeployRequest
+  inputFrom:
+    secretKeyRef:
+      name: gate-input
+      key: request.bin
+```
 
 ## Advanced Configuration
 

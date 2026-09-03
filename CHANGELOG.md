@@ -5,6 +5,466 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
+## [1.10.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.9.0...v1.10.0) - 2026-09-01
+
+### ⚠ Breaking Changes
+
+- **deps:** </strong> Use
+<code>go.opentelemetry.io/otel/attribute.Value</code> and
+<code>go.opentelemetry.io/otel/attribute.KeyValue</code> for log bodies
+and attributes in <code>go.opentelemetry.io/otel/log</code>,
+<code>go.opentelemetry.io/otel/log/logtest</code>,
+<code>go.opentelemetry.io/otel/sdk/log</code>, and
+<code>go.opentelemetry.io/otel/sdk/log/logtest</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8490">#8490</a>)</li>
+<li>Encode log bodies and attributes as
+<code>go.opentelemetry.io/otel/attribute.Value</code> JSON in
+<code>go.opentelemetry.io/otel/exporters/stdout/stdoutlog</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8490">#8490</a>)</li>
+<li>Improve the performance of hashing <code>BOOLSLICE</code>,
+<code>INT64SLICE</code>, <code>FLOAT64SLICE</code>, and
+<code>STRINGSLICE</code> attribute values by avoiding reflection for
+short slices in <code>go.opentelemetry.io/otel/attribute</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8511">#8511</a>)</li>
+<li>⚠️ <strong>Breaking Change:</strong> <code>WithEndpointURL</code> in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp</code>
+no longer appends the default signal path when an endpoint URL has no
+path, making the behavior consistent with
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp</code>
+and with setting the endpoint through
+<code>OTEL_EXPORTER_OTLP_METRICS_ENDPOINT</code>. If the URL has no path
+component, the root path (<code>/</code>) is used. Use
+<code>WithEndpointURL(url.JoinPath(endpoint,
+&quot;/v1/metrics&quot;))</code> to preserve the previous behavior. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8538">#8538</a>)</li>
+<li>⚠️ <strong>Breaking Change:</strong> <code>WithEndpointURL</code> in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp</code>
+no longer appends the default signal path when an endpoint URL has no
+path, making the behavior consistent with
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp</code>
+and with setting the endpoint through
+<code>OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</code>. If the URL has no path
+component, the root path (<code>/</code>) is used. Use
+<code>WithEndpointURL(url.JoinPath(endpoint,
+&quot;/v1/traces&quot;))</code> to preserve the previous behavior. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8538">#8538</a>)</li>
+</ul>
+<h3>Deprecated</h3>
+<ul>
+<li>Deprecate <code>WithExportBufferSize</code> in
+<code>go.opentelemetry.io/otel/sdk/log</code>. The option remains
+available for source compatibility but no longer affects behavior;
+<code>BatchProcessor</code> no longer maintains a separate
+export-request buffer. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8620">#8620</a>)</li>
+</ul>
+<h3>Removed</h3>
+<ul>
+<li>⚠️ <strong>Breaking Change:</strong> Remove <code>Kind</code>,
+<code>Value</code>, <code>KeyValue</code>, their constructors, and
+attribute conversion helpers from
+<code>go.opentelemetry.io/otel/log</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8490">#8490</a>)</li>
+<li>⚠️ <strong>Breaking Change:</strong> Remove the
+<code>AttributeValueLengthLimit</code> and
+<code>AttributeCountLimit</code> fields from <code>RecordFactory</code>
+in <code>go.opentelemetry.io/otel/sdk/log/logtest</code>; records
+produced by the factory now keep attribute limits disabled so test code
+can append exact attributes. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8556">#8556</a>)</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Apply TLS certificates configured through environment variables to
+gRPC connections in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc</code>.</li>
+<li>Prevent panics in
+<code>go.opentelemetry.io/otel/bridge/opentracing</code> when
+OpenTracing baggage is propagated concurrently with
+<code>Span.SetBaggageItem</code>.</li>
+<li>Fix an off-by-one error in <code>FixedSizeReservoir</code> in
+<code>go.opentelemetry.io/otel/sdk/metric/exemplar</code> that prevented
+the first exemplar from being sampled after the reservoir was filled.
+(<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8309">#8309</a>)</li>
+<li>Interpret HTTP <code>Retry-After</code> header values as seconds
+instead of nanoseconds when retrying OTLP HTTP exports in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp</code>,
+<code>go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp</code>,
+and
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp</code>.
+(<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8383">#8383</a>)</li>
+</ul>
+<!-- raw HTML omitted -->
+</blockquote>
+<p>... (truncated)</p>
+</details>
+<details>
+<summary>Changelog</summary>
+<p><em>Sourced from <a
+href="https://github.com/open-telemetry/opentelemetry-go/blob/main/CHANGELOG.md">go.opentelemetry.io/otel's
+changelog</a>.</em></p>
+<blockquote>
+<h2>[1.45.0/0.67.0/0.21.0/0.0.18] - 2026-08-03</h2>
+<h3>Added</h3>
+<ul>
+<li>Add experimental observability metrics to
+<code>BatchProcessor</code> in
+<code>go.opentelemetry.io/otel/sdk/log</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/7124">#7124</a>)</li>
+<li>Add the experimental <code>WithUnsafeAttributes</code> no-copy
+attribute option to <code>go.opentelemetry.io/otel/metric/x</code> for
+future performance improvements. This API is a work in progress. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8251">#8251</a>)</li>
+<li>Add <code>Map</code> and <code>MapValue</code> functions for the new
+<code>MAP</code> attribute type in
+<code>go.opentelemetry.io/otel/attribute</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8445">#8445</a>)</li>
+<li>Support <code>MAP</code> attributes in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlptrace</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8453">#8453</a>)</li>
+<li>Support <code>MAP</code> attributes in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8453">#8453</a>)</li>
+<li>Support <code>MAP</code> attributes in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlpmetric</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8453">#8453</a>)</li>
+<li>Support <code>MAP</code> attributes in
+<code>go.opentelemetry.io/otel/exporters/zipkin</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8453">#8453</a>)</li>
+<li>Apply <code>AttributeValueLengthLimit</code> recursively to values
+contained in <code>attribute.MAP</code> attributes in
+<code>go.opentelemetry.io/otel/sdk/trace</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8454">#8454</a>)</li>
+<li>Remove duplicate keys from <code>attribute.MAP</code> values in
+<code>go.opentelemetry.io/otel/sdk/resource</code> using last-value-wins
+semantics. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8471">#8471</a>)</li>
+<li>Remove duplicate keys by default from <code>attribute.MAP</code>
+values in instrumentation scope attributes in
+<code>go.opentelemetry.io/otel/sdk/log</code> using last-value-wins
+semantics. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8471">#8471</a>)</li>
+<li>Remove duplicate keys by default from <code>attribute.MAP</code>
+values in span, event, link, and instrumentation scope attributes in
+<code>go.opentelemetry.io/otel/sdk/trace</code> using last-value-wins
+semantics. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8471">#8471</a>)</li>
+<li>Remove duplicate keys by default from <code>attribute.MAP</code>
+values in measurement and instrumentation scope attributes in
+<code>go.opentelemetry.io/otel/sdk/metric</code> using last-value-wins
+semantics. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8471">#8471</a>)</li>
+<li>Extend <code>WithAllowKeyDuplication</code> in
+<code>go.opentelemetry.io/otel/sdk/log</code> to disable duplicate-key
+removal in <code>attribute.MAP</code> values for instrumentation scope
+attributes. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8471">#8471</a>)</li>
+<li>Add the <code>go.opentelemetry.io/otel/semconv/v1.42.0</code>
+package.
+The package contains semantic conventions from the <code>v1.42.0</code>
+version of the OpenTelemetry Semantic Conventions.
+See the <a
+href="https://github.com/open-telemetry/opentelemetry-go/blob/main/semconv/v1.42.0/MIGRATION.md">migration
+documentation</a> for information on how to upgrade from
+<code>go.opentelemetry.io/otel/semconv/v1.41.0</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8484">#8484</a>)</li>
+<li>Add <code>WithoutPanicRecording</code> as a
+<code>TracerProviderOption</code> in
+<code>go.opentelemetry.io/otel/sdk/trace</code> to disable exception
+event recording for panics. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8532">#8532</a>)</li>
+<li>Add the <code>go.opentelemetry.io/otel/semconv/v1.43.0</code>
+package.
+The package contains semantic conventions from the <code>v1.43.0</code>
+version of the OpenTelemetry Semantic Conventions.
+See the <a
+href="https://github.com/open-telemetry/opentelemetry-go/blob/main/semconv/v1.43.0/MIGRATION.md">migration
+documentation</a> for information on how to upgrade from
+<code>go.opentelemetry.io/otel/semconv/v1.42.0</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8628">#8628</a>)</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><code>HistogramReservoir</code> in
+<code>go.opentelemetry.io/otel/sdk/metric/exemplar</code> now uses a
+time-unbiased sampling algorithm for exemplars. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8306">#8306</a>)</li>
+<li>⚠️ <strong>Breaking Change:</strong> Use
+<code>go.opentelemetry.io/otel/attribute.Value</code> and
+<code>go.opentelemetry.io/otel/attribute.KeyValue</code> for log bodies
+and attributes in <code>go.opentelemetry.io/otel/log</code>,
+<code>go.opentelemetry.io/otel/log/logtest</code>,
+<code>go.opentelemetry.io/otel/sdk/log</code>, and
+<code>go.opentelemetry.io/otel/sdk/log/logtest</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8490">#8490</a>)</li>
+<li>Encode log bodies and attributes as
+<code>go.opentelemetry.io/otel/attribute.Value</code> JSON in
+<code>go.opentelemetry.io/otel/exporters/stdout/stdoutlog</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8490">#8490</a>)</li>
+<li>Improve the performance of hashing <code>BOOLSLICE</code>,
+<code>INT64SLICE</code>, <code>FLOAT64SLICE</code>, and
+<code>STRINGSLICE</code> attribute values by avoiding reflection for
+short slices in <code>go.opentelemetry.io/otel/attribute</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8511">#8511</a>)</li>
+<li>⚠️ <strong>Breaking Change:</strong> <code>WithEndpointURL</code> in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp</code>
+no longer appends the default signal path when an endpoint URL has no
+path, making the behavior consistent with
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp</code>
+and with setting the endpoint through
+<code>OTEL_EXPORTER_OTLP_METRICS_ENDPOINT</code>. If the URL has no path
+component, the root path (<code>/</code>) is used. Use
+<code>WithEndpointURL(url.JoinPath(endpoint,
+&quot;/v1/metrics&quot;))</code> to preserve the previous behavior. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8538">#8538</a>)</li>
+<li>⚠️ <strong>Breaking Change:</strong> <code>WithEndpointURL</code> in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp</code>
+no longer appends the default signal path when an endpoint URL has no
+path, making the behavior consistent with
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp</code>
+and with setting the endpoint through
+<code>OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</code>. If the URL has no path
+component, the root path (<code>/</code>) is used. Use
+<code>WithEndpointURL(url.JoinPath(endpoint,
+&quot;/v1/traces&quot;))</code> to preserve the previous behavior. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8538">#8538</a>)</li>
+</ul>
+<h3>Deprecated</h3>
+<ul>
+<li>Deprecate <code>WithExportBufferSize</code> in
+<code>go.opentelemetry.io/otel/sdk/log</code>. The option remains
+available for source compatibility but no longer affects behavior;
+<code>BatchProcessor</code> no longer maintains a separate
+export-request buffer. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8620">#8620</a>)</li>
+</ul>
+<h3>Removed</h3>
+<ul>
+<li>⚠️ <strong>Breaking Change:</strong> Remove <code>Kind</code>,
+<code>Value</code>, <code>KeyValue</code>, their constructors, and
+attribute conversion helpers from
+<code>go.opentelemetry.io/otel/log</code>. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8490">#8490</a>)</li>
+<li>⚠️ <strong>Breaking Change:</strong> Remove the
+<code>AttributeValueLengthLimit</code> and
+<code>AttributeCountLimit</code> fields from <code>RecordFactory</code>
+in <code>go.opentelemetry.io/otel/sdk/log/logtest</code>; records
+produced by the factory now keep attribute limits disabled so test code
+can append exact attributes. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8556">#8556</a>)</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Apply TLS certificates configured through environment variables to
+gRPC connections in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc</code>.</li>
+<li>Prevent panics in
+<code>go.opentelemetry.io/otel/bridge/opentracing</code> when
+OpenTracing baggage is propagated concurrently with
+<code>Span.SetBaggageItem</code>.</li>
+<li>Fix an off-by-one error in <code>FixedSizeReservoir</code> in
+<code>go.opentelemetry.io/otel/sdk/metric/exemplar</code> that prevented
+the first exemplar from being sampled after the reservoir was filled.
+(<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8309">#8309</a>)</li>
+<li>Interpret HTTP <code>Retry-After</code> header values as seconds
+instead of nanoseconds when retrying OTLP HTTP exports in
+<code>go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp</code>,
+<code>go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp</code>,
+and
+<code>go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp</code>.
+(<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8383">#8383</a>)</li>
+<li>Fix a memory leak in the <code>Reservoir</code> implementation in
+<code>go.opentelemetry.io/otel/sdk/metric/exemplar</code>, where storing
+the full <code>context.Context</code> pinned large objects such as gRPC
+transport buffers. (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8389">#8389</a>)</li>
+</ul>
+<!-- raw HTML omitted -->
+</blockquote>
+<p>... (truncated)</p>
+</details>
+<details>
+<summary>Commits</summary>
+<ul>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/93a693edeed0e07ce5ebd1dfe67af42d1e2055d8"><code>93a693e</code></a>
+Release v1.45.0 (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8693">#8693</a>)</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/c65d435b43e5e6b82310e6b18dd4cdcb8ac63a0c"><code>c65d435</code></a>
+Merge commit from fork</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/223f9fdce4e4a85d6ee2155c6a140f236db72c8b"><code>223f9fd</code></a>
+sdk/metric: remove obsolete randomFloat64 TODO (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8685">#8685</a>)</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/06272bc491566efb2c581c8a52e4986cfcccec5b"><code>06272bc</code></a>
+fix(deps): update googleapis to 6ac0973 (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8694">#8694</a>)</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/a4f238f57646197d124edcf67baf4cd6ea6d0a9f"><code>a4f238f</code></a>
+chore(deps): update github.com/charmbracelet/ultraviolet digest to
+8b69304 (#...</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/37140e78821d3cb29a33d4b601ca4645b80ceebd"><code>37140e7</code></a>
+chore(deps): update codspeedhq/action action to v5.0.2 (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8690">#8690</a>)</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/cef0855960bce4385c7d58c40e846573c190d826"><code>cef0855</code></a>
+chore(deps): update module github.com/lucasb-eyer/go-colorful to v1.4.1
+(<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8689">#8689</a>)</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/e814a7281f2d52a6440c3269e139145e62801a16"><code>e814a72</code></a>
+Merge commit from fork</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/bfd8eb7f85d3364fdde9ad1a408df98be30acadb"><code>bfd8eb7</code></a>
+chore(deps): update github.com/golangci/rowserrcheck digest to d2031e3
+(<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8687">#8687</a>)</li>
+<li><a
+href="https://github.com/open-telemetry/opentelemetry-go/commit/48db2c659c3b138f971273cd91ea0bcb647768e1"><code>48db2c6</code></a>
+chore(deps): update github/codeql-action action to v4.37.5 (<a
+href="https://redirect.github.com/open-telemetry/opentelemetry-go/issues/8692">#8692</a>)</li>
+<li>Additional commits viewable in <a
+href="https://github.com/open-telemetry/opentelemetry-go/compare/v1.44.0...v1.45.0">compare
+view</a></li>
+</ul>
+</details>
+<br />
+
+
+[![Dependabot compatibility
+score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=go.opentelemetry.io/otel&package-manager=go_modules&previous-version=1.44.0&new-version=1.45.0)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)
+
+Dependabot will resolve any conflicts with this PR as long as you don't
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+<details>
+<summary>Dependabot commands and options</summary>
+<br />
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show <dependency name> ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore <dependency name> major version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency's major version (unless you unignore this specific
+dependency's major version or upgrade to it yourself)
+- `@dependabot ignore <dependency name> minor version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency's minor version (unless you unignore this specific
+dependency's minor version or upgrade to it yourself)
+- `@dependabot ignore <dependency name>` will close this group update PR
+and stop Dependabot creating any more for the specific dependency
+(unless you unignore this specific dependency or upgrade to it yourself)
+- `@dependabot unignore <dependency name>` will remove all of the ignore
+conditions of the specified dependency
+- `@dependabot unignore <dependency name> <ignore condition>` will
+remove the ignore condition of the specified dependency and ignore
+conditions
+
+
+</details>
+
+Signed-off-by: dependabot[bot] <support@github.com>
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> ([#538](https://github.com/temporalio/temporal-worker-controller/pull/538)) ([`d8252d7`](https://github.com/temporalio/temporal-worker-controller/commit/d8252d79591fdd01034c5bb7642d4c730d3d9de9))
+
+### Bug Fixes
+
+- **controller:** prune worker deployment version before deleting its k8s Deployment ([#553](https://github.com/temporalio/temporal-worker-controller/pull/553)) ([`5afa61b`](https://github.com/temporalio/temporal-worker-controller/commit/5afa61bbfa6a0d98e2a017e94399ef0c657e2912))
+- **controller:** only send status updates when the status changed ([#557](https://github.com/temporalio/temporal-worker-controller/pull/557)) ([`6852fe9`](https://github.com/temporalio/temporal-worker-controller/commit/6852fe9dc8f36ab6e0c0a033020f9dcbedf3b25a))
+- evict cached Temporal client on failures that indicate possible bad-client ([#329](https://github.com/temporalio/temporal-worker-controller/pull/329)) ([`c26d73d`](https://github.com/temporalio/temporal-worker-controller/commit/c26d73d1f5943d04d8a988e8509625450703c20d))
+- **controller:** watch Connection to clear stale TemporalConnection status ([#545](https://github.com/temporalio/temporal-worker-controller/pull/545)) ([`6579b08`](https://github.com/temporalio/temporal-worker-controller/commit/6579b083083e1f522f3dfeafc2a355bafbe1bfc8))
+- **controller:** DescribeVersion on NotRegistered Versions to prevent pre-mature scaledown of said versions ([#556](https://github.com/temporalio/temporal-worker-controller/pull/556)) ([`6a222ee`](https://github.com/temporalio/temporal-worker-controller/commit/6a222eef10064aad5973c86ce08457676c95e136))
+- **controller:** delete rendered autoscalers at sunset scale-down ([#544](https://github.com/temporalio/temporal-worker-controller/pull/544)) ([`252364f`](https://github.com/temporalio/temporal-worker-controller/commit/252364f6e7c473d79fbdb2a094cf04e579912ac9))
+
+### Documentation
+
+- **changelog:** update changelog for v1.9.0 ([#533](https://github.com/temporalio/temporal-worker-controller/pull/533)) ([`3456aef`](https://github.com/temporalio/temporal-worker-controller/commit/3456aeff368c82f8f14153fc3e3aadafec2d230e))
+
+### Chores
+
+- **deps:** bump github.com/onsi/ginkgo/v2 in / ([#551](https://github.com/temporalio/temporal-worker-controller/pull/551)) ([`5e1d78c`](https://github.com/temporalio/temporal-worker-controller/commit/5e1d78c1cc825807596470d27922cbcd1f150b5e))
+- **deps:** bump go.opentelemetry.io/otel in /internal/demo ([#538](https://github.com/temporalio/temporal-worker-controller/pull/538)) ([`d8252d7`](https://github.com/temporalio/temporal-worker-controller/commit/d8252d79591fdd01034c5bb7642d4c730d3d9de9))
+- **deps:** bump github.com/stretchr/testify in / ([#537](https://github.com/temporalio/temporal-worker-controller/pull/537)) ([`674a2cd`](https://github.com/temporalio/temporal-worker-controller/commit/674a2cde9c3343d814584698727bf99224f5545e))
+
+### Other Changes
+
+- Add ClusterConnection cluster-scoped resource ([#549](https://github.com/temporalio/temporal-worker-controller/pull/549)) ([`c295cd9`](https://github.com/temporalio/temporal-worker-controller/commit/c295cd9dd4ceff65b77c530f8f882f0c4c6dad70))
+- Revert "Bump chart version to 0.28.1 [skip ci]" ([#560](https://github.com/temporalio/temporal-worker-controller/pull/560)) ([`14c699e`](https://github.com/temporalio/temporal-worker-controller/commit/14c699ec2ca7e8c125f0722ccd2d4a51d38af742))
+- document extraEnv proxy usage and validate EnvVar shape ([#558](https://github.com/temporalio/temporal-worker-controller/pull/558)) ([`93454a7`](https://github.com/temporalio/temporal-worker-controller/commit/93454a70b2ea2cbb637cdec547b575d75c692453))
+- Bump chart version to 0.28.1 [skip ci] ([`08f57c8`](https://github.com/temporalio/temporal-worker-controller/commit/08f57c8c86fad913fbed0cb143256aa555d0e67b))
+- Make controller more resilient to inconsistent Temporal state, delay requeue after Temporal ResourceExhausted, improve logs ([#554](https://github.com/temporalio/temporal-worker-controller/pull/554)) ([`3fdfa93`](https://github.com/temporalio/temporal-worker-controller/commit/3fdfa93d9d30dbfb83d523f30be24378cf442c3a))
+- Support a trusted CA for API-key and no-credentials Connections ([#546](https://github.com/temporalio/temporal-worker-controller/pull/546)) ([`a7089b8`](https://github.com/temporalio/temporal-worker-controller/commit/a7089b860d55d77f01197651d36073872e9d6a88))
+- support extraEnv, extraVolumes and extraVolumeMounts on the manager ([#532](https://github.com/temporalio/temporal-worker-controller/pull/532)) ([`7316aee`](https://github.com/temporalio/temporal-worker-controller/commit/7316aeece0341504e8c057ad90c421e0d45634a9))
+- disable k8s Go package deps in dependabot ([#534](https://github.com/temporalio/temporal-worker-controller/pull/534)) ([`d4e0c15`](https://github.com/temporalio/temporal-worker-controller/commit/d4e0c15483dc32272526b19830c6d636b7d2fccc))
+- uplift google.golang.org/grpc -> 1.83.0 ([#535](https://github.com/temporalio/temporal-worker-controller/pull/535)) ([`f26ce4a`](https://github.com/temporalio/temporal-worker-controller/commit/f26ce4a8de9852a6e559c44e903f0cf681e47e07))
+- Bump chart version to 0.28.0 [skip ci] ([`f29d1b0`](https://github.com/temporalio/temporal-worker-controller/commit/f29d1b07b9bb83da239046a4ee9bfb4ad9e249a1))
+
+## [1.9.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.8.1...v1.9.0) - 2026-08-19
+
+### Features
+
+- add payload encoding to gate workflow ([#528](https://github.com/temporalio/temporal-worker-controller/pull/528)) ([`ad2dbaa`](https://github.com/temporalio/temporal-worker-controller/commit/ad2dbaa69f785de59b9ce8a53671fe9a0aa0b82a))
+- **helm:** configure kube-rbac-proxy sidecar ([#468](https://github.com/temporalio/temporal-worker-controller/pull/468)) ([`f3bc2ad`](https://github.com/temporalio/temporal-worker-controller/commit/f3bc2ad95b4a73e95dea2fc0e43f741e9b05c68a))
+
+### Bug Fixes
+
+- **controller:** prune Temporal server-side version record on normal drain ([#498](https://github.com/temporalio/temporal-worker-controller/pull/498)) ([`4227ae4`](https://github.com/temporalio/temporal-worker-controller/commit/4227ae456d784b0ed70d2e7b7447313174fd6c4c))
+- **controller:** delete k8s worker Deployments during WD cleanup ([#508](https://github.com/temporalio/temporal-worker-controller/pull/508)) ([`33585e8`](https://github.com/temporalio/temporal-worker-controller/commit/33585e858bbcafbb3e1d8e524f736360a9fa7410))
+- pin connection on deprecated versions ([#525](https://github.com/temporalio/temporal-worker-controller/pull/525)) ([`e029d36`](https://github.com/temporalio/temporal-worker-controller/commit/e029d36b139d84f0975e861a35768d81f57d5d87))
+- make 'make test-unit' work out of the box ([#499](https://github.com/temporalio/temporal-worker-controller/pull/499)) ([`9cd89c0`](https://github.com/temporalio/temporal-worker-controller/commit/9cd89c07b013e3929b8f36d837602a1841c9f2f1))
+- **clientpool:** attach namespace header to every request ([#467](https://github.com/temporalio/temporal-worker-controller/pull/467)) ([`921e5b4`](https://github.com/temporalio/temporal-worker-controller/commit/921e5b4413cd7b7ffbfae1a0db881d5d53423475))
+
+### Documentation
+
+- **concepts:** warn that changing connectionRef mutates all managed ([#512](https://github.com/temporalio/temporal-worker-controller/pull/512)) ([`16a1fdf`](https://github.com/temporalio/temporal-worker-controller/commit/16a1fdf4e67c919674db51753edf961a09d7170b))
+- **changelog:** backfill CHANGELOG.md ([#524](https://github.com/temporalio/temporal-worker-controller/pull/524)) ([`bed0114`](https://github.com/temporalio/temporal-worker-controller/commit/bed011411159dd0abe19d85434aad0c5d167947e))
+- align Worker Options with the API ([#500](https://github.com/temporalio/temporal-worker-controller/pull/500)) ([`dd5978d`](https://github.com/temporalio/temporal-worker-controller/commit/dd5978ddeedb55fb1e40f238a1fa168f2c1679e9))
+
+### Chores
+
+- added workflow for changelog file ([#495](https://github.com/temporalio/temporal-worker-controller/pull/495)) ([`35fd07e`](https://github.com/temporalio/temporal-worker-controller/commit/35fd07e61b794072d881a65821e1fd8d6e2c5e6f))
+
+### Other Changes
+
+- Bump github.com/prometheus/client_golang in /internal/demo ([#523](https://github.com/temporalio/temporal-worker-controller/pull/523)) ([`0943dfc`](https://github.com/temporalio/temporal-worker-controller/commit/0943dfc9e1436a756f89bb158800ddd0ff82b603))
+- BUG[493] sub-task 1 - complete connection env/volume updates ([#516](https://github.com/temporalio/temporal-worker-controller/pull/516)) ([`46f09ed`](https://github.com/temporalio/temporal-worker-controller/commit/46f09edaa7e336792db3706e7166879b0d21ed3b))
+- Bump k8s.io/client-go in / ([#521](https://github.com/temporalio/temporal-worker-controller/pull/521)) ([`261a782`](https://github.com/temporalio/temporal-worker-controller/commit/261a782d6f6ce0cfcb33223519622d4836ef613b))
+- Bump docker/login-action from 4.5.0 to 4.6.0 ([#518](https://github.com/temporalio/temporal-worker-controller/pull/518)) ([`3c5a04c`](https://github.com/temporalio/temporal-worker-controller/commit/3c5a04cee51bbdd4584ef6fd7a644793f4256ebf))
+- standardize all temporal Go package deps ([#517](https://github.com/temporalio/temporal-worker-controller/pull/517)) ([`c8dddf3`](https://github.com/temporalio/temporal-worker-controller/commit/c8dddf3a950aac343dc07e1d54b7e07adf220728))
+- Updated update-changelog.yml to request reviews from the worker-controller team ([#514](https://github.com/temporalio/temporal-worker-controller/pull/514)) ([`2ca9877`](https://github.com/temporalio/temporal-worker-controller/commit/2ca987792eff176a8117488df5a1b5b21547c78f))
+- [FR-126] Rollback ([#274](https://github.com/temporalio/temporal-worker-controller/pull/274)) ([`6e70184`](https://github.com/temporalio/temporal-worker-controller/commit/6e70184ab261196d9d70ba20dcced03a978abc7c))
+- Bump go.temporal.io/api in /internal/demo ([#501](https://github.com/temporalio/temporal-worker-controller/pull/501)) ([`f20efb6`](https://github.com/temporalio/temporal-worker-controller/commit/f20efb679e70e7169f1e47a70af643139c156907))
+- Bump docker/login-action from 4.4.0 to 4.5.0 ([#503](https://github.com/temporalio/temporal-worker-controller/pull/503)) ([`2c45961`](https://github.com/temporalio/temporal-worker-controller/commit/2c459610ae8b32561cc30c7a948f5bbdcf3d5183))
+- Bump actions/checkout from 7.0.0 to 7.0.1 ([#504](https://github.com/temporalio/temporal-worker-controller/pull/504)) ([`dacd0ec`](https://github.com/temporalio/temporal-worker-controller/commit/dacd0ec5ef02c876ebea54a4641f068e44eefa79))
+- Bump k8s.io/api in / ([#506](https://github.com/temporalio/temporal-worker-controller/pull/506)) ([`bf321ad`](https://github.com/temporalio/temporal-worker-controller/commit/bf321ade20ff98244d8abb75d6cf96b9349b64fa))
+- Skip unavailable deprecated CRD watches ([#469](https://github.com/temporalio/temporal-worker-controller/pull/469)) ([`db62cbb`](https://github.com/temporalio/temporal-worker-controller/commit/db62cbba7f6ad59534ecec2ed9acdac60a31a54f))
+- uplift temporal core deps ([#490](https://github.com/temporalio/temporal-worker-controller/pull/490)) ([`3e83925`](https://github.com/temporalio/temporal-worker-controller/commit/3e839257ba27a219b32cc472447504a48571718b))
+- Bump chart version to 0.27.1 [skip ci] ([`4fd32c8`](https://github.com/temporalio/temporal-worker-controller/commit/4fd32c8e07b4976188221ed9104304542c9395b7))
+- Bump google.golang.org/grpc in / ([#487](https://github.com/temporalio/temporal-worker-controller/pull/487)) ([`d503182`](https://github.com/temporalio/temporal-worker-controller/commit/d5031824b9266b9244e0b5877f811a3b48308e79))
+- tell dependabot to ignore cert-manager dep in Helm ([#489](https://github.com/temporalio/temporal-worker-controller/pull/489)) ([`6c5de89`](https://github.com/temporalio/temporal-worker-controller/commit/6c5de8975f309143608fd8e5a67bd222afffe2e6))
+- Bump actions/setup-go from 6.5.0 to 7.0.0 ([#483](https://github.com/temporalio/temporal-worker-controller/pull/483)) ([`36eb96a`](https://github.com/temporalio/temporal-worker-controller/commit/36eb96a547b6adf9d7a1d985fee12f2b656f1a5d))
+- Bump k8s.io/api in / ([#488](https://github.com/temporalio/temporal-worker-controller/pull/488)) ([`220117d`](https://github.com/temporalio/temporal-worker-controller/commit/220117df5e1701c91e69d4829e5aaa84ac9e0632))
+- uplift temporal core dependencies ([#480](https://github.com/temporalio/temporal-worker-controller/pull/480)) ([`01a92a0`](https://github.com/temporalio/temporal-worker-controller/commit/01a92a0410bbedf353030fcc5a686d00916ea417))
+- Bump google.golang.org/grpc in / ([#455](https://github.com/temporalio/temporal-worker-controller/pull/455)) ([`3f32da9`](https://github.com/temporalio/temporal-worker-controller/commit/3f32da98bf46865da27e82ddecbf3daf201fd89c))
+- Bump docker/login-action from 4.3.0 to 4.4.0 ([#454](https://github.com/temporalio/temporal-worker-controller/pull/454)) ([`c21a844`](https://github.com/temporalio/temporal-worker-controller/commit/c21a8447bc64b024806203a95cdf899441e95c8e))
+- add Eniko Dif to CODEOWNERS ([#464](https://github.com/temporalio/temporal-worker-controller/pull/464)) ([`01f3d9c`](https://github.com/temporalio/temporal-worker-controller/commit/01f3d9ca2a76deb85818362ae15c8aa45a177abd))
+
 ## [1.8.1](https://github.com/temporalio/temporal-worker-controller/compare/v1.8.0...v1.8.1) - 2026-07-30
 
 ### Features

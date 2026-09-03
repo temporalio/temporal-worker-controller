@@ -253,6 +253,48 @@
       "items": {},
       "type": "array"
     },
+    "extraEnv": {
+      "default": [],
+      "description": "Additional Kubernetes EnvVar entries for the manager container. Each entry needs a name and either a literal value or a valueFrom source.\n\nUse this for corporate HTTP(S) proxies (HTTP_PROXY, HTTPS_PROXY, NO_PROXY) — the Go runtime, gRPC, and net/http honor those variables. Use it with extraVolumes and extraVolumeMounts to trust a private CA via SSL_CERT_FILE.\n\nFor example:\nextraEnv:\n- name: HTTP_PROXY\n  value: http://proxy.corp.example.com:8080\n- name: SSL_CERT_FILE\n  value: /etc/ssl/custom-ca/ca.crt\n- name: API_TOKEN\n  valueFrom:\n    secretKeyRef:\n      name: controller-secrets\n      key: api-token",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Environment variable name"
+          },
+          "value": {
+            "type": "string",
+            "description": "Literal environment variable value"
+          },
+          "valueFrom": {
+            "type": "object",
+            "description": "Kubernetes EnvVarSource, such as secretKeyRef or configMapKeyRef"
+          }
+        }
+      },
+      "type": "array"
+    },
+    "extraVolumes": {
+      "default": [],
+      "description": "Additional volumes for the manager Pod, alongside the webhook certificate volume the chart already creates.\n\nFor example:\nextraVolumes:\n- name: custom-ca\n  secret:\n    secretName: custom-ca",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "extraVolumeMounts": {
+      "default": [],
+      "description": "Additional volume mounts for the manager container. Volumes must be supplied via extraVolumes.\n\nFor example:\nextraVolumeMounts:\n- name: custom-ca\n  mountPath: /etc/ssl/custom-ca\n  readOnly: true",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
     "replicas": {
       "default": 1,
       "description": "Number of replicas of manager to run.\n\nThe default is 1, but in production set this to 2 or 3 to provide high availability.",

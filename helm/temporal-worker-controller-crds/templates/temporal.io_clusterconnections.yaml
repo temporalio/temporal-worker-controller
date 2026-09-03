@@ -4,15 +4,15 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: connections.temporal.io
+  name: clusterconnections.temporal.io
 spec:
   group: temporal.io
   names:
-    kind: Connection
-    listKind: ConnectionList
-    plural: connections
-    singular: connection
-  scope: Namespaced
+    kind: ClusterConnection
+    listKind: ClusterConnectionList
+    plural: clusterconnections
+    singular: clusterconnection
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - description: Temporal server endpoint
@@ -61,14 +61,6 @@ spec:
                 type: object
               tls:
                 properties:
-                  caCertSecretRef:
-                    properties:
-                      name:
-                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                        type: string
-                    required:
-                    - name
-                    type: object
                   serverName:
                     pattern: ^[a-zA-Z0-9.-]+$
                     type: string
@@ -79,9 +71,6 @@ spec:
             x-kubernetes-validations:
             - message: Only one of mutualTLSSecretRef or apiKeySecretRef may be set
               rule: '!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))'
-            - message: tls.caCertSecretRef cannot be combined with mutualTLSSecretRef;
-                bundle the CA into that secret's own ca.crt key instead
-              rule: '!(has(self.mutualTLSSecretRef) && has(self.tls) && has(self.tls.caCertSecretRef))'
           status:
             type: object
         type: object

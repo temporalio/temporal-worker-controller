@@ -121,6 +121,12 @@ type WorkflowConfig struct {
 	// IsInputSecret indicates whether the GateInput came from a Secret reference
 	// and should be treated as sensitive (not logged)
 	IsInputSecret bool
+	// GateEncoding is the payload encoding to declare for GateInput when starting the
+	// workflow. Empty means the SDK will use json/plain encoding.
+	GateEncoding string
+	// GateMessageType is the fully-qualified protobuf message name to record alongside
+	// GateInput. Empty means no message type is declared.
+	GateMessageType string
 }
 
 // Config holds the configuration for planning
@@ -170,8 +176,12 @@ func GeneratePlan(
 	// TODO(jlegrone): generate warnings/events on the WorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.
 
-	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments)
-	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState)
+	// Determine build IDs we're holding at zero for sunset. Their autoscalers must
+	// not exist while that's true
+	sunsetBuildIDs := getSunsetScaleDownBuildIDs(status, spec)
+
+	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments, sunsetBuildIDs)
+	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
 	return plan, nil
@@ -186,6 +196,7 @@ func getWorkerResourceApplies(
 	k8sState *k8s.DeploymentState,
 	temporalNamespace string,
 	deleteDeployments []*appsv1.Deployment,
+	sunsetBuildIDs map[string]struct{},
 ) []WorkerResourceApply {
 	// Build a set of deployment names that are scheduled for deletion so we can
 	// skip rendering WRTs for them. Their rendered resources are deleted explicitly
@@ -208,9 +219,18 @@ func getWorkerResourceApplies(
 			existingStatus[v.BuildID] = v
 		}
 
+		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for buildID, deployment := range k8sState.Deployments {
 			if _, deleting := deletingDeployments[deployment.Name]; deleting {
 				continue
+			}
+			if hasScaleTarget {
+				// The controller is holding this version's replicas at zero, so
+				// getDeleteWorkerResources removes its autoscaler. We don't want
+				// to render this autoscaler again
+				if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+					continue
+				}
 			}
 			rendered, renderErr := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
 			if renderErr != nil {
@@ -310,6 +330,7 @@ func getDeleteWorkerResources(
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	deleteDeployments []*appsv1.Deployment,
 	k8sState *k8s.DeploymentState,
+	sunsetBuildIDs map[string]struct{},
 ) []WorkerResourceRef {
 	if len(wrts) == 0 {
 		return nil
@@ -339,15 +360,26 @@ func getDeleteWorkerResources(
 			continue
 		}
 
-		// Union of builds being sunset this cycle and orphaned status entries.
+		// Union of builds being sunset this cycle, orphaned status entries and builds
+		// pinned to zero (autoscalers only)
 		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
 		buildIDs = append(buildIDs, deletingBuildIDs...)
+
+		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for _, v := range wrt.Status.Versions {
 			if v.BuildID == "" {
 				continue
 			}
 			if k8sState != nil {
 				if _, live := k8sState.Deployments[v.BuildID]; live {
+					if hasScaleTarget {
+						// Remove the autoscaler as soon as the controller starts holding
+						// replicas at zero. The k8s Deployment outlives it by deleteDelay.
+						// Any other rendered resource is cleaned up with the Deployment
+						if _, sunsetting := sunsetBuildIDs[v.BuildID]; sunsetting {
+							buildIDs = append(buildIDs, v.BuildID)
+						}
+					}
 					continue // build still has a Deployment; its resource is managed by applies
 				}
 			}
@@ -716,9 +748,17 @@ func getDeleteDeployments(
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
 			// 2. The deployment is scaled to 0 replicas.
+			// 3. The version is eligible for deletion (drained with no active
+			//    worker pods, i.e. Status.Replicas == 0). Requiring this lets
+			//    executePlan prune the Temporal-side version record in the same
+			//    reconcile as the Deployment delete: EligibleForDeletion is only
+			//    computable while the Deployment (and thus this DeprecatedVersions
+			//    entry) still exists, so this is the only point that can reliably
+			//    prune it. See execplan.deleteDrainedVersions.
 			if version.DrainedSince != nil &&
 				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
-				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				version.EligibleForDeletion {
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		case temporaliov1alpha1.VersionStatusNotRegistered:
@@ -727,6 +767,7 @@ func getDeleteDeployments(
 				// NotRegistered versions are versions that the server doesn't know about.
 				// Only delete if it's not the target version.
 				status.TargetVersion.BuildID != version.BuildID {
+				// Consider: Could call DescribeVersion here to assert NotFound before deleting, in case version summaries have diverged from version state
 				deleteDeployments = append(deleteDeployments, d)
 			}
 		}
@@ -828,6 +869,22 @@ func getScaleDeployments(
 	return scaleDeployments
 }
 
+// getSunsetScaleDownBuildIDs returns the build IDs of drained versions the controller has
+// begun forcing to zero.
+func getSunsetScaleDownBuildIDs(
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) map[string]struct{} {
+	buildIDs := map[string]struct{}{}
+	for _, version := range status.DeprecatedVersions {
+		if version.Status == temporaliov1alpha1.VersionStatusDrained &&
+			version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
+			buildIDs[version.BuildID] = struct{}{}
+		}
+	}
+	return buildIDs
+}
+
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
@@ -864,10 +921,11 @@ func getTestWorkflows(
 	var testWorkflows []WorkflowConfig
 
 	// Skip if there's no gate workflow defined, if the target version is already the current, or if the target
-	// version is not yet registered in temporal
+	// version is not yet ready to run workflows
 	if config.RolloutStrategy.Gate == nil ||
 		(status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID) ||
-		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusCreated {
 		return nil
 	}
 
@@ -883,12 +941,14 @@ func getTestWorkflows(
 	for _, tq := range targetVersion.TaskQueues {
 		if _, ok := taskQueuesWithWorkflows[tq.Name]; !ok {
 			testWorkflows = append(testWorkflows, WorkflowConfig{
-				WorkflowType:  config.RolloutStrategy.Gate.WorkflowType,
-				WorkflowID:    temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
-				BuildID:       targetVersion.BuildID,
-				TaskQueue:     tq.Name,
-				GateInput:     string(gateInput),
-				IsInputSecret: isGateInputSecret,
+				WorkflowType:    config.RolloutStrategy.Gate.WorkflowType,
+				WorkflowID:      temporal.GetTestWorkflowID(workerDeploymentName, targetVersion.BuildID, tq.Name),
+				BuildID:         targetVersion.BuildID,
+				TaskQueue:       tq.Name,
+				GateInput:       string(gateInput),
+				IsInputSecret:   isGateInputSecret,
+				GateEncoding:    string(config.RolloutStrategy.Gate.Encoding),
+				GateMessageType: config.RolloutStrategy.Gate.MessageType,
 			})
 		}
 	}
@@ -914,9 +974,12 @@ func getVersionConfigDiff(
 		return nil
 	}
 
-	// Do nothing if target version's deployment is not healthy yet, or if the version is not yet registered in temporal
+	// Do nothing if the target Deployment is not healthy yet, or until Temporal reports
+	// the version as Inactive, indicating that workers have started polling. Created
+	// versions exist in Temporal but do not have pollers yet.
 	if status.TargetVersion.HealthySince == nil ||
-		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered {
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered ||
+		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusCreated {
 		return nil
 	}
 

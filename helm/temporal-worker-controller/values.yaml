@@ -185,6 +185,49 @@ nodeSelector: {}
 
 tolerations: []
 
+# extraEnv adds Kubernetes EnvVar entries to the manager container. Each entry
+# needs a name and either a literal value or a valueFrom source
+# (secretKeyRef / configMapKeyRef). The Go runtime, gRPC (Temporal SDK), and
+# net/http (controller-runtime / client-go) honor standard proxy variables.
+#
+# Use extraVolumes/extraVolumeMounts together with SSL_CERT_FILE to trust a
+# private CA. The controller verifies the Temporal server certificate against
+# the system trust store; Go reads SSL_CERT_FILE.
+#
+# extraEnv:
+#   - name: HTTP_PROXY
+#     value: "http://proxy.corp.example.com:8080"
+#   - name: HTTPS_PROXY
+#     value: "http://proxy.corp.example.com:8080"
+#   - name: NO_PROXY
+#     value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8"
+#   - name: SSL_CERT_FILE
+#     value: /etc/ssl/custom-ca/ca.crt
+#   - name: API_TOKEN
+#     valueFrom:
+#       secretKeyRef:
+#         name: controller-secrets
+#         key: api-token
+extraEnv: []
+
+# extraVolumes adds volumes to the manager pod, alongside the webhook certificate
+# volume the chart already creates.
+#
+# extraVolumes:
+#   - name: custom-ca
+#     secret:
+#       secretName: custom-ca
+extraVolumes: []
+
+# extraVolumeMounts adds volume mounts to the manager container. Volumes must be
+# supplied via extraVolumes above.
+#
+# extraVolumeMounts:
+#   - name: custom-ca
+#     mountPath: /etc/ssl/custom-ca
+#     readOnly: true
+extraVolumeMounts: []
+
 # Configure the kube-rbac-proxy sidecar that protects the controller metrics
 # endpoint. The sidecar is enabled unless metrics.disableAuth is true.
 kubeRBACProxy:

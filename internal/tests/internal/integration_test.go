@@ -25,7 +25,7 @@ type testCase struct {
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
 	// Set up test environment
-	cfg, k8sClient, mgr, _, cleanup := setupTestEnvironment(t)
+	cfg, k8sClient, mgr, clientPool, cleanup := setupTestEnvironment(t)
 	defer cleanup()
 
 	// Create test namespace
@@ -990,6 +990,9 @@ func TestIntegration(t *testing.T) {
 
 	// Conditions and events tests
 	runConditionsAndEventsTests(t, k8sClient, mgr, ts, testNamespace.Name)
+
+	// Version-summary divergence safety test
+	runNotRegisteredVersionTests(t, k8sClient, clientPool, ts, testNamespace.Name)
 
 	// Rate limit test: uses a dedicated server to avoid interfering with the tests above.
 	// Ten TWDs in the same Temporal namespace produce 10 concurrent DescribeWorkerDeployment
