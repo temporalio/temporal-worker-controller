@@ -38,6 +38,7 @@ const (
 	VersionEnvKey                                    = "CONTROLLER_VERSION"
 	IdentityEnvKey                                   = "CONTROLLER_IDENTITY"
 	IdentitySuffixEnvKey                             = "CONTROLLER_IDENTITY_SUFFIX"
+	LegacyIdentitySuffixEnvKey                       = "CONTROLLER_IDENTITY_LEGACY_SUFFIX"
 	MaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
 
 	serverDeleteVersionIdentity = "try-delete-for-add-version"
@@ -68,13 +69,28 @@ func getDeprecatedControllerIdentity() string {
 	return defaults.DeprecatedDefaultControllerIdentity
 }
 
-// getControllerIdentity returns the identity with controller env var and namespace uid suffix.
+// getControllerIdentity returns the identity with controller env var and service account uid suffix.
 // Presence of both are ensured by main() and in Reconcile() for users of the controller as a library.
 func getControllerIdentity() string {
 	id := os.Getenv(IdentityEnvKey)
 	suffix := os.Getenv(IdentitySuffixEnvKey)
 	if id != "" && suffix != "" {
 		return id + "/" + suffix
+	}
+	return ""
+}
+
+// getLegacyControllerIdentity returns the controller identity formed with the legacy
+// suffix (the pre-migration namespace UID), or "" if no legacy suffix is configured.
+// During the migration window after the identity suffix source changed from the namespace
+// UID to the ServiceAccount UID, a Worker Deployment still claimed under the legacy identity
+// is treated as reclaimable so the controller adopts it under its current identity instead
+// of deadlocking. TODO: remove once all managed deployments have been re-claimed.
+func getLegacyControllerIdentity() string {
+	id := os.Getenv(IdentityEnvKey)
+	legacySuffix := os.Getenv(LegacyIdentitySuffixEnvKey)
+	if id != "" && legacySuffix != "" {
+		return id + "/" + legacySuffix
 	}
 	return ""
 }
