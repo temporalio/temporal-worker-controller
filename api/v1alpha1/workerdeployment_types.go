@@ -140,6 +140,11 @@ const (
 	// referenced Connection resource cannot be found.
 	ReasonConnectionNotFound = "ConnectionNotFound"
 
+	// ReasonClusterConnectionUnsupported is set on ConditionProgressing=False when a
+	// WorkerDeployment references a ClusterConnection but the controller is namespace-scoped.
+	// ClusterConnection is cluster-scoped, so such a controller can never read it.
+	ReasonClusterConnectionUnsupported = "ClusterConnectionUnsupported"
+
 	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the credential
 	// secret referenced by the Connection is misconfigured. This covers:
 	// (1) the secret reference has an empty name, (2) the named Kubernetes Secret
