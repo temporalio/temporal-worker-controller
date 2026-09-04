@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -793,44 +792,7 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
 
-		buildID := twd.Status.TargetVersion.BuildID
-		if twd.Status.CurrentVersion != nil {
-			buildID = twd.Status.CurrentVersion.BuildID
-		}
-		var taskQueuesWithoutPollers []string
-		var describeErr error
-		if temporalState != nil {
-			if versionInfo, exists := temporalState.Versions[buildID]; exists {
-				taskQueuesWithoutPollers = versionInfo.TaskQueuesWithoutPollers
-				describeErr = versionInfo.TaskQueueDescribeError
-			}
-		}
-		progressingStatus, progressingReason, affectedQueues := computePollerHealthCondition(taskQueuesWithoutPollers, describeErr)
-
-		var progressingMessage string
-		switch progressingReason {
-		case temporaliov1alpha1.ReasonWaitingForPollers:
-			progressingMessage = fmt.Sprintf("Version %s has no active pollers on task queue(s): %s", buildID, strings.Join(affectedQueues, ", "))
-		case temporaliov1alpha1.ReasonActivePollers:
-			progressingMessage = fmt.Sprintf("Version %s has active pollers on all known task queues", buildID)
-		default:
-			progressingMessage = fmt.Sprintf("Poller status for version %s could not be determined", buildID)
-		}
-
-		progressingChanged := r.setCondition(twd, temporaliov1alpha1.ConditionProgressing, progressingStatus, progressingReason, progressingMessage)
-		if progressingChanged {
-			switch progressingReason {
-			case temporaliov1alpha1.ReasonWaitingForPollers:
-				r.Recorder.Eventf(twd, corev1.EventTypeWarning, temporaliov1alpha1.ReasonWaitingForPollers,
-					"Version %s has no active pollers on task queue(s): %s", buildID, strings.Join(affectedQueues, ", "))
-			case temporaliov1alpha1.ReasonActivePollers:
-				r.Recorder.Eventf(twd, corev1.EventTypeNormal, temporaliov1alpha1.ReasonActivePollers,
-					"Version %s has active pollers on all known task queues", buildID)
-			case temporaliov1alpha1.ReasonPollerStatusUnknown:
-				// Don't emit an event for Unknown -- it just means "don't know yet",
-				// not a state transition worth alerting on.
-			}
-		}
+		r.setConditionProgressingForCurrent(twd, temporalState)
 
 		// Deprecated: set RolloutComplete=True for v1.3.x compat. This deliberately
 		// mirrors rollout completion only, not poller presence, matching its

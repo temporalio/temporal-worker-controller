@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestComputePollerHealthCondition(t *testing.T) {
+func TestProgressingConditionFromTaskQueues(t *testing.T) {
 	tests := []struct {
 		name                     string
 		taskQueuesWithoutPollers []string
@@ -70,7 +70,7 @@ func TestComputePollerHealthCondition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, reason, affected := computePollerHealthCondition(tt.taskQueuesWithoutPollers, tt.describeErr)
+			status, reason, affected := progressingConditionFromTaskQueues(tt.taskQueuesWithoutPollers, tt.describeErr)
 			assert.Equal(t, tt.wantStatus, status)
 			assert.Equal(t, tt.wantReason, reason)
 			assert.Equal(t, tt.wantAffected, affected)
