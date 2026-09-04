@@ -46,16 +46,18 @@ type VersionInfo struct {
 	// Nil if the version was never current or if the server doesn't support this field.
 	LastCurrentTime *time.Time
 
-	// PollerHealth summarizes, per task queue, whether at least one poller was observed.
-	// Keyed by task queue name; true = has at least one poller. A task queue is absent
-	// from the map if its poller status could not be determined (e.g. a transient
-	// DescribeTaskQueue error) -- see PollerHealthUnknown.
-	PollerHealth map[string]bool
+	// TaskQueuesWithoutPollers lists the names of this version's task queues that were
+	// confirmed to have no active poller. A checked version with no such queues has a
+	// non-nil, empty slice. Nil means poller status was never checked for this version
+	// (e.g. not yet Current, or the DescribeVersion call failed) -- see
+	// TaskQueueDescribeError, and don't interpret nil as "healthy".
+	TaskQueuesWithoutPollers []string
 
-	// PollerHealthUnknown is true if poller status could not be determined for one or
-	// more of this version's task queues. Callers must not interpret this as unhealthy;
-	// it means "don't know", not "broken".
-	PollerHealthUnknown bool
+	// TaskQueueDescribeError is non-nil if poller status could not be determined for
+	// one or more of this version's task queues (a DescribeVersion or DescribeTaskQueue
+	// failure). Callers must not interpret this as unhealthy; it means "don't know",
+	// not "broken".
+	TaskQueueDescribeError error
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -157,11 +159,9 @@ func GetWorkerDeploymentState(
 				BuildID: version.DeploymentVersion.BuildId,
 			})
 			if descErr == nil {
-				var pollerErr error
-				versionInfo.PollerHealth, pollerErr = computePollerHealth(ctx, client, currentDesc.Info.TaskQueuesInfos) //nolint:revive // TODO(carlydf): consider logging this error
-				versionInfo.PollerHealthUnknown = pollerErr != nil
+				versionInfo.TaskQueuesWithoutPollers, versionInfo.TaskQueueDescribeError = computePollerHealth(ctx, client, currentDesc.Info.TaskQueuesInfos)
 			} else {
-				versionInfo.PollerHealthUnknown = true
+				versionInfo.TaskQueueDescribeError = descErr
 			}
 		}
 
@@ -378,12 +378,6 @@ func GetTestWorkflowStatus(
 		return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
 	}
 
-	// Poller health for the target version, computed from the task queues already
-	// fetched above via DescribeVersion (no additional per-version round trip).
-	var pollerErr error
-	temporalState.Versions[buildID].PollerHealth, pollerErr = computePollerHealth(ctx, client, versionResp.Info.TaskQueuesInfos) //nolint:revive // TODO(carlydf): consider logging this error
-	temporalState.Versions[buildID].PollerHealthUnknown = pollerErr != nil
-
 	// Check test workflows for each task queue
 	for _, tq := range versionResp.Info.TaskQueuesInfos {
 		// Skip non-workflow task queues
@@ -489,29 +483,33 @@ func getPollers(ctx context.Context,
 	return resp.GetPollers(), nil
 }
 
-// computePollerHealth reports, per task queue, whether at least one poller was
-// observed. It stops and returns an error on the first DescribeTaskQueue failure
-// rather than continuing on to the remaining task queues: such an error is most
-// likely a rate limit or a network partition/connectivity failure, and continuing
-// to hammer Temporal with more DescribeTaskQueue calls right after one of those
-// errors would only make things worse. Task queues successfully checked before the
-// error are still returned in health. Callers must not interpret a non-nil error
-// (or a task queue missing from health) as unhealthy -- it means "don't know", not
+// computePollerHealth reports the names of task queues, among tqs, that were
+// confirmed to have no active poller. It stops and returns an error on the first
+// DescribeTaskQueue failure rather than continuing on to the remaining task
+// queues: such an error is most likely a rate limit or a network
+// partition/connectivity failure, and continuing to hammer Temporal with more
+// DescribeTaskQueue calls right after one of those errors would only make things
+// worse. Task queues successfully checked before the error are still reflected in
+// the returned slice, which is always non-nil on success (even when empty) so
+// callers can distinguish "checked, all healthy" from "never checked". Callers
+// must not interpret a non-nil error as unhealthy -- it means "don't know", not
 // "broken".
 func computePollerHealth(
 	ctx context.Context,
 	client temporalClient.Client,
 	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
-) (health map[string]bool, err error) {
-	health = make(map[string]bool, len(tqs))
+) (taskQueuesWithoutPollers []string, err error) {
+	taskQueuesWithoutPollers = make([]string, 0, len(tqs))
 	for _, tqInfo := range tqs {
 		pollers, err := getPollers(ctx, client, tqInfo)
 		if err != nil {
-			return health, err
+			return taskQueuesWithoutPollers, err
 		}
-		health[tqInfo.Name] = len(pollers) > 0
+		if len(pollers) == 0 {
+			taskQueuesWithoutPollers = append(taskQueuesWithoutPollers, tqInfo.Name)
+		}
 	}
-	return health, nil
+	return taskQueuesWithoutPollers, nil
 }
 
 func allTaskQueuesHaveUnversionedPoller(
