@@ -393,12 +393,12 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ReadyWhenVersionIsCurrent", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-		// An empty (but non-nil) PollerHealth map represents a version with no task
-		// queues seen yet to check -- vacuously active -- as opposed to nil, which
-		// means poller status was never checked at all (Unknown).
+		// An empty (but non-nil) TaskQueuesWithoutPollers slice represents a version
+		// with no task queues seen yet to check -- vacuously active -- as opposed to
+		// nil, which means poller status was never checked at all (Unknown).
 		temporalState := &temporal.TemporalWorkerState{
 			Versions: map[string]*temporal.VersionInfo{
-				twd.Status.TargetVersion.BuildID: {PollerHealth: map[string]bool{}},
+				twd.Status.TargetVersion.BuildID: {TaskQueuesWithoutPollers: []string{}},
 			},
 		}
 		r.syncConditions(twd, temporalState)
@@ -415,7 +415,7 @@ func TestSyncConditions(t *testing.T) {
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
 		temporalState := &temporal.TemporalWorkerState{
 			Versions: map[string]*temporal.VersionInfo{
-				twd.Status.TargetVersion.BuildID: {PollerHealth: map[string]bool{"tq-1": false}},
+				twd.Status.TargetVersion.BuildID: {TaskQueuesWithoutPollers: []string{"tq-1"}},
 			},
 		}
 		r.syncConditions(twd, temporalState)

@@ -797,15 +797,15 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		if twd.Status.CurrentVersion != nil {
 			buildID = twd.Status.CurrentVersion.BuildID
 		}
-		var pollerHealth map[string]bool
-		var pollerHealthUnknown bool
+		var taskQueuesWithoutPollers []string
+		var describeErr error
 		if temporalState != nil {
 			if versionInfo, exists := temporalState.Versions[buildID]; exists {
-				pollerHealth = versionInfo.PollerHealth
-				pollerHealthUnknown = versionInfo.PollerHealthUnknown
+				taskQueuesWithoutPollers = versionInfo.TaskQueuesWithoutPollers
+				describeErr = versionInfo.TaskQueueDescribeError
 			}
 		}
-		progressingStatus, progressingReason, affectedQueues := computePollerHealthCondition(pollerHealth, pollerHealthUnknown)
+		progressingStatus, progressingReason, affectedQueues := computePollerHealthCondition(taskQueuesWithoutPollers, describeErr)
 
 		var progressingMessage string
 		switch progressingReason {

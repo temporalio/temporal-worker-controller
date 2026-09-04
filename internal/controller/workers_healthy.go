@@ -17,33 +17,30 @@ import (
 // pure function so the decision logic can be unit tested without an envtest
 // environment.
 //
-//   - pollerHealth == nil: poller status was never checked for this version (e.g. not
-//     yet registered with Temporal) -> Progressing=False, ReasonPollerStatusUnknown.
-//   - any task queue with a false value -> Progressing=True, ReasonWaitingForPollers,
-//     naming the affected queues. A known missing-poller problem takes precedence
-//     over an unrelated unknown elsewhere.
-//   - no false values, but unknown == true (some task queues errored) ->
+//   - any task queue named in taskQueuesWithoutPollers -> Progressing=True,
+//     ReasonWaitingForPollers, naming the affected queues. A known missing-poller
+//     problem takes precedence over an unrelated describe error.
+//   - taskQueuesWithoutPollers is empty (nil or not) and describeErr != nil (some
+//     task queue's poller status couldn't be determined) -> Progressing=False,
+//     ReasonPollerStatusUnknown.
+//   - taskQueuesWithoutPollers == nil and describeErr == nil: poller status was
+//     never checked for this version (e.g. not yet registered with Temporal) ->
 //     Progressing=False, ReasonPollerStatusUnknown.
-//   - all task queues true, unknown == false -> Progressing=False, ReasonActivePollers.
+//   - taskQueuesWithoutPollers is a non-nil empty slice and describeErr == nil:
+//     checked, every task queue has a poller -> Progressing=False, ReasonActivePollers.
 func computePollerHealthCondition(
-	pollerHealth map[string]bool,
-	unknown bool,
+	taskQueuesWithoutPollers []string,
+	describeErr error,
 ) (status metav1.ConditionStatus, reason string, affectedQueues []string) {
-	if pollerHealth == nil {
-		return metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown, nil
-	}
-
-	for tq, hasPoller := range pollerHealth {
-		if !hasPoller {
-			affectedQueues = append(affectedQueues, tq)
-		}
-	}
-
-	if len(affectedQueues) > 0 {
+	if len(taskQueuesWithoutPollers) > 0 {
+		affectedQueues = append([]string(nil), taskQueuesWithoutPollers...)
 		sort.Strings(affectedQueues)
 		return metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers, affectedQueues
 	}
-	if unknown {
+	if describeErr != nil {
+		return metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown, nil
+	}
+	if taskQueuesWithoutPollers == nil {
 		return metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown, nil
 	}
 	return metav1.ConditionFalse, temporaliov1alpha1.ReasonActivePollers, nil
