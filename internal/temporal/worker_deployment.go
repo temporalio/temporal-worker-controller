@@ -149,17 +149,17 @@ func GetWorkerDeploymentState(
 			depHandle, routingConfig, version,
 		)
 
-		// Poller health for the current version reflects whether workers are actively
-		// receiving tasks for the version serving production traffic, as opposed to
-		// merely being Ready at the Kubernetes level. Only checked for the current
-		// version to avoid an extra DescribeVersion/DescribeTaskQueue round trip per
-		// version on every reconcile.
+		// Task queues without a poller, for the current version, surface whether workers
+		// are actively receiving tasks for the version serving production traffic, as
+		// opposed to merely being Ready at the Kubernetes level. Only checked for the
+		// current version to avoid an extra DescribeVersion/DescribeTaskQueue round
+		// trip per version on every reconcile.
 		if versionInfo != nil && versionInfo.Status == temporaliov1alpha1.VersionStatusCurrent {
 			currentDesc, descErr := depHandle.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
 				BuildID: version.DeploymentVersion.BuildId,
 			})
 			if descErr == nil {
-				versionInfo.TaskQueuesWithoutPollers, versionInfo.TaskQueueDescribeError = computePollerHealth(ctx, client, currentDesc.Info.TaskQueuesInfos)
+				versionInfo.TaskQueuesWithoutPollers, versionInfo.TaskQueueDescribeError = getTaskQueuesWithNoPollers(ctx, client, currentDesc.Info.TaskQueuesInfos)
 			} else {
 				versionInfo.TaskQueueDescribeError = descErr
 			}
@@ -483,7 +483,7 @@ func getPollers(ctx context.Context,
 	return resp.GetPollers(), nil
 }
 
-// computePollerHealth reports the names of task queues, among tqs, that were
+// getTaskQueuesWithNoPollers reports the names of task queues, among tqs, that were
 // confirmed to have no active poller. It stops and returns an error on the first
 // DescribeTaskQueue failure rather than continuing on to the remaining task
 // queues: such an error is most likely a rate limit or a network
@@ -494,7 +494,7 @@ func getPollers(ctx context.Context,
 // callers can distinguish "checked, all healthy" from "never checked". Callers
 // must not interpret a non-nil error as unhealthy -- it means "don't know", not
 // "broken".
-func computePollerHealth(
+func getTaskQueuesWithNoPollers(
 	ctx context.Context,
 	client temporalClient.Client,
 	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
