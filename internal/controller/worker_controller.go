@@ -418,8 +418,11 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	// Derive Ready/Progressing from rollout state before the final write.
-	r.syncConditions(&workerDeploy)
+	// Derive Ready/Progressing from rollout state before the final write. When the
+	// target version has become current, this also factors in whether workers are
+	// actively polling Temporal into ConditionProgressing (Ready itself remains
+	// about rollout completion only).
+	r.syncConditions(&workerDeploy, temporalState)
 
 	// Single status write per reconcile: persists the generated status and
 	// conditions set during this loop (Ready, Progressing). Do not send the update
@@ -750,14 +753,15 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	return nil
 }
 
-// setCondition sets a condition on the WorkerDeployment status.
+// setCondition sets the given condition and reports whether it actually changed
+// (differed in Status/Reason/Message/ObservedGeneration from what was already set).
 func (r *WorkerDeploymentReconciler) setCondition(
 	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	conditionType string,
 	status metav1.ConditionStatus,
 	reason, message string,
-) {
-	meta.SetStatusCondition(&workerDeploy.Status.Conditions, metav1.Condition{
+) bool {
+	return meta.SetStatusCondition(&workerDeploy.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
 		ObservedGeneration: workerDeploy.Generation,
@@ -769,7 +773,10 @@ func (r *WorkerDeploymentReconciler) setCondition(
 // syncConditions sets Ready and Progressing based on the current rollout state.
 // It must be called at the end of a successful reconcile (no errors) so that
 // Progressing/Ready reflect the latest Temporal version status.
-func (r *WorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.WorkerDeployment) {
+func (r *WorkerDeploymentReconciler) syncConditions(
+	twd *temporaliov1alpha1.WorkerDeployment,
+	temporalState *temporal.TemporalWorkerState,
+) {
 	// Deprecated: set ConnectionHealthy=True on all successful reconciles for v1.3.x compat.
 	r.setCondition(twd, temporaliov1alpha1.ConditionConnectionHealthy, //nolint:staticcheck // backward compat
 		metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy, //nolint:staticcheck // backward compat
@@ -777,13 +784,20 @@ func (r *WorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.Work
 
 	switch twd.Status.TargetVersion.Status {
 	case temporaliov1alpha1.VersionStatusCurrent:
+		// Rollout itself has completed — Ready stays True regardless of poller
+		// presence. Poller presence is surfaced on ConditionProgressing instead,
+		// mirroring the existing ReasonWaitingForPollers (Progressing=True) /
+		// ReasonActivePollers (Progressing=False) pair.
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
-		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
-			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
-			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
-		// Deprecated: set RolloutComplete=True for v1.3.x compat.
+
+		r.setConditionProgressingForCurrent(twd, temporalState)
+
+		// Deprecated: set RolloutComplete=True for v1.3.x compat. This deliberately
+		// mirrors rollout completion only, not poller presence, matching its
+		// pre-existing (Kubernetes-readiness-only) semantics for v1.3.x compat
+		// consumers.
 		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, //nolint:staticcheck // backward compat
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))

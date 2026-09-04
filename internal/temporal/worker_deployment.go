@@ -40,10 +40,24 @@ type VersionInfo struct {
 	//   - Strategy is Progressive, and
 	//   - Presence of unversioned pollers in all task queues of target version cannot be confirmed.
 	AllTaskQueuesHaveUnversionedPoller bool
+
 	// LastCurrentTime is the timestamp when this version last became current.
 	// Used to determine if this is a rollback scenario (version was previously current).
 	// Nil if the version was never current or if the server doesn't support this field.
 	LastCurrentTime *time.Time
+
+	// TaskQueuesWithoutPollers lists the names of this version's task queues that were
+	// confirmed to have no active poller. A checked version with no such queues has a
+	// non-nil, empty slice. Nil means poller status was never checked for this version
+	// (e.g. not yet Current, or the DescribeVersion call failed) -- see
+	// TaskQueueDescribeError, and don't interpret nil as "healthy".
+	TaskQueuesWithoutPollers []string
+
+	// TaskQueueDescribeError is non-nil if poller status could not be determined for
+	// one or more of this version's task queues (a DescribeVersion or DescribeTaskQueue
+	// failure). Callers must not interpret this as unhealthy; it means "don't know",
+	// not "broken".
+	TaskQueueDescribeError error
 }
 
 // TemporalWorkerState represents the state of a worker deployment in Temporal
@@ -134,6 +148,23 @@ func GetWorkerDeploymentState(
 			ctx, l, client, targetBuildID, strategy,
 			depHandle, routingConfig, version,
 		)
+
+		// Task queues without a poller, for the current version, surface whether workers
+		// are actively receiving tasks for the version serving production traffic, as
+		// opposed to merely being Ready at the Kubernetes level. Only checked for the
+		// current version to avoid an extra DescribeVersion/DescribeTaskQueue round
+		// trip per version on every reconcile.
+		if versionInfo != nil && versionInfo.Status == temporaliov1alpha1.VersionStatusCurrent {
+			currentDesc, descErr := depHandle.DescribeVersion(ctx, temporalClient.WorkerDeploymentDescribeVersionOptions{
+				BuildID: version.DeploymentVersion.BuildId,
+			})
+			if descErr == nil {
+				versionInfo.TaskQueuesWithoutPollers, versionInfo.TaskQueueDescribeError = getTaskQueuesWithNoPollers(ctx, client, currentDesc.Info.TaskQueuesInfos)
+			} else {
+				versionInfo.TaskQueueDescribeError = descErr
+			}
+		}
+
 		state.Versions[version.DeploymentVersion.BuildId] = versionInfo
 	}
 
@@ -450,6 +481,35 @@ func getPollers(ctx context.Context,
 		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
 	}
 	return resp.GetPollers(), nil
+}
+
+// getTaskQueuesWithNoPollers reports the names of task queues, among tqs, that were
+// confirmed to have no active poller. It stops and returns an error on the first
+// DescribeTaskQueue failure rather than continuing on to the remaining task
+// queues: such an error is most likely a rate limit or a network
+// partition/connectivity failure, and continuing to hammer Temporal with more
+// DescribeTaskQueue calls right after one of those errors would only make things
+// worse. Task queues successfully checked before the error are still reflected in
+// the returned slice, which is always non-nil on success (even when empty) so
+// callers can distinguish "checked, all healthy" from "never checked". Callers
+// must not interpret a non-nil error as unhealthy -- it means "don't know", not
+// "broken".
+func getTaskQueuesWithNoPollers(
+	ctx context.Context,
+	client temporalClient.Client,
+	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
+) (taskQueuesWithoutPollers []string, err error) {
+	taskQueuesWithoutPollers = make([]string, 0, len(tqs))
+	for _, tqInfo := range tqs {
+		pollers, err := getPollers(ctx, client, tqInfo)
+		if err != nil {
+			return taskQueuesWithoutPollers, err
+		}
+		if len(pollers) == 0 {
+			taskQueuesWithoutPollers = append(taskQueuesWithoutPollers, tqInfo.Name)
+		}
+	}
+	return taskQueuesWithoutPollers, nil
 }
 
 func allTaskQueuesHaveUnversionedPoller(
