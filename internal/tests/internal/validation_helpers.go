@@ -31,6 +31,7 @@ func waitForExpectedTargetDeployment(t *testing.T, twd *temporaliov1alpha1.Worke
 	deadline := time.Now().Add(timeout)
 	deploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
 	namespace := twd.Namespace
+	ticks := 0
 
 	for time.Now().Before(deadline) {
 		var deployment appsv1.Deployment
@@ -51,7 +52,14 @@ func waitForExpectedTargetDeployment(t *testing.T, twd *temporaliov1alpha1.Worke
 			return
 		}
 		time.Sleep(1 * time.Second)
+		// Cheap k8s-only snapshot while blocked, so a failure shows whether the
+		// gating state was evolving or frozen. Diagnostic only (#542).
+		if ticks++; ticks%10 == 0 {
+			logRolloutDiagnostics(t, ctx, env, twd, fmt.Sprintf("waiting-%ds", ticks), false)
+		}
 	}
+	logRolloutDiagnostics(t, ctx, env, twd, "timeout", true)
+	postMortemDrainageWatch(t, ctx, env, twd, deploymentName, postMortemBudget, postMortemInterval)
 	t.Fatalf("failed to wait for deployment: timeout waiting for deployment %s in namespace %s", deploymentName, namespace)
 }
 
@@ -478,6 +486,9 @@ func waitForEvent(
 	})
 }
 
+// diagOnFailure ...
+var diagOnFailure func(label string)
+
 func eventually(t *testing.T, timeout, interval time.Duration, check func() error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -490,6 +501,9 @@ func eventually(t *testing.T, timeout, interval time.Duration, check func() erro
 		time.Sleep(interval)
 	}
 	if lastErr != nil {
+		if diagOnFailure != nil {
+			diagOnFailure("eventually-failed")
+		}
 		t.Fatalf("eventually failed after %s: %v", timeout, lastErr)
 	}
 }
@@ -568,4 +582,169 @@ func assertWRTControllerOwnerRef(
 	}
 	t.Errorf("WRT %s/%s missing controller owner reference to TWD %s (refs: %+v)",
 		namespace, wrtName, twdName, wrt.OwnerReferences)
+}
+
+// logRolloutDiagnostics dumps the state
+func logRolloutDiagnostics(
+	t *testing.T,
+	ctx context.Context,
+	env testhelpers.TestEnv,
+	twd *temporaliov1alpha1.WorkerDeployment,
+	label string,
+	describeTemporal bool,
+) {
+	t.Helper()
+
+	if describeTemporal {
+		wdName := k8s.ComputeWorkerDeploymentName(twd)
+		handle := env.Ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(wdName)
+		resp, err := handle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+		if err != nil {
+			t.Logf("DIAG[%s] temporal describe %s failed: %v", label, wdName, err)
+		} else {
+			rc := resp.Info.RoutingConfig
+			cur, ramp := "<none>", "<none>"
+			if rc.CurrentVersion != nil {
+				cur = rc.CurrentVersion.BuildID
+			}
+			if rc.RampingVersion != nil {
+				ramp = rc.RampingVersion.BuildID
+			}
+			t.Logf("DIAG[%s] temporal %s: current=%s ramping=%s versions=%d",
+				label, wdName, cur, ramp, len(resp.Info.VersionSummaries))
+			for _, vs := range resp.Info.VersionSummaries {
+				t.Logf("DIAG[%s]   temporal version %-14s drainage=%v", label, vs.Version.BuildID, vs.DrainageStatus)
+			}
+		}
+	}
+
+	var live temporaliov1alpha1.WorkerDeployment
+	if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &live); client.IgnoreNotFound(err) == nil && err != nil {
+		t.Logf("DIAG[%s] TWD not created yet", label)
+	} else if err != nil {
+		t.Logf("DIAG[%s] get TWD %s failed: %v", label, twd.Name, err)
+	} else {
+		ineligible := 0
+		for _, dv := range live.Status.DeprecatedVersions {
+			if !dv.EligibleForDeletion {
+				ineligible++
+			}
+		}
+		cur := "<none>"
+		if live.Status.CurrentVersion != nil {
+			cur = live.Status.CurrentVersion.BuildID
+		}
+		t.Logf("DIAG[%s] TWD status: current=%s target=%s(%s) versionCount=%d deprecated=%d ineligible=%d (cap=%d, blocked=%v)",
+			label, cur, live.Status.TargetVersion.BuildID, live.Status.TargetVersion.Status,
+			live.Status.VersionCount, len(live.Status.DeprecatedVersions), ineligible,
+			testMaxVersionsIneligibleForDeletion, ineligible >= testMaxVersionsIneligibleForDeletion)
+		for _, dv := range live.Status.DeprecatedVersions {
+			t.Logf("DIAG[%s]   deprecated %-14s status=%-14s eligibleForDeletion=%v", label, dv.BuildID, dv.Status, dv.EligibleForDeletion)
+		}
+	}
+
+	var deps appsv1.DeploymentList
+	if err := env.K8sClient.List(ctx, &deps, client.InNamespace(twd.Namespace)); err != nil {
+		t.Logf("DIAG[%s] list deployments failed: %v", label, err)
+		return
+	}
+	for _, d := range deps.Items {
+		owned := false
+		for _, or := range d.OwnerReferences {
+			if or.UID == twd.UID {
+				owned = true
+			}
+		}
+		if !owned {
+			continue
+		}
+		var specReplicas int32
+		if d.Spec.Replicas != nil {
+			specReplicas = *d.Spec.Replicas
+		}
+		t.Logf("DIAG[%s]   k8s deployment %-42s buildID=%-14s spec.replicas=%d status.replicas=%d",
+			label, d.Name, d.Labels[k8s.BuildIDLabel], specReplicas, d.Status.Replicas)
+	}
+}
+
+// postMortemDrainageWatch keeps watching after the test has already given up
+func postMortemDrainageWatch(
+	t *testing.T,
+	ctx context.Context,
+	env testhelpers.TestEnv,
+	twd *temporaliov1alpha1.WorkerDeployment,
+	deploymentName string,
+	budget time.Duration,
+	interval time.Duration,
+) {
+	t.Helper()
+
+	wdName := k8s.ComputeWorkerDeploymentName(twd)
+	handle := env.Ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(wdName)
+
+	if probe, err := handle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{}); err == nil {
+		stuck := false
+		for _, vs := range probe.Info.VersionSummaries {
+			if vs.DrainageStatus == sdkclient.WorkerDeploymentVersionDrainageStatusDraining {
+				stuck = true
+			}
+		}
+		if !stuck {
+			t.Logf("DIAG[post-mortem] no version is in Draining; nothing to watch")
+			return
+		}
+	}
+
+	start := time.Now()
+	deadline := start.Add(budget)
+	lastDrainage := map[string]sdkclient.WorkerDeploymentVersionDrainageStatus{}
+	deploymentSeen := false
+	var firstFlip, deploymentAt time.Duration
+	sawFlip := false
+
+	t.Logf("DIAG[post-mortem] watching for up to %s at %s intervals (test has already failed)", budget, interval)
+
+	for time.Now().Before(deadline) {
+		elapsed := time.Since(start).Truncate(time.Second)
+
+		resp, err := handle.Describe(ctx, sdkclient.WorkerDeploymentDescribeOptions{})
+		if err != nil {
+			t.Logf("DIAG[post-mortem] t=+%s describe failed: %v", elapsed, err)
+		} else {
+			for _, vs := range resp.Info.VersionSummaries {
+				prev, seen := lastDrainage[vs.Version.BuildID]
+				if !seen {
+					t.Logf("DIAG[post-mortem] t=+%s %-14s drainage=%v", elapsed, vs.Version.BuildID, vs.DrainageStatus)
+				} else if prev != vs.DrainageStatus {
+					t.Logf("DIAG[post-mortem] t=+%s %-14s drainage %v -> %v  <-- TRANSITION", elapsed, vs.Version.BuildID, prev, vs.DrainageStatus)
+					if !sawFlip && vs.DrainageStatus == sdkclient.WorkerDeploymentVersionDrainageStatusDrained {
+						firstFlip, sawFlip = elapsed, true
+					}
+				}
+				lastDrainage[vs.Version.BuildID] = vs.DrainageStatus
+			}
+		}
+
+		if !deploymentSeen {
+			var deployment appsv1.Deployment
+			if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: twd.Namespace}, &deployment); err == nil {
+				deploymentSeen, deploymentAt = true, elapsed
+				t.Logf("DIAG[post-mortem] t=+%s deployment %s CREATED  <-- controller unblocked", elapsed, deploymentName)
+			}
+		}
+
+		if sawFlip && deploymentSeen {
+			break // both questions answered; no reason to keep the run alive
+		}
+		time.Sleep(interval)
+	}
+
+	switch {
+	case sawFlip && deploymentSeen:
+		t.Logf("DIAG[post-mortem] VERDICT: backoff, not latched -- drained at +%s, controller created the deployment at +%s", firstFlip, deploymentAt)
+	case sawFlip:
+		t.Logf("DIAG[post-mortem] VERDICT: drainage recovered at +%s but the deployment never appeared within %s", firstFlip, budget)
+	default:
+		t.Logf("DIAG[post-mortem] VERDICT: latched -- no version reached Drained within %s; drainage evaluation appears to have stopped", budget)
+	}
 }
