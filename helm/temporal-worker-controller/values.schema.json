@@ -203,6 +203,10 @@
         "certDir": {
           "type": "string",
           "description": "Directory for webhook certificates"
+        },
+        "certSecretName": {
+          "type": "string",
+          "description": "Name of the Kubernetes Secret containing the webhook TLS certificate and key"
         }
       }
     },
