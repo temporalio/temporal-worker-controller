@@ -61,6 +61,15 @@ jobs:
             --set crds.enabled=true \
             --wait --timeout 2m
 
+      - name: Wait for cert-manager readiness
+        if: matrix.mode.install-cert-manager
+        run: |
+          echo "Waiting for cert-manager webhook to be ready..."
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/component=webhook \
+            -n cert-manager --timeout=60s
+          sleep 5
+
       - name: Generate BYO certificate
         if: ${{ !matrix.mode.install-cert-manager }}
         run: |
@@ -84,6 +93,14 @@ jobs:
             --set image.tag=e2e \
             --set image.pullPolicy=IfNotPresent \
             ${{ matrix.mode.helm-args }}
+
+      - name: Restart controller pods
+        run: |
+          sleep 15
+          kubectl rollout restart deployment/temporal-worker-controller-manager \
+            -n temporal-system
+          kubectl rollout status deployment/temporal-worker-controller-manager \
+            -n temporal-system --timeout=120s
 
       - name: Wait for controller pods
         run: |
