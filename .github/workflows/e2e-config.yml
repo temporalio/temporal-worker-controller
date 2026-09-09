@@ -1,0 +1,105 @@
+name: E2E Configuration Matrix
+
+on:
+  pull_request:
+    paths:
+      - '**.go'
+      - 'helm/**'
+      - '.github/workflows/e2e-config.yml'
+      - 'Dockerfile'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: e2e-${{ matrix.mode.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: default
+            helm-args: "--set certmanager.enabled=true"
+            install-cert-manager: true
+          - name: namespace-scoped
+            helm-args: "--set rbac.restrictWatchNamespaces='{default}' --set certmanager.enabled=true"
+            install-cert-manager: true
+          - name: byo-cert
+            helm-args: "--set certmanager.enabled=false --set webhook.certSecretName=byo-webhook-cert"
+            install-cert-manager: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: twc-e2e
+
+      - name: Build controller image
+        run: docker build -t temporal-worker-controller:e2e .
+
+      - name: Load image into Kind
+        run: kind load docker-image temporal-worker-controller:e2e --name twc-e2e
+
+      - name: Install cert-manager
+        if: matrix.mode.install-cert-manager
+        run: |
+          helm install cert-manager jetstack/cert-manager \
+            --namespace cert-manager \
+            --create-namespace \
+            --set crds.enabled=true \
+            --wait --timeout 2m
+
+      - name: Generate BYO certificate
+        if: ${{ !matrix.mode.install-cert-manager }}
+        run: |
+          kubectl create namespace temporal-system --dry-run=client -o yaml | kubectl apply -f -
+          openssl req -x509 -newkey rsa:2048 -keyout tls.key -out tls.crt \
+            -days 1 -nodes -subj "/CN=temporal-worker-controller-webhook-service.temporal-system.svc"
+          kubectl create secret tls byo-webhook-cert \
+            --cert=tls.crt --key=tls.key -n temporal-system
+
+      - name: Install CRDs chart
+        run: |
+          helm install temporal-worker-controller-crds helm/temporal-worker-controller-crds \
+            --namespace temporal-system \
+            --create-namespace
+
+      - name: Install TWC
+        run: |
+          helm install temporal-worker-controller helm/temporal-worker-controller \
+            --namespace temporal-system \
+            --set image.repository=temporal-worker-controller \
+            --set image.tag=e2e \
+            --set image.pullPolicy=IfNotPresent \
+            ${{ matrix.mode.helm-args }}
+
+      - name: Wait for controller pods
+        run: |
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -n temporal-system --timeout=180s
+
+      - name: Check for error logs
+        run: |
+          errors=$(kubectl logs -n temporal-system \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            --tail=100 2>&1 | grep '"level":"error"' || true)
+          if [ -n "$errors" ]; then
+            echo "ERROR: Found error-level logs:"
+            echo "$errors"
+            exit 1
+          fi
+          echo "No error logs detected"
+
+      - name: Apply test WorkerDeployment
+        run: kubectl apply -f test/e2e/fixtures/basic-wd.yaml
+
+      - name: Verify WorkerDeployment accepted
+        run: |
+          kubectl get workerdeployment test-worker -n temporal-system
+          echo "WorkerDeployment accepted by webhook"
+      
+          
+          
