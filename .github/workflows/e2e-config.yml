@@ -96,16 +96,18 @@ jobs:
 
       - name: Wait for webhook cert
         run: |
-          echo "Waiting for webhook cert Secret..."
+          SECRET_NAME="webhook-server-cert"
+          if [ "${{ matrix.mode.name }}" = "byo-cert" ]; then
+            SECRET_NAME="byo-webhook-cert"
+          fi
+          echo "Waiting for Secret $SECRET_NAME..."
           for i in $(seq 1 60); do
-            if kubectl get secret webhook-server-cert -n temporal-system 2>/dev/null; then
+            if kubectl get secret "$SECRET_NAME" -n temporal-system 2>/dev/null; then
               echo "Secret found after ${i} attempts"
               break
             fi
             if [ "$i" -eq 60 ]; then
               echo "FAIL: Secret not created after 5 minutes"
-              kubectl get certificate -n temporal-system -o yaml
-              kubectl logs -n cert-manager -l app.kubernetes.io/name=cert-manager --tail=20
               exit 1
             fi
             sleep 5
