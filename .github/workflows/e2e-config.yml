@@ -102,7 +102,7 @@ jobs:
               echo "Secret found after ${i} attempts"
               break
             fi
-            if [ $i -eq 60 ]; then
+            if [ "$i" -eq 60 ]; then
               echo "FAIL: Secret not created after 5 minutes"
               kubectl get certificate -n temporal-system -o yaml
               kubectl logs -n cert-manager -l app.kubernetes.io/name=cert-manager --tail=20
