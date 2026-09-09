@@ -9,6 +9,9 @@ on:
       - 'Dockerfile'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   e2e:
     name: e2e-${{ matrix.mode.name }}
@@ -19,20 +22,21 @@ jobs:
       matrix:
         mode:
           - name: default
-            helm-args: "--set certmanager.enabled=true"
+            helm-args: "--set certmanager.enabled=true --set certmanager.install=false"
             install-cert-manager: true
           - name: namespace-scoped
-            helm-args: "--set rbac.restrictWatchNamespaces='{default}' --set certmanager.enabled=true"
+            helm-args: "--set rbac.restrictWatchNamespaces='{default}' --set certmanager.enabled=true --set certmanager.install=false"
             install-cert-manager: true
           - name: byo-cert
             helm-args: "--set certmanager.enabled=false --set webhook.certSecretName=byo-webhook-cert"
             install-cert-manager: false
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
 
       - name: Create Kind cluster
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2
         with:
           cluster_name: twc-e2e
 
@@ -41,6 +45,9 @@ jobs:
 
       - name: Load image into Kind
         run: kind load docker-image temporal-worker-controller:e2e --name twc-e2e
+
+      - name: Add Helm repos
+        run: helm repo add jetstack https://charts.jetstack.io
 
       - name: Install cert-manager
         if: matrix.mode.install-cert-manager
