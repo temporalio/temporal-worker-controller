@@ -139,6 +139,22 @@ jobs:
         run: |
           kubectl get workerdeployment test-worker -n temporal-system
           echo "WorkerDeployment accepted by webhook"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== Pod status ==="
+          kubectl get pods -n temporal-system -o wide
+          echo "=== Pod describe ==="
+          kubectl describe pods -n temporal-system -l app.kubernetes.io/name=temporal-worker-controller
+          echo "=== Pod logs ==="
+          kubectl logs -n temporal-system -l app.kubernetes.io/name=temporal-worker-controller --all-containers --tail=100 || true
+          echo "=== Events ==="
+          kubectl get events -n temporal-system --sort-by=.lastTimestamp | tail -30
+          echo "=== Secrets ==="
+          kubectl get secrets -n temporal-system
+          echo "=== Certificates ==="
+          kubectl get certificate -n temporal-system -o wide || true
       
           
           
