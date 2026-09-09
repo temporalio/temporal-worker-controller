@@ -115,17 +115,10 @@ jobs:
 
       - name: Restart controller pods
         run: |
-          sleep 15
           kubectl rollout restart deployment/temporal-worker-controller-manager \
             -n temporal-system
           kubectl rollout status deployment/temporal-worker-controller-manager \
             -n temporal-system --timeout=120s
-
-      - name: Wait for controller pods
-        run: |
-          kubectl wait --for=condition=ready pod \
-            -l app.kubernetes.io/name=temporal-worker-controller \
-            -n temporal-system --timeout=180s
 
       - name: Check for error logs
         run: |
