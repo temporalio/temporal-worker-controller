@@ -94,6 +94,23 @@ jobs:
             --set image.pullPolicy=IfNotPresent \
             ${{ matrix.mode.helm-args }}
 
+      - name: Wait for webhook cert
+        run: |
+          echo "Waiting for webhook cert Secret..."
+          for i in $(seq 1 60); do
+            if kubectl get secret webhook-server-cert -n temporal-system 2>/dev/null; then
+              echo "Secret found after ${i} attempts"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "FAIL: Secret not created after 5 minutes"
+              kubectl get certificate -n temporal-system -o yaml
+              kubectl logs -n cert-manager -l app.kubernetes.io/name=cert-manager --tail=20
+              exit 1
+            fi
+            sleep 5
+          done
+
       - name: Restart controller pods
         run: |
           sleep 15
