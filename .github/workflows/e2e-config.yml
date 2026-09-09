@@ -98,15 +98,14 @@ jobs:
             --set image.pullPolicy=IfNotPresent \
             ${{ matrix.mode.helm-args }}
 
+      # TODO(Mechack): After webhook.certSecretName PR merges, update BYO mode to use
+      # a custom Secret name (e.g. byo-webhook-cert) to test the feature
+      # echo "Waiting for webhook cert Secret..."
       - name: Wait for webhook cert
         run: |
-          SECRET_NAME="webhook-server-cert"
-          if [ "${{ matrix.mode.name }}" = "byo-cert" ]; then
-            SECRET_NAME="byo-webhook-cert"
-          fi
-          echo "Waiting for Secret $SECRET_NAME..."
+          echo "Waiting for webhook cert Secret..."
           for i in $(seq 1 60); do
-            if kubectl get secret "$SECRET_NAME" -n temporal-system 2>/dev/null; then
+            if kubectl get secret webhook-server-cert -n temporal-system 2>/dev/null; then
               echo "Secret found after ${i} attempts"
               break
             fi
