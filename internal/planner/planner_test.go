@@ -734,7 +734,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			// EligibleForDeletion: worker pods have not fully terminated (Status.Replicas > 0),
 			// so versioned pollers may still be registered and the Temporal-side DeleteVersion
 			// would fail. Deleting the Deployment now would strand that server-side version
-			// record with no way to retry (see execplan.deleteDrainedVersions), so hold off.
+			// record with no way to retry (see execplan.deleteDeprecatedVersions), so hold off.
 			name: "drained long enough and scaled to zero in spec, but not eligible for deletion - not deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
@@ -4670,6 +4670,49 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 				buildIDs = append(buildIDs, id)
 			}
 			assert.ElementsMatch(t, tc.expect, buildIDs)
+		})
+	}
+}
+
+func TestGetDeleteDeployments_Inactive(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mutate     func(*appsv1.Deployment, *temporaliov1alpha1.WorkerDeploymentStatus)
+		wantDelete bool
+	}{
+		{name: "superseded and fully scaled down", wantDelete: true},
+		{name: "scale down requested but pods remain", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { d.Status.Replicas = 1 }},
+		{name: "terminating pods remain", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) {
+			n := int32(1)
+			d.Status.TerminatingReplicas = &n
+		}},
+		{name: "scale down not observed", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { d.Generation = 1 }},
+		{name: "replicas unspecified", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { d.Spec.Replicas = nil }},
+		{name: "replicas positive", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { *d.Spec.Replicas = 1 }},
+		{name: "target retained", mutate: func(_ *appsv1.Deployment, s *temporaliov1alpha1.WorkerDeploymentStatus) {
+			s.TargetVersion.BuildID = "old"
+		}},
+		{name: "current retained", mutate: func(_ *appsv1.Deployment, s *temporaliov1alpha1.WorkerDeploymentStatus) {
+			s.CurrentVersion = &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "old"}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := createDeploymentWithDefaultConnectionSpecHash(0)
+			s := &temporaliov1alpha1.WorkerDeploymentStatus{
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "old", Status: temporaliov1alpha1.VersionStatusInactive,
+						Deployment: &corev1.ObjectReference{Name: "old"},
+					},
+				}},
+			}
+			if tc.mutate != nil {
+				tc.mutate(d, s)
+			}
+			state := &k8s.DeploymentState{Deployments: map[string]*appsv1.Deployment{"old": d}}
+			deleted := getDeleteDeployments(state, s, &temporaliov1alpha1.WorkerDeploymentSpec{}, true)
+			assert.Equal(t, tc.wantDelete, len(deleted) == 1)
+			assert.Empty(t, getDeleteDeployments(state, s, &temporaliov1alpha1.WorkerDeploymentSpec{}, false))
 		})
 	}
 }

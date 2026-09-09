@@ -17,6 +17,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	appsv1 "k8s.io/api/apps/v1"
@@ -607,4 +608,61 @@ func TestGeneratePlan_CarriesEncodingAndMessageType(t *testing.T) {
 	require.Equal(t, string(temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON), wf.encoding)
 	require.Equal(t, "my.package.DeployRequest", wf.messageType)
 	require.Equal(t, []byte(`{"service":"checkout"}`), wf.input)
+}
+
+// A visibility failure must retain the Deployment so the next reconciliation can retry.
+type inactivePruneClient struct {
+	*stubTemporalClient
+	response *workflowservice.CountWorkflowExecutionsResponse
+	err      error
+	query    string
+}
+
+func (c *inactivePruneClient) CountWorkflow(_ context.Context, request *workflowservice.CountWorkflowExecutionsRequest) (*workflowservice.CountWorkflowExecutionsResponse, error) {
+	c.query = request.Query
+	return c.response, c.err
+}
+
+func TestExecutePlan_InactiveVersionDeletion(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		response    *workflowservice.CountWorkflowExecutionsResponse
+		countErr    error
+		deleteErr   error
+		wantAttempt bool
+		wantDelete  bool
+	}{
+		{name: "unused version", response: &workflowservice.CountWorkflowExecutionsResponse{}, wantAttempt: true, wantDelete: true},
+		{name: "running pinned workflow", response: &workflowservice.CountWorkflowExecutionsResponse{Count: 1}},
+		{name: "visibility failure", countErr: errors.New("visibility unavailable")},
+		{name: "missing response"},
+		{name: "server rejects deletion", response: &workflowservice.CountWorkflowExecutionsResponse{}, deleteErr: serviceerror.NewFailedPrecondition("active pollers"), wantAttempt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+			twd := makeExecplanTWD("my-worker", "default")
+			old := makeVersionedDeployment(twd, "old", 0, connection)
+			current := makeVersionedDeployment(twd, "current", 1, connection)
+			r, _ := newTestReconciler([]client.Object{twd, old, current})
+			handle := newPruneStubHandle(tc.deleteErr)
+			c := &inactivePruneClient{stubTemporalClient: newStubTemporalClientWithHandle(handle), response: tc.response, err: tc.countErr}
+			status := statusWithDeprecated("current", current, &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+				BaseWorkerDeploymentVersion: baseVersion("old", old, temporaliov1alpha1.VersionStatusInactive),
+			})
+			twd.Status = status
+			state := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{
+				"old":     {Status: temporaliov1alpha1.VersionStatusInactive},
+				"current": {Status: temporaliov1alpha1.VersionStatusCurrent},
+			}}
+			p, err := r.generatePlan(context.Background(), logr.Discard(), twd, connection, state)
+			require.NoError(t, err)
+			require.NoError(t, r.executePlan(context.Background(), logr.Discard(), twd, c, p))
+			require.Equal(t, tc.wantAttempt, len(handle.deletedVersions) == 1)
+			require.Equal(t, tc.wantDelete, len(p.DeleteDeployments) == 1)
+			require.Equal(t, !tc.wantDelete, deploymentExists(t, r, "default", old.Name))
+			require.Contains(t, c.query, "TemporalWorkerDeploymentVersion IN ('default/my-worker.old', 'default/my-worker:old')")
+			require.Contains(t, c.query, "TemporalWorkflowVersioningBehavior = 'Pinned'")
+			require.Contains(t, c.query, "ExecutionStatus = 'Running'")
+		})
+	}
 }

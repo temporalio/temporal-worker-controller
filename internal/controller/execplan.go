@@ -20,6 +20,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
@@ -662,12 +663,15 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	return errors.Join(append(applyErrs, statusErrs...)...)
 }
 
-// deleteDrainedVersions prunes the Temporal server-side Worker Deployment Version
+// deleteDeprecatedVersions prunes the Temporal server-side Worker Deployment Version
 // record for each k8s Deployment in DeleteDeployments, before executeK8sOperations
 // deletes them. It is mutated to remove the k8s Deployments that should not be
 // deleted because their Temporal server-side WDV record could not be removed or
 // because the k8s Deployment has no build ID label. The removed k8s deployments
 // stay in the cluster so that a later reconcile retries the pruning.
+//
+// DeleteVersion does not check pinned execution visibility for Inactive versions,
+// which can receive workflows through VersioningOverride. Check visibility first.
 //
 // The planner only adds a drained version to DeleteDeployments once it is
 // EligibleForDeletion (see planner.getDeleteDeployments): drained past the sunset
@@ -687,11 +691,12 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 // phase without reaching back into k8sState. NotRegistered Deployments are also carried
 // in DeleteDeployments; they have no server-side version, so they skip DeleteVersion and
 // are retained for deletion.
-func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
+func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	ctx context.Context,
 	l logr.Logger,
 	workerDeploy *temporaliov1alpha1.WorkerDeployment,
 	depHandle sdkclient.WorkerDeploymentHandle,
+	temporalClient sdkclient.Client,
 	p *plan,
 ) {
 	identity := getControllerIdentity()
@@ -710,6 +715,20 @@ func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
 			markedForDeletion = append(markedForDeletion, d)
 			continue
 		}
+		if slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
+			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
+		}) {
+			// Visibility can contain either the legacy dot separator or the newer colon form.
+			legacyVersion := strings.ReplaceAll(p.WorkerDeploymentName+"."+buildID, "'", "''")
+			version := strings.ReplaceAll(p.WorkerDeploymentName+":"+buildID, "'", "''")
+			count, err := temporalClient.CountWorkflow(ctx, &workflowservice.CountWorkflowExecutionsRequest{
+				Query: fmt.Sprintf("TemporalWorkerDeploymentVersion IN ('%s', '%s') AND TemporalWorkflowVersioningBehavior = 'Pinned' AND ExecutionStatus = 'Running'", legacyVersion, version),
+			})
+			if err != nil || count == nil || count.Count != 0 {
+				l.Info("could not confirm inactive version has no running pinned workflows, keeping its Deployment", "buildID", buildID, "error", err)
+				continue
+			}
+		}
 		_, err := depHandle.DeleteVersion(
 			ctx,
 			sdkclient.WorkerDeploymentDeleteVersionOptions{
@@ -726,7 +745,7 @@ func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
 			}
 			l.Info("worker deployment version already deleted", "buildID", buildID)
 		} else {
-			l.Info("deleted drained worker deployment version", "buildID", buildID)
+			l.Info("deleted deprecated worker deployment version", "buildID", buildID)
 		}
 		markedForDeletion = append(markedForDeletion, d)
 	}
@@ -757,8 +776,8 @@ func (r *WorkerDeploymentReconciler) executePlan(
 	// Prune the Temporal server-side version records before their k8s Deployments are
 	// deleted, and narrow the plan to the versions the server confirmed gone. A Deployment
 	// held back here keeps its version nominated for deletion, so a failed deletion is retried
-	// on the next reconcile instead of orphaning the record; see deleteDrainedVersions.
-	r.deleteDrainedVersions(ctx, l, workerDeploy, deploymentHandler, p)
+	// on the next reconcile instead of orphaning the record; see deleteDeprecatedVersions.
+	r.deleteDeprecatedVersions(ctx, l, workerDeploy, deploymentHandler, temporalClient, p)
 	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
 	if err != nil {
 		return err
