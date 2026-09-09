@@ -28,7 +28,9 @@ jobs:
             helm-args: "--set rbac.restrictWatchNamespaces='{default}' --set certmanager.enabled=true --set certmanager.install=false"
             install-cert-manager: true
           - name: byo-cert
-            helm-args: "--set certmanager.enabled=false --set webhook.certSecretName=byo-webhook-cert"
+            # TODO(Mechack): After webhook.certSecretName PR merges, change to:
+            # helm-args: "--set certmanager.enabled=false --set certmanager.install=false --set webhook.certSecretName=byo-webhook-cert"
+            helm-args: "--set certmanager.enabled=false --set certmanager.install=false"
             install-cert-manager: false
     steps:
       - name: Checkout
@@ -70,13 +72,15 @@ jobs:
             -n cert-manager --timeout=60s
           sleep 5
 
+        # TODO(Mechack): After webhook.certSecretName PR merges, rename to byo-webhook-cert
+        # and set webhook.certSecretName=byo-webhook-cert in helm-args to test
       - name: Generate BYO certificate
         if: ${{ !matrix.mode.install-cert-manager }}
         run: |
           kubectl create namespace temporal-system --dry-run=client -o yaml | kubectl apply -f -
           openssl req -x509 -newkey rsa:2048 -keyout tls.key -out tls.crt \
             -days 1 -nodes -subj "/CN=temporal-worker-controller-webhook-service.temporal-system.svc"
-          kubectl create secret tls byo-webhook-cert \
+          kubectl create secret tls webhook-server-cert \
             --cert=tls.crt --key=tls.key -n temporal-system
 
       - name: Install CRDs chart
