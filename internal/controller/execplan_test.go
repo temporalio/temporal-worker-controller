@@ -637,13 +637,22 @@ func TestExecutePlan_InactiveVersionDeletion(t *testing.T) {
 		{name: "visibility failure", countErr: errors.New("visibility unavailable")},
 		{name: "missing response"},
 		{name: "server rejects deletion", response: &workflowservice.CountWorkflowExecutionsResponse{}, deleteErr: serviceerror.NewFailedPrecondition("active pollers"), wantAttempt: true},
+		{name: "Temporal version already deleted", response: &workflowservice.CountWorkflowExecutionsResponse{}, deleteErr: serviceerror.NewNotFound("version"), wantAttempt: true, wantDelete: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
 			twd := makeExecplanTWD("my-worker", "default")
 			old := makeVersionedDeployment(twd, "old", 0, connection)
 			current := makeVersionedDeployment(twd, "current", 1, connection)
-			r, _ := newTestReconciler([]client.Object{twd, old, current})
+			wrt := makeExecplanWRT("config", twd)
+			wrt.Spec.Template.Raw = []byte(`{"apiVersion":"v1","kind":"ConfigMap","data":{"test":"present"}}`)
+			oldConfig, oldHash := renderWRT(t, wrt, old, "old", testTemporalNamespace)
+			currentConfig, currentHash := renderWRT(t, wrt, current, "current", testTemporalNamespace)
+			wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
+				k8s.WorkerResourceTemplateVersionStatusForBuildID("old", oldConfig.GetName(), 1, oldHash, ""),
+				k8s.WorkerResourceTemplateVersionStatusForBuildID("current", currentConfig.GetName(), 1, currentHash, ""),
+			}
+			r, _ := newTestReconciler([]client.Object{twd, old, current, wrt, oldConfig, currentConfig})
 			handle := newPruneStubHandle(tc.deleteErr)
 			c := &inactivePruneClient{stubTemporalClient: newStubTemporalClientWithHandle(handle), response: tc.response, err: tc.countErr}
 			status := statusWithDeprecated("current", current, &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
@@ -660,6 +669,14 @@ func TestExecutePlan_InactiveVersionDeletion(t *testing.T) {
 			require.Equal(t, tc.wantAttempt, len(handle.deletedVersions) == 1)
 			require.Equal(t, tc.wantDelete, len(p.DeleteDeployments) == 1)
 			require.Equal(t, !tc.wantDelete, deploymentExists(t, r, "default", old.Name))
+			require.True(t, deploymentExists(t, r, "default", current.Name))
+			configErr := r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: oldConfig.GetName()}, &corev1.ConfigMap{})
+			if tc.wantDelete {
+				require.True(t, apierrors.IsNotFound(configErr))
+			} else {
+				require.NoError(t, configErr, "retained version must keep its rendered resources")
+			}
+			require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: currentConfig.GetName()}, &corev1.ConfigMap{}))
 			require.Contains(t, c.query, "TemporalWorkerDeploymentVersion IN ('default/my-worker.old', 'default/my-worker:old')")
 			require.Contains(t, c.query, "TemporalWorkflowVersioningBehavior = 'Pinned'")
 			require.Contains(t, c.query, "ExecutionStatus = 'Running'")

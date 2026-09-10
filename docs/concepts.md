@@ -125,6 +125,17 @@ Defines how Drained versions are cleaned up:
 - **scaledownDelay**: How long to wait after a version has been Drained before scaling pods to zero
 - **deleteDelay**: How long to wait after a version has been Drained before deleting the Kubernetes `Deployment`
 
+Versions superseded before ever becoming Current or Ramping remain Inactive in Temporal;
+they never acquire a drainage timestamp. The controller retires these versions after
+their Deployment has fully scaled to zero, visibility reports no running pinned workflows,
+and Temporal accepts the normal version deletion request. The drainage-based sunset delays
+do not apply to these unused versions. API failures or active pollers defer deletion and are
+retried on subsequent reconciliations.
+
+Stop sending pinned version overrides to a version being retired. Visibility is eventually
+consistent, so this check cannot exclude concurrent workflow starts or override changes.
+Temporal's drained status has the [same limitation for newly pinned overrides](https://typescript.temporal.io/api/interfaces/proto.temporal.api.deployment.v1.IWorkerDeploymentVersionInfo#drainageinfo).
+
 ### Template
 The pod template used for the target version of this worker deployment. Similar to the pod template used in a standar Kubernetes `Deployment`, but managed by the controller.
 

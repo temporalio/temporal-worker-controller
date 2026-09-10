@@ -672,6 +672,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 //
 // DeleteVersion does not check pinned execution visibility for Inactive versions,
 // which can receive workflows through VersioningOverride. Check visibility first.
+// Like Temporal drainage, visibility is eventually consistent: callers must stop
+// sending new pinned overrides to a version being retired. This is not an atomic
+// exclusion against concurrent workflow starts or override updates.
 //
 // The planner only adds a drained version to DeleteDeployments once it is
 // EligibleForDeletion (see planner.getDeleteDeployments): drained past the sunset
@@ -701,6 +704,7 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 ) {
 	identity := getControllerIdentity()
 	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
+	retainedInactiveBuilds := make(map[string]bool)
 	for _, d := range p.DeleteDeployments {
 		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
 		if !ok {
@@ -718,6 +722,7 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 		if slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
 			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
 		}) {
+			retainedInactiveBuilds[buildID] = true
 			// Visibility can contain either the legacy dot separator or the newer colon form.
 			legacyVersion := strings.ReplaceAll(p.WorkerDeploymentName+"."+buildID, "'", "''")
 			version := strings.ReplaceAll(p.WorkerDeploymentName+":"+buildID, "'", "''")
@@ -748,8 +753,15 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			l.Info("deleted deprecated worker deployment version", "buildID", buildID)
 		}
 		markedForDeletion = append(markedForDeletion, d)
+		delete(retainedInactiveBuilds, buildID)
 	}
 	p.DeleteDeployments = markedForDeletion
+	// Resources nominated with an inactive Deployment must survive if its deletion
+	// was refused. Otherwise, for example, its ConfigMaps could disappear underneath
+	// a version retained for pinned workflows.
+	p.DeleteWorkerResources = slices.DeleteFunc(p.DeleteWorkerResources, func(ref planner.WorkerResourceRef) bool {
+		return retainedInactiveBuilds[ref.BuildID]
+	})
 }
 
 // isVersionNotRegistered checks whether the Temporal server had no record of buildID when
