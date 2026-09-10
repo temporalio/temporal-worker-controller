@@ -109,6 +109,8 @@ message: "Migration complete. Delete this TemporalWorkerDeployment."
 
 For `TemporalConnection`, the same `Deprecated` → `MigratedToConnection` pattern applies (there is no ownership transfer step, so there is no intermediate state).
 
+> **CD health checks:** because these resources never report `Ready=True`, tools that assess health from conditions (Helm `--wait`, Flux, and anything else built on [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus)) treat an unmigrated `TemporalWorkerDeployment` or `TemporalConnection` as not-ready for as long as it exists — completing the migration is what resolves it. A resource already marked for deletion reports `Terminating` instead, so following the migration steps above does not leave a release waiting.
+
 ## Deletion protection
 
 After upgrading to v1.7, the controller adds a `temporal.io/migration-guard` finalizer to every `TemporalWorkerDeployment` and `TemporalConnection`. This finalizer prevents the resource from being fully deleted until migration is confirmed:
