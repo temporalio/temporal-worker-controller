@@ -260,12 +260,18 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// finalizer from the previously-referenced connection if no other WD uses it.
 	// The new connection is already protected by ensureConnectionFinalizer above,
 	// so the WD is never left unprotected.
-	if workerDeploy.Generation != workerDeploy.Status.ObservedGeneration {
-		current := workerDeploy.Spec.WorkerOptions.ConnectionRef
-		if observed := workerDeploy.Status.ObservedConnectionRef; observed != nil && !sameConnectionRef(*observed, current) {
-			if err := r.releaseConnectionFinalizerIfUnused(ctx, l, *observed, workerDeploy.Namespace, workerDeploy.Name); err != nil {
-				return ctrl.Result{}, err
-			}
+	//
+	// This compares the observed ref directly rather than first gating on
+	// generation != observedGeneration. Blocked reconciles now advance
+	// observedGeneration (see recordWarningAndSetBlocked), so a connectionRef change
+	// whose first reconcile was blocked — repointing at a Connection that does not
+	// exist yet, say — would otherwise never be noticed again and the old connection
+	// would keep our finalizer forever. ObservedConnectionRef is only written on a
+	// successful reconcile, so it remains the correct thing to compare against.
+	current := workerDeploy.Spec.WorkerOptions.ConnectionRef
+	if observed := workerDeploy.Status.ObservedConnectionRef; observed != nil && !sameConnectionRef(*observed, current) {
+		if err := r.releaseConnectionFinalizerIfUnused(ctx, l, *observed, workerDeploy.Namespace, workerDeploy.Name); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -567,6 +573,19 @@ func (r *WorkerDeploymentReconciler) markWRTsWDNotFound(ctx context.Context, wd 
 			Message:            fmt.Sprintf("WorkerDeployment %q not found", wd.Name),
 			ObservedGeneration: wrt.Generation,
 		})
+		// Reconciling, not Stalled: a WRT that references a WorkerDeployment which does
+		// not exist yet is an expected, self-resolving state during creation ordering —
+		// it is the first case named in this function's doc comment. Reporting Failed
+		// here would abort any install that applies the WRT before the WD.
+		meta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionStalled)
+		meta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               temporaliov1alpha1.ConditionReconciling,
+			Status:             metav1.ConditionTrue,
+			Reason:             temporaliov1alpha1.ReasonWRTWDNotFound,
+			Message:            fmt.Sprintf("WorkerDeployment %q not found", wd.Name),
+			ObservedGeneration: wrt.Generation,
+		})
+		wrt.Status.ObservedGeneration = wrt.Generation
 		if err := r.Status().Update(ctx, wrt); err != nil {
 			l.Error(err, "unable to update WorkerResourceTemplate status for missing WorkerDeployment",
 				"WorkerResourceTemplate", wrt.Name, "WorkerDeployment", wd.Name)
@@ -770,6 +789,13 @@ func (r *WorkerDeploymentReconciler) setCondition(
 // It must be called at the end of a successful reconcile (no errors) so that
 // Progressing/Ready reflect the latest Temporal version status.
 func (r *WorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.WorkerDeployment) {
+	// A successful reconcile clears any Stalled condition left by an earlier blocked
+	// one. meta.SetStatusCondition only ever upserts, so without this removal
+	// Stalled=True would be permanent and kstatus would keep reporting Failed after
+	// the WorkerDeployment recovered. Removing rather than setting False follows the
+	// abnormal-true convention: absent means normal.
+	meta.RemoveStatusCondition(&twd.Status.Conditions, temporaliov1alpha1.ConditionStalled)
+
 	// Deprecated: set ConnectionHealthy=True on all successful reconciles for v1.3.x compat.
 	r.setCondition(twd, temporaliov1alpha1.ConditionConnectionHealthy, //nolint:staticcheck // backward compat
 		metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy, //nolint:staticcheck // backward compat
@@ -809,11 +835,64 @@ func (r *WorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.Work
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers,
 			fmt.Sprintf("Waiting for workers with buildID %s to start polling", twd.Status.TargetVersion.BuildID))
 	}
+
+	// Reconciling is the kstatus-native spelling of Progressing, mirrored from
+	// whatever the switch above decided rather than duplicated into each arm, so a
+	// future arm cannot set one and forget the other. Progressing stays as-is: it is
+	// a published API string that monitoring may depend on, and kstatus never reads
+	// it. Absent (rather than False) when the rollout is done, per the abnormal-true
+	// convention. Stalled was already removed at the top of this function, so the two
+	// can never both be True here.
+	if prog := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionProgressing); prog != nil &&
+		prog.Status == metav1.ConditionTrue {
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
+			metav1.ConditionTrue, prog.Reason, prog.Message)
+	} else {
+		meta.RemoveStatusCondition(&twd.Status.Conditions, temporaliov1alpha1.ConditionReconciling)
+	}
+}
+
+// stalledReasons are the blocking reasons reported through the kstatus Stalled
+// condition, which makes kstatus report Failed and lets Argo Rollouts and Helm --wait
+// fail fast instead of waiting out their timeout. Reasons absent from this set are
+// treated as transient: the controller keeps retrying and kstatus keeps reporting
+// InProgress, exactly as it did before this condition existed.
+//
+// A reason belongs here only when it is decidable from information already in hand.
+// Both entries below are settled by the spec the user just applied plus how the
+// controller was deployed; nothing arriving later can change the answer, so calling
+// them terminal can never be wrong.
+//
+// Everything else is deliberately excluded, in two groups:
+//
+//   - Waiting on another object to exist — ReasonConnectionNotFound (a Connection) and
+//     ReasonAuthSecretInvalid (a Secret, which this reason also covers when simply
+//     absent). Applying a WorkerDeployment alongside its Connection and credentials in
+//     one release gives no ordering guarantee, so a missing reference can be a normal
+//     few-second gap rather than a mistake. Reporting Failed there would abort a deploy
+//     that was about to succeed, and a false failure costs more than a slow one.
+//     Distinguishing a real typo would need a grace period — report Stalled only once
+//     the reference has been missing for a while — which lastTransitionTime already
+//     makes measurable. Until then these keep pre-existing behaviour.
+//
+//   - Transient infrastructure failures — ReasonTemporalClientCreationFailed and
+//     ReasonTemporalStateFetchFailed (server unreachable or rate limited; the
+//     ResourceExhausted paths requeue after 30s) and ReasonPlanGenerationFailed /
+//     ReasonPlanExecutionFailed (retried with backoff). Marking these Stalled would
+//     abort a deploy that is merely being throttled.
+//
+// WorkerResourceTemplate makes the same call for the same reason: a WRT whose
+// WorkerDeployment does not exist yet reports Reconciling, not Stalled. See
+// markWRTsWDNotFound.
+var stalledReasons = map[string]bool{
+	temporaliov1alpha1.ReasonInvalidSpec:                  true,
+	temporaliov1alpha1.ReasonClusterConnectionUnsupported: true,
 }
 
 // recordWarningAndSetBlocked emits a warning event, sets Progressing=False and Ready=False
-// with the given reason, and persists the status immediately. Called on all error paths that
-// block reconciliation progress.
+// with the given reason, sets Stalled=True for reasons in stalledReasons, advances
+// status.observedGeneration, and persists the status immediately. Called on all error paths
+// that block reconciliation progress.
 func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	ctx context.Context,
 	workerDeploy *temporaliov1alpha1.WorkerDeployment,
@@ -824,6 +903,34 @@ func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, reason, "%s", eventMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, reason, conditionMessage)
+
+	// Report terminal failures through the kstatus Stalled condition so consumers
+	// (Argo Rollouts, Helm --wait) fail fast instead of waiting out their timeout.
+	// Progressing=False alone cannot express this: kstatus does not read it.
+	//
+	// Exactly one of Stalled and Reconciling is set here, and the other is removed.
+	// kstatus scans status.conditions in array order and returns on the first match,
+	// so an object carrying both as True would get a verdict that depends on which
+	// was inserted first.
+	if stalledReasons[reason] {
+		meta.RemoveStatusCondition(&workerDeploy.Status.Conditions, temporaliov1alpha1.ConditionReconciling)
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionStalled, metav1.ConditionTrue, reason, conditionMessage)
+	} else {
+		// Transient failure: the controller is still retrying (with backoff, or an
+		// explicit RequeueAfter for rate limits), so say so directly instead of
+		// leaving kstatus to infer it from the Ready=False fallback.
+		meta.RemoveStatusCondition(&workerDeploy.Status.Conditions, temporaliov1alpha1.ConditionStalled)
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReconciling, metav1.ConditionTrue, reason, conditionMessage)
+	}
+
+	// Record that this generation was observed even though it could not be
+	// reconciled: the controller has seen this spec and reached a verdict on it.
+	// Without this, status.observedGeneration lags metadata.generation on every
+	// error path that returns before generateStatus, and kstatus returns
+	// InProgress from its generation check before it ever reads the conditions
+	// set above.
+	workerDeploy.Status.ObservedGeneration = workerDeploy.Generation
+
 	// Deprecated: set ConnectionHealthy=False for v1.3.x compat, but only for
 	// reasons that actually indicate connection/auth issues. Plan generation and execution
 	// failures are unrelated to connection health and should not trigger this condition.
