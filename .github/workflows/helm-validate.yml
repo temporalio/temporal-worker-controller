@@ -127,6 +127,19 @@ jobs:
       - name: Regenerate and diff
         run: make manifests && git diff --exit-code helm/temporal-worker-controller/templates/rbac.yaml
 
+  helm-check-values-schema:
+    name: Check values.schema.json is generated
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate and diff
+        run: make helm-values-schema && git diff --exit-code helm/temporal-worker-controller/values.schema.json
+
   helm-validate-succeed:
     name: All Helm Validations Succeed
     needs:
@@ -135,6 +148,7 @@ jobs:
       - helm-lint-crds
       - helm-template-crds
       - helm-check-rbac
+      - helm-check-values-schema
     runs-on: ubuntu-latest
     if: always()
     env:
