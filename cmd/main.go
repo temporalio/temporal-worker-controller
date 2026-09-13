@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 
 var (
@@ -48,6 +49,9 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var watchNamespaces string
+	var webhookCertDir string
+	var webhookCertName string
+	var webhookKeyName string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -57,6 +61,13 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "",
+		"Directory containing the webhook server's TLS certificate and key. "+
+			"If empty, controller-runtime's default (/tmp/k8s-webhook-server/serving-certs) is used.")
+	flag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt",
+		"Name of the TLS certificate file within webhook-cert-dir.")
+	flag.StringVar(&webhookKeyName, "webhook-key-name", "tls.key",
+		"Name of the TLS private key file within webhook-cert-dir.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -67,6 +78,10 @@ func main() {
 		watchNamespaces = os.Getenv("WATCH_NAMESPACES")
 	}
 	namespaces := controller.ParseWatchNamespaces(watchNamespaces)
+
+	if webhookCertDir == "" {
+		webhookCertDir = os.Getenv("WEBHOOK_CERT_DIR")
+	}
 
 	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	ctrl.SetLogger(zap.New(zap.JSONEncoder()))
@@ -83,8 +98,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	config := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(config, ctrl.Options{
+	managerOptions := ctrl.Options{
 		Scheme: scheme,
 		Cache:  cacheOptions,
 		Metrics: metricsserver.Options{
@@ -104,7 +118,18 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
-	})
+	}
+
+	if webhookCertDir != "" {
+		managerOptions.WebhookServer = webhook.NewServer(webhook.Options{
+			CertDir:  webhookCertDir,
+			CertName: webhookCertName,
+			KeyName:  webhookKeyName,
+		})
+	}
+
+	config := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(config, managerOptions)
 
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
