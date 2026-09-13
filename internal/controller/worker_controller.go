@@ -590,7 +590,13 @@ func (r *WorkerDeploymentReconciler) markWRTsWDNotFound(ctx context.Context, wd 
 		// not exist yet is an expected, self-resolving state during creation ordering —
 		// it is the first case named in this function's doc comment. Reporting Failed
 		// here would abort any install that applies the WRT before the WD.
-		meta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionStalled)
+		meta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               temporaliov1alpha1.ConditionStalled,
+			Status:             metav1.ConditionFalse,
+			Reason:             temporaliov1alpha1.ReasonWRTWDNotFound,
+			Message:            fmt.Sprintf("WorkerDeployment %q not found", wd.Name),
+			ObservedGeneration: wrt.Generation,
+		})
 		meta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
 			Type:               temporaliov1alpha1.ConditionReconciling,
 			Status:             metav1.ConditionTrue,
@@ -818,6 +824,19 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy, //nolint:staticcheck // backward compat
 		"Connection is healthy and auth secret is resolved")
 
+	// Reaching this function means the reconcile completed without a blocking error,
+	// so nothing is stalled whatever stage the rollout is at. Set above the switch
+	// rather than in each arm for the same reason ConnectionHealthy is: the value does
+	// not vary by rollout state, and repeating it per arm invites one arm to drift.
+	//
+	// Set to False rather than removed, matching how every other condition in this
+	// function is handled. meta.SetStatusCondition only ever upserts, so this is also
+	// what lets a WorkerDeployment that recovers from a blocking error stop reporting
+	// Failed — without it, a Stalled=True written earlier would be permanent.
+	r.setCondition(twd, temporaliov1alpha1.ConditionStalled,
+		metav1.ConditionFalse, temporaliov1alpha1.ReasonReconcileSucceeded,
+		"Reconcile succeeded")
+
 	switch twd.Status.TargetVersion.Status {
 	case temporaliov1alpha1.VersionStatusCurrent:
 		// Rollout itself has completed — Ready stays True regardless of poller
@@ -829,11 +848,7 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
 
 		r.setConditionProgressingForCurrent(twd, temporalState)
-
-		// Deprecated: set RolloutComplete=True for v1.3.x compat. This deliberately
-		// mirrors rollout completion only, not poller presence, matching its
-		// pre-existing (Kubernetes-readiness-only) semantics for v1.3.x compat
-		// consumers.
+		// Deprecated: set RolloutComplete=True for v1.3.x compat.
 		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, //nolint:staticcheck // backward compat
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
@@ -844,11 +859,17 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping,
 			fmt.Sprintf("Target version %s is receiving a percentage of new workflows", twd.Status.TargetVersion.BuildID))
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping,
+			fmt.Sprintf("Target version %s is receiving a percentage of new workflows", twd.Status.TargetVersion.BuildID))
 	case temporaliov1alpha1.VersionStatusInactive:
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion,
 			fmt.Sprintf("Target version %s is registered but not yet promoted", twd.Status.TargetVersion.BuildID))
 		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion,
+			fmt.Sprintf("Target version %s is waiting for promotion to current", twd.Status.TargetVersion.BuildID))
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion,
 			fmt.Sprintf("Target version %s is waiting for promotion to current", twd.Status.TargetVersion.BuildID))
 	default: // NotRegistered or unset: workers have not started polling yet
@@ -858,21 +879,9 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers,
 			fmt.Sprintf("Waiting for workers with buildID %s to start polling", twd.Status.TargetVersion.BuildID))
-	}
-
-	// Reconciling is the kstatus-native spelling of Progressing, mirrored from
-	// whatever the switch above decided rather than duplicated into each arm, so a
-	// future arm cannot set one and forget the other. Progressing stays as-is: it is
-	// a published API string that monitoring may depend on, and kstatus never reads
-	// it. Absent (rather than False) when the rollout is done, per the abnormal-true
-	// convention. Stalled was already removed at the top of this function, so the two
-	// can never both be True here.
-	if prog := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionProgressing); prog != nil &&
-		prog.Status == metav1.ConditionTrue {
 		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
-			metav1.ConditionTrue, prog.Reason, prog.Message)
-	} else {
-		meta.RemoveStatusCondition(&twd.Status.Conditions, temporaliov1alpha1.ConditionReconciling)
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers,
+			fmt.Sprintf("Waiting for workers with buildID %s to start polling", twd.Status.TargetVersion.BuildID))
 	}
 }
 
@@ -932,18 +941,19 @@ func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	// (Argo Rollouts, Helm --wait) fail fast instead of waiting out their timeout.
 	// Progressing=False alone cannot express this: kstatus does not read it.
 	//
-	// Exactly one of Stalled and Reconciling is set here, and the other is removed.
-	// kstatus scans status.conditions in array order and returns on the first match,
-	// so an object carrying both as True would get a verdict that depends on which
-	// was inserted first.
+	// Both are always written, and exactly one of them is True. kstatus scans
+	// status.conditions in array order and returns on the first match, so an object
+	// carrying both as True would get a verdict that depends on which was inserted
+	// first. Writing the other as False rather than removing it keeps every condition
+	// this controller owns present on every object, whatever path produced it.
 	if stalledReasons[reason] {
-		meta.RemoveStatusCondition(&workerDeploy.Status.Conditions, temporaliov1alpha1.ConditionReconciling)
 		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionStalled, metav1.ConditionTrue, reason, conditionMessage)
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReconciling, metav1.ConditionFalse, reason, conditionMessage)
 	} else {
 		// Transient failure: the controller is still retrying (with backoff, or an
 		// explicit RequeueAfter for rate limits), so say so directly instead of
 		// leaving kstatus to infer it from the Ready=False fallback.
-		meta.RemoveStatusCondition(&workerDeploy.Status.Conditions, temporaliov1alpha1.ConditionStalled)
+		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionStalled, metav1.ConditionFalse, reason, conditionMessage)
 		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReconciling, metav1.ConditionTrue, reason, conditionMessage)
 	}
 
