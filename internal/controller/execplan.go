@@ -689,32 +689,32 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		// one that is still being retried. Ready=False alone reads as InProgress to
 		// kstatus, which is why a bad template used to hang a deploy until timeout.
 		//
-		// Exactly one of Stalled and Reconciling is ever set: kstatus scans
+		// Both are always written, and at most one of them is True. kstatus scans
 		// status.conditions in array order and returns on the first match, so an object
 		// carrying both as True would get a verdict decided by insertion order.
+		// Writing the inactive one as False rather than removing it keeps every
+		// condition this controller owns present on every object.
+		stalledStatus, reconcilingStatus := metav1.ConditionFalse, metav1.ConditionFalse
 		switch {
 		case anyTerminal:
-			apimeta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionReconciling)
-			apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-				Type:               temporaliov1alpha1.ConditionStalled,
-				Status:             metav1.ConditionTrue,
-				Reason:             condReason,
-				Message:            condMessage,
-				ObservedGeneration: wrt.Generation,
-			})
+			stalledStatus = metav1.ConditionTrue
 		case anyFailed:
-			apimeta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionStalled)
-			apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-				Type:               temporaliov1alpha1.ConditionReconciling,
-				Status:             metav1.ConditionTrue,
-				Reason:             condReason,
-				Message:            condMessage,
-				ObservedGeneration: wrt.Generation,
-			})
-		default:
-			apimeta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionStalled)
-			apimeta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionReconciling)
+			reconcilingStatus = metav1.ConditionTrue
 		}
+		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               temporaliov1alpha1.ConditionStalled,
+			Status:             stalledStatus,
+			Reason:             condReason,
+			Message:            condMessage,
+			ObservedGeneration: wrt.Generation,
+		})
+		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               temporaliov1alpha1.ConditionReconciling,
+			Status:             reconcilingStatus,
+			Reason:             condReason,
+			Message:            condMessage,
+			ObservedGeneration: wrt.Generation,
+		})
 
 		// Record that this generation was processed, whatever the outcome. kstatus
 		// checks this before it looks at any condition, so leaving it behind would

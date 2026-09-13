@@ -14,10 +14,16 @@ const (
 
 	// ConditionStalled is True when reconciliation cannot progress and only a spec
 	// change can resolve it — an invalid spec, or a connection kind this controller
-	// cannot read. It follows the kstatus "abnormal-true" convention
-	// (https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) —
-	// absent while things are normal — and kstatus reports Failed when it is True,
-	// so Argo Rollouts and Helm --wait abort instead of waiting out their timeout.
+	// cannot read. kstatus
+	// (https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) reports
+	// Failed when it is True, so Argo Rollouts and Helm --wait abort instead of
+	// waiting out their timeout.
+	//
+	// kstatus's own convention is that such a condition is absent while things are
+	// normal, but it only ever tests for True, so this controller writes the
+	// condition on every path and sets it False when nothing is stalled. That reads
+	// identically to kstatus and keeps every condition the controller owns visible
+	// in kubectl describe, consistent with Ready and Progressing.
 	//
 	// It is set only for failures decidable from information already in hand.
 	// Failures that are waiting on another object to exist (a missing Connection or
@@ -26,17 +32,20 @@ const (
 	// during a deploy. See stalledReasons in the controller package.
 	ConditionStalled = "Stalled"
 
-	// ConditionReconciling is the kstatus "abnormal-true" counterpart to
-	// Progressing: True while the controller is still working toward the spec,
-	// and absent once it has caught up. kstatus reports InProgress when it is
+	// ConditionReconciling is True while the controller is still working toward the
+	// spec, and False once it has caught up. kstatus reports InProgress when it is
 	// True, which is the path kstatus intends for custom resources — without it
 	// kstatus has to infer the same answer from Ready=False, a fallback its own
 	// documentation flags as unreliable.
 	//
+	// It is close to the inverse of Progressing but not identical: a transient
+	// blocking error sets Progressing=False (blocked) and Reconciling=True (still
+	// retrying), because those two vocabularies disagree about what a retry is.
+	//
 	// Reconciling and Stalled must never both be True on the same object:
 	// kstatus scans status.conditions in array order and returns on the first
 	// match, so the verdict would depend on insertion order. The controller
-	// always removes one when it sets the other.
+	// writes both on every path and sets at most one of them to True.
 	ConditionReconciling = "Reconciling"
 )
 
