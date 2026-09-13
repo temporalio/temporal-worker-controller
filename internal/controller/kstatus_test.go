@@ -195,10 +195,12 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 			desired: kstatus.InProgressStatus,
 		},
 		{
-			// Recovery: a WorkerDeployment that was Stalled and then reconciled
-			// successfully. meta.SetStatusCondition only upserts, so without the
-			// RemoveStatusCondition call in syncConditions the Stalled=True set here
-			// would be permanent and kstatus would report Failed forever.
+			// Recovery: a WorkerDeployment that was blocked and then reconciled
+			// successfully. meta.SetStatusCondition only upserts, so unless a later
+			// successful reconcile writes Stalled=False, a Stalled=True would be
+			// permanent and kstatus would report Failed forever. Note this case uses a
+			// transient reason, which never sets Stalled at all — the terminal path is
+			// covered by AbnormalConditionsResolvedOnRecovery.
 			name: "RecoveredAfterBlocked",
 			build: func() *temporaliov1alpha1.WorkerDeployment {
 				r, _ := newTestReconciler(nil)
@@ -328,7 +330,11 @@ func TestConditionsAreKstatusCompatible(t *testing.T) {
 		})
 	}
 
-	t.Run("AbnormalConditionsClearedOnRecovery", func(t *testing.T) {
+	// Recovery is the case that would break if nothing ever cleared Stalled:
+	// meta.SetStatusCondition only upserts, so a Stalled=True written during a
+	// blocking error would otherwise be permanent and kstatus would keep reporting
+	// Failed on a WorkerDeployment that is now healthy.
+	t.Run("AbnormalConditionsResolvedOnRecovery", func(t *testing.T) {
 		r, _ := newTestReconciler(nil)
 		wd := makeWD("wd", "default", "conn")
 		r.recordWarningAndSetBlocked(ctx, wd, temporaliov1alpha1.ReasonInvalidSpec, "boom", "boom")
@@ -339,10 +345,18 @@ func TestConditionsAreKstatusCompatible(t *testing.T) {
 		wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
 		r.syncConditions(wd)
 
-		assert.Nil(t, apimeta.FindStatusCondition(wd.Status.Conditions, temporaliov1alpha1.ConditionStalled),
-			"Stalled should be removed, not set to False")
-		assert.Nil(t, apimeta.FindStatusCondition(wd.Status.Conditions, temporaliov1alpha1.ConditionReconciling),
-			"Reconciling should be removed once the rollout is complete")
+		// Both are set to False rather than removed, matching how every other
+		// condition syncConditions writes is handled. kstatus only ever tests for
+		// True, so present-and-False reads the same to it as absent.
+		stalled := apimeta.FindStatusCondition(wd.Status.Conditions, temporaliov1alpha1.ConditionStalled)
+		require.NotNil(t, stalled, "Stalled should still be reported, as False")
+		assert.Equal(t, metav1.ConditionFalse, stalled.Status)
+		assert.Equal(t, temporaliov1alpha1.ReasonReconcileSucceeded, stalled.Reason)
+
+		reconciling := apimeta.FindStatusCondition(wd.Status.Conditions, temporaliov1alpha1.ConditionReconciling)
+		require.NotNil(t, reconciling, "Reconciling should still be reported, as False")
+		assert.Equal(t, metav1.ConditionFalse, reconciling.Status)
+		assert.Equal(t, temporaliov1alpha1.ReasonRolloutComplete, reconciling.Reason)
 	})
 }
 
@@ -433,8 +447,8 @@ func TestKstatusBaseline_WorkerResourceTemplate(t *testing.T) {
 
 		assert.True(t, apimeta.IsStatusConditionTrue(got.Status.Conditions, temporaliov1alpha1.ConditionReconciling),
 			"a WRT waiting for its WorkerDeployment is still reconciling")
-		assert.Nil(t, apimeta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionStalled),
-			"creation ordering is expected and self-resolving, so it must not be Stalled")
+		assert.True(t, apimeta.IsStatusConditionFalse(got.Status.Conditions, temporaliov1alpha1.ConditionStalled),
+			"creation ordering is expected and self-resolving, so Stalled must be False")
 		assert.Equal(t, got.Generation, got.Status.ObservedGeneration)
 
 		res := computeKstatus(t, &got)
