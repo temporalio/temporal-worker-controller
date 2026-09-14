@@ -54,16 +54,6 @@ func (s *WorkerDeploymentSpec) Default(ctx context.Context) error {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
 	}
 
-	if s.RolloutStrategy.MaxUnavailable == nil {
-		maxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
-		s.RolloutStrategy.MaxUnavailable = &maxUnavailable
-	}
-
-	if s.RolloutStrategy.MaxSurge == nil {
-		maxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
-		s.RolloutStrategy.MaxSurge = &maxSurge
-	}
-
 	return nil
 }
 
@@ -118,21 +108,6 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 			}
 			lastRamp = step.RampPercentage
 		}
-	}
-
-	if isExplicitlyZeroIntOrString(s.MaxUnavailable) &&
-		isExplicitlyZeroIntOrString(s.MaxSurge) {
-		allErrs = append(
-			allErrs,
-			field.Invalid(
-				field.NewPath("spec.rollout.maxUnavailable"),
-				fmt.Sprintf(
-					"maxUnavailable=%v, maxSurge=%v",
-					s.MaxUnavailable, s.MaxSurge,
-				),
-				"maxUnavailable and maxSurge cannot both be 0",
-			),
-		)
 	}
 
 	if s.Gate != nil && s.Gate.Input != nil && s.Gate.InputFrom != nil {
