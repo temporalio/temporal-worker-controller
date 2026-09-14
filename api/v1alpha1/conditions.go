@@ -34,7 +34,7 @@ const (
 
 	// ConditionReconciling is True while the controller is still working toward the
 	// spec, and False once it has caught up. kstatus reports InProgress when it is
-	// True, which is the path kstatus intends for custom resources — without it
+	// True, which is the path kstatus intends for custom resources. Without it,
 	// kstatus has to infer the same answer from Ready=False, a fallback its own
 	// documentation flags as unreliable.
 	//
@@ -42,7 +42,7 @@ const (
 	// blocking error sets Progressing=False (blocked) and Reconciling=True (still
 	// retrying), because those two vocabularies disagree about what a retry is.
 	//
-	// Reconciling and Stalled must never both be True on the same object:
+	// Reconciling and Stalled must never both be True on the same object.
 	// kstatus scans status.conditions in array order and returns on the first
 	// match, so the verdict would depend on insertion order. The controller
 	// writes both on every path and sets at most one of them to True.
