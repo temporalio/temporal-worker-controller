@@ -619,29 +619,6 @@ func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {
 		}
 		assert.Equal(t, expected, deployment.Spec.Strategy)
 	})
-
-	t.Run("applies rollingUpdate strategy with unavailable and surge filled in", func(t *testing.T) {
-		maxUnavailable := intstr.FromString("5%")
-		maxSurge := intstr.FromInt32(0)
-		deployment := k8s.NewDeploymentWithOwnerRef(
-			&metav1.TypeMeta{},
-			&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
-			&temporaliov1alpha1.WorkerDeploymentSpec{
-				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
-					MaxUnavailable: &maxUnavailable,
-					MaxSurge:       &maxSurge,
-				},
-			},
-			"test-deployment",
-			"build123",
-			temporaliov1alpha1.ConnectionSpec{},
-		)
-
-		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, deployment.Spec.Strategy.Type)
-		require.NotNil(t, deployment.Spec.Strategy.RollingUpdate)
-		assert.Equal(t, maxUnavailable, *deployment.Spec.Strategy.RollingUpdate.MaxUnavailable)
-		assert.Equal(t, maxSurge, *deployment.Spec.Strategy.RollingUpdate.MaxSurge)
-	})
 }
 
 func TestComputeConnectionSpecHash(t *testing.T) {

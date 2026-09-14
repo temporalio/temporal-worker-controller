@@ -12,13 +12,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -153,15 +151,6 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: "[spec.rollout.steps[2].rampPercentage: Invalid value: 9: rampPercentage must increase between each step, spec.rollout.steps[4].rampPercentage: Invalid value: 50: rampPercentage must increase between each step]",
 		},
-		"maxUnavailable and maxSurge both zero": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("both-zero-surge", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
-				zero := intstr.FromInt32(0)
-				obj.Spec.RolloutStrategy.MaxUnavailable = &zero
-				obj.Spec.RolloutStrategy.MaxSurge = &zero
-				return obj
-			}),
-			errorMsg: "maxUnavailable and maxSurge cannot both be 0",
-		},
 	}
 
 	for name, tc := range tests {
@@ -186,6 +175,24 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 			assertAdmission(webhook.ValidateUpdate(ctx, nil, tc.obj))
 		})
 	}
+}
+
+func TestWorkerDeployment_DeprecatedFieldEmitsWarning(t *testing.T) {
+	ctx := context.Background()
+	dep := testhelpers.MakeWDWithName("valid-worker", "")
+	replicas := int32(1)
+	// deliberately use the deprecated replicas top-level field and set the
+	// deployment field to nil after copying over the template contents.
+	dep.Spec.Template = dep.Spec.Template
+	dep.Spec.Replicas = &replicas
+	dep.Spec.Deployment = nil
+
+	webhook := &temporaliov1alpha1.WorkerDeployment{}
+	warns, err := webhook.ValidateCreate(ctx, dep)
+
+	require.NoError(t, err)
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "spec.replicas is deprecated; use spec.deployment.replicas instead")
 }
 
 func TestWorkerDeployment_ValidateUpdate(t *testing.T) {
@@ -249,19 +256,6 @@ func TestWorkerDeployment_Default(t *testing.T) {
 				assert.Equal(t, time.Hour, obj.Spec.SunsetStrategy.ScaledownDelay.Duration)
 				require.NotNil(t, obj.Spec.SunsetStrategy.DeleteDelay)
 				assert.Equal(t, 24*time.Hour, obj.Spec.SunsetStrategy.DeleteDelay.Duration)
-			},
-		},
-		"defaults partial rolloutStrategy deployment strategy fields": {
-			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("partial-deployment-strategy", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
-				maxUnavailable := intstr.FromString("5%")
-				obj.Spec.RolloutStrategy = temporaliov1alpha1.RolloutStrategy{
-					MaxUnavailable: &maxUnavailable,
-				}
-				return obj
-			}),
-			expected: func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment) {
-				assert.Equal(t, intstr.FromString("5%"), *obj.Spec.RolloutStrategy.MaxUnavailable)
-				assert.Equal(t, intstr.FromString(defaults.DeploymentMaxSurge), *obj.Spec.RolloutStrategy.MaxSurge)
 			},
 		},
 	}

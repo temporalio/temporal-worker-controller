@@ -306,7 +306,7 @@ func createStatus(
 func recreateTWD(twd *temporaliov1alpha1.WorkerDeployment, imageName string, replicas int32) *temporaliov1alpha1.WorkerDeployment {
 	ret := twd.DeepCopy()
 	ret.Spec.Template.Spec.Containers[0].Image = imageName
-	ret.Spec.Replicas = &replicas
+	ret.Spec.Deployment.Replicas = &replicas
 	return ret
 }
 
