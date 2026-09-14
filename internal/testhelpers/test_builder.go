@@ -70,7 +70,10 @@ func (b *WorkerDeploymentBuilder) WithGate(expectSuccess bool) *WorkerDeployment
 
 // WithReplicas sets the number of replicas
 func (b *WorkerDeploymentBuilder) WithReplicas(replicas int32) *WorkerDeploymentBuilder {
-	b.twd.Spec.Replicas = &replicas
+	if b.twd.Spec.Deployment == nil {
+		b.twd.Spec.Deployment = &temporaliov1alpha1.KubeDeploymentSpec{}
+	}
+	b.twd.Spec.Deployment.Replicas = &replicas
 	return b
 }
 

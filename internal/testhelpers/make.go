@@ -51,8 +51,10 @@ func MakeWD(
 			Labels:    map[string]string{"app": "test-worker"},
 		},
 		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
-			Replicas:        &replicas,
-			Template:        podSpec,
+			Template: podSpec,
+			Deployment: &temporaliov1alpha1.KubeDeploymentSpec{
+				Replicas: &replicas,
+			},
 			RolloutStrategy: r,
 			SunsetStrategy:  s,
 			WorkerOptions:   w,

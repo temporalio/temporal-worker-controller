@@ -12,7 +12,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -54,16 +53,6 @@ func (s *WorkerDeploymentSpec) Default(ctx context.Context) error {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
 	}
 
-	if s.RolloutStrategy.MaxUnavailable == nil {
-		maxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
-		s.RolloutStrategy.MaxUnavailable = &maxUnavailable
-	}
-
-	if s.RolloutStrategy.MaxSurge == nil {
-		maxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
-		s.RolloutStrategy.MaxSurge = &maxSurge
-	}
-
 	return nil
 }
 
@@ -88,15 +77,15 @@ func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj ru
 		return nil, apierrors.NewBadRequest("expected a WorkerDeployment")
 	}
 
-	return validateForUpdateOrCreate(nil, dep)
+	return validateForUpdateOrCreate(dep)
 }
 
-func validateForUpdateOrCreate(old, new *WorkerDeployment) (admission.Warnings, error) {
-	allErrs := validateRolloutStrategy(new.Spec.RolloutStrategy)
+func validateForUpdateOrCreate(dep *WorkerDeployment) (admission.Warnings, error) {
+	allErrs := validateRolloutStrategy(dep.Spec.RolloutStrategy)
 	if len(allErrs) > 0 {
-		return nil, newInvalidErr(new, allErrs)
+		return nil, newInvalidErr(dep, allErrs)
 	}
-	return nil, nil
+	return validateDeploymentSpec(dep.Spec), nil
 }
 
 // validateRolloutStrategy checks constraints that the CRD schema cannot enforce:
@@ -118,21 +107,6 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 			}
 			lastRamp = step.RampPercentage
 		}
-	}
-
-	if isExplicitlyZeroIntOrString(s.MaxUnavailable) &&
-		isExplicitlyZeroIntOrString(s.MaxSurge) {
-		allErrs = append(
-			allErrs,
-			field.Invalid(
-				field.NewPath("spec.rollout.maxUnavailable"),
-				fmt.Sprintf(
-					"maxUnavailable=%v, maxSurge=%v",
-					s.MaxUnavailable, s.MaxSurge,
-				),
-				"maxUnavailable and maxSurge cannot both be 0",
-			),
-		)
 	}
 
 	if s.Gate != nil && s.Gate.Input != nil && s.Gate.InputFrom != nil {
@@ -182,16 +156,26 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 	return allErrs
 }
 
-func newInvalidErr(dep *WorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
-	return apierrors.NewInvalid(dep.GroupVersionKind().GroupKind(), dep.GetName(), errs)
+// validateDeploymentSpec examines the supplied WorkerDeploymentSpec structs
+// and returns any warnings about using the deprecated replicas,
+// minReadySeconds and ProgressDeadlineSeconds fields instead of the
+// WorkerDeploymentSpec.Deployment struct field.
+func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
+	var warns admission.Warnings
+	if spec.Deployment == nil {
+		if spec.MinReadySeconds > 0 {
+			warns = append(warns, "spec.minReadySeconds is deprecated; use spec.deployment.minReadySeconds instead")
+		}
+		if spec.ProgressDeadlineSeconds != nil {
+			warns = append(warns, "spec.progressDeadlineSeconds is deprecated; use spec.deployment.progressDeadlineSeconds instead")
+		}
+		if spec.Replicas != nil {
+			warns = append(warns, "spec.replicas is deprecated; use spec.deployment.replicas instead")
+		}
+	}
+	return warns
 }
 
-func isExplicitlyZeroIntOrString(v *intstr.IntOrString) bool {
-	if v == nil {
-		return false
-	}
-	if v.Type == intstr.Int {
-		return v.IntVal == 0
-	}
-	return v.StrVal == "0" || v.StrVal == "0%"
+func newInvalidErr(dep *WorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
+	return apierrors.NewInvalid(dep.GroupVersionKind().GroupKind(), dep.GetName(), errs)
 }

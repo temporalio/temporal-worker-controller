@@ -46,6 +46,36 @@ spec:
             type: object
           spec:
             properties:
+              deployment:
+                properties:
+                  minReadySeconds:
+                    format: int32
+                    type: integer
+                  progressDeadlineSeconds:
+                    format: int32
+                    type: integer
+                  replicas:
+                    format: int32
+                    type: integer
+                  strategy:
+                    properties:
+                      rollingUpdate:
+                        properties:
+                          maxSurge:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            x-kubernetes-int-or-string: true
+                          maxUnavailable:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      type:
+                        type: string
+                    type: object
+                type: object
               minReadySeconds:
                 default: 0
                 format: int32
@@ -106,16 +136,6 @@ spec:
                     required:
                     - workflowType
                     type: object
-                  maxSurge:
-                    anyOf:
-                    - type: integer
-                    - type: string
-                    x-kubernetes-int-or-string: true
-                  maxUnavailable:
-                    anyOf:
-                    - type: integer
-                    - type: string
-                    x-kubernetes-int-or-string: true
                   steps:
                     items:
                       properties:

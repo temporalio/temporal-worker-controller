@@ -48,9 +48,9 @@ import (
 func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) ([]planner.WorkerResourceRef, error) {
 	// Create deployment
 	if p.CreateDeployment != nil {
-		l.Info("creating deployment", "deployment", p.CreateDeployment)
+		l.Info("creating deployment", "deployment", p.CreateDeployment.Name)
 		if err := r.Create(ctx, p.CreateDeployment); err != nil {
-			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment)
+			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment.Name)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentCreateFailed,
 				"Failed to create Deployment %q: %v", p.CreateDeployment.Name, err)
 			return nil, err
@@ -59,9 +59,9 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 
 	// Delete deployments
 	for _, d := range p.DeleteDeployments {
-		l.Info("deleting deployment", "deployment", d)
+		l.Info("deleting deployment", "deployment", d.Name)
 		if err := r.Delete(ctx, d); err != nil {
-			l.Error(err, "unable to delete deployment", "deployment", d)
+			l.Error(err, "unable to delete deployment", "deployment", d.Name)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentDeleteFailed,
 				"Failed to delete Deployment %q: %v", d.Name, err)
 			return nil, err
@@ -103,7 +103,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		buildID := buildIDForDeployment(workerDeploy, d)
 		l.Info(
 			"scaling deployment",
-			"deployment", d,
+			"deployment", d.Name,
 			"buildID", buildID,
 			"replicas", replicas,
 		)
@@ -119,7 +119,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 			l.Error(
 				err,
 				"unable to scale deployment",
-				"deployment", d,
+				"deployment", d.Name,
 				"buildID", buildID,
 				"replicas", replicas,
 			)
