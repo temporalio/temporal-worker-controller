@@ -27,5 +27,5 @@ spec:
   issuerRef:
     kind: Issuer
     name: {{ .Release.Name }}-selfsigned-issuer
-  secretName: webhook-server-cert
+  secretName: {{ .Values.webhook.certSecretName }}
 {{- end }}
