@@ -12,7 +12,7 @@ The `WorkerDeployment` resource exposes four standard conditions on `status.cond
 
 `Ready` and `Progressing` describe the rollout in the controller's own terms. They are the ones to read in a script, a dashboard, or `kubectl describe`, and their `reason` fields carry the detail.
 
-`Stalled` and `Reconciling` say the same thing in the vocabulary [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) understands — the library behind Helm 4 `--wait` and Flux health assessment. They follow kstatus's "abnormal-true" convention: each is present and `True` only while something unusual is happening, and absent otherwise. You rarely need to read them yourself; they exist so those tools reach the right verdict without a custom health check.
+`Stalled` and `Reconciling` say the same thing in the vocabulary [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) understands, the library behind Helm 4 `--wait` and Flux health assessment. They follow kstatus's "abnormal-true" convention: each is present and `True` only while something unusual is happening, and absent otherwise. You rarely need to read them yourself; they exist so those tools reach the right verdict without a custom health check.
 
 ### `Ready`
 
@@ -49,7 +49,7 @@ Once the underlying problem is fixed, the next successful reconcile will restore
 
 ### `Stalled` and `Reconciling`
 
-`Reconciling=True` means the controller is still working toward the spec; kstatus-based tools report the resource as **in progress** and keep waiting. `Stalled=True` means reconciliation cannot proceed and waiting will not help; those tools report **failed** and stop. Both are absent once a rollout is complete, and only one is ever set at a time.
+`Reconciling=True` means the controller is still working toward the spec. kstatus-based tools report the resource as **in progress** and keep waiting. `Stalled=True` means reconciliation cannot proceed and waiting will not help. The kstatus tools report **failed** and stop. Both are absent once a rollout is complete, and only one is ever set at a time.
 
 `Stalled` is set only for failures that are decidable from information already in hand, where nothing arriving later could change the answer:
 
@@ -63,17 +63,17 @@ Once the underlying problem is fixed, the next successful reconcile will restore
 | `TemporalStateFetchFailed` | `Reconciling` | Includes rate limiting; retried |
 | `PlanGenerationFailed`, `PlanExecutionFailed` | `Reconciling` | Retried with backoff |
 
-The reason a missing `Connection` is not treated as terminal is ordering. Applying a `WorkerDeployment` alongside its `Connection` and credentials in one release gives no guarantee about which lands first, so a missing reference is frequently a normal gap of a few seconds rather than a mistake. Failing a deploy that was about to succeed is worse than waiting.
+The reason a missing `Connection` is not treated as terminal is ordering. Applying a `WorkerDeployment` alongside its `Connection` and credentials in one release gives no guarantee about which lands first, so a missing reference is frequently a normal gap of a few seconds rather than a mistake.
 
-The trade-off is that a genuinely wrong `connectionRef` — a typo, or a `Connection` that was never created — keeps reporting *in progress* until your tool's timeout expires rather than failing immediately. Set timeouts you are willing to wait out, and read the `reason` on `Ready`/`Progressing` (or the resource's Kubernetes Events) to see what is actually blocking.
+The trade-off is that an incorrect `connectionRef` or a `Connection` that was never created keeps reporting *in progress* until your tool's timeout expires rather than failing immediately. Set timeouts you are willing to wait out, and read the `reason` on `Ready`/`Progressing` (or the resource's Kubernetes Events) to see what is actually blocking.
 
-`WorkerResourceTemplate` follows the same pattern: a template that cannot render, or that the API server rejects outright, sets `Stalled`; one waiting for its `WorkerDeployment` to appear, or retrying a transient apply failure, sets `Reconciling`.
+`WorkerResourceTemplate` follows the same pattern: a template that cannot render, or that the API server rejects outright, sets `Stalled`. A `WorkerResourceTemplate` waiting for its `WorkerDeployment` to appear, or retrying a transient apply failure, sets `Reconciling`.
 
 ### `Connection` and `ClusterConnection`
 
-`Connection` and `ClusterConnection` are configuration-only resources. They have no controller of their own and expose no conditions, so tools that assess health from conditions — Helm `--wait`, Flux, and anything else built on [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) — treat them as healthy as soon as they exist. This is intentional: there is no reconcile loop behind them and therefore nothing to wait for. Kubernetes treats `ConfigMap` and `Secret` the same way.
+`Connection` and `ClusterConnection` are configuration-only resources. They have no controller of their own and expose no conditions, so tools that assess health from conditions like Helm `--wait`, Flux, and anything else built on [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) treat them as healthy as soon as they exist. This is intentional as there is no reconcile loop behind them and therefore nothing to wait for. Kubernetes treats `ConfigMap` and `Secret` the same way.
 
-A broken connection is still reported, just on the `WorkerDeployment` that references it rather than on the connection itself — see the `ConnectionNotFound` and `AuthSecretInvalid` reasons above. Gate your rollouts on the `WorkerDeployment`; waiting on a `Connection` tells you only that the object was accepted by the API server, not that the credentials in it work.
+A broken connection is still reported, just on the `WorkerDeployment` that references it rather than on the connection itself (see the `ConnectionNotFound` and `AuthSecretInvalid` reasons above). Gate your rollouts on the `WorkerDeployment` as waiting on a `Connection` tells you only that the object was accepted by the API server, not that the credentials in it work.
 
 ## Triggering a rollout
 

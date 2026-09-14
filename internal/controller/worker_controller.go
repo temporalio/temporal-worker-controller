@@ -264,9 +264,9 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// This compares the observed ref directly rather than first gating on
 	// generation != observedGeneration. Blocked reconciles now advance
 	// observedGeneration (see recordWarningAndSetBlocked), so a connectionRef change
-	// whose first reconcile was blocked — repointing at a Connection that does not
-	// exist yet, say — would otherwise never be noticed again and the old connection
-	// would keep our finalizer forever. ObservedConnectionRef is only written on a
+	// whose first reconcile was blocked (by repointing at a Connection that does not
+	// exist yet for example) would otherwise never be noticed again and the old connection
+	// would keep the finalizer forever. ObservedConnectionRef is only written on a
 	// successful reconcile, so it remains the correct thing to compare against.
 	current := workerDeploy.Spec.WorkerOptions.ConnectionRef
 	if observed := workerDeploy.Status.ObservedConnectionRef; observed != nil && !sameConnectionRef(*observed, current) {
@@ -574,9 +574,8 @@ func (r *WorkerDeploymentReconciler) markWRTsWDNotFound(ctx context.Context, wd 
 			ObservedGeneration: wrt.Generation,
 		})
 		// Reconciling, not Stalled: a WRT that references a WorkerDeployment which does
-		// not exist yet is an expected, self-resolving state during creation ordering —
-		// it is the first case named in this function's doc comment. Reporting Failed
-		// here would abort any install that applies the WRT before the WD.
+		// not exist yet is an expected, self-resolving state during creation ordering.
+		// Reporting Failed here would abort any install that applies the WRT before the WD.
 		meta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
 			Type:               temporaliov1alpha1.ConditionStalled,
 			Status:             metav1.ConditionFalse,
@@ -805,10 +804,8 @@ func (r *WorkerDeploymentReconciler) syncConditions(twd *temporaliov1alpha1.Work
 	// rather than in each arm for the same reason ConnectionHealthy is: the value does
 	// not vary by rollout state, and repeating it per arm invites one arm to drift.
 	//
-	// Set to False rather than removed, matching how every other condition in this
-	// function is handled. meta.SetStatusCondition only ever upserts, so this is also
-	// what lets a WorkerDeployment that recovers from a blocking error stop reporting
-	// Failed — without it, a Stalled=True written earlier would be permanent.
+	// SetStatusCondition only upserts, so a Stalled=True from an earlier blocked reconcile
+	// stays until something sets it False.
 	r.setCondition(twd, temporaliov1alpha1.ConditionStalled,
 		metav1.ConditionFalse, temporaliov1alpha1.ReasonReconcileSucceeded,
 		"Reconcile succeeded")

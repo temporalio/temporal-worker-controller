@@ -445,8 +445,8 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		err          error
 		skipped      bool // true if the apply was skipped because the rendered hash is unchanged
 		// renderFailed distinguishes a spec.template render failure from an SSA apply
-		// failure. Render failures are always terminal — only a spec change can fix
-		// them — while apply failures are classified by API error kind.
+		// failure. Render failures are always terminal as only a spec change can fix
+		// them while apply failures are classified by API error kind.
 		renderFailed bool
 	}
 	wrtResults := make(map[wrtKey][]applyResult)
@@ -570,16 +570,21 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		if allSkipped && len(deleted) == 0 {
 			// Every apply was a no-op and nothing was deleted, so the per-Build-ID
 			// status and conditions are already correct. The one thing that can still
-			// be stale is status.observedGeneration: a spec edit that renders
-			// byte-identically bumps metadata.generation without changing any hash,
-			// so every apply is skipped and no status write happens. Reordering keys
-			// in spec.template does exactly that — ComputeRenderedObjectHash marshals
-			// a map, and Go sorts map keys. Left behind, observedGeneration would make
-			// kstatus report InProgress forever.
+			// be stale is status.observedGeneration.
+			//
+			// metadata.generation tracks any semantic change to the spec, while the
+			// skip decision above is made on a hash of the rendered output. Those two
+			// can come apart. Switching spec.temporalWorkerDeploymentRef to
+			// spec.workerDeploymentRef with the same name is such a case: the webhook
+			// permits it (only the effective name is immutable) and it is step 4 of the
+			// CRD rename migration, but rendering does not depend on which ref field
+			// was used, so the hash is unchanged, every apply is skipped and no status
+			// write happens. A stale observedGeneration would make kstatus report
+			// InProgress forever.
 			//
 			// The Get is served from the informer cache, and the write still only
-			// happens when something actually changed, so the optimisation this branch
-			// exists for is preserved.
+			// happens when something has actually changed, so this branch's
+			// optimisation is preserved.
 			wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
 			if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
 				if !apierrors.IsNotFound(err) {
@@ -739,13 +744,13 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 // kstatus Stalled condition (making kstatus report Failed) rather than left looking
 // like work still in progress.
 //
-// renderFailed covers a spec.template that could not be rendered at all — always
+// renderFailed covers a spec.template that could not be rendered at all. This is always
 // terminal, since only a spec change can fix it. For SSA apply failures only the API
 // server's own outright rejections count: Invalid (the rendered object does not satisfy
 // the target schema), Forbidden and Unauthorized (the controller lacks RBAC for the
 // templated kind), BadRequest, and the media-type/method rejections.
 //
-// Everything else — Conflict, timeouts, TooManyRequests, transport errors — is retried
+// Everything else (Conflict, timeouts, TooManyRequests, transport errors) is retried
 // on the next reconcile and deliberately keeps reporting InProgress, so a blip cannot
 // abort a deploy. This mirrors the stalledReasons split in worker_controller.go.
 func isTerminalWorkerResourceError(err error, renderFailed bool) bool {
