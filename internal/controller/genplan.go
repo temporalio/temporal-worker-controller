@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -74,7 +75,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	ctx context.Context,
 	l logr.Logger,
 	w *temporaliov1alpha1.WorkerDeployment,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
 	temporalState *temporal.TemporalWorkerState,
 ) (*plan, error) {
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(w)
@@ -150,6 +151,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	}
 
 	planResult, err := planner.GeneratePlan(
+		ctx,
 		l,
 		k8sState,
 		&w.Status,
@@ -211,7 +213,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 func (r *WorkerDeploymentReconciler) newDeployment(
 	w *temporaliov1alpha1.WorkerDeployment,
 	buildID string,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
 ) (*appsv1.Deployment, error) {
 	return k8s.NewDeploymentWithControllerRef(w, buildID, connection, r.Scheme)
 }

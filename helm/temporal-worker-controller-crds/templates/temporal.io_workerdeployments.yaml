@@ -4001,8 +4001,6 @@ spec:
                     x-kubernetes-validations:
                     - message: exactly one of name or objectRef must be set
                       rule: has(self.name) != has(self.objectRef)
-                    - message: objectRef.kind must be Connection or ClusterConnection
-                      rule: '!has(self.objectRef) || self.objectRef.kind in [''Connection'',''ClusterConnection'']'
                     - message: objectRef.apiGroup must be temporal.io
                       rule: '!has(self.objectRef) || self.objectRef.apiGroup == ''temporal.io'''
                     - message: objectRef.namespace is not supported yet
@@ -4180,8 +4178,6 @@ spec:
                 x-kubernetes-validations:
                 - message: exactly one of name or objectRef must be set
                   rule: has(self.name) != has(self.objectRef)
-                - message: objectRef.kind must be Connection or ClusterConnection
-                  rule: '!has(self.objectRef) || self.objectRef.kind in [''Connection'',''ClusterConnection'']'
                 - message: objectRef.apiGroup must be temporal.io
                   rule: '!has(self.objectRef) || self.objectRef.apiGroup == ''temporal.io'''
                 - message: objectRef.namespace is not supported yet

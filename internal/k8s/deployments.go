@@ -16,6 +16,7 @@ import (
 
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -235,14 +236,16 @@ func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 	}
 }
 
-// NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
+// NewDeploymentWithOwnerRef creates a new deployment resource with owner
+// references. The resolved connection injects the per-kind worker-pod
+// env/volumes and writes the connection-spec-hash annotation.
 func NewDeploymentWithOwnerRef(
 	typeMeta *metav1.TypeMeta,
 	objectMeta *metav1.ObjectMeta,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	workerDeploymentName string,
 	buildID string,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
 ) *appsv1.Deployment {
 	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
 
@@ -257,17 +260,23 @@ func NewDeploymentWithOwnerRef(
 
 	podSpec := spec.Template.Spec.DeepCopy()
 
-	// Apply controller-managed environment variables and volume mounts
-	ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
-
-	// Build pod annotations
 	podAnnotations := make(map[string]string)
 	for k, v := range spec.Template.Annotations {
 		podAnnotations[k] = v
 	}
-	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
+	// ApplyWorkerPodSpec injects env vars, volumes, and the connection-spec-hash
+	// annotation. Idempotent, so it serves the fresh-pod build path here and the
+	// in-place drift update path in planner. This constructor returns no error,
+	// so a non-nil error from ApplyWorkerPodSpec cannot be surfaced here; the
+	// default provider never errors, and the in-place drift path in planner
+	// logs any error from a custom provider.
+	_ = connection.ApplyWorkerPodSpec(podSpec, podAnnotations, connectionprovider.PodSpecApplyOpts{
+		TemporalNamespace:    spec.WorkerOptions.TemporalNamespace,
+		WorkerDeploymentName: workerDeploymentName,
+		BuildID:              buildID,
+	})
 	// Store hash of user-provided pod template spec BEFORE controller modifications
-	// This enables drift detection when build ID is stable
+	// so drift is detectable when build ID is stable.
 	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(spec.Template)
 	blockOwnerDeletion := true
 
@@ -338,99 +347,10 @@ func ComputePodTemplateSpecHash(template corev1.PodTemplateSpec) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// ApplyControllerPodSpecModifications applies controller-managed environment variables and
-// volume mounts to a pod spec. This is used both when creating new deployments and when
-// updating existing deployments for drift detection.
-func ApplyControllerPodSpecModifications(
-	podSpec *corev1.PodSpec,
-	connection temporaliov1alpha1.ConnectionSpec,
-	temporalNamespace string,
-	workerDeploymentName string,
-	buildID string,
-) {
-	// Add environment variables to containers
-	for i, container := range podSpec.Containers {
-		container.Env = append(container.Env,
-			corev1.EnvVar{
-				Name:  "TEMPORAL_ADDRESS",
-				Value: connection.HostPort,
-			},
-			corev1.EnvVar{
-				Name:  "TEMPORAL_NAMESPACE",
-				Value: temporalNamespace,
-			},
-			corev1.EnvVar{
-				Name:  "TEMPORAL_DEPLOYMENT_NAME",
-				Value: workerDeploymentName,
-			},
-			corev1.EnvVar{
-				Name:  "TEMPORAL_WORKER_BUILD_ID",
-				Value: buildID,
-			},
-		)
-		podSpec.Containers[i] = container
-	}
-
-	if tlsServerName := connection.TLSServerName(); tlsServerName != "" {
-		for i, container := range podSpec.Containers {
-			container.Env = append(container.Env, corev1.EnvVar{
-				Name:  "TEMPORAL_TLS_SERVER_NAME",
-				Value: tlsServerName,
-			})
-			podSpec.Containers[i] = container
-		}
-	}
-
-	// Add TLS config if mTLS is enabled
-	if connection.MutualTLSSecretRef != nil {
-		for i, container := range podSpec.Containers {
-			container.Env = append(container.Env,
-				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS",
-					Value: "true",
-				},
-				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_CLIENT_KEY_PATH",
-					Value: "/etc/temporal/tls/tls.key",
-				},
-				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_CLIENT_CERT_PATH",
-					Value: "/etc/temporal/tls/tls.crt",
-				},
-			)
-			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      "temporal-tls",
-				MountPath: "/etc/temporal/tls",
-			})
-			podSpec.Containers[i] = container
-		}
-		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-			Name: "temporal-tls",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: connection.MutualTLSSecretRef.Name,
-				},
-			},
-		})
-	} else if connection.APIKeySecretRef != nil {
-		for i, container := range podSpec.Containers {
-			container.Env = append(container.Env,
-				corev1.EnvVar{
-					Name: "TEMPORAL_API_KEY",
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: connection.APIKeySecretRef,
-					},
-				},
-			)
-			podSpec.Containers[i] = container
-		}
-	}
-}
-
 func NewDeploymentWithControllerRef(
 	w *temporaliov1alpha1.WorkerDeployment,
 	buildID string,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
 	reconcilerScheme *runtime.Scheme,
 ) (*appsv1.Deployment, error) {
 	d := NewDeploymentWithOwnerRef(

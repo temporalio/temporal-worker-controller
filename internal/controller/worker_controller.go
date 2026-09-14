@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	"go.temporal.io/api/serviceerror"
@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -59,9 +60,12 @@ const (
 // WorkerDeploymentReconciler reconciles a WorkerDeployment object
 type WorkerDeploymentReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	TemporalClientPool *clientpool.ClientPool
-	Recorder           record.EventRecorder
+	Scheme *runtime.Scheme
+	// Providers is the startup-built list of connection providers; the
+	// reconciler never mutates it. A wrapper binary appends its own kinds to
+	// the default slice from clientpool.NewDefaultProviders.
+	Providers []connectionprovider.ConnectionProvider
+	Recorder  record.EventRecorder
 
 	// Disables panic recovery if true
 	DisableRecoverPanic  bool
@@ -193,12 +197,27 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	// This WorkerDeployment can never reconcile. Reported before the finalizer is added so it
-	// stays deletable, and without requeueing since only a spec or deployment-mode change can
-	// resolve it.
-	if r.DisableClusterConnections && connectionRefIsCluster(workerDeploy.Spec.WorkerOptions.ConnectionRef) {
+	// ConnectionRef.Name is validated by webhook (+kubebuilder:validation:Required).
+	// Resolve the connection provider before adding the WD finalizer, so an
+	// unknown kind is reported on a deletable object instead of wedging deletion.
+	connRef := workerDeploy.Spec.WorkerOptions.ConnectionRef
+	connProv, err := connectionprovider.LookupProvider(r.Providers, connRef)
+	if err != nil {
+		l.Error(err, "unable to look up connection provider", "connectionRef", connRef)
+		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+			temporaliov1alpha1.ReasonUnknownConnectionKind,
+			fmt.Sprintf("Unknown connection kind for %q: %v", connectionprovider.RefName(connRef), err),
+			fmt.Sprintf("Unknown connection kind: %v", err))
+		// No requeue: the user must correct the connectionRef.
+		return ctrl.Result{}, nil
+	}
+
+	// Block cluster-scoped refs when the controller is namespace-scoped. Scope
+	// comes from the resolved provider, so wrapper-registered cluster-scoped
+	// kinds are blocked too, not just the built-in ClusterConnection.
+	if r.DisableClusterConnections && connProv.IsClusterScoped() {
 		msg := fmt.Sprintf("ClusterConnection %q cannot be used because the controller is namespace-scoped",
-			connectionRefName(workerDeploy.Spec.WorkerOptions.ConnectionRef))
+			connectionprovider.RefName(connRef))
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonClusterConnectionUnsupported, msg, msg)
 		return ctrl.Result{}, nil
@@ -235,24 +254,21 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	// Note: ConnectionRef.Name is validated by webhook due to +kubebuilder:validation:Required
-
-	// Fetch the connection parameters
-	connSpec, connObj, err := r.getConnectionByRef(ctx, workerDeploy.Spec.WorkerOptions.ConnectionRef, workerDeploy.Namespace)
+	// Fetch the referenced connection object; a missing one surfaces as
+	// ReasonConnectionNotFound. (Unknown kinds were rejected above.)
+	connection, err := connProv.Fetch(ctx, connRef, workerDeploy.Namespace)
 	if err != nil {
 		l.Error(err, "unable to fetch Connection")
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			temporaliov1alpha1.ReasonConnectionNotFound,
-			fmt.Sprintf("Unable to fetch Connection %q: %v", workerDeploy.Spec.WorkerOptions.ConnectionRef.Name, err),
-			fmt.Sprintf("Connection %q not found: %v", workerDeploy.Spec.WorkerOptions.ConnectionRef.Name, err))
+			fmt.Sprintf("Unable to fetch Connection %q: %v", connectionprovider.RefName(connRef), err),
+			fmt.Sprintf("Connection %q not found: %v", connectionprovider.RefName(connRef), err))
 		return ctrl.Result{}, err
 	}
 
-	connection := temporaliov1alpha1.Connection{Spec: connSpec}
-
 	// Ensure the finalizer is on the connection object so it cannot be deleted
 	// while this WD still references it.
-	if err := r.ensureConnectionFinalizer(ctx, l, connObj); err != nil {
+	if err := r.ensureConnectionFinalizer(ctx, l, connection.Object()); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -269,59 +285,35 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
-	if err := connection.Spec.Validate(); err != nil {
-		l.Error(err, "connection spec not valid")
-		// TODO(jaypipes): As of TWC release <=v1.8.1, the only validation
-		// error for the connection spec is that the authentication secret is
-		// not valid. Revisit this warning reason when there are more potential
-		// validation failures.
-		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
-			temporaliov1alpha1.ReasonAuthSecretInvalid,
-			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", connObj.GetName(), err),
-			fmt.Sprintf("Unable to resolve auth secret: %v", err))
-		return ctrl.Result{}, err
-	}
-
-	// Get the Auth Mode and Secret Name
-	authMode := connection.Spec.AuthMode()
-	secretName := connection.Spec.SecretName()
-
-	// Get or update temporal client for connection
-	clientPoolKey := clientpool.ClientPoolKey{
-		HostPort:            connection.Spec.HostPort,
-		TLSServerName:       connection.Spec.TLSServerName(),
-		Namespace:           workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName:          secretName,
-		TLSCACertSecretName: connection.Spec.TLSCACertSecretName(),
-		AuthMode:            authMode,
-	}
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
-	if !ok {
-		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
-			K8sNamespace:      workerDeploy.Namespace,
-			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-			Spec:              connection.Spec,
-			Identity:          getControllerIdentity(),
-		})
-		if err != nil {
+	// Get or create the cached SDK client for this connection. The provider owns
+	// client construction. Auth/credential errors surface as
+	// ReasonAuthSecretInvalid; dial/connectivity errors as
+	// ReasonTemporalClientCreationFailed.
+	temporalClient, err := connection.GetClient(ctx, workerDeploy.Spec.WorkerOptions.TemporalNamespace, workerDeploy.Namespace, getControllerIdentity())
+	if err != nil {
+		var authErr *connectionprovider.AuthError
+		var dialErr *connectionprovider.DialError
+		switch {
+		case errors.As(err, &authErr):
 			l.Error(err, "invalid Temporal auth secret")
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonAuthSecretInvalid,
-				fmt.Sprintf("Invalid Temporal auth secret for %s:%s: %v", connection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
+				fmt.Sprintf("Invalid Temporal auth secret for %q: %v", connectionprovider.RefName(connRef), err),
 				fmt.Sprintf("Invalid auth secret: %v", err))
-			return ctrl.Result{}, err
-		}
-
-		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
-		if err != nil {
+		case errors.As(err, &dialErr):
 			l.Error(err, "unable to create TemporalClient")
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonTemporalClientCreationFailed,
-				fmt.Sprintf("Unable to create Temporal client for %s:%s: %v", connection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
+				fmt.Sprintf("Unable to create Temporal client for %q: %v", connectionprovider.RefName(connRef), err),
 				fmt.Sprintf("Failed to connect to Temporal: %v", err))
-			return ctrl.Result{}, err
+		default:
+			l.Error(err, "unable to create TemporalClient")
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+				temporaliov1alpha1.ReasonTemporalClientCreationFailed,
+				fmt.Sprintf("Unable to create Temporal client for %q: %v", connectionprovider.RefName(connRef), err),
+				fmt.Sprintf("Failed to connect to Temporal: %v", err))
 		}
-		temporalClient = c
+		return ctrl.Result{}, err
 	}
 
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(&workerDeploy)
@@ -353,7 +345,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	)
 	if err != nil {
 		if shouldEvictClient(err) {
-			r.TemporalClientPool.EvictClient(clientPoolKey)
+			connection.Evict(workerDeploy.Spec.WorkerOptions.TemporalNamespace, workerDeploy.Namespace)
 		}
 		var rateLimitErr *serviceerror.ResourceExhausted
 		if errors.As(err, &rateLimitErr) {
@@ -389,7 +381,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Generate a plan to get to desired spec from current status
-	plan, err := r.generatePlan(ctx, l, &workerDeploy, connection.Spec, temporalState)
+	plan, err := r.generatePlan(ctx, l, &workerDeploy, connection, temporalState)
 	if err != nil {
 		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 			ReasonPlanGenerationFailed,
@@ -401,7 +393,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Execute the plan, handling any errors
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
 		if shouldEvictClient(err) {
-			r.TemporalClientPool.EvictClient(clientPoolKey)
+			connection.Evict(workerDeploy.Spec.WorkerOptions.TemporalNamespace, workerDeploy.Namespace)
 		}
 		var rateLimitErr *serviceerror.ResourceExhausted
 		if errors.As(err, &rateLimitErr) {
@@ -596,49 +588,29 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 ) (retErr error) {
 	// Resolve Connection.
 	// The Connection is guaranteed to exist because we hold a finalizer on it
-	// that prevents deletion while any WD references it.
-	connSpec, _, err := r.getConnectionByRef(ctx, workerDeploy.Spec.WorkerOptions.ConnectionRef, workerDeploy.Namespace)
+	// that prevents deletion while any WD references it. An unknown kind,
+	// however, never produced a Temporal client or placed a connection
+	// finalizer (the reconcile path blocks before that), so there is nothing
+	// to clean up server-side — treat it as success so the WD finalizer can be
+	// removed instead of wedging deletion in a retry loop.
+	connProv, err := connectionprovider.LookupProvider(r.Providers, workerDeploy.Spec.WorkerOptions.ConnectionRef)
+	if err != nil {
+		var unknown *connectionprovider.UnknownKindError
+		if errors.As(err, &unknown) {
+			l.Info("skipping deletion cleanup: connection kind has no provider",
+				"connectionRef", workerDeploy.Spec.WorkerOptions.ConnectionRef)
+			return nil
+		}
+		return fmt.Errorf("unable to look up connection provider: %w", err)
+	}
+	connection, err := connProv.Fetch(ctx, workerDeploy.Spec.WorkerOptions.ConnectionRef, workerDeploy.Namespace)
 	if err != nil {
 		return fmt.Errorf("unable to fetch Connection: %w", err)
 	}
-	connection := temporaliov1alpha1.Connection{Spec: connSpec}
 
-	if err := connection.Spec.Validate(); err != nil {
-		// TODO(jaypipes): As of TWC release <=v1.8.1, the only validation
-		// error for the connection spec is that the authentication secret is
-		// not valid. Revisit this error wrap when there are more potential
-		// validation failures.
-		return fmt.Errorf("unable to resolve auth secret name: %w", err)
-	}
-
-	authMode := connection.Spec.AuthMode()
-	secretName := connection.Spec.SecretName()
-
-	clientPoolKey := clientpool.ClientPoolKey{
-		HostPort:            connection.Spec.HostPort,
-		TLSServerName:       connection.Spec.TLSServerName(),
-		Namespace:           workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName:          secretName,
-		TLSCACertSecretName: connection.Spec.TLSCACertSecretName(),
-		AuthMode:            authMode,
-	}
-
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
-	if !ok {
-		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
-			K8sNamespace:      workerDeploy.Namespace,
-			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-			Spec:              connection.Spec,
-			Identity:          getControllerIdentity(),
-		})
-		if err != nil {
-			return fmt.Errorf("unable to parse Temporal auth secret: %w", err)
-		}
-		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
-		if err != nil {
-			return fmt.Errorf("unable to create TemporalClient: %w", err)
-		}
-		temporalClient = c
+	temporalClient, err := connection.GetClient(ctx, workerDeploy.Spec.WorkerOptions.TemporalNamespace, workerDeploy.Namespace, getControllerIdentity())
+	if err != nil {
+		return fmt.Errorf("unable to create TemporalClient: %w", err)
 	}
 
 	// Evict cached SDK clients on failures that indicate the cached client may
@@ -646,7 +618,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	// success below and should not churn otherwise healthy clients.
 	defer func() {
 		if shouldEvictClient(retErr) {
-			r.TemporalClientPool.EvictClient(clientPoolKey)
+			connection.Evict(workerDeploy.Spec.WorkerOptions.TemporalNamespace, workerDeploy.Namespace)
 		}
 	}()
 
@@ -844,150 +816,13 @@ func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	switch reason {
 	case temporaliov1alpha1.ReasonConnectionNotFound,
 		temporaliov1alpha1.ReasonClusterConnectionUnsupported,
+		temporaliov1alpha1.ReasonUnknownConnectionKind,
 		temporaliov1alpha1.ReasonAuthSecretInvalid,
 		temporaliov1alpha1.ReasonTemporalClientCreationFailed,
 		temporaliov1alpha1.ReasonTemporalStateFetchFailed:
 		r.setCondition(workerDeploy, temporaliov1alpha1.ConditionConnectionHealthy, metav1.ConditionFalse, reason, conditionMessage) //nolint:staticcheck // backward compat
 	}
 	_ = r.Status().Update(ctx, workerDeploy)
-}
-
-// connectionRefIsCluster reports whether ref targets a cluster-scoped ClusterConnection.
-func connectionRefIsCluster(ref temporaliov1alpha1.ConnectionReference) bool {
-	return ref.ObjectRef != nil && ref.ObjectRef.Kind == "ClusterConnection"
-}
-
-// connectionRefName returns the connection resource name from either form.
-func connectionRefName(ref temporaliov1alpha1.ConnectionReference) string {
-	if ref.ObjectRef != nil {
-		return ref.ObjectRef.Name
-	}
-	return ref.Name
-}
-
-// sameConnectionRef reports whether two connectionRefs resolve to the same connection.
-func sameConnectionRef(a, b temporaliov1alpha1.ConnectionReference) bool {
-	return connectionRefName(a) == connectionRefName(b) && connectionRefIsCluster(a) == connectionRefIsCluster(b)
-}
-
-// getConnectionByRef fetches the connection resource identified by ref and
-// returns its spec and the underlying object. namespace is used only for a
-// namespaced Connection; it is ignored for a cluster-scoped ClusterConnection.
-// The object is returned as a client.Object so callers can manage the finalizer
-// on it regardless of kind.
-func (r *WorkerDeploymentReconciler) getConnectionByRef(
-	ctx context.Context,
-	ref temporaliov1alpha1.ConnectionReference,
-	namespace string,
-) (temporaliov1alpha1.ConnectionSpec, client.Object, error) {
-	name := connectionRefName(ref)
-	if connectionRefIsCluster(ref) {
-		var cc temporaliov1alpha1.ClusterConnection
-		if err := r.Get(ctx, types.NamespacedName{Name: name}, &cc); err != nil {
-			return temporaliov1alpha1.ConnectionSpec{}, nil, err
-		}
-		return cc.Spec, &cc, nil
-	}
-	var conn temporaliov1alpha1.Connection
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      name,
-		Namespace: namespace,
-	}, &conn); err != nil {
-		return temporaliov1alpha1.ConnectionSpec{}, nil, err
-	}
-	return conn.Spec, &conn, nil
-}
-
-// ensureConnectionFinalizer adds our finalizer to the Connection so it
-// cannot be deleted while this WD still needs it for cleanup.
-func (r *WorkerDeploymentReconciler) ensureConnectionFinalizer(
-	ctx context.Context,
-	l logr.Logger,
-	conn client.Object,
-) error {
-	if !controllerutil.ContainsFinalizer(conn, finalizerName) {
-		l.Info("Adding finalizer to connection", "connection", conn.GetName())
-		controllerutil.AddFinalizer(conn, finalizerName)
-		if err := r.Update(ctx, conn); err != nil {
-			return fmt.Errorf("unable to add finalizer to connection %q: %w", conn.GetName(), err)
-		}
-	}
-	return nil
-}
-
-// releaseConnectionFinalizerIfUnused removes our finalizer from the connection
-// identified by ref, unless some other WorkerDeployment (other than
-// selfNamespace/selfName) still references it. It is used both when a WD is
-// deleted (ref = current connectionRef) and when a WD's connectionRef changes
-// (ref = previously-observed connectionRef).
-func (r *WorkerDeploymentReconciler) releaseConnectionFinalizerIfUnused(
-	ctx context.Context,
-	l logr.Logger,
-	ref temporaliov1alpha1.ConnectionReference,
-	selfNamespace, selfName string,
-) error {
-	isCluster := connectionRefIsCluster(ref)
-
-	// A namespace-scoped controller never placed a finalizer on a ClusterConnection, and
-	// cannot read one to check. Nothing to release.
-	if isCluster && r.DisableClusterConnections {
-		return nil
-	}
-
-	// Scope the "is it still used?" query correctly for the kind:
-	//   - Namespaced Connection: only WDs in its own namespace can reference it,
-	//     so restrict the list to selfNamespace.
-	//   - ClusterConnection: a WD in ANY namespace can reference it, so we must
-	//     list across all namespaces.
-	var listOpts []client.ListOption
-	if !isCluster {
-		listOpts = append(listOpts, client.InNamespace(selfNamespace))
-	}
-
-	var wds temporaliov1alpha1.WorkerDeploymentList
-	if err := r.List(ctx, &wds, listOpts...); err != nil {
-		return fmt.Errorf("unable to list WorkerDeployments: %w", err)
-	}
-
-	for i := range wds.Items {
-		wd := &wds.Items[i]
-		// Skip self by namespace and name: under a cluster-wide list, two WDs in
-		// different namespaces can share the same name, so name alone is not a
-		// unique identity.
-		if wd.Namespace == selfNamespace && wd.Name == selfName {
-			continue
-		}
-		otherRef := wd.Spec.WorkerOptions.ConnectionRef
-		// Same target only if BOTH name and (normalized) kind match, so a
-		// namespaced Connection "foo" and a ClusterConnection "foo" are distinct.
-		if connectionRefName(otherRef) == connectionRefName(ref) && connectionRefIsCluster(otherRef) == isCluster {
-			l.Info("Connection still referenced by another WorkerDeployment, keeping finalizer",
-				"connection", connectionRefName(ref), "clusterScoped", isCluster,
-				"referencedBy", wd.Name, "referencedByNamespace", wd.Namespace)
-			return nil
-		}
-	}
-
-	// Fetch by the passed ref, not the WD's current connectionRef: during a
-	// connectionRef change the WD's current ref points at the new connection, so
-	// fetching by current ref would strip the finalizer off the wrong object.
-	_, connObj, err := r.getConnectionByRef(ctx, ref, selfNamespace)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("unable to fetch connection %q: %w", connectionRefName(ref), err)
-	}
-
-	if controllerutil.ContainsFinalizer(connObj, finalizerName) {
-		l.Info("Removing finalizer from connection", "connection", connectionRefName(ref), "clusterScoped", isCluster)
-		controllerutil.RemoveFinalizer(connObj, finalizerName)
-		if err := r.Update(ctx, connObj); err != nil {
-			return fmt.Errorf("unable to remove finalizer from connection %q: %w", connectionRefName(ref), err)
-		}
-	}
-
-	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -1027,12 +862,22 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	recoverPanic := !r.DisableRecoverPanic
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.WorkerDeployment{}).
-		Owns(&appsv1.Deployment{}).
-		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
-		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT))
-	if !r.DisableClusterConnections {
-		builder = builder.Watches(&temporaliov1alpha1.ClusterConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingClusterConnection))
+		Owns(&appsv1.Deployment{})
+	// Watch every registered connection kind so a change to any referenced
+	// connection re-enqueues the WorkerDeployments that use it. The mapper is
+	// scoped by GroupKind: a namespaced kind lists WDs in the connection's own
+	// namespace; a cluster-scoped kind lists across all namespaces. No concrete
+	// kind name is hardcoded; a wrapper binary appends its kinds to the slice
+	// and gets the watch for free. Skip cluster-scoped kinds when the controller
+	// is namespace-scoped (DisableClusterConnections): a namespaced Role can
+	// never authorize listing them and the watch would retry forever.
+	for _, prov := range r.Providers {
+		if prov.IsClusterScoped() && r.DisableClusterConnections {
+			continue
+		}
+		builder = builder.Watches(prov.NewObject(), handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnectionKind(prov.GroupKind(), prov.IsClusterScoped())))
 	}
+	builder = builder.Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT))
 	if !r.DisableDeprecatedTWD {
 		// Watch deprecated TemporalWorkerDeployments so that any modification to an existing TWD
 		// (e.g. a status update before migration completes) triggers a reconcile of the matching WD
@@ -1066,57 +911,40 @@ func (r *WorkerDeploymentReconciler) reconcileRequestForWRT(ctx context.Context,
 	}
 }
 
-func (r *WorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {
-	var requests []reconcile.Request
+// findTWDsUsingConnectionKind returns a mapper that enqueues every WorkerDeployment
+// referencing a connection of the given GroupKind. clusterScoped controls the list
+// scope: a namespaced kind lists WDs in the connection's own namespace, while a
+// cluster-scoped kind lists across all namespaces. A WD matches only if BOTH the
+// referenced name and the resolved GroupKind match, so a namespaced Connection
+// "foo" and a cluster-scoped connection "foo" are distinct.
+func (r *WorkerDeploymentReconciler) findTWDsUsingConnectionKind(gk schema.GroupKind, clusterScoped bool) func(context.Context, client.Object) []reconcile.Request {
+	return func(ctx context.Context, conn client.Object) []reconcile.Request {
+		var requests []reconcile.Request
 
-	// Find all TWDs in same namespace that reference this TC
-	var twds temporaliov1alpha1.WorkerDeploymentList
-	if err := r.List(ctx, &twds, client.InNamespace(tc.GetNamespace())); err != nil {
+		var listOpts []client.ListOption
+		if !clusterScoped {
+			listOpts = append(listOpts, client.InNamespace(conn.GetNamespace()))
+		}
+
+		var twds temporaliov1alpha1.WorkerDeploymentList
+		if err := r.List(ctx, &twds, listOpts...); err != nil {
+			return requests
+		}
+
+		for _, twd := range twds.Items {
+			ref := twd.Spec.WorkerOptions.ConnectionRef
+			if connectionprovider.RefName(ref) == conn.GetName() && connectionprovider.RefGroupKind(ref) == gk {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      twd.Name,
+						Namespace: twd.Namespace,
+					},
+				})
+			}
+		}
+
 		return requests
 	}
-
-	// Filter to ones using this connection
-	for _, twd := range twds.Items {
-		ref := twd.Spec.WorkerOptions.ConnectionRef
-		// Only namespaced Connection refs are driven by this (Connection) watch.
-		if !connectionRefIsCluster(ref) && connectionRefName(ref) == tc.GetName() {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      twd.Name,
-					Namespace: twd.Namespace,
-				},
-			})
-		}
-	}
-
-	return requests
-}
-
-// Note: findTWDsUsingClusterConnection performs a cluster-wide list and O(n) scan of WorkerDeployments
-// for each ClusterConnection event. This is expected to be acceptable while
-// the number of Workerdeployments isn't large, but may increase the controller load
-// as the number of workerdeployments grow.
-func (r *WorkerDeploymentReconciler) findTWDsUsingClusterConnection(
-	ctx context.Context,
-	cc client.Object,
-) []reconcile.Request {
-	var requests []reconcile.Request
-	var twds temporaliov1alpha1.WorkerDeploymentList
-	if err := r.List(ctx, &twds); err != nil {
-		return requests
-	}
-	for _, twd := range twds.Items {
-		ref := twd.Spec.WorkerOptions.ConnectionRef
-		if connectionRefIsCluster(ref) && connectionRefName(ref) == cc.GetName() {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      twd.Name,
-					Namespace: twd.Namespace,
-				},
-			})
-		}
-	}
-	return requests
 }
 
 func isAccessDeniedErr(err error) bool {

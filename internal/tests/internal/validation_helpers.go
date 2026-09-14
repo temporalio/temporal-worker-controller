@@ -8,6 +8,7 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	sdkclient "go.temporal.io/sdk/client"
@@ -40,7 +41,7 @@ func waitForExpectedTargetDeployment(t *testing.T, twd *temporaliov1alpha1.Worke
 		}, &deployment); err == nil {
 			t.Logf("Found deployment %s in namespace %s", deployment.Name, namespace)
 			expectedBuildID := k8s.ComputeBuildID(twd)
-			expectedDeployment, err := k8s.NewDeploymentWithControllerRef(twd, expectedBuildID, env.Connection.Spec, env.Mgr.GetScheme())
+			expectedDeployment, err := k8s.NewDeploymentWithControllerRef(twd, expectedBuildID, clientpool.NewResolvedConnection(clientpool.New(nil, nil), env.Connection.Spec), env.Mgr.GetScheme())
 			if err != nil {
 				t.Fatalf("failed to create expected deployment: %v", err)
 			}

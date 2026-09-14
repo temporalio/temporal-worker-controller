@@ -16,6 +16,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
@@ -157,7 +158,7 @@ func runPlanCycleWith(t *testing.T, r *WorkerDeploymentReconciler, twd *temporal
 	ctx := context.Background()
 	w := twd.DeepCopy()
 	w.Status = status
-	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, &temporal.TemporalWorkerState{})
+	p, err := r.generatePlan(ctx, logr.Discard(), w, testhelpers.NewResolvedConnection(connection), &temporal.TemporalWorkerState{})
 	require.NoError(t, err, "generatePlan failed")
 	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, tc, p), "executePlan failed")
 	return p
@@ -289,7 +290,7 @@ func TestExecutePlan_WRTResourceDeleteFailure_RetriedNextCycle(t *testing.T) {
 	// Fail deletes of rendered HPA copies while failHPADeletes is true; Deployment
 	// deletes always succeed, reproducing "Deployment gone, rendered resource orphaned".
 	failHPADeletes := true
-	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, depA, depB, wrt, hpaA, hpaB}, interceptor.Funcs{
+	r, _, _ := newTestReconcilerWithInterceptors([]client.Object{twd, depA, depB, wrt, hpaA, hpaB}, interceptor.Funcs{
 		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
 			if failHPADeletes && obj.GetObjectKind().GroupVersionKind().Kind == "HorizontalPodAutoscaler" {
 				return errors.New("simulated transient delete failure")
@@ -583,7 +584,7 @@ func TestGeneratePlan_CarriesEncodingAndMessageType(t *testing.T) {
 		MessageType:  "my.package.DeployRequest",
 	}
 
-	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+	r, _, _ := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
 
 	w := twd.DeepCopy()
 	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
@@ -599,7 +600,7 @@ func TestGeneratePlan_CarriesEncodingAndMessageType(t *testing.T) {
 	}
 
 	p, err := r.generatePlan(context.Background(), logr.Discard(), w,
-		temporaliov1alpha1.ConnectionSpec{}, &temporal.TemporalWorkerState{})
+		testhelpers.NewResolvedConnection(temporaliov1alpha1.ConnectionSpec{}), &temporal.TemporalWorkerState{})
 	require.NoError(t, err)
 	require.Len(t, p.startTestWorkflows, 1)
 

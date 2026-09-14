@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
@@ -137,12 +139,13 @@ type Config struct {
 
 // GeneratePlan creates a plan for updating the worker deployment
 func GeneratePlan(
+	ctx context.Context,
 	l logr.Logger,
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	temporalState *temporal.TemporalWorkerState,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
 	config *Config,
 	workerDeploymentName string,
 	maxVersionsIneligibleForDeletion int32,
@@ -165,7 +168,7 @@ func GeneratePlan(
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
 	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
-	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
+	plan.UpdateDeployments = getUpdateDeployments(ctx, l, k8sState, status, spec, connection, workerDeploymentName)
 
 	// Determine if we need to start any test workflows
 	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName, gateInput, isGateInputSecret)
@@ -412,160 +415,51 @@ func getDeleteWorkerResources(
 	return refs
 }
 
-// checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
-// out-of-date with respect to the provided ConnectionSpec. If an update is required, it mutates
-// the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
-// the Deployment does not exist, it returns nil.
+// checkAndUpdateDeploymentConnectionSpec updates the Deployment for buildID in-place when
+// its connection fingerprint is stale, returning the modified Deployment (or nil if
+// no update is needed or the Deployment does not exist).
 func checkAndUpdateDeploymentConnectionSpec(
+	ctx context.Context,
+	l logr.Logger,
 	buildID string,
 	k8sState *k8s.DeploymentState,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
+	temporalNamespace string,
+	workerDeploymentName string,
 ) *appsv1.Deployment {
 	existingDeployment, exists := k8sState.Deployments[buildID]
 	if !exists {
 		return nil
 	}
 
-	// If the connection spec hash has changed, update the deployment
-	currentHash := k8s.ComputeConnectionSpecHash(connection)
+	// A Fingerprint error means the current hash can't be computed this cycle;
+	// skip and let the next reconcile retry rather than failing hard. The default
+	// provider never errors here; a custom provider that does should make the
+	// failure observable, so log it rather than swallowing silently.
+	currentHash, err := connection.Fingerprint(ctx)
+	if err != nil {
+		l.Error(err, "unable to compute connection fingerprint; skipping in-place connection drift update", "buildID", buildID)
+		return nil
+	}
 	if currentHash != existingDeployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
-
-		// Update the deployment in-place with new connection info
-		updateDeploymentWithConnection(existingDeployment, connection)
+		// ApplyWorkerPodSpec is idempotent, so it serves this in-place drift update
+		// and the fresh-pod build path in NewDeploymentWithOwnerRef. A non-nil
+		// error is non-fatal but should be observable.
+		if err := connection.ApplyWorkerPodSpec(
+			&existingDeployment.Spec.Template.Spec,
+			existingDeployment.Spec.Template.Annotations,
+			connectionprovider.PodSpecApplyOpts{
+				TemporalNamespace:    temporalNamespace,
+				WorkerDeploymentName: workerDeploymentName,
+				BuildID:              buildID,
+			},
+		); err != nil {
+			l.Error(err, "ApplyWorkerPodSpec failed during in-place connection drift update", "buildID", buildID)
+		}
 		return existingDeployment // Return the modified deployment
 	}
 
 	return nil
-}
-
-// updateDeploymentWithConnection updates an existing deployment in-place to match a new ConnectionSpec.
-// It rewrites the controller-managed connection env vars and the mTLS volume/mount, adding and removing them as needed,
-// So switching auth mode (mTLS <-> API key or to/from no-credentials) yields a fully-configured pod.
-// It operates on the deployment's own pod template, so each version keeps its own image.
-func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection temporaliov1alpha1.ConnectionSpec) {
-	// Update the connection spec hash annotation
-	deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
-
-	tlsServerName := connection.TLSServerName()
-	mtls := connection.MutualTLSSecretRef != nil
-	apiKey := !mtls && connection.APIKeySecretRef != nil
-
-	for i := range deployment.Spec.Template.Spec.Containers {
-		container := &deployment.Spec.Template.Spec.Containers[i]
-
-		container.Env = setEnvVar(container.Env, "TEMPORAL_ADDRESS", connection.HostPort)
-
-		if tlsServerName != "" {
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_SERVER_NAME", tlsServerName)
-		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_SERVER_NAME")
-		}
-
-		if mtls {
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS", "true")
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH", "/etc/temporal/tls/tls.key")
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH", "/etc/temporal/tls/tls.crt")
-			container.VolumeMounts = ensureTLSVolumeMount(container.VolumeMounts)
-		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS")
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH")
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH")
-			container.VolumeMounts = removeTLSVolumeMount(container.VolumeMounts)
-		}
-
-		if apiKey {
-			container.Env = setEnvVarFrom(container.Env, "TEMPORAL_API_KEY", &corev1.EnvVarSource{SecretKeyRef: connection.APIKeySecretRef})
-		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_API_KEY")
-		}
-	}
-
-	if mtls {
-		deployment.Spec.Template.Spec.Volumes = ensureTLSVolume(deployment.Spec.Template.Spec.Volumes,
-			connection.MutualTLSSecretRef.Name)
-	} else {
-		deployment.Spec.Template.Spec.Volumes = removeTLSVolume(deployment.Spec.Template.Spec.Volumes)
-	}
-}
-
-func setEnvVar(envVars []corev1.EnvVar, name string, value string) []corev1.EnvVar {
-	for i := range envVars {
-		if envVars[i].Name == name {
-			envVars[i].Value = value
-			envVars[i].ValueFrom = nil
-			return envVars
-		}
-	}
-	return append(envVars, corev1.EnvVar{Name: name, Value: value})
-}
-
-func removeEnvVar(envVars []corev1.EnvVar, name string) []corev1.EnvVar {
-	for i := range envVars {
-		if envVars[i].Name == name {
-			return append(envVars[:i], envVars[i+1:]...)
-		}
-	}
-	return envVars
-}
-
-// setEnvVarFrom sets or replaces an env whose value comes from a source(ex. a secret).
-// Mirrors of setEnvVar for ValueFrom-style vars
-func setEnvVarFrom(envVars []corev1.EnvVar, name string, src *corev1.EnvVarSource) []corev1.EnvVar {
-	for i := range envVars {
-		if envVars[i].Name == name {
-			envVars[i].Value = ""
-			envVars[i].ValueFrom = src
-			return envVars
-		}
-	}
-	return append(envVars, corev1.EnvVar{Name: name, ValueFrom: src})
-}
-
-// ensureTLSVolume adds the temporal-tls secret volume or updates its secret name if present.
-func ensureTLSVolume(volumes []corev1.Volume, secretName string) []corev1.Volume {
-	for i := range volumes {
-		if volumes[i].Name == "temporal-tls" {
-			volumes[i].VolumeSource = corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
-			}
-			return volumes
-		}
-	}
-	return append(volumes, corev1.Volume{
-		Name:         "temporal-tls",
-		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secretName}},
-	})
-}
-
-// removeTLSVolume removes the temporal-tls volume if present
-func removeTLSVolume(volumes []corev1.Volume) []corev1.Volume {
-	for i := range volumes {
-		if volumes[i].Name == "temporal-tls" {
-			return slices.Delete(volumes, i, i+1)
-		}
-	}
-	return volumes
-}
-
-// ensureTLSVolumeMount adds the temporal-tls mount to a container, or fixes its path if present.
-func ensureTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
-	for i := range mounts {
-		if mounts[i].Name == "temporal-tls" {
-			mounts[i].MountPath = "/etc/temporal/tls"
-			return mounts
-		}
-	}
-	return append(mounts, corev1.VolumeMount{Name: "temporal-tls", MountPath: "/etc/temporal/tls"})
-}
-
-// removeTLSVolumeMount removes the temporal-tls mount from a container if present.
-func removeTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
-	for i := range mounts {
-		if mounts[i].Name == "temporal-tls" {
-			return slices.Delete(mounts, i, i+1)
-		}
-	}
-	return mounts
 }
 
 // checkAndUpdateDeploymentPodTemplateSpec determines whether the Deployment for the given buildID is
@@ -574,10 +468,12 @@ func removeTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 // If an update is required, it rebuilds the deployment spec and returns a pointer to that Deployment.
 // If no update is needed or the Deployment does not exist, it returns nil.
 func checkAndUpdateDeploymentPodTemplateSpec(
+	ctx context.Context,
+	l logr.Logger,
 	buildID string,
 	k8sState *k8s.DeploymentState,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
 ) *appsv1.Deployment {
 	existingDeployment, exists := k8sState.Deployments[buildID]
 	if !exists {
@@ -612,17 +508,18 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 
 	// Pod template has changed - rebuild the pod spec from the TWD spec
 	// This applies all controller modifications (env vars, TLS mounts, etc.)
-	updateDeploymentWithPodTemplateSpec(existingDeployment, spec, connection)
+	updateDeploymentWithPodTemplateSpec(l, existingDeployment, spec, connection)
 
 	return existingDeployment
 }
 
-// updateDeploymentWithPodTemplateSpec updates an existing deployment with a new pod template spec
-// from the TWD spec. This applies all the controller modifications that NewDeploymentWithOwnerRef does.
+// updateDeploymentWithPodTemplateSpec rebuilds an existing deployment's pod template from
+// the TWD spec, applying the same controller modifications as NewDeploymentWithOwnerRef.
 func updateDeploymentWithPodTemplateSpec(
+	l logr.Logger,
 	deployment *appsv1.Deployment,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
 ) {
 	// Deep copy the user-provided pod spec to avoid mutating the original
 	podSpec := spec.Template.Spec.DeepCopy()
@@ -647,16 +544,20 @@ func updateDeploymentWithPodTemplateSpec(
 		}
 	}
 
-	// Apply controller-managed environment variables and volume mounts
-	// Uses the same shared helper as NewDeploymentWithOwnerRef
-	k8s.ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
-
-	// Build new pod annotations
+	// ApplyWorkerPodSpec injects env vars, volumes, and the connection-spec-hash
+	// annotation. Idempotent, so it serves the fresh-pod build path and this rebuild.
+	// A non-nil error is non-fatal but should be observable.
 	podAnnotations := make(map[string]string)
 	for k, v := range spec.Template.Annotations {
 		podAnnotations[k] = v
 	}
-	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
+	if err := connection.ApplyWorkerPodSpec(podSpec, podAnnotations, connectionprovider.PodSpecApplyOpts{
+		TemporalNamespace:    spec.WorkerOptions.TemporalNamespace,
+		WorkerDeploymentName: workerDeploymentName,
+		BuildID:              buildID,
+	}); err != nil {
+		l.Error(err, "ApplyWorkerPodSpec failed during pod template spec rebuild")
+	}
 	// Store the new pod template spec hash
 	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(spec.Template)
 
@@ -685,10 +586,13 @@ func updateDeploymentWithPodTemplateSpec(
 }
 
 func getUpdateDeployments(
+	ctx context.Context,
+	l logr.Logger,
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-	connection temporaliov1alpha1.ConnectionSpec,
+	connection connectionprovider.ResolvedConnection,
+	workerDeploymentName string,
 ) []*appsv1.Deployment {
 	var updateDeployments []*appsv1.Deployment
 	// Track which deployments we've already added to avoid duplicates
@@ -697,7 +601,7 @@ func getUpdateDeployments(
 	// Check target version deployment for pod template spec drift
 	// This enables rolling updates when the build ID is stable but spec changed
 	if status.TargetVersion.BuildID != "" {
-		if deployment := checkAndUpdateDeploymentPodTemplateSpec(status.TargetVersion.BuildID, k8sState, spec, connection); deployment != nil {
+		if deployment := checkAndUpdateDeploymentPodTemplateSpec(ctx, l, status.TargetVersion.BuildID, k8sState, spec, connection); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 			updatedBuildIDs[status.TargetVersion.BuildID] = true
 		}
@@ -706,7 +610,7 @@ func getUpdateDeployments(
 	// Check target version deployment if it has an expired connection spec hash
 	// (only if not already updated by pod template check)
 	if status.TargetVersion.BuildID != "" && !updatedBuildIDs[status.TargetVersion.BuildID] {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.BuildID, k8sState, connection); deployment != nil {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(ctx, l, status.TargetVersion.BuildID, k8sState, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 			updatedBuildIDs[status.TargetVersion.BuildID] = true
 		}
@@ -714,7 +618,7 @@ func getUpdateDeployments(
 
 	// Check current version deployment if it has an expired connection spec hash
 	if status.CurrentVersion != nil && status.CurrentVersion.BuildID != "" && !updatedBuildIDs[status.CurrentVersion.BuildID] {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.BuildID, k8sState, connection); deployment != nil {
+		if deployment := checkAndUpdateDeploymentConnectionSpec(ctx, l, status.CurrentVersion.BuildID, k8sState, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 			updatedBuildIDs[status.CurrentVersion.BuildID] = true
 		}

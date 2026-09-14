@@ -18,6 +18,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers/testlogr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -657,7 +658,7 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
+			plan, err := GeneratePlan(context.Background(), logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, testhelpers.NewResolvedConnection(createDefaultConnectionSpec()), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -1322,7 +1323,7 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 		},
 	}
 	spec := &temporaliov1alpha1.WorkerDeploymentSpec{} // spec.Replicas == nil
-	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
+	updateDeploymentWithPodTemplateSpec(logr.Discard(), dep, spec, testhelpers.NewResolvedConnection(temporaliov1alpha1.ConnectionSpec{}))
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
 }
@@ -2494,7 +2495,7 @@ func TestComplexVersionStateScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false, nil, "test-twd", types.UID("test-twd-uid"))
+			plan, err := GeneratePlan(context.Background(), logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, testhelpers.NewResolvedConnection(createDefaultConnectionSpec()), tc.config, "test/namespace", defaults.MaxVersionsIneligibleForDeletion, nil, false, nil, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDeletes, len(plan.DeleteDeployments), "unexpected number of deletes")
@@ -2733,7 +2734,7 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 				k8sState.Deployments[buildID] = tt.existingDeployment
 			}
 
-			result := checkAndUpdateDeploymentConnectionSpec(buildID, k8sState, tt.newConnection)
+			result := checkAndUpdateDeploymentConnectionSpec(context.Background(), logr.Discard(), buildID, k8sState, testhelpers.NewResolvedConnection(tt.newConnection), "test-namespace", "test-worker")
 
 			if !tt.expectUpdate {
 				assert.Nil(t, result, "Expected no update, but got deployment")
@@ -2841,7 +2842,7 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		dep := createTestDeploymentWithConnection("test-worker", "v1", existing)
 		dep.Spec.Template.Spec.Containers[0].Image = image
 		k8sState := &k8s.DeploymentState{Deployments: map[string]*appsv1.Deployment{"v1": dep}}
-		result := checkAndUpdateDeploymentConnectionSpec("v1", k8sState, newConn)
+		result := checkAndUpdateDeploymentConnectionSpec(context.Background(), logr.Discard(), "v1", k8sState, testhelpers.NewResolvedConnection(newConn), "test-namespace", "test-worker")
 		require.NotNil(t, result, "connection change should trigger an update")
 		return result
 	}
@@ -3084,7 +3085,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				k8sState.Deployments[buildID] = tt.existingDeployment
 			}
 
-			result := checkAndUpdateDeploymentPodTemplateSpec(buildID, k8sState, tt.newSpec, tt.connection)
+			result := checkAndUpdateDeploymentPodTemplateSpec(context.Background(), logr.Discard(), buildID, k8sState, tt.newSpec, testhelpers.NewResolvedConnection(tt.connection))
 
 			if !tt.expectUpdate {
 				assert.Nil(t, result, "Expected no update, but got deployment")
@@ -3387,7 +3388,7 @@ func createTestDeploymentWithConnection(deploymentName, buildID string, connecti
 		createDefaultWorkerSpec(),
 		deploymentName,
 		buildID,
-		connection,
+		testhelpers.NewResolvedConnection(connection),
 	)
 }
 

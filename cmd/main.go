@@ -8,14 +8,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
-	"go.temporal.io/sdk/log"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -156,17 +154,10 @@ func main() {
 	}
 
 	if err = (&controller.WorkerDeploymentReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		TemporalClientPool: clientpool.New(
-			log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-				AddSource:   false,
-				Level:       nil,
-				ReplaceAttr: nil,
-			}))),
-			mgr.GetClient(),
-		),
-		Recorder: mgr.GetEventRecorderFor("temporal-worker-controller"),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Providers: clientpool.NewDefaultProviders(mgr.GetClient()),
+		Recorder:  mgr.GetEventRecorderFor("temporal-worker-controller"),
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 		DisableDeprecatedTWD:                       !deprecatedCRDWatches.TemporalWorkerDeployments,
 		DisableClusterConnections:                  namespaceScoped,

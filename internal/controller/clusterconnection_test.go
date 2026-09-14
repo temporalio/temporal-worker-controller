@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -19,6 +20,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+func (r *WorkerDeploymentReconciler) findTWDsUsingConnection(ctx context.Context, tc client.Object) []reconcile.Request {
+	return r.findTWDsUsingConnectionKind(connectionprovider.RefGroupKind(temporaliov1alpha1.ConnectionReference{Name: tc.GetName()}), false)(ctx, tc)
+}
+
+func (r *WorkerDeploymentReconciler) findTWDsUsingClusterConnection(
+	ctx context.Context,
+	cc client.Object,
+) []reconcile.Request {
+	return r.findTWDsUsingConnectionKind(connectionprovider.RefGroupKind(temporaliov1alpha1.ConnectionReference{ObjectRef: &corev1.TypedObjectReference{APIGroup: ptr(temporaliov1alpha1.GroupVersion.Group), Kind: "ClusterConnection", Name: cc.GetName()}}), true)(ctx, cc)
+}
+
+// getConnectionByRef returns the underlying object for ref via the provider
+// registry, for tests that need the concrete object.
+func (r *WorkerDeploymentReconciler) getConnectionByRef(
+	ctx context.Context,
+	ref temporaliov1alpha1.ConnectionReference,
+	namespace string,
+) (client.Object, error) {
+	prov, err := connectionprovider.LookupProvider(r.Providers, ref)
+	if err != nil {
+		return nil, err
+	}
+	connection, err := prov.Fetch(ctx, ref, namespace)
+	if err != nil {
+		return nil, err
+	}
+	return connection.Object(), nil
+}
 
 // makeClusterConnection creates a minimal cluster-scoped ClusterConnection.
 func makeClusterConnection(name, hostPort string) *temporaliov1alpha1.ClusterConnection {
@@ -68,9 +98,9 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "conn", "Connection")
 		r, _ := newTestReconciler([]client.Object{conn, wd})
 
-		spec, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
+		obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.NoError(t, err)
-		assert.Equal(t, "h:7233", spec.HostPort)
+		assert.Equal(t, "h:7233", obj.(*temporaliov1alpha1.Connection).Spec.HostPort)
 		_, ok := obj.(*temporaliov1alpha1.Connection)
 		assert.True(t, ok, "expected a *Connection object")
 	})
@@ -80,9 +110,9 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "conn", "")
 		r, _ := newTestReconciler([]client.Object{conn, wd})
 
-		spec, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
+		obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.NoError(t, err)
-		assert.Equal(t, "h:7233", spec.HostPort)
+		assert.Equal(t, "h:7233", obj.(*temporaliov1alpha1.Connection).Spec.HostPort)
 		_, ok := obj.(*temporaliov1alpha1.Connection)
 		assert.True(t, ok, "empty kind must resolve to a namespaced Connection")
 	})
@@ -92,11 +122,11 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{cc, wd})
 
-		spec, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
+		obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.NoError(t, err)
-		assert.Equal(t, "h:7233", spec.HostPort)
 		got, ok := obj.(*temporaliov1alpha1.ClusterConnection)
 		require.True(t, ok, "expected a *ClusterConnection object")
+		assert.Equal(t, "h:7233", got.Spec.HostPort)
 		assert.Empty(t, got.Namespace, "cluster-scoped object must have no namespace")
 	})
 
@@ -107,15 +137,15 @@ func TestResolveConnection(t *testing.T) {
 		wdCC := makeWDWithKind("wd-cc", "default", "foo", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{conn, cc, wdNS, wdCC})
 
-		specNS, objNS, err := r.getConnectionByRef(ctx, wdNS.Spec.WorkerOptions.ConnectionRef, wdNS.Namespace)
+		objNS, err := r.getConnectionByRef(ctx, wdNS.Spec.WorkerOptions.ConnectionRef, wdNS.Namespace)
 		require.NoError(t, err)
-		assert.Equal(t, "ns-conn:7233", specNS.HostPort)
+		assert.Equal(t, "ns-conn:7233", objNS.(*temporaliov1alpha1.Connection).Spec.HostPort)
 		_, ok := objNS.(*temporaliov1alpha1.Connection)
 		assert.True(t, ok)
 
-		specCC, objCC, err := r.getConnectionByRef(ctx, wdCC.Spec.WorkerOptions.ConnectionRef, wdCC.Namespace)
+		objCC, err := r.getConnectionByRef(ctx, wdCC.Spec.WorkerOptions.ConnectionRef, wdCC.Namespace)
 		require.NoError(t, err)
-		assert.Equal(t, "cluster-conn:7233", specCC.HostPort)
+		assert.Equal(t, "cluster-conn:7233", objCC.(*temporaliov1alpha1.ClusterConnection).Spec.HostPort)
 		_, ok = objCC.(*temporaliov1alpha1.ClusterConnection)
 		assert.True(t, ok)
 	})
@@ -125,7 +155,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "foo", "Connection")
 		r, _ := newTestReconciler([]client.Object{cc, wd})
 
-		_, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
+		obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.Error(t, err)
 		assert.True(t, apierrors.IsNotFound(err), "must be NotFound, not a stray cluster resolve")
 		assert.Nil(t, obj)
@@ -135,7 +165,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "missing", "Connection")
 		r, _ := newTestReconciler([]client.Object{wd})
 
-		_, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
+		obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.Error(t, err)
 		assert.True(t, apierrors.IsNotFound(err))
 		assert.Nil(t, obj)
@@ -145,7 +175,7 @@ func TestResolveConnection(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "missing", "ClusterConnection")
 		r, _ := newTestReconciler([]client.Object{wd})
 
-		_, obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
+		obj, err := r.getConnectionByRef(ctx, wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace)
 		require.Error(t, err)
 		assert.True(t, apierrors.IsNotFound(err))
 		assert.Nil(t, obj)
@@ -213,7 +243,7 @@ func TestEnsureConnectionFinalizer(t *testing.T) {
 					return c.Update(ctx, obj, opts...)
 				},
 			}
-			r, _ := newTestReconcilerWithInterceptors([]client.Object{tc.seed}, funcs)
+			r, _, _ := newTestReconcilerWithInterceptors([]client.Object{tc.seed}, funcs)
 			err := r.ensureConnectionFinalizer(ctx, logr.Discard(), tc.seed)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantUpdateCount, updateCount, "unexpected number of Update calls")

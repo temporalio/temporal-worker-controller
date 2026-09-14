@@ -571,7 +571,7 @@ func TestNewDeploymentWithPodAnnotations(t *testing.T) {
 		&temporaliov1alpha1.WorkerDeploymentSpec{},
 		"test-deployment",
 		"build123",
-		connection,
+		testhelpers.NewResolvedConnection(connection),
 	)
 
 	expectedHash := k8s.ComputeConnectionSpecHash(connection)
@@ -587,7 +587,7 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 		&temporaliov1alpha1.WorkerDeploymentSpec{},
 		"test-deployment",
 		"build123",
-		temporaliov1alpha1.ConnectionSpec{},
+		testhelpers.NewResolvedConnection(temporaliov1alpha1.ConnectionSpec{}),
 	)
 
 	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
@@ -934,7 +934,7 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 				spec,
 				"test-deployment",
 				"test-build-id",
-				tt.connection,
+				testhelpers.NewResolvedConnection(tt.connection),
 			)
 
 			// Verify expected environment variables are present
@@ -1071,7 +1071,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 				spec,
 				"test-deployment",
 				"test-build-id",
-				tt.connection,
+				testhelpers.NewResolvedConnection(tt.connection),
 			)
 
 			// Extract environment variables from the deployment
