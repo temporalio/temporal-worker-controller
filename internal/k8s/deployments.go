@@ -17,12 +17,10 @@ import (
 	"github.com/distribution/reference"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/k8s.io/utils"
-	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -257,10 +255,16 @@ func NewDeploymentWithOwnerRef(
 		podLabels[k] = v
 	}
 
-	podSpec := spec.Template.Spec.DeepCopy()
+	depSpec := spec.DeploymentSpec()
 
 	// Apply controller-managed environment variables and volume mounts
-	ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
+	ApplyControllerPodSpecModifications(
+		&depSpec.Template.Spec,
+		connection,
+		spec.WorkerOptions.TemporalNamespace,
+		workerDeploymentName,
+		buildID,
+	)
 
 	// Build pod annotations
 	podAnnotations := make(map[string]string)
@@ -270,10 +274,16 @@ func NewDeploymentWithOwnerRef(
 	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
 	// Store hash of user-provided pod template spec BEFORE controller modifications
 	// This enables drift detection when build ID is stable
-	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(spec.Template)
+	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(depSpec.Template)
 	blockOwnerDeletion := true
 
-	ApplyDefaultRollingUpdateFields(&spec.RolloutStrategy)
+	depSpec.Selector = &metav1.LabelSelector{
+		MatchLabels: selectorLabels,
+	}
+	depSpec.Template.ObjectMeta = metav1.ObjectMeta{
+		Labels:      podLabels,
+		Annotations: podAnnotations,
+	}
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -293,60 +303,7 @@ func NewDeploymentWithOwnerRef(
 			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
 			//                 deleting deployments that are still reachable.
 		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: spec.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: selectorLabels,
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:      podLabels,
-					Annotations: podAnnotations,
-				},
-				Spec: *podSpec,
-			},
-			MinReadySeconds: spec.MinReadySeconds,
-			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
-					MaxSurge:       spec.RolloutStrategy.MaxSurge,
-				},
-			},
-		},
-	}
-}
-
-// DefaultDeploymentStrategy returns the default appsv1.DeploymentStrategy
-// using RollingUpdate deployment strategy type and the default values for
-// MaxUnavailable and MaxSurge.
-func DefaultDeploymentStrategy() appsv1.DeploymentStrategy {
-	defaultMaxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
-	defaultMaxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
-	return appsv1.DeploymentStrategy{
-		Type: appsv1.RollingUpdateDeploymentStrategyType,
-		RollingUpdate: &appsv1.RollingUpdateDeployment{
-			MaxUnavailable: &defaultMaxUnavailable,
-			MaxSurge:       &defaultMaxSurge,
-		},
-	}
-
-}
-
-// ApplyDefaultRollingUpdateFields mutates the supplied RolloutStrategy,
-// applying the same default values for MaxUnavailable and MaxSurge s as the
-// apps/v1 Deployment API.
-func ApplyDefaultRollingUpdateFields(s *temporaliov1alpha1.RolloutStrategy) {
-	if s == nil {
-		return
-	}
-	if s.MaxUnavailable == nil {
-		maxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
-		s.MaxUnavailable = &maxUnavailable
-	}
-	if s.MaxSurge == nil {
-		maxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
-		s.MaxSurge = &maxSurge
+		Spec: depSpec,
 	}
 }
 

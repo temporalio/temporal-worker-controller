@@ -618,15 +618,16 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 	return existingDeployment
 }
 
-// updateDeploymentWithPodTemplateSpec updates an existing deployment with a new pod template spec
-// from the TWD spec. This applies all the controller modifications that NewDeploymentWithOwnerRef does.
+// updateDeploymentWithPodTemplateSpec updates an existing Kubernetes
+// Deployment with a new pod template spec from the WorkerDeploymentSpec. This
+// applies all the controller modifications that NewDeploymentWithOwnerRef
+// does.
 func updateDeploymentWithPodTemplateSpec(
 	deployment *appsv1.Deployment,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) {
-	// Deep copy the user-provided pod spec to avoid mutating the original
-	podSpec := spec.Template.Spec.DeepCopy()
+	wdDepSpec := spec.DeploymentSpec()
 
 	// Extract the build ID from the deployment's labels (with nil safety)
 	var buildID string
@@ -650,7 +651,13 @@ func updateDeploymentWithPodTemplateSpec(
 
 	// Apply controller-managed environment variables and volume mounts
 	// Uses the same shared helper as NewDeploymentWithOwnerRef
-	k8s.ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
+	k8s.ApplyControllerPodSpecModifications(
+		&wdDepSpec.Template.Spec,
+		connection,
+		spec.WorkerOptions.TemporalNamespace,
+		workerDeploymentName,
+		buildID,
+	)
 
 	// Build new pod annotations
 	podAnnotations := make(map[string]string)
@@ -671,31 +678,20 @@ func updateDeploymentWithPodTemplateSpec(
 		podLabels[k] = v
 	}
 
-	// Update the deployment's pod template
-	deployment.Spec.Template.ObjectMeta.Labels = podLabels
-	deployment.Spec.Template.ObjectMeta.Annotations = podAnnotations
-	deployment.Spec.Template.Spec = *podSpec
-
 	// Only set replicas when the controller is managing them (spec.Replicas non-nil).
 	// When nil, an external autoscaler owns replicas; preserving the current value
 	// avoids competing with it on every Update.
-	if spec.Replicas != nil {
-		deployment.Spec.Replicas = spec.Replicas
-	}
-	deployment.Spec.MinReadySeconds = spec.MinReadySeconds
-	deployment.Spec.Strategy = appsv1.DeploymentStrategy{
-		Type: appsv1.RollingUpdateDeploymentStrategyType,
-		RollingUpdate: &appsv1.RollingUpdateDeployment{
-			MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
-			MaxSurge:       spec.RolloutStrategy.MaxSurge,
-		},
-	}
+	origReplicas := deployment.Spec.Replicas
+	deployment.Spec = wdDepSpec
+	deployment.Spec.Replicas = origReplicas
+
+	// Update the deployment's pod template
+	deployment.Spec.Template.ObjectMeta.Labels = podLabels
+	deployment.Spec.Template.ObjectMeta.Annotations = podAnnotations
 }
 
-// checkAndUpdateDeploymentStrategy updates an owned Deployment when its rolling
-// update strategy differs from the WorkerDeployment spec. When
-// spec.DeploymentStrategy is nil the controller does not manage strategy and
-// leaves the live Deployment alone.
+// checkAndUpdateDeploymentStrategy updates an owned Deployment when its
+// rolling update strategy differs from the WorkerDeployment spec.
 func checkAndUpdateDeploymentStrategy(
 	buildID string,
 	k8sState *k8s.DeploymentState,
@@ -706,13 +702,8 @@ func checkAndUpdateDeploymentStrategy(
 		return nil
 	}
 
-	desired := appsv1.DeploymentStrategy{
-		Type: appsv1.RollingUpdateDeploymentStrategyType,
-		RollingUpdate: &appsv1.RollingUpdateDeployment{
-			MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
-			MaxSurge:       spec.RolloutStrategy.MaxSurge,
-		},
-	}
+	wdDepSpec := spec.DeploymentSpec()
+	desired := wdDepSpec.Strategy
 	actual := existingDeployment.Spec.Strategy
 	if apiequality.Semantic.DeepEqual(desired, actual) {
 		return nil
@@ -758,19 +749,16 @@ func getUpdateDeployments(
 		}
 	}
 
-	// Sync Deployment rolling-update strategy on all owned versions. Do this after
-	// the pod-template / connection checks so a deployment already queued for update
-	// also picks up strategy changes in the same write.
+	// Sync Deployment rolling-update strategy on all Kubernetes Deployments
+	// associated with WorkerDeploymentVersions managed by Temporal Worker
+	// Controller for this Temporal Worker Deployment. Do this after the
+	// pod-template / connection checks so a Kubernetes Deployment already
+	// queued for update also picks up strategy changes in the same write.
 	for _, buildID := range ownedBuildIDs(status) {
 		if updatedBuildIDs[buildID] {
 			if deployment, exists := k8sState.Deployments[buildID]; exists {
-				deployment.Spec.Strategy = appsv1.DeploymentStrategy{
-					Type: appsv1.RollingUpdateDeploymentStrategyType,
-					RollingUpdate: &appsv1.RollingUpdateDeployment{
-						MaxUnavailable: spec.RolloutStrategy.MaxUnavailable,
-						MaxSurge:       spec.RolloutStrategy.MaxSurge,
-					},
-				}
+				wdDepSpec := spec.DeploymentSpec()
+				deployment.Spec.Strategy = wdDepSpec.Strategy
 			}
 			continue
 		}
@@ -866,13 +854,14 @@ func getScaleDeployments(
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
+	wdDepSpec := spec.DeploymentSpec()
 
 	// Scale the current version if needed
 	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
 		// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
 		// Scale the Current Version per the WorkerDeploymentSpec.Replicas value.
-		if spec.Replicas != nil {
-			replicas := *spec.Replicas
+		if wdDepSpec.Replicas != nil {
+			replicas := *wdDepSpec.Replicas
 			ref := status.CurrentVersion.Deployment
 			if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
@@ -891,10 +880,10 @@ func getScaleDeployments(
 			// due to Sunset Policy, and the TWD has nil replicas because a scaler is managing the replicas, then
 			// no one will scale the Target Version back up, so we need to scale it back to 1 replica, which is what
 			// would happen if the Deployment was being created from scratch with nil replicas.
-			if spec.Replicas != nil || (spec.Replicas == nil && d.Spec.Replicas != nil && *d.Spec.Replicas == 0) {
+			if wdDepSpec.Replicas != nil || (wdDepSpec.Replicas == nil && d.Spec.Replicas != nil && *d.Spec.Replicas == 0) {
 				replicas := int32(1) // just scale up to 1 if we are in the spec.Replicas == nil && d.Spec.Replicas == 0 case.
-				if spec.Replicas != nil {
-					replicas = *spec.Replicas
+				if wdDepSpec.Replicas != nil {
+					replicas = *wdDepSpec.Replicas
 				}
 				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
 					scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
@@ -919,8 +908,8 @@ func getScaleDeployments(
 			// Scale down inactive versions that are not the target
 			if status.TargetVersion.BuildID == version.BuildID {
 				// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-				if spec.Replicas != nil {
-					replicas := *spec.Replicas
+				if wdDepSpec.Replicas != nil {
+					replicas := *wdDepSpec.Replicas
 					if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 						scaleDeployments[version.Deployment] = uint32(replicas)
 					}
@@ -931,8 +920,8 @@ func getScaleDeployments(
 		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
 			// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
 			// Scale up these deployments
-			if spec.Replicas != nil {
-				replicas := *spec.Replicas
+			if wdDepSpec.Replicas != nil {
+				replicas := *wdDepSpec.Replicas
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 					scaleDeployments[version.Deployment] = uint32(replicas)
 				}

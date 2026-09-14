@@ -5,6 +5,8 @@
 package v1alpha1
 
 import (
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,10 +82,12 @@ type WorkerDeploymentSpec struct {
 	// the rollout target) to zero regardless.
 	// This field makes WorkerDeploymentSpec implement the scale subresource, which is compatible with auto-scalers.
 	// +optional
+	// Deprecated: Use deployment.replicas instead
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
+	// Deprecated: Use deployment.template instead
 	Template corev1.PodTemplateSpec `json:"template"`
 
 	// Minimum number of seconds for which a newly created pod should be ready
@@ -91,6 +95,7 @@ type WorkerDeploymentSpec struct {
 	// Defaults to 0 (pod will be considered available as soon as it is ready)
 	// +optional
 	// +kubebuilder:default=0
+	// Deprecated: Use deployment.minReadySeconds instead
 	MinReadySeconds int32 `json:"minReadySeconds,omitempty"`
 
 	// The maximum time in seconds for a deployment to make progress before it
@@ -99,7 +104,19 @@ type WorkerDeploymentSpec struct {
 	// reason will be surfaced in the deployment status. Note that progress will
 	// not be estimated during the time a deployment is paused. Defaults to 600s.
 	// +kubebuilder:default=600
+	// Deprecated: Use deployment.progressDeadlineSeconds instead
 	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty" protobuf:"varint,9,opt,name=progressDeadlineSeconds"`
+
+	// Deployment contains the desired configuration for the Kubernetes
+	// Deployment that is created by Temporal Worker Controller for each
+	// WorkerDeploymentVersion (BuildID) in the Temporal WorkerDeployment
+	// described by this WorkerDeploymentSpec.
+	//
+	// When this field is not nil, the Replicas, MinReadySeconds, Template and
+	// ProgressDeadlineSeconds fields are ignored and those same-named fields
+	// on the Deployment field's appsv1.DeploymentSpec struct are used instead.
+	// +optional
+	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
@@ -109,6 +126,44 @@ type WorkerDeploymentSpec struct {
 
 	// WorkerOptions configures the worker's connection to Temporal.
 	WorkerOptions WorkerOptions `json:"workerOptions"`
+}
+
+// DeploymentSpec returns the appsv1.DeploymentSpec struct constructed by
+// examining the WorkerDeploymentSpec. If WorkerDeploymentSpec.deployment is
+// non-nil, we return that. Otherwise, we construct an appsv1.DeploymentSpec
+// with the older, deprecated Replicas, Template, MinReadySeconds and
+// ProgressDeadlineSeconds fields.
+func (s WorkerDeploymentSpec) DeploymentSpec() appsv1.DeploymentSpec {
+	if s.Deployment != nil {
+		depSpec := *s.Deployment
+		if depSpec.Strategy.Type == "" {
+			depSpec.Strategy = DefaultDeploymentStrategy()
+		}
+		return depSpec
+	}
+	return appsv1.DeploymentSpec{
+		Replicas:                s.Replicas,
+		Template:                s.Template,
+		MinReadySeconds:         s.MinReadySeconds,
+		ProgressDeadlineSeconds: s.ProgressDeadlineSeconds,
+		Strategy:                DefaultDeploymentStrategy(),
+	}
+}
+
+// DefaultDeploymentStrategy returns the default appsv1.DeploymentStrategy
+// using RollingUpdate deployment strategy type and the default values for
+// MaxUnavailable and MaxSurge.
+func DefaultDeploymentStrategy() appsv1.DeploymentStrategy {
+	defaultMaxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
+	defaultMaxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
+	return appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &defaultMaxUnavailable,
+			MaxSurge:       &defaultMaxSurge,
+		},
+	}
+
 }
 
 // Condition reason constants for WorkerDeployment.
@@ -468,7 +523,15 @@ type GateInputSource struct {
 	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
 }
 
-// RolloutStrategy defines strategy to apply during next rollout
+// RolloutStrategy defines the strategy Temporal Worker Controller uses to
+// update the Temporal WorkerDeployment's target version (build ID).
+//
+// This struct does *not* influence the shape of the Kubernetes Deployment that
+// is created by Temporal Worker Controller for an individual
+// WorkerDeploymentVersion (build ID). Use WorkerDeploymentSpec.deployment to
+// control the shape of the Kubernetes Deployment associated with a
+// WorkerDeploymentVersion.
+//
 // +kubebuilder:validation:XValidation:rule="self.strategy != 'Progressive' || (has(self.steps) && size(self.steps) > 0)",message="steps are required for Progressive rollout"
 // +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.inputFrom) || (has(self.gate.inputFrom.configMapKeyRef) != has(self.gate.inputFrom.secretKeyRef))",message="exactly one of configMapKeyRef or secretKeyRef must be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.gate) || !has(self.gate.encoding) || self.gate.encoding != 'binary/protobuf' || has(self.gate.messageType)",message="gate.messageType is required when gate.encoding is binary/protobuf"
@@ -480,48 +543,6 @@ type RolloutStrategy struct {
 	// - "AllAtOnce"
 	// - "Progressive"
 	Strategy DefaultVersionUpdateStrategy `json:"strategy"`
-
-	// The maximum number of pods that can be unavailable during an in-place
-	// restart of an existing Kubernetes Deployment created by the controller.
-	//
-	// Mirrored from appsv1.RollingUpdateDeployment struct.
-	//
-	// Value can be an absolute number (ex: 5) or a percentage of desired pods
-	// (ex: 10%). Absolute number is calculated from percentage by rounding
-	// down. This can not be 0 if MaxSurge is 0.
-	//
-	// Defaults to 25%.
-	//
-	// Example: when this is set to 30%, the old ReplicaSet can be scaled down
-	// to 70% of desired pods immediately when the rolling update starts. Once
-	// new pods are ready, old ReplicaSet can be scaled down further, followed
-	// by scaling up the new ReplicaSet, ensuring that the total number of pods
-	// available at all times during the update is at least 70% of desired
-	// pods.
-	// +optional
-	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
-
-	// When an in-place restart of an existing Kubernetes Deployment backing a
-	// WorkerDeploymentVersion created by the controller is performed, this is
-	// the maximum number of pods that can be scheduled above the desired
-	// number of pods.
-	//
-	// Mirrored from appsv1.RollingUpdateDeployment struct.
-	//
-	// Value can be an absolute number (ex: 5) or a percentage of desired pods
-	// (ex: 10%). This can not be 0 if MaxUnavailable is 0. Absolute number is
-	// calculated from percentage by rounding up.
-	//
-	// Defaults to 25%.
-	//
-	// Example: when this is set to 30%, the new ReplicaSet can be scaled up
-	// immediately when the rolling update starts, such that the total number
-	// of old and new pods do not exceed 130% of desired pods. Once old pods
-	// have been killed, new ReplicaSet can be scaled up further, ensuring that
-	// total number of pods running at any time during the update is at most
-	// 130% of desired pods.
-	// +optional
-	MaxSurge *intstr.IntOrString `json:"maxSurge,omitempty"`
 
 	// Gate specifies a workflow type that must run once to completion on the new worker deployment version before
 	// any traffic is directed to the new version.

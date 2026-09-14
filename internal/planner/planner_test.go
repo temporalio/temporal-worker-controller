@@ -659,7 +659,6 @@ func TestGeneratePlan(t *testing.T) {
 			}
 
 			spec := tc.spec
-			k8s.ApplyDefaultRollingUpdateFields(&spec.RolloutStrategy)
 
 			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
@@ -1340,9 +1339,14 @@ func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
 		},
 	}
 	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-		RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
-			MaxUnavailable: &maxUnavailable,
-			MaxSurge:       &maxSurge,
+		Deployment: &appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &maxUnavailable,
+					MaxSurge:       &maxSurge,
+				},
+			},
 		},
 	}
 	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
@@ -1355,15 +1359,16 @@ func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
 func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
 	maxUnavailable := intstr.FromString("5%")
 	maxSurge := intstr.FromInt32(0)
-	desiredRolloutStrategy := temporaliov1alpha1.RolloutStrategy{
-		MaxUnavailable: &maxUnavailable,
-		MaxSurge:       &maxSurge,
-	}
 	desiredDeploymentStrategy := appsv1.DeploymentStrategy{
 		Type: appsv1.RollingUpdateDeploymentStrategyType,
 		RollingUpdate: &appsv1.RollingUpdateDeployment{
 			MaxUnavailable: &maxUnavailable,
 			MaxSurge:       &maxSurge,
+		},
+	}
+	desiredSpec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{
+			Strategy: desiredDeploymentStrategy,
 		},
 	}
 
@@ -1394,8 +1399,7 @@ func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
 	}
 
 	t.Run("updates when strategy differs", func(t *testing.T) {
-		spec := &temporaliov1alpha1.WorkerDeploymentSpec{RolloutStrategy: desiredRolloutStrategy}
-		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
+		updates := getUpdateDeployments(k8sState, status, desiredSpec, temporaliov1alpha1.ConnectionSpec{})
 		require.Len(t, updates, 1)
 		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, updates[0].Spec.Strategy.Type)
 		require.NotNil(t, updates[0].Spec.Strategy.RollingUpdate)
@@ -1404,9 +1408,8 @@ func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
 	})
 
 	t.Run("no update when strategy same", func(t *testing.T) {
-		spec := &temporaliov1alpha1.WorkerDeploymentSpec{RolloutStrategy: desiredRolloutStrategy}
 		deployment.Spec.Strategy = desiredDeploymentStrategy
-		updates := getUpdateDeployments(k8sState, status, spec, temporaliov1alpha1.ConnectionSpec{})
+		updates := getUpdateDeployments(k8sState, status, desiredSpec, temporaliov1alpha1.ConnectionSpec{})
 		assert.Empty(t, updates)
 	})
 }
@@ -3214,7 +3217,7 @@ func createDeploymentWithDefaultConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
-			Strategy: k8s.DefaultDeploymentStrategy(),
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3234,7 +3237,7 @@ func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
-			Strategy: k8s.DefaultDeploymentStrategy(),
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3286,7 +3289,7 @@ func createDeploymentForDriftTest(replicas int32, buildID string, image string) 
 					},
 				},
 			},
-			Strategy: k8s.DefaultDeploymentStrategy(),
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3339,7 +3342,7 @@ func createDeploymentForDriftTestWithEnv(replicas int32, buildID string, image s
 					},
 				},
 			},
-			Strategy: k8s.DefaultDeploymentStrategy(),
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3380,7 +3383,6 @@ func createDeploymentWithoutHashAnnotation(replicas int32, buildID string, image
 					},
 				},
 			},
-			Strategy: k8s.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3897,7 +3899,7 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 					},
 				},
 			},
-			Strategy: k8s.DefaultDeploymentStrategy(),
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
