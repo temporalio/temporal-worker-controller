@@ -33,13 +33,13 @@ Review the [compatibility commitment](crd-management.md#compatibility-commitment
 ```bash
 # 1. Upgrade CRDs first
 helm upgrade temporal-worker-controller-crds \
-  oci://docker.io/temporalio/temporal-worker-controller-crds
+  oci://docker.io/temporalio/temporal-worker-controller-crds \
   --version <target-version> \
   --namespace temporal-system
 
 # 2. Then upgrade the controller
 helm upgrade temporal-worker-controller \
-  oci://docker.io/temporalio/temporal-worker-controller
+  oci://docker.io/temporalio/temporal-worker-controller \
   --version <target-version> \
   --namespace temporal-system
 ```
@@ -51,8 +51,12 @@ See [CRD Management — Upgrading](crd-management.md#upgrading) for detailed ins
 ### What the webhooks do
 
 TWC runs two admission webhooks:
-**WorkerResourceTemplate** validator | Validates WRT create/update/delete. Security control with `failurePolicy: Fail`  if the webhook is down, all WRT operations are blocked cluster-wide. | Always on |
-**WorkerDeployment** validator | Validates and defaults WD create/update. | `webhook.enabled` (default: `false`) |
+
+| Webhook | Controls | Gated by |
+|---------|----------|----------|
+| **WorkerResourceTemplate** validator | Validates WRT create/update/delete. Security control with `failurePolicy: Fail` — if the webhook is down, all WRT operations are blocked cluster-wide. | Always on |
+| **WorkerDeployment** validator | Validates and defaults WD create/update. | `webhook.enabled` (default: `false`) |
+
 
 ### Why a TLS certificate is always required
 
@@ -70,7 +74,7 @@ the README.
 
 Only users who previously set `certmanager.install: true` in their TWC Helm values. This installed cert-manager **as a subchart** inside TWC's Helm release. The default was `false`
 
-If you are unsure if you're effected, check:
+If you are unsure if you're affected, check:
 
 ```bash
 helm get values temporal-worker-controller -n temporal-system -o json | jq '.certmanager.install'
