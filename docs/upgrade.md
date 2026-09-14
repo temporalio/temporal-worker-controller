@@ -4,17 +4,26 @@
 
 The Temporal Worker Controller ships as **two Helm charts**:
 
-`temporal-worker-controller-crds` | Custom Resource Definitions (CRDs) 
-`temporal-worker-controller` | Controller deployment, RBAC, webhooks 
+| Chart | Contains |
+|-------|----------|
+| `temporal-worker-controller-crds` | Custom Resource Definitions (CRDs) |
+| `temporal-worker-controller` | Controller deployment, RBAC, webhooks |
 
-**Always upgrade the CRD chart first, then the controller chart.** See crd-management.md for the full rationale and compatibility commitment.
+**Always upgrade the CRD chart first, then the controller chart.** See [CRD Management](crd-management.md) for the full rationale and compatibility commitment.
 
 ## Before You Upgrade
 
 Check your currently installed versions:
 
 ```bash
-helm list -n temporal-system
+helm list -A
+```
+
+Back up your current release values and manifest for reference:
+
+```bash
+helm get values <release-name> -n <namespace> -o yaml > backup-values.yaml
+helm get manifest <release-name> -n <namespace> > backup-manifest.yaml
 ```
 
 Review the [compatibility commitment](crd-management.md#compatibility-commitment)
@@ -24,13 +33,13 @@ Review the [compatibility commitment](crd-management.md#compatibility-commitment
 ```bash
 # 1. Upgrade CRDs first
 helm upgrade temporal-worker-controller-crds \
-  oci://ghcr.io/temporalio/helm-charts/temporal-worker-controller-crds \
+  oci://docker.io/temporalio/temporal-worker-controller-crds
   --version <target-version> \
   --namespace temporal-system
 
 # 2. Then upgrade the controller
 helm upgrade temporal-worker-controller \
-  oci://ghcr.io/temporalio/helm-charts/temporal-worker-controller \
+  oci://docker.io/temporalio/temporal-worker-controller
   --version <target-version> \
   --namespace temporal-system
 ```
@@ -51,54 +60,9 @@ Kubernetes requires all webhooks to serve HTTPS. Because the WRT webhook is alwa
 
 ### Certificate options
 
-**Option 1: cert-manager (default)**
-
-With `certmanager.enabled: true` (the default), the chart creates an Issuer and Certificate resource. cert-manager generates the TLS certificate and stores it in a Secret. Cert-manager must be installed independently in the cluster before installing TWC.
-
-```bash
-# Install cert-manager (once per cluster)
-helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager \
-  --create-namespace \
-  --set crds.enabled=true
-
-# Install TWC (cert-manager creates the webhook cert automatically)
-helm install temporal-worker-controller <chart> \
-  --namespace temporal-system \
-  --set certmanager.enabled=true
-```
-
-**Option 2: Bring your own certificate**
-
-If you manage TLS certificates outside of cert-manager, create the Secret yourself and tell TWC its name:
-
-```bash
-# Create your TLS Secret
-kubectl create secret tls my-webhook-cert \
-  --cert=webhook.pem \
-  --key=webhook-key.pem \
-  --namespace temporal-system
-
-# Install TWC pointing at your Secret
-helm install temporal-worker-controller <chart> \
-  --namespace temporal-system \
-  --set certmanager.enabled=false \
-  --set webhook.certSecretName=my-webhook-cert \
-  --set certmanager.caBundle=$(base64 < ca.pem)
-```
-
-The `webhook.certSecretName` value (default: `webhook-server-cert`) controls which Secret the controller pod mounts for TLS. The `caBundle` value tells the Kubernetes API server which CA to trust when calling the webhook.
-
-**Option 3: Self-managed with cert-manager**
-
-If you use cert-manager but want to control the Secret name:
-
-```bash
-helm install temporal-worker-controller <chart> \
-  --namespace temporal-system \
-  --set certmanager.enabled=true \
-  --set webhook.certSecretName=my-custom-cert-name
-```
+For certificate configuration options (cert-manager, BYO cert, self-managed),
+see [Webhook TLS Configuration](../README.md#webhook-tls-configuration) in
+the README.
 
 ## Migrating from the cert-manager Subchart
 
@@ -109,12 +73,17 @@ Only users who previously set `certmanager.install: true` in their TWC Helm valu
 If you are unsure if you're effected, check:
 
 ```bash
-helm get values temporal-worker-controller -n temporal-system | grep "certmanager"
+helm get values temporal-worker-controller -n temporal-system -o json | jq '.certmanager.install'
 ```
 
-If the output does not show `install: true`, you can skip this section.
+If the output is not `true`, you can skip this section.
 
 ### Why migration is required
+
+> [!WARNING]
+> Removing the subchart dependency without migration will cause Helm to
+> **delete** all cert-manager resources it previously managed — removing
+> cert-manager from the cluster entirely.
 
 When cert-manager is installed as a TWC subchart, Helm treats all cert-manager resources as part of the TWC release.
 Removing the subchart dependency (upgrading to a version without it) would cause Helm to **delete** those cert-manager resources and removing cert-manager from the cluster entirely. This migration prevents that.
@@ -144,15 +113,25 @@ done
 
 # Services
 for svc in temporal-worker-controller-cert-manager \
+            temporal-worker-controller-cert-manager-cainjector \
             temporal-worker-controller-cert-manager-webhook; do
   kubectl annotate service $svc -n <namespace> helm.sh/resource-policy=keep
 done
 
 # Roles and RoleBindings (names may vary by cert-manager version)
-kubectl annotate role temporal-worker-controller-cert-manager-webhook:dynamic-serving \
-  -n <namespace> helm.sh/resource-policy=keep
-kubectl annotate rolebinding temporal-worker-controller-cert-manager-webhook:dynamic-serving \
-  -n <namespace> helm.sh/resource-policy=keep
+# Release-namespace Roles/RoleBindings
+for name in temporal-worker-controller-cert-manager-webhook:dynamic-serving \
+            temporal-worker-controller-cert-manager-tokenrequest; do
+  kubectl annotate role $name -n <namespace> helm.sh/resource-policy=keep
+  kubectl annotate rolebinding $name -n <namespace> helm.sh/resource-policy=keep
+done
+
+# Leader-election Roles/RoleBindings live in kube-system, NOT the release namespace
+for name in temporal-worker-controller-cert-manager:leaderelection \
+            temporal-worker-controller-cert-manager-cainjector:leaderelection; do
+  kubectl annotate role $name -n kube-system helm.sh/resource-policy=keep
+  kubectl annotate rolebinding $name -n kube-system helm.sh/resource-policy=keep
+done
 
 # CRDs
 for crd in challenges.acme.cert-manager.io \
