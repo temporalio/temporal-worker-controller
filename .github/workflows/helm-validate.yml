@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install Helm
         uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78 # v3.5
@@ -23,6 +25,11 @@ jobs:
 
       - name: Lint chart
         run: helm lint --strict helm/temporal-worker-controller
+
+      - name: Check values.schema.json stays in sync with values.yaml
+        env:
+          GIT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: hack/check-helm-values-schema.sh
 
   helm-template:
     name: Template Helm Chart
