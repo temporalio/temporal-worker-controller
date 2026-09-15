@@ -1,0 +1,107 @@
+{{- if and (not .Values.certmanager.enabled) .Values.certmanager.caInjector.enabled }}
+# Patches the caBundle onto both ValidatingWebhookConfigurations at every
+# install/upgrade, reading the CA fresh from a Secret each time. Alternative
+# to a static certmanager.caBundle value for CAs that rotate.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-ca-injector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: ca-injector
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-ca-injector-role
+  labels:
+    app.kubernetes.io/component: ca-injector
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations"]
+    resourceNames:
+      - {{ .Release.Name }}-wrt-validating-webhook-configuration
+      {{- if .Values.webhook.enabled }}
+      - {{ .Release.Name }}-wd-validating-webhook-configuration
+      {{- end }}
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-ca-injector-rolebinding
+  labels:
+    app.kubernetes.io/component: ca-injector
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-ca-injector-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-ca-injector
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-ca-injector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: ca-injector
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: ca-injector
+        {{- include "temporal-worker-controller.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-ca-injector
+      restartPolicy: Never
+      containers:
+        - name: ca-injector
+          image: {{ .Values.certmanager.caInjector.image }}
+          command: ["/bin/sh", "-c"]
+          # Each ValidatingWebhookConfiguration in this chart has exactly one
+          # entry under .webhooks, hence the hardcoded /webhooks/0 path. "add"
+          # (not "replace") also works when caBundle was never set, since
+          # caBundle is an omitempty field absent from the object until patched.
+          args:
+            - |
+              set -eu
+              CA_BUNDLE=$(base64 -w0 < /ca/{{ .Values.certmanager.caInjector.caSecretKey }})
+              kubectl patch validatingwebhookconfigurations {{ .Release.Name }}-wrt-validating-webhook-configuration \
+                --type=json -p="[{\"op\":\"add\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"$CA_BUNDLE\"}]"
+              {{- if .Values.webhook.enabled }}
+              kubectl patch validatingwebhookconfigurations {{ .Release.Name }}-wd-validating-webhook-configuration \
+                --type=json -p="[{\"op\":\"add\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"$CA_BUNDLE\"}]"
+              {{- end }}
+          volumeMounts:
+            - name: ca
+              mountPath: /ca
+              readOnly: true
+      volumes:
+        - name: ca
+          secret:
+            secretName: {{ .Values.certmanager.caInjector.caSecretName }}
+{{- end }}
