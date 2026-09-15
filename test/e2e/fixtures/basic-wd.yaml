@@ -1,0 +1,21 @@
+apiVersion: temporal.io/v1alpha1
+kind: WorkerDeployment
+metadata:
+  name: test-worker
+  namespace: temporal-system
+spec:
+  rollout:
+    strategy: AllAtOnce
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 2h
+  template:
+    spec:
+      containers:
+        - name: main
+          image: busybox:latest
+          command: ["sleep", "infinity"]
+  workerOptions:
+    connectionRef:
+      name: test-connection
+    temporalNamespace: default
