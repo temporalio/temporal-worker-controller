@@ -287,6 +287,12 @@ func (r *WorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.Ve
 	if existing == getDeprecatedControllerIdentity() {
 		return true
 	}
+	// Reclaim deployments still claimed under this controller's legacy identity (the
+	// pre-migration namespace-UID suffix) so an identity-suffix change on upgrade adopts
+	// them instead of deadlocking. See getLegacyControllerIdentity.
+	if legacy := getLegacyControllerIdentity(); legacy != "" && existing == legacy {
+		return true
+	}
 	return false
 }
 
