@@ -228,9 +228,12 @@ test-unit: envtest helm-dependency-build ## Run unit tests and webhook integrati
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
 .PHONY: test-integration
+# -timeout: Go's default is 10m and the suite already runs ~9m in CI, so any added wait
+# (e.g. the #542 triage diagnostics) panics the whole binary rather than failing a single
+# subtest. 30m matches what ci/run-integration-tests.sh already passes.
 test-integration: manifests generate envtest ## Run integration tests against local Temporal dev server.
 	@echo "Running integration tests..."
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -v -tags test_dep ./internal/tests/internal -run TestIntegration
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -v -tags test_dep ./internal/tests/internal -run TestIntegration -timeout 30m
 
 ##@ Build
 
