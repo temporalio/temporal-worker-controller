@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -158,4 +159,14 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 
 func newInvalidErr(dep *WorkerDeployment, errs field.ErrorList) *apierrors.StatusError {
 	return apierrors.NewInvalid(dep.GroupVersionKind().GroupKind(), dep.GetName(), errs)
+}
+
+func isExplicitlyZeroIntOrString(v *intstr.IntOrString) bool {
+	if v == nil {
+		return false
+	}
+	if v.Type == intstr.Int {
+		return v.IntVal == 0
+	}
+	return v.StrVal == "0" || v.StrVal == "0%"
 }
