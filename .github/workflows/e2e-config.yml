@@ -22,15 +22,13 @@ jobs:
       matrix:
         mode:
           - name: default
-            helm-args: "--set certmanager.enabled=true --set certmanager.install=false"
+            helm-args: "--set certmanager.enabled=true"
             install-cert-manager: true
           - name: namespace-scoped
-            helm-args: "--set rbac.restrictWatchNamespaces='{default}' --set certmanager.enabled=true --set certmanager.install=false"
+            helm-args: "--set rbac.restrictWatchNamespaces='{default}' --set certmanager.enabled=true"
             install-cert-manager: true
           - name: byo-cert
-            # TODO(Mechack): After webhook.certSecretName PR merges, change to:
-            # helm-args: "--set certmanager.enabled=false --set certmanager.install=false --set webhook.certSecretName=byo-webhook-cert"
-            helm-args: "--set certmanager.enabled=false --set certmanager.install=false"
+            helm-args: "--set certmanager.enabled=false --set webhook.certSecretName=byo-webhook-cert"
             install-cert-manager: false
     steps:
       - name: Checkout
@@ -47,12 +45,6 @@ jobs:
 
       - name: Load image into Kind
         run: kind load docker-image temporal-worker-controller:e2e --name twc-e2e
-
-      # TODO(Mechack): Remove this step after the remove certmanager subchart merges
-      - name: Build Helm dependencies
-        run: |
-          helm repo add jetstack https://charts.jetstack.io
-          helm dependency build helm/temporal-worker-controller
 
       - name: Install cert-manager
         if: matrix.mode.install-cert-manager
@@ -72,16 +64,15 @@ jobs:
             -n cert-manager --timeout=60s
           sleep 5
 
-        # TODO(Mechack): After webhook.certSecretName PR merges, rename to byo-webhook-cert
-        # and set webhook.certSecretName=byo-webhook-cert in helm-args to test
       - name: Generate BYO certificate
         if: ${{ !matrix.mode.install-cert-manager }}
         run: |
           kubectl create namespace temporal-system --dry-run=client -o yaml | kubectl apply -f -
           openssl req -x509 -newkey rsa:2048 -keyout tls.key -out tls.crt \
             -days 1 -nodes -subj "/CN=temporal-worker-controller-webhook-service.temporal-system.svc"
-          kubectl create secret tls webhook-server-cert \
+          kubectl create secret tls byo-webhook-cert \
             --cert=tls.crt --key=tls.key -n temporal-system
+          echo "BYO_CA_BUNDLE=$(base64 < tls.crt | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Install CRDs chart
         run: |
@@ -91,21 +82,28 @@ jobs:
 
       - name: Install TWC
         run: |
+          EXTRA_ARGS=""
+          if [ "${{ matrix.mode.name }}" = "byo-cert" ]; then
+            EXTRA_ARGS="--set certmanager.caBundle=${BYO_CA_BUNDLE}"
+          fi
           helm install temporal-worker-controller helm/temporal-worker-controller \
             --namespace temporal-system \
             --set image.repository=temporal-worker-controller \
             --set image.tag=e2e \
             --set image.pullPolicy=IfNotPresent \
-            ${{ matrix.mode.helm-args }}
+            --set webhook.enabled=true \
+            ${{ matrix.mode.helm-args }} \
+            $EXTRA_ARGS
 
-      # TODO(Mechack): After webhook.certSecretName PR merges, update BYO mode to use
-      # a custom Secret name (e.g. byo-webhook-cert) to test the feature
-      # echo "Waiting for webhook cert Secret..."
       - name: Wait for webhook cert
         run: |
-          echo "Waiting for webhook cert Secret..."
+          SECRET_NAME="webhook-server-cert"
+          if [ "${{ matrix.mode.name }}" = "byo-cert" ]; then
+            SECRET_NAME="byo-webhook-cert"
+          fi
+          echo "Waiting for webhook cert Secret ${SECRET_NAME}..."
           for i in $(seq 1 60); do
-            if kubectl get secret webhook-server-cert -n temporal-system 2>/dev/null; then
+            if kubectl get secret "$SECRET_NAME" -n temporal-system 2>/dev/null; then
               echo "Secret found after ${i} attempts"
               break
             fi
