@@ -91,6 +91,9 @@ jobs:
           if [ "${{ matrix.mode.name }}" = "byo-cert" ]; then
             EXTRA_ARGS="--set certmanager.caBundle=${BYO_CA_BUNDLE}"
           fi
+          # EXTRA_ARGS is intentionally word-split into separate helm flags;
+          # when empty it expands to nothing (no empty-string argument).
+          # shellcheck disable=SC2086
           helm install temporal-worker-controller helm/temporal-worker-controller \
             --namespace temporal-system \
             --set image.repository=temporal-worker-controller \
@@ -125,6 +128,21 @@ jobs:
             -n temporal-system
           kubectl rollout status deployment/temporal-worker-controller-manager \
             -n temporal-system --timeout=120s
+
+      - name: Wait for webhook readiness
+        run: |
+          echo "Waiting for webhook to be ready..."
+          for i in $(seq 1 30); do
+            if kubectl get validatingwebhookconfiguration \
+              temporal-worker-controller-wd-validating-webhook-configuration -o jsonpath='{.webhooks[0].clientConfig.caBundle}' 2>/dev/null | grep -q .; then
+              echo "Webhook CA bundle injected after ${i} attempts"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "WARNING: Webhook CA bundle not injected after 150s, proceeding anyway"
+            fi
+            sleep 5
+          done
 
       - name: Check for error logs
         run: |
