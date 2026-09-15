@@ -46,6 +46,9 @@ jobs:
       - name: Load image into Kind
         run: kind load docker-image temporal-worker-controller:e2e --name twc-e2e
 
+      - name: Add Helm repos
+        run: helm repo add jetstack https://charts.jetstack.io
+
       - name: Install cert-manager
         if: matrix.mode.install-cert-manager
         run: |
@@ -69,7 +72,9 @@ jobs:
         run: |
           kubectl create namespace temporal-system --dry-run=client -o yaml | kubectl apply -f -
           openssl req -x509 -newkey rsa:2048 -keyout tls.key -out tls.crt \
-            -days 1 -nodes -subj "/CN=temporal-worker-controller-webhook-service.temporal-system.svc"
+            -days 1 -nodes \
+            -subj "/CN=temporal-worker-controller-webhook-service.temporal-system.svc" \
+            -addext "subjectAltName=DNS:temporal-worker-controller-webhook-service.temporal-system.svc"
           kubectl create secret tls byo-webhook-cert \
             --cert=tls.crt --key=tls.key -n temporal-system
           echo "BYO_CA_BUNDLE=$(base64 < tls.crt | tr -d '\n')" >> "$GITHUB_ENV"
