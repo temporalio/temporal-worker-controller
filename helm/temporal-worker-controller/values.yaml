@@ -176,7 +176,23 @@ certmanager:
   # the webhook cert Secret (see webhook.certSecretName). The Kubernetes API server uses this
   # to verify the webhook server's TLS certificate.
   # Leave empty when enabled: true — cert-manager injects the CA bundle automatically.
+  # Leave empty (and use caInjector below instead) if that CA rotates and you don't want
+  # to keep this value in sync by hand.
   caBundle: ""
+
+  # caInjector runs a Helm post-install/post-upgrade hook Job that patches the
+  # caBundle onto both ValidatingWebhookConfigurations from a Secret, instead of
+  # the static caBundle value above. Use this when your TLS cert is issued by an
+  # external PKI whose CA can rotate — every install/upgrade re-reads the CA, so
+  # there's nothing to keep in sync by hand. Only relevant when enabled: false;
+  # ignored otherwise.
+  caInjector:
+    enabled: false
+    image: bitnami/kubectl:1.31
+    # Secret holding the CA that signed the webhook server's TLS certificate.
+    # Must exist in the release namespace before install/upgrade.
+    caSecretName: ""
+    caSecretKey: ca.crt
 
 # Not yet supported
 prometheus:
