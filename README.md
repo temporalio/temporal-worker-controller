@@ -110,6 +110,59 @@ See [docs/crd-management.md](docs/crd-management.md) for upgrade, rollback, and 
 
 **Need configuration help?** → See the [Configuration Reference](docs/configuration.md) for all available options.
 
+## Webhook TLS Configuration
+
+The validating webhook requires TLS. Choose one of the following options.
+
+**Option 1: cert-manager (default)**
+
+With `certmanager.enabled: true` (the default), the chart creates an Issuer and Certificate resource. cert-manager generates the TLS certificate and stores it in a Secret. Cert-manager must be installed independently in the cluster before installing TWC.
+
+```bash
+# Install cert-manager (once per cluster)
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --set crds.enabled=true
+
+# Install TWC (cert-manager creates the webhook cert automatically)
+helm install temporal-worker-controller <chart> \
+  --namespace temporal-system \
+  --set certmanager.enabled=true
+```
+
+**Option 2: Bring your own certificate**
+
+If you manage TLS certificates outside of cert-manager, create the Secret yourself and tell TWC its name:
+
+```bash
+# Create your TLS Secret
+kubectl create secret tls my-webhook-cert \
+  --cert=webhook.pem \
+  --key=webhook-key.pem \
+  --namespace temporal-system
+
+# Install TWC pointing at your Secret
+helm install temporal-worker-controller <chart> \
+  --namespace temporal-system \
+  --set certmanager.enabled=false \
+  --set webhook.certSecretName=my-webhook-cert \
+  --set certmanager.caBundle=$(base64 < ca.pem)
+```
+
+The `webhook.certSecretName` value (default: `webhook-server-cert`) controls which Secret the controller pod mounts for TLS. The `caBundle` value tells the Kubernetes API server which CA to trust when calling the webhook.
+
+**Option 3: Self-managed with cert-manager**
+
+If you use cert-manager but want to control the Secret name:
+
+```bash
+helm install temporal-worker-controller <chart> \
+  --namespace temporal-system \
+  --set certmanager.enabled=true \
+  --set webhook.certSecretName=my-custom-cert-name
+```
+
 ## Features
 
 - ✅ **Registration of new Temporal Worker Deployment Versions**
