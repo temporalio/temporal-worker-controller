@@ -1,0 +1,97 @@
+# WorkerResourceTemplate — KEDA example
+#
+# This example attaches a KEDA ScaledObject to each active versioned Deployment
+# of the "helloworld" WorkerDeployment (from the local demo). Note that, unlike
+# the HPA examples, it is not wired into the demo directly, as KEDA and
+# prometheus-adapter cannot coexist in one cluster: Kubernetes permits exactly
+# one APIService for external.metrics.k8s.io, and both claim it.
+#
+# The controller renders one ScaledObject per Build ID and deletes each copy
+# when its Deployment is sunset.
+#
+# Apply:
+#   kubectl apply -f examples/wrt-keda.yaml
+#
+# Verify:
+#   kubectl get wrt              # shows Applied status per Build ID
+#   kubectl get scaledobject     # one per active Build ID
+#   kubectl get hpa              # KEDA creates an HPA behind each ScaledObject
+#
+# See docs/scaling-recommendations.md for full documentation.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-keda
+  # Deploy into the same namespace as the helloworld WorkerDeployment.
+  namespace: default
+spec:
+  # Must match the name of the WorkerDeployment.
+  workerDeploymentRef:
+    name: helloworld
+
+  # The resource template. The controller creates one copy per active Build ID,
+  # naming each one "<wdName>-<wrtName>-<buildID>-<hash>", where <hash> is 8 hex
+  # characters and the prefix is truncated to fit Kubernetes name limits — e.g.
+  # "helloworld-helloworld-keda-v1-5f8b0251". Match on the labels rather than
+  # parsing the name.
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      # Setting scaleTargetRef to {} tells the controller to auto-inject the
+      # correct versioned Deployment reference for each Build ID. Do not set this
+      # to a real value as the the webhook will reject it.
+      # Note: {} (empty object) is required here. Writing null looks equivalent in
+      # YAML but the Kubernetes API server deletes null-valued keys before storage,
+      # so the controller would never see the field and injection would not occur.
+      scaleTargetRef: {}
+
+      # Keep minReplicaCount at 1 or higher: a rollout only progresses once
+      # Temporal sees pollers for the version, so at zero replicas it stalls.
+      minReplicaCount: 1
+      maxReplicaCount: 3
+
+      # Each poll costs roughly one Temporal API call against a per-namespace
+      # rate limit shared by every ScaledObject in the namespace. See the polling
+      # budget table in docs/scaling-recommendations.md before lowering this.
+      pollingInterval: 10
+      cooldownPeriod: 30
+
+      triggers:
+        - type: temporal
+          # A KEDA TriggerAuthentication in this namespace holding the Temporal
+          # Cloud API key. For details on how to create it, see
+          # docs/scaling-recommendations.md.
+          authenticationRef:
+            name: keda-trigger-auth-temporal
+          metadata:
+            # Use one of the Temporal Cloud regional gRPC endpoints, in the form
+            # <region>.<cloud-provider>.api.temporal.io:7233. The value below is
+            # us-east-1 on AWS; set it to your own namespace's region. Regions
+            # and their endpoints are listed at https://docs.temporal.io/cloud/regions
+            endpoint: us-east-1.aws.api.temporal.io:7233
+
+            # The task queue your workers poll. The helloworld demo worker uses
+            # "<k8s-namespace>/<release-name>"; set this to your own queue.
+            taskQueue: default/helloworld
+
+            # Watch the activity queue, as that's where work actually piles up
+            # (workflow tasks come and go quickly).
+            queueTypes: activity
+
+            # Scale up once the backlog exceeds this many tasks per replica.
+            # 5 is KEDA's default; tune it to your activity duration and the
+            # worker's MaxConcurrentActivityExecutionSize.
+            targetQueueSize: "5"
+
+            # The empty string is the opt-in sentinel for the three identifiers
+            # the controller owns, filled in per rendered copy:
+            #   namespace               -> the Temporal namespace
+            #   workerDeploymentName    -> "<k8s-namespace>/<wd-name>", the name
+            #                              workers register with the server
+            #   workerDeploymentBuildId -> this copy's Build ID; the value that
+            #                              scopes the backlog query to one version
+            # A non-empty value here is rejected by the validating webhook.
+            namespace: ""
+            workerDeploymentName: ""
+            workerDeploymentBuildId: ""
