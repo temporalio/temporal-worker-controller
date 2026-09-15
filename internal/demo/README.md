@@ -10,7 +10,7 @@ This guide will help you set up and run the Temporal Worker Controller locally u
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - Temporal Cloud account with API key or mTLS certificates
 - Understanding of [Worker Versioning concepts](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning) (Pinned and Auto-Upgrade versioning behaviors)
-- cert-manager is required for the `WorkerResourceTemplate` validating webhook (TLS). The controller Helm chart installs it automatically as a subchart (`certmanager.install: true` is set in the Skaffold profile).
+- cert-manager is required for the `WorkerResourceTemplate` validating webhook (TLS). Cert-manager is installed as a separate Helm release in the Skaffold profile.
 
 > **Note**: This demo specifically showcases **Pinned** workflow behavior. All workflows in the demo will remain on the worker version where they started, demonstrating how the controller safely manages multiple worker versions simultaneously during deployments.
 

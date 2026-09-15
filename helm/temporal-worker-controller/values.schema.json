@@ -215,7 +215,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Whether to enable cert-manager"
+          "description": "Whether to create cert-manager Issuer and Certificate resources for webhook TLS"
         }
       }
     },
