@@ -670,8 +670,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 // because the k8s Deployment has no build ID label. The removed k8s deployments
 // stay in the cluster so that a later reconcile retries the pruning.
 //
-// DeleteVersion does not check pinned execution visibility for Inactive versions,
-// which can receive workflows through VersioningOverride. Check visibility first.
+// Because DeleteVersion does not check to see if there are open workflows using
+// pinned execution for Inactive versions, we query the Temporal visibility service
+// for open pinned workflows before deleting Inactive versions.
 // Like Temporal drainage, visibility is eventually consistent: callers must stop
 // sending new pinned overrides to a version being retired. This is not an atomic
 // exclusion against concurrent workflow starts or override updates.
@@ -704,7 +705,9 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 ) {
 	identity := getControllerIdentity()
 	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
-	retainedInactiveBuilds := make(map[string]bool)
+	// Worker resources have a separate deletion list. Track retained inactive
+	// versions so skipping their Deployments also preserves their resources.
+	retainedResourceBuilds := make(map[string]bool)
 	for _, d := range p.DeleteDeployments {
 		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
 		if !ok {
@@ -722,15 +725,14 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 		if slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
 			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
 		}) {
-			retainedInactiveBuilds[buildID] = true
-			// Visibility can contain either the legacy dot separator or the newer colon form.
-			legacyVersion := strings.ReplaceAll(p.WorkerDeploymentName+"."+buildID, "'", "''")
-			version := strings.ReplaceAll(p.WorkerDeploymentName+":"+buildID, "'", "''")
-			count, err := temporalClient.CountWorkflow(ctx, &workflowservice.CountWorkflowExecutionsRequest{
-				Query: fmt.Sprintf("TemporalWorkerDeploymentVersion IN ('%s', '%s') AND TemporalWorkflowVersioningBehavior = 'Pinned' AND ExecutionStatus = 'Running'", legacyVersion, version),
-			})
-			if err != nil || count == nil || count.Count != 0 {
+			retainedResourceBuilds[buildID] = true
+			count, err := getOpenPinnedWorkflowExecutions(ctx, temporalClient, p.WorkerDeploymentName, buildID)
+			if err != nil || count == nil {
 				l.Info("could not confirm inactive version has no running pinned workflows, keeping its Deployment", "buildID", buildID, "error", err)
+				continue
+			}
+			if count.Count != 0 {
+				l.Info("inactive version has running pinned workflows, keeping its Deployment", "buildID", buildID, "count", count.Count)
 				continue
 			}
 		}
@@ -753,15 +755,34 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			l.Info("deleted deprecated worker deployment version", "buildID", buildID)
 		}
 		markedForDeletion = append(markedForDeletion, d)
-		delete(retainedInactiveBuilds, buildID)
+		delete(retainedResourceBuilds, buildID)
 	}
 	p.DeleteDeployments = markedForDeletion
 	// Resources nominated with an inactive Deployment must survive if its deletion
 	// was refused. Otherwise, for example, its ConfigMaps could disappear underneath
 	// a version retained for pinned workflows.
 	p.DeleteWorkerResources = slices.DeleteFunc(p.DeleteWorkerResources, func(ref planner.WorkerResourceRef) bool {
-		return retainedInactiveBuilds[ref.BuildID]
+		return retainedResourceBuilds[ref.BuildID]
 	})
+}
+
+func getOpenPinnedWorkflowExecutions(
+	ctx context.Context,
+	temporalClient sdkclient.Client,
+	deploymentName string,
+	buildID string,
+) (*workflowservice.CountWorkflowExecutionsResponse, error) {
+	// Visibility can contain either the legacy dot separator or the newer colon form.
+	legacyVersion := strings.ReplaceAll(deploymentName+"."+buildID, "'", "''")
+	version := strings.ReplaceAll(deploymentName+":"+buildID, "'", "''")
+	qs := fmt.Sprintf(
+		"TemporalWorkerDeploymentVersion IN ('%s', '%s') "+
+			"AND TemporalWorkflowVersioningBehavior = 'Pinned' "+
+			"AND ExecutionStatus = 'Running'",
+		legacyVersion, version,
+	)
+	req := &workflowservice.CountWorkflowExecutionsRequest{Query: qs}
+	return temporalClient.CountWorkflow(ctx, req)
 }
 
 // isVersionNotRegistered checks whether the Temporal server had no record of buildID when
