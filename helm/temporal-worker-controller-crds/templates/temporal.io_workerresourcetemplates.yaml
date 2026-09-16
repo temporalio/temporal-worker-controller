@@ -111,6 +111,10 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                format: int64
+                minimum: 0
+                type: integer
               versions:
                 items:
                   properties:

@@ -110,6 +110,16 @@ type WorkerResourceTemplateStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ObservedGeneration is the .metadata.generation the controller last
+	// reconciled. Compare against .metadata.generation to tell whether the
+	// controller has caught up with the latest spec change.
+	//
+	// This is the only generation field kstatus consults; the per-entry
+	// observedGeneration carried on each condition is not read by it.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 //+kubebuilder:object:root=true
