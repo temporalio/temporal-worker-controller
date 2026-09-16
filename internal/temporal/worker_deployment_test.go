@@ -12,9 +12,13 @@ import (
 
 	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/api/workflowservice/v1"
+	temporalClient "go.temporal.io/sdk/client"
 )
 
 func TestVersionStatusMap(t *testing.T) {
@@ -198,4 +202,83 @@ func eventually(t *testing.T, timeout, interval time.Duration, check func() erro
 	if lastErr != nil {
 		t.Fatalf("eventually failed after %s: %v", timeout, lastErr)
 	}
+}
+
+// describeTaskQueueStub is a minimal temporalClient.Client that only implements
+// DescribeTaskQueue, recording which (name, type) pairs it was called with and
+// returning a canned response keyed by type. Embedding the interface (left nil)
+// satisfies every other method without needing a full mock.
+type describeTaskQueueStub struct {
+	temporalClient.Client
+	responses map[enumspb.TaskQueueType]*workflowservice.DescribeTaskQueueResponse
+	calls     []enumspb.TaskQueueType
+}
+
+func (s *describeTaskQueueStub) DescribeTaskQueue(_ context.Context, _ string, taskqueueType enumspb.TaskQueueType) (*workflowservice.DescribeTaskQueueResponse, error) {
+	s.calls = append(s.calls, taskqueueType)
+	return s.responses[taskqueueType], nil
+}
+
+func TestGetPollersCoversWorkflowActivityAndNexusTaskQueues(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		queueType     temporalClient.TaskQueueType
+		protoType     enumspb.TaskQueueType
+		wantIdentity  string
+		wantCallCount int
+	}{
+		{
+			name:          "workflow task queue",
+			queueType:     temporalClient.TaskQueueTypeWorkflow,
+			protoType:     enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+			wantIdentity:  "workflow-poller",
+			wantCallCount: 1,
+		},
+		{
+			name:          "activity task queue",
+			queueType:     temporalClient.TaskQueueTypeActivity,
+			protoType:     enumspb.TASK_QUEUE_TYPE_ACTIVITY,
+			wantIdentity:  "activity-poller",
+			wantCallCount: 1,
+		},
+		{
+			name:          "nexus task queue",
+			queueType:     temporalClient.TaskQueueTypeNexus,
+			protoType:     enumspb.TASK_QUEUE_TYPE_NEXUS,
+			wantIdentity:  "nexus-poller",
+			wantCallCount: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &describeTaskQueueStub{
+				responses: map[enumspb.TaskQueueType]*workflowservice.DescribeTaskQueueResponse{
+					tc.protoType: {Pollers: []*taskqueuepb.PollerInfo{{Identity: tc.wantIdentity}}},
+				},
+			}
+			pollers, err := getPollers(context.Background(), stub, temporalClient.WorkerDeploymentTaskQueueInfo{
+				Name: "tq", Type: tc.queueType,
+			})
+			require.NoError(t, err)
+			require.Len(t, pollers, 1)
+			assert.Equal(t, tc.wantIdentity, pollers[0].GetIdentity())
+			assert.Equal(t, []enumspb.TaskQueueType{tc.protoType}, stub.calls)
+		})
+	}
+}
+
+// TestGetTaskQueuesWithNoPollersDoesNotFalsePositiveOnNexus is a regression test for the bug
+// where getPollers had no case for TaskQueueTypeNexus: the switch fell through with a nil
+// DescribeTaskQueueResponse, GetPollers() on nil returned an empty slice, and every Nexus task
+// queue was reported as having no active poller even when one was actively polling it.
+func TestGetTaskQueuesWithNoPollersDoesNotFalsePositiveOnNexus(t *testing.T) {
+	stub := &describeTaskQueueStub{
+		responses: map[enumspb.TaskQueueType]*workflowservice.DescribeTaskQueueResponse{
+			enumspb.TASK_QUEUE_TYPE_NEXUS: {Pollers: []*taskqueuepb.PollerInfo{{Identity: "nexus-poller"}}},
+		},
+	}
+	withoutPollers, err := getTaskQueuesWithNoPollers(context.Background(), stub, []temporalClient.WorkerDeploymentTaskQueueInfo{
+		{Name: "nexus-tq", Type: temporalClient.TaskQueueTypeNexus},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, withoutPollers, "a Nexus task queue with an active poller must not be reported as having no poller")
 }

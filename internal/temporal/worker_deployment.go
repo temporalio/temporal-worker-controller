@@ -476,6 +476,8 @@ func getPollers(ctx context.Context,
 		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeWorkflow)
 	case temporalClient.TaskQueueTypeActivity:
 		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeActivity)
+	case temporalClient.TaskQueueTypeNexus:
+		resp, err = client.DescribeTaskQueue(ctx, taskQueueInfo.Name, temporalClient.TaskQueueTypeNexus)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("unable to describe task queue %s: %w", taskQueueInfo.Name, err)
