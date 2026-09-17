@@ -17,15 +17,11 @@
     "certmanager": {
       "properties": {
         "caBundle": {
-          "description": "caBundle is only used when enabled: false (i.e. you are managing webhook TLS yourself).\nSet this to the base64-encoded PEM CA certificate that signed the TLS certificate in\nthe \"webhook-server-cert\" Secret. The Kubernetes API server uses this to verify the\nwebhook server's TLS certificate.\nLeave empty when enabled: true — cert-manager injects the CA bundle automatically.",
+          "description": "caBundle is only used when enabled: false (i.e. you are managing webhook TLS yourself).\nSet this to the base64-encoded PEM CA certificate that signed the TLS certificate in\nthe webhook cert Secret (see webhook.certSecretName). The Kubernetes API server uses this\nto verify the webhook server's TLS certificate.\nLeave empty when enabled: true — cert-manager injects the CA bundle automatically.",
           "type": "string"
         },
         "enabled": {
-          "description": "enabled controls creation of the cert-manager Issuer and Certificate used for\nwebhook TLS. cert-manager must be installed in the cluster (either via the\nsubchart above or separately).\nSet to false only if you are providing your own TLS certificate (see caBundle below).",
-          "type": "boolean"
-        },
-        "install": {
-          "description": "install controls whether cert-manager is installed as a Helm subchart.\nSet to true if cert-manager is not already installed in the cluster.\nSee https://cert-manager.io/docs/installation/",
+          "description": "enabled controls creation of the cert-manager Issuer and Certificate used for\nwebhook TLS. cert-manager must be installed in the cluster independently.\nSet to false only if you are providing your own TLS certificate (see caBundle below).",
           "type": "boolean"
         }
       },
@@ -330,6 +326,9 @@
     "webhook": {
       "properties": {
         "certDir": {
+          "type": "string"
+        },
+        "certSecretName": {
           "type": "string"
         },
         "enabled": {
