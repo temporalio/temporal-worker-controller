@@ -35,7 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -58,7 +58,7 @@ func newTestScheme() *runtime.Scheme {
 }
 
 // newTestReconciler creates a WorkerDeploymentReconciler with a fake client and recorder.
-func newTestReconciler(objs []client.Object) (*WorkerDeploymentReconciler, *record.FakeRecorder) {
+func newTestReconciler(objs []client.Object) (*WorkerDeploymentReconciler, *events.FakeRecorder) {
 	r, recorder, _ := newTestReconcilerWithInterceptors(objs, interceptor.Funcs{})
 	return r, recorder
 }
@@ -66,7 +66,7 @@ func newTestReconciler(objs []client.Object) (*WorkerDeploymentReconciler, *reco
 // newTestReconcilerWithInterceptors creates a reconciler with a fake client that uses custom interceptors.
 // It also returns the ClientPool backing the default providers, so eviction tests can inject
 // poisoned clients and assert cache state via SetClientForTesting / GetSDKClient.
-func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.Funcs) (*WorkerDeploymentReconciler, *record.FakeRecorder, *clientpool.ClientPool) {
+func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.Funcs) (*WorkerDeploymentReconciler, *events.FakeRecorder, *clientpool.ClientPool) {
 	scheme := newTestScheme()
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -90,7 +90,7 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 		WithInterceptorFuncs(funcs).
 		Build()
 
-	recorder := record.NewFakeRecorder(10)
+	recorder := events.NewFakeRecorder(10)
 
 	pool := clientpool.New(nil, fakeClient)
 	providers := []connectionprovider.ConnectionProvider{
@@ -172,7 +172,7 @@ func makeNoCredsConnection(name, namespace, hostPort string) *temporaliov1alpha1
 }
 
 // drainEvents reads all pending events from the recorder channel.
-func drainEvents(recorder *record.FakeRecorder) []string {
+func drainEvents(recorder *events.FakeRecorder) []string {
 	var events []string
 	for {
 		select {

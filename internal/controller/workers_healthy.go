@@ -62,10 +62,10 @@ func (r *WorkerDeploymentReconciler) setConditionProgressingForCurrent(
 	}
 	switch reason {
 	case temporaliov1alpha1.ReasonWaitingForPollers:
-		r.Recorder.Eventf(twd, corev1.EventTypeWarning, temporaliov1alpha1.ReasonWaitingForPollers,
+		r.Recorder.Eventf(twd, nil, corev1.EventTypeWarning, temporaliov1alpha1.ReasonWaitingForPollers, temporaliov1alpha1.ReasonWaitingForPollers,
 			"Version %s has no active pollers on task queue(s): %s", buildID, strings.Join(affectedQueues, ", "))
 	case temporaliov1alpha1.ReasonActivePollers:
-		r.Recorder.Eventf(twd, corev1.EventTypeNormal, temporaliov1alpha1.ReasonActivePollers,
+		r.Recorder.Eventf(twd, nil, corev1.EventTypeNormal, temporaliov1alpha1.ReasonActivePollers, temporaliov1alpha1.ReasonActivePollers,
 			"Version %s has active pollers on all known task queues", buildID)
 	case temporaliov1alpha1.ReasonPollerStatusUnknown:
 		// Don't emit an event for Unknown -- it just means "don't know yet", not a

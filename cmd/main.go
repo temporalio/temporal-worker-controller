@@ -157,7 +157,7 @@ func main() {
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		Providers: clientpool.NewDefaultProviders(mgr.GetClient()),
-		Recorder:  mgr.GetEventRecorderFor("temporal-worker-controller"),
+		Recorder:  mgr.GetEventRecorder("temporal-worker-controller"),
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 		DisableDeprecatedTWD:                       !deprecatedCRDWatches.TemporalWorkerDeployments,
 		DisableClusterConnections:                  namespaceScoped,

@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -65,7 +65,7 @@ type WorkerDeploymentReconciler struct {
 	// reconciler never mutates it. A wrapper binary appends its own kinds to
 	// the default slice from clientpool.NewDefaultProviders.
 	Providers []connectionprovider.ConnectionProvider
-	Recorder  record.EventRecorder
+	Recorder  events.EventRecorder
 
 	// Disables panic recovery if true
 	DisableRecoverPanic  bool
@@ -807,7 +807,7 @@ func (r *WorkerDeploymentReconciler) recordWarningAndSetBlocked(
 	eventMessage string,
 	conditionMessage string,
 ) {
-	r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, reason, "%s", eventMessage)
+	r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, reason, reason, "%s", eventMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, reason, conditionMessage)
 	r.setCondition(workerDeploy, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, reason, conditionMessage)
 	// Deprecated: set ConnectionHealthy=False for v1.3.x compat, but only for
