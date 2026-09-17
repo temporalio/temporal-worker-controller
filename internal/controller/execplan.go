@@ -705,9 +705,6 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 ) {
 	identity := getControllerIdentity()
 	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
-	// Worker resources have a separate deletion list. Track retained inactive
-	// versions so skipping their Deployments also preserves their resources.
-	retainedResourceBuilds := make(map[string]bool)
 	for _, d := range p.DeleteDeployments {
 		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
 		if !ok {
@@ -725,7 +722,6 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 		if slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
 			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
 		}) {
-			retainedResourceBuilds[buildID] = true
 			count, err := getOpenPinnedWorkflowExecutions(ctx, temporalClient, p.WorkerDeploymentName, buildID)
 			if err != nil || count == nil {
 				l.Info("could not confirm inactive version has no running pinned workflows, keeping its Deployment", "buildID", buildID, "error", err)
@@ -755,15 +751,27 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			l.Info("deleted deprecated worker deployment version", "buildID", buildID)
 		}
 		markedForDeletion = append(markedForDeletion, d)
-		delete(retainedResourceBuilds, buildID)
+	}
+	// Keep resources belonging to inactive Deployments whose deletion was refused.
+	// Other resource deletions, such as orphan cleanup, remain in the plan.
+	for _, d := range p.DeleteDeployments {
+		if slices.Contains(markedForDeletion, d) {
+			continue
+		}
+		buildID, ok := d.Labels[k8s.BuildIDLabel]
+		if !ok {
+			continue
+		}
+		if !slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
+			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
+		}) {
+			continue
+		}
+		p.DeleteWorkerResources = slices.DeleteFunc(p.DeleteWorkerResources, func(ref planner.WorkerResourceRef) bool {
+			return ref.BuildID == buildID
+		})
 	}
 	p.DeleteDeployments = markedForDeletion
-	// Resources nominated with an inactive Deployment must survive if its deletion
-	// was refused. Otherwise, for example, its ConfigMaps could disappear underneath
-	// a version retained for pinned workflows.
-	p.DeleteWorkerResources = slices.DeleteFunc(p.DeleteWorkerResources, func(ref planner.WorkerResourceRef) bool {
-		return retainedResourceBuilds[ref.BuildID]
-	})
 }
 
 func getOpenPinnedWorkflowExecutions(

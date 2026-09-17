@@ -648,11 +648,16 @@ func TestExecutePlan_InactiveVersionDeletion(t *testing.T) {
 			wrt.Spec.Template.Raw = []byte(`{"apiVersion":"v1","kind":"ConfigMap","data":{"test":"present"}}`)
 			oldConfig, oldHash := renderWRT(t, wrt, old, "old", testTemporalNamespace)
 			currentConfig, currentHash := renderWRT(t, wrt, current, "current", testTemporalNamespace)
+			// This resource outlived its Deployment and must still be cleaned up,
+			// even when the old version's Deployment and resources are retained.
+			orphan := makeVersionedDeployment(twd, "orphan", 0, connection)
+			orphanConfig, orphanHash := renderWRT(t, wrt, orphan, "orphan", testTemporalNamespace)
 			wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
 				k8s.WorkerResourceTemplateVersionStatusForBuildID("old", oldConfig.GetName(), 1, oldHash, ""),
 				k8s.WorkerResourceTemplateVersionStatusForBuildID("current", currentConfig.GetName(), 1, currentHash, ""),
+				k8s.WorkerResourceTemplateVersionStatusForBuildID("orphan", orphanConfig.GetName(), 1, orphanHash, ""),
 			}
-			r, _ := newTestReconciler([]client.Object{twd, old, current, wrt, oldConfig, currentConfig})
+			r, _ := newTestReconciler([]client.Object{twd, old, current, wrt, oldConfig, currentConfig, orphanConfig})
 			handle := newPruneStubHandle(tc.deleteErr)
 			c := &inactivePruneClient{stubTemporalClient: newStubTemporalClientWithHandle(handle), response: tc.response, err: tc.countErr}
 			status := statusWithDeprecated("current", current, &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
@@ -677,6 +682,8 @@ func TestExecutePlan_InactiveVersionDeletion(t *testing.T) {
 				require.NoError(t, configErr, "retained version must keep its rendered resources")
 			}
 			require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: currentConfig.GetName()}, &corev1.ConfigMap{}))
+			orphanErr := r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: orphanConfig.GetName()}, &corev1.ConfigMap{})
+			require.True(t, apierrors.IsNotFound(orphanErr), "orphan cleanup must continue when another version is retained")
 			require.Contains(t, c.query, "TemporalWorkerDeploymentVersion IN ('default/my-worker.old', 'default/my-worker:old')")
 			require.Contains(t, c.query, "TemporalWorkflowVersioningBehavior = 'Pinned'")
 			require.Contains(t, c.query, "ExecutionStatus = 'Running'")

@@ -113,11 +113,14 @@ func testInactiveVersionRetirement(t *testing.T, k8sClient client.Client, ts *te
 			return err
 		}
 		for _, v := range next.Status.DeprecatedVersions {
-			if v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive && v.DrainedSince == nil {
-				return nil
+			if v.BuildID == buildID {
+				if v.Status == temporaliov1alpha1.VersionStatusInactive && v.DrainedSince == nil {
+					return nil
+				}
+				return fmt.Errorf("superseded version has status %s and drainedSince %v", v.Status, v.DrainedSince)
 			}
 		}
-		return fmt.Errorf("superseded version is not yet Inactive")
+		return fmt.Errorf("superseded version %s is not yet in deprecated versions", buildID)
 	})
 	stopOnce()
 	scaleDeploymentToZero(t, ctx, k8sClient, oldKey.Name, namespace)
