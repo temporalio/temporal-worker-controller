@@ -108,7 +108,7 @@ The following steps have been tested on both Helm 3.21.4 and Helm 4.2.3:
 6. Install cert-manager independently
 7. Verify
 
-#### Step 1: Annotate cert-manager resources
+#### Annotate cert-manager resources
 
 Add the `helm.sh/resource-policy: keep` annotation to every cert-manager resource owned by the TWC release. This tells Helm to preserve them during the upgrade.
 
