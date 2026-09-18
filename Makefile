@@ -307,6 +307,11 @@ $(HELM): $(LOCALBIN)
                                 && chmod 700 get_helm.sh \
                                 && HELM_INSTALL_DIR=$(LOCALBIN) USE_SUDO=false DESIRED_VERSION=$(HELM_VERSION) ./get_helm.sh --no-sudo \
                                 && rm get_helm.sh; }
+
+.PHONY: helm-values-schema
+helm-values-schema: ## Generate helm/temporal-worker-controller/values.schema.json from values.yaml.
+	go run ./hack/helm-values-schema
+
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary. If wrong version is installed, it will be overwritten.
 $(CONTROLLER_GEN): $(LOCALBIN)
