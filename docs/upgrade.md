@@ -223,7 +223,7 @@ kubectl get secret webhook-server-cert -n temporal-system
 kubectl get pods -n temporal-system | grep manager
 ```
 
-#### Step 3: Transfer CRD ownership
+#### Transfer cert-manager CRD ownership
 
 The cert-manager CRDs still carry ownership labels pointing to the TWC release. The independent cert-manager install needs to adopt them:
 
