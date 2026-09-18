@@ -17,3 +17,9 @@ const (
 	// managed by this identity for clean reclamation with the new identity format.
 	DeprecatedDefaultControllerIdentity = "temporal-worker-controller"
 )
+
+// Retry intervals for DeleteWorkerDeploymentVersion
+const (
+	VersionDeleteBaseInterval = 10 * time.Second
+	VersionDeleteMaxInterval  = 30 * time.Minute
+)
