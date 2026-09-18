@@ -61,7 +61,7 @@ Set the `webhook.enabled` (default: `false`) Helm chart value to enable this web
 The WorkerResourceTemplate webhook validates `WorkerResourceTemplate` resources on create, update and delete of a WorkerDeployment. This webhook cannot be disabled.
 
 
-### Why a TLS certificate is always required
+### TLS configuration
 
 Kubernetes requires all webhooks to serve HTTPS. Because the WRT webhook is always on, the controller pod **always** needs a TLS certificate - regardless of the `webhook.enabled` setting. The certificate is mounted from a Kubernetes Secret into the pod.
 
