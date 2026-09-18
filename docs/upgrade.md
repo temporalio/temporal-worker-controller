@@ -73,9 +73,11 @@ the README.
 
 ## Migrating from the cert-manager Subchart
 
-### Who is affected
+Prior to Temporal Worker Controller `v1.11.0` (Helm Chart version `v0.30.0`), the Helm chart listed the separate `cert-manager` Helm Chart as a dependent sub-chart.
 
-Only users who previously set `certmanager.install: true` in their TWC Helm values. This installed cert-manager **as a subchart** inside TWC's Helm release. The default was `false`
+In release `v1.11.0` (Chart version `v0.30.0`), that dependent sub-chart was removed and users are required to manage the installation of `cert-manager` separately from Temporal Worker Controller.
+
+Users who previously set `certmanager.install: true` in their Temporal Worker Controller Helm Chart values triggered the installation of `cert-manager`. Note that the default value for `certmanager.install` was `false`.
 
 If you are unsure if you're affected, check:
 
