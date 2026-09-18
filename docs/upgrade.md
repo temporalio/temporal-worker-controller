@@ -232,7 +232,7 @@ for crd in challenges.acme.cert-manager.io \
 done
 ```
 
-#### Step 4: Transfer Certificate and Issuer ownership
+#### Transfer Certificate and Issuer ownership
 
 > **Important:** Without this step, the new cert-manager instance will not renew the webhook certificate when it expires. The existing certificate continues to work until expiry, but renewal will silently fail.
 
