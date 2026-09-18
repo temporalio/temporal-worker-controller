@@ -63,7 +63,7 @@ The WorkerResourceTemplate webhook validates `WorkerResourceTemplate` resources 
 
 ### TLS configuration
 
-Kubernetes requires all webhooks to serve HTTPS. Because the WRT webhook is always on, the controller pod **always** needs a TLS certificate - regardless of the `webhook.enabled` setting. The certificate is mounted from a Kubernetes Secret into the pod.
+Kubernetes requires all webhooks to serve HTTPS. Because the WorkerResourceTemplate webhook is always on, the controller Pod **always** needs a TLS certificate, regardless of the `webhook.enabled` setting. The certificate is mounted from a Kubernetes Secret into the controller Pod.
 
 ### Certificate options
 
