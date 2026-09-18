@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -138,9 +139,15 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		t.Fatalf("failed to create k8s client: %v", err)
 	}
 
-	// Create manager
+	// Create manager. SkipNameValidation lets the same reconciler name be registered
+	// across multiple Test functions in one process (controller-runtime otherwise enforces
+	// globally-unique controller names for metrics).
+	skipNameValidation := true
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
+		Controller: config.Controller{
+			SkipNameValidation: &skipNameValidation,
+		},
 	})
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
