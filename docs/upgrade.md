@@ -50,16 +50,15 @@ helm upgrade temporal-worker-controller \
   --namespace temporal-system
 ```
 
-## Webhook and TLS Configuration
+## Webhooks
 
-### What the webhooks do
+TWC runs two admission webhooks, one for the `WorkerDeployment` custom resource and another for the `WorkerResourceTemplate` [controller-generated resources](worker-resource-templates.md).
 
-TWC runs two admission webhooks:
+The WorkerDeployment webhook validates and defaults `WorkerDeployment` custom resources on create and update.
 
-| Webhook | Controls | Gated by |
-|---------|----------|----------|
-| **WorkerResourceTemplate** validator | Validates WRT create/update/delete. Security control with `failurePolicy: Fail` — if the webhook is down, all WRT operations are blocked cluster-wide. | Always on |
-| **WorkerDeployment** validator | Validates and defaults WD create/update. | `webhook.enabled` (default: `false`) |
+Set the `webhook.enabled` (default: `false`) Helm chart value to enable this webhook when installing or upgrading Temporal Worker Controller.
+
+The WorkerResourceTemplate webhook validates `WorkerResourceTemplate` resources on create, update and delete of a WorkerDeployment. This webhook cannot be disabled.
 
 
 ### Why a TLS certificate is always required
