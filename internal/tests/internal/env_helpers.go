@@ -16,6 +16,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/api/taskqueue/v1"
@@ -25,6 +26,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -153,12 +155,20 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		ReplaceAttr: nil,
 	}))), k8sClient)
 
+	// Build the connection providers from the client pool. The harness owns the
+	// pool so eviction tests can inject poisoned clients and assert cache state
+	// directly (see reconciler_events_test.go).
+	providers := []connectionprovider.ConnectionProvider{
+		clientpool.NewDefaultProvider(clientPool, schema.GroupKind{Group: temporaliov1alpha1.GroupVersion.Group, Kind: "Connection"}, false),
+		clientpool.NewDefaultProvider(clientPool, schema.GroupKind{Group: temporaliov1alpha1.GroupVersion.Group, Kind: "ClusterConnection"}, true),
+	}
+
 	// Set up controller
 	reconciler := &controller.WorkerDeploymentReconciler{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
-		TemporalClientPool:  clientPool,
-		Recorder:            mgr.GetEventRecorderFor("temporal-worker-controller"),
+		Providers:           providers,
+		Recorder:            mgr.GetEventRecorder("temporal-worker-controller"),
 		DisableRecoverPanic: true,
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 	}

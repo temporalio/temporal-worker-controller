@@ -48,7 +48,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		l.Info("creating deployment", "deployment", p.CreateDeployment)
 		if err := r.Create(ctx, p.CreateDeployment); err != nil {
 			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentCreateFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonDeploymentCreateFailed, ReasonDeploymentCreateFailed,
 				"Failed to create Deployment %q: %v", p.CreateDeployment.Name, err)
 			return nil, err
 		}
@@ -59,7 +59,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		l.Info("deleting deployment", "deployment", d)
 		if err := r.Delete(ctx, d); err != nil {
 			l.Error(err, "unable to delete deployment", "deployment", d)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentDeleteFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonDeploymentDeleteFailed, ReasonDeploymentDeleteFailed,
 				"Failed to delete Deployment %q: %v", d.Name, err)
 			return nil, err
 		}
@@ -120,7 +120,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 				"buildID", buildID,
 				"replicas", replicas,
 			)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentScaleFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonDeploymentScaleFailed, ReasonDeploymentScaleFailed,
 				"Failed to scale Deployment %q for Build ID %q to %d replicas: %v", d.Name, buildID, replicas, err)
 			return deletedWorkerResources, fmt.Errorf("unable to scale deployment: %w", err)
 		}
@@ -131,7 +131,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
 		if err := r.Update(ctx, d); err != nil {
 			l.Error(err, "unable to update deployment", "deployment", d)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentUpdateFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonDeploymentUpdateFailed, ReasonDeploymentUpdateFailed,
 				"Failed to update Deployment %q: %v", d.Name, err)
 			return deletedWorkerResources, fmt.Errorf("unable to update deployment: %w", err)
 		}
@@ -231,7 +231,7 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 		}
 		if err != nil {
 			l.Error(err, "unable to start test workflow execution", "workflowType", wf.workflowType, "buildID", wf.buildID, "taskQueue", wf.taskQueue)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonTestWorkflowStartFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonTestWorkflowStartFailed, ReasonTestWorkflowStartFailed,
 				"Failed to start gate workflow %q (buildID %s, taskQueue %s): %v", wf.workflowType, wf.buildID, wf.taskQueue, err)
 			return fmt.Errorf("unable to start test workflow execution: %w", err)
 		}
@@ -313,7 +313,7 @@ func (r *WorkerDeploymentReconciler) claimManagerIdentity(
 	})
 	if err != nil {
 		l.Error(err, "unable to claim manager identity")
-		r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonManagerIdentityClaimFailed,
+		r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonManagerIdentityClaimFailed, ReasonManagerIdentityClaimFailed,
 			"Failed to claim manager identity: %v", err)
 		return err
 	}
@@ -343,7 +343,7 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 			Identity:      getControllerIdentity(),
 		}); err != nil {
 			l.Error(err, "unable to set current deployment version", "buildID", vcfg.BuildID)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonVersionPromotionFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonVersionPromotionFailed, ReasonVersionPromotionFailed,
 				"Failed to set buildID %q as current version: %v", vcfg.BuildID, err)
 			return fmt.Errorf("unable to set current deployment version: %w", err)
 		}
@@ -366,7 +366,7 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 			Identity:      getControllerIdentity(),
 		}); err != nil {
 			l.Error(err, "unable to set ramping deployment version", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonVersionPromotionFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonVersionPromotionFailed, ReasonVersionPromotionFailed,
 				"Failed to set buildID %q as ramping version (%d%%): %v", vcfg.BuildID, vcfg.RampPercentage, err)
 			return fmt.Errorf("unable to set ramping deployment version: %w", err)
 		}
@@ -393,7 +393,7 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 		},
 	}); err != nil { // would be cool to do this atomically with the update
 		l.Error(err, "unable to update version metadata", "buildID", vcfg.BuildID)
-		r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonMetadataUpdateFailed,
+		r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonMetadataUpdateFailed, ReasonMetadataUpdateFailed,
 			"Failed to update version metadata for buildID %q: %v", vcfg.BuildID, err)
 		return fmt.Errorf("unable to update metadata after setting current deployment: %w", err)
 	}

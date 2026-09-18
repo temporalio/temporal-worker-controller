@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	deploymentpb "go.temporal.io/api/deployment/v1"
@@ -28,11 +29,13 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -55,12 +58,15 @@ func newTestScheme() *runtime.Scheme {
 }
 
 // newTestReconciler creates a WorkerDeploymentReconciler with a fake client and recorder.
-func newTestReconciler(objs []client.Object) (*WorkerDeploymentReconciler, *record.FakeRecorder) {
-	return newTestReconcilerWithInterceptors(objs, interceptor.Funcs{})
+func newTestReconciler(objs []client.Object) (*WorkerDeploymentReconciler, *events.FakeRecorder) {
+	r, recorder, _ := newTestReconcilerWithInterceptors(objs, interceptor.Funcs{})
+	return r, recorder
 }
 
 // newTestReconcilerWithInterceptors creates a reconciler with a fake client that uses custom interceptors.
-func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.Funcs) (*WorkerDeploymentReconciler, *record.FakeRecorder) {
+// It also returns the ClientPool backing the default providers, so eviction tests can inject
+// poisoned clients and assert cache state via SetClientForTesting / GetSDKClient.
+func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.Funcs) (*WorkerDeploymentReconciler, *events.FakeRecorder, *clientpool.ClientPool) {
 	scheme := newTestScheme()
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -84,18 +90,24 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 		WithInterceptorFuncs(funcs).
 		Build()
 
-	recorder := record.NewFakeRecorder(10)
+	recorder := events.NewFakeRecorder(10)
+
+	pool := clientpool.New(nil, fakeClient)
+	providers := []connectionprovider.ConnectionProvider{
+		clientpool.NewDefaultProvider(pool, schema.GroupKind{Group: temporaliov1alpha1.GroupVersion.Group, Kind: "Connection"}, false),
+		clientpool.NewDefaultProvider(pool, schema.GroupKind{Group: temporaliov1alpha1.GroupVersion.Group, Kind: "ClusterConnection"}, true),
+	}
 
 	r := &WorkerDeploymentReconciler{
 		Client:              fakeClient,
 		Scheme:              scheme,
-		TemporalClientPool:  clientpool.New(nil, fakeClient),
+		Providers:           providers,
 		Recorder:            recorder,
 		DisableRecoverPanic: true,
 		MaxDeploymentVersionsIneligibleForDeletion: 75,
 	}
 
-	return r, recorder
+	return r, recorder, pool
 }
 
 // makeWD creates a minimal WorkerDeployment for testing.
@@ -160,7 +172,7 @@ func makeNoCredsConnection(name, namespace, hostPort string) *temporaliov1alpha1
 }
 
 // drainEvents reads all pending events from the recorder channel.
-func drainEvents(recorder *record.FakeRecorder) []string {
+func drainEvents(recorder *events.FakeRecorder) []string {
 	var events []string
 	for {
 		select {
@@ -602,6 +614,78 @@ func TestReconcile_ConnectionNotFound(t *testing.T) {
 	assert.Equal(t, metav1.ConditionFalse, connHealthy.Status)
 }
 
+// TestReconcile_UnknownConnectionKind verifies that a WorkerDeployment whose
+// ConnectionRef targets a GroupKind no connection provider is registered for is
+// surfaced as a status condition (ReasonUnknownConnectionKind) rather than a
+// transient error. The CEL kind allowlist was dropped so wrapper binaries can
+// register new connection kinds; an unregistered kind must not wedge the
+// reconciler in a retry loop.
+func TestReconcile_UnknownConnectionKind(t *testing.T) {
+	twd := makeWD("test-worker", "default", "") // connectionName unused; we set ObjectRef below
+	twd.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{
+		ObjectRef: &corev1.TypedObjectReference{
+			APIGroup: ptr("temporal.io"),
+			Kind:     "SomeOtherKind",
+			Name:     "my-connection",
+		},
+	}
+
+	r, recorder := newTestReconciler([]client.Object{twd})
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+	require.NoError(t, err, "unknown kind is a status condition, not a transient error")
+	assert.Zero(t, result.RequeueAfter, "should not requeue — the user must correct the connectionRef")
+
+	events := drainEvents(recorder)
+	assertEventEmitted(t, events, temporaliov1alpha1.ReasonUnknownConnectionKind)
+
+	var updated temporaliov1alpha1.WorkerDeployment
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated))
+	cond := meta.FindStatusCondition(updated.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
+	require.NotNil(t, cond, "Progressing condition should be set")
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, temporaliov1alpha1.ReasonUnknownConnectionKind, cond.Reason)
+	assert.Contains(t, cond.Message, "SomeOtherKind", "condition message should name the unknown kind")
+}
+
+// TestReconcile_UnknownConnectionKind_Deletable verifies that a WorkerDeployment
+// whose ConnectionRef targets an unregistered kind can still be deleted. The
+// reconcile path blocks before placing any connection finalizer or creating any
+// Temporal server-side state, so deletion must succeed instead of wedging in a
+// retry loop on the failed provider lookup. Regression test for the cleanup bug
+// introduced when the CEL objectRef.kind allowlist was dropped.
+func TestReconcile_UnknownConnectionKind_Deletable(t *testing.T) {
+	now := metav1.Now()
+	twd := makeWD("test-worker", "default", "")
+	twd.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{
+		ObjectRef: &corev1.TypedObjectReference{
+			APIGroup: ptr("temporal.io"),
+			Kind:     "SomeOtherKind",
+			Name:     "my-connection",
+		},
+	}
+	twd.Finalizers = []string{finalizerName}
+	twd.DeletionTimestamp = &now
+
+	r, _ := newTestReconciler([]client.Object{twd})
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+	require.NoError(t, err, "deletion of an unknown-kind WD must not error or requeue")
+	assert.Zero(t, result.RequeueAfter, "must not requeue — there is nothing to clean up for an unknown kind")
+
+	// The fake client deletes the object once all finalizers are gone (mimicking
+	// the API server), so a NotFound result means the finalizer was removed and
+	// Kubernetes was allowed to complete the deletion.
+	var updated temporaliov1alpha1.WorkerDeployment
+	err = r.Get(context.Background(), types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &updated)
+	assert.True(t, apierrors.IsNotFound(err),
+		"the WD finalizer must be removed so Kubernetes can delete the resource; got err=%v", err)
+}
+
 // TestReconcile_ConnectionUnhealthy verifies that credential configuration
 // errors (regardless of auth type) emit ReasonAuthSecretInvalid and set the
 // ConnectionHealthy condition to False.
@@ -699,7 +783,7 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
 	listCallCount := 0
-	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
+	r, recorder, pool := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			listCallCount++
 			if listCallCount > 1 {
@@ -709,7 +793,7 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 		},
 	})
 
-	r.TemporalClientPool.SetClientForTesting(
+	pool.SetClientForTesting(
 		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
 		newStubTemporalClient(nil),
 	)
@@ -743,7 +827,7 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
-	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
+	r, recorder, pool := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
 		Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
 			if _, ok := obj.(*appsv1.Deployment); ok {
 				return errors.New("simulated Deployment create failure")
@@ -752,7 +836,7 @@ func TestReconcile_PlanExecutionFailed_EmitsEvent(t *testing.T) {
 		},
 	})
 
-	r.TemporalClientPool.SetClientForTesting(
+	pool.SetClientForTesting(
 		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
 		newStubTemporalClient(nil),
 	)
@@ -785,11 +869,11 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	tc := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
-	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{})
+	r, recorder, pool := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{})
 
 	stub := newStubTemporalClient(nil)
 	stub.describeDeploymentErr = &serviceerror.NotFound{}
-	r.TemporalClientPool.SetClientForTesting(
+	pool.SetClientForTesting(
 		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
 		stub,
 	)
@@ -815,8 +899,8 @@ func TestReconcile_SteadyState_SkipsStatusWrite(t *testing.T) {
 	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
 	writes := 0
-	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, countWDStatusWrites(&writes))
-	r.TemporalClientPool.SetClientForTesting(
+	r, _, pool := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, countWDStatusWrites(&writes))
+	pool.SetClientForTesting(
 		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
 		newStubTemporalClient(nil),
 	)
@@ -849,8 +933,8 @@ func TestReconcile_SpecChange_StillWritesStatus(t *testing.T) {
 	twd := makeWD("test-worker", k8sNamespace, tc.Name)
 
 	writes := 0
-	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, countWDStatusWrites(&writes))
-	r.TemporalClientPool.SetClientForTesting(
+	r, _, pool := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, countWDStatusWrites(&writes))
+	pool.SetClientForTesting(
 		noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
 		newStubTemporalClient(nil),
 	)
@@ -888,14 +972,14 @@ func TestReconcile_EvictsCachedClientOnTransportFailure(t *testing.T) {
 	conn := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 	twd := makeWD("test-worker", k8sNamespace, conn.Name)
 
-	r, recorder := newTestReconciler([]client.Object{twd, conn})
+	r, recorder, pool := newTestReconcilerWithInterceptors([]client.Object{twd, conn}, interceptor.Funcs{})
 
 	poolKey := noCredsPoolKey(conn.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace)
 	poisoned := newStubTemporalClient(nil)
 	poisoned.describeDeploymentErr = context.DeadlineExceeded
-	r.TemporalClientPool.SetClientForTesting(poolKey, poisoned)
+	pool.SetClientForTesting(poolKey, poisoned)
 
-	cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
+	cached, ok := pool.GetSDKClient(poolKey)
 	require.True(t, ok, "poisoned client should be cached before Reconcile runs")
 	require.Same(t, poisoned, cached)
 
@@ -906,7 +990,7 @@ func TestReconcile_EvictsCachedClientOnTransportFailure(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded, "the original transport error must propagate")
 	assertEventEmitted(t, drainEvents(recorder), temporaliov1alpha1.ReasonTemporalStateFetchFailed)
 
-	_, ok = r.TemporalClientPool.GetSDKClient(poolKey)
+	_, ok = pool.GetSDKClient(poolKey)
 	require.False(t, ok, "poisoned client must be evicted so the next reconcile dials a fresh one")
 }
 
@@ -981,7 +1065,7 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, tc.interceptors)
+			r, recorder, _ := newTestReconcilerWithInterceptors([]client.Object{twd}, tc.interceptors)
 			_, err := r.executeK8sOperations(context.Background(), logr.Discard(), twd, tc.makePlan(twd.Namespace))
 			require.Error(t, err)
 			assertEventEmitted(t, drainEvents(recorder), tc.expectedReason)
@@ -1019,7 +1103,7 @@ func TestBuildIDForDeployment(t *testing.T) {
 func TestStartTestWorkflows_StartFailed_EmitsEvent(t *testing.T) {
 	namespace := "default"
 	twd := makeWD("test-worker", namespace, "my-conn")
-	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+	r, recorder, _ := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
 
 	p := &plan{
 		WorkerDeploymentName: twd.Name,
@@ -1073,7 +1157,7 @@ func TestUpdateVersionConfig_EmitsEventOnFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			namespace := "default"
 			twd := makeWD("test-worker", namespace, "my-conn")
-			r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
+			r, recorder, _ := newTestReconcilerWithInterceptors([]client.Object{twd}, interceptor.Funcs{})
 
 			p := &plan{WorkerDeploymentName: twd.Name, UpdateVersionConfig: tc.config}
 			err := r.updateVersionConfig(context.Background(), logr.Discard(), twd, tc.handle, p)
@@ -1094,7 +1178,7 @@ func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
 		conn := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 		twd := makeWD("del-worker", k8sNamespace, conn.Name)
 
-		r, _ := newTestReconciler([]client.Object{twd, conn})
+		r, _, pool := newTestReconcilerWithInterceptors([]client.Object{twd, conn}, interceptor.Funcs{})
 
 		poolKey := noCredsPoolKey(conn.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace)
 		poisoned := &stubTemporalClient{
@@ -1102,10 +1186,10 @@ func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
 				describeErr: context.DeadlineExceeded,
 			}},
 		}
-		r.TemporalClientPool.SetClientForTesting(poolKey, poisoned)
+		pool.SetClientForTesting(poolKey, poisoned)
 
 		// Sanity: the poisoned client is what handleDeletion will pick up.
-		cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
+		cached, ok := pool.GetSDKClient(poolKey)
 		require.True(t, ok, "poisoned client should be cached before handleDeletion runs")
 		require.Same(t, poisoned, cached)
 
@@ -1113,7 +1197,7 @@ func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
 		require.Error(t, err, "handleDeletion must surface the Temporal Describe error")
 		require.ErrorIs(t, err, context.DeadlineExceeded, "the original error must propagate so the reconciler requeues")
 
-		_, ok = r.TemporalClientPool.GetSDKClient(poolKey)
+		_, ok = pool.GetSDKClient(poolKey)
 		require.False(t, ok, "poisoned client must be evicted from the pool after a Temporal-server-side failure so the next reconcile dials a fresh one")
 	})
 
@@ -1126,16 +1210,16 @@ func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
 		conn := makeNoCredsConnection("my-conn", k8sNamespace, hostPort)
 		twd := makeWD("del-worker", k8sNamespace, conn.Name)
 
-		r, _ := newTestReconciler([]client.Object{twd, conn})
+		r, _, pool := newTestReconcilerWithInterceptors([]client.Object{twd, conn}, interceptor.Funcs{})
 
 		poolKey := noCredsPoolKey(conn.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace)
 		healthy := newStubTemporalClient(nil) // describeErr=&serviceerror.NotFound{}
-		r.TemporalClientPool.SetClientForTesting(poolKey, healthy)
+		pool.SetClientForTesting(poolKey, healthy)
 
 		err := r.handleDeletion(context.Background(), logr.Discard(), twd)
 		require.NoError(t, err, "Describe returning NotFound must be treated as success")
 
-		cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
+		cached, ok := pool.GetSDKClient(poolKey)
 		require.True(t, ok, "a healthy cached client must remain in the pool after a successful handleDeletion")
 		require.Same(t, healthy, cached)
 	})

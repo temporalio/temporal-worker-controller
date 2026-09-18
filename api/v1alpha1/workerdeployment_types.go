@@ -23,7 +23,6 @@ import (
 // connection is not yet implemented, so objectRef.namespace must NOT
 // be set.
 // +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.objectRef)",message="exactly one of name or objectRef must be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || self.objectRef.kind in ['Connection','ClusterConnection']",message="objectRef.kind must be Connection or ClusterConnection"
 // +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || self.objectRef.apiGroup == 'temporal.io'",message="objectRef.apiGroup must be temporal.io"
 // +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || !has(self.objectRef.__namespace__)",message="objectRef.namespace is not supported yet"
 type ConnectionReference struct {
@@ -33,8 +32,10 @@ type ConnectionReference struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name,omitempty"`
 	// ObjectRef references the connection resource by full type information.
-	// kind must be "Connection" or "ClusterConnection", apiGroup must be
-	// "temporal.io", and namespace must not be set (not yet supported).
+	// apiGroup must be "temporal.io" and namespace must not be set (not yet
+	// supported). kind is not validated at admission; an unknown or unregistered
+	// kind is rejected by the controller with a status condition
+	// (ReasonUnknownConnectionKind) on the next reconcile.
 	// +optional
 	ObjectRef *corev1.TypedObjectReference `json:"objectRef,omitempty"`
 }
@@ -145,6 +146,13 @@ const (
 	// WorkerDeployment references a ClusterConnection but the controller is namespace-scoped.
 	// ClusterConnection is cluster-scoped, so such a controller can never read it.
 	ReasonClusterConnectionUnsupported = "ClusterConnectionUnsupported"
+
+	// ReasonUnknownConnectionKind is set on ConditionProgressing=False when the
+	// referenced connection resource targets a GroupKind no connection provider is
+	// registered for. The CEL validation no longer rejects unknown kinds at
+	// admission time, so this is surfaced as a status condition instead of a
+	// transient error.
+	ReasonUnknownConnectionKind = "UnknownConnectionKind"
 
 	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the credential
 	// secret referenced by the Connection is misconfigured. This covers:

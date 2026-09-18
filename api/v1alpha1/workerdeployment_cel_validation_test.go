@@ -262,7 +262,12 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err.Error()).To(ContainSubstring("exactly one of name or objectRef"))
 	})
 
-	It("rejects objectRef with an invalid kind", func() {
+	It("accepts objectRef with an unknown kind (rejected at reconcile, not admission)", func() {
+		// The CEL kind allowlist was dropped so connection kinds registered by
+		// wrapper binaries are accepted without further upstream CRD changes.
+		// An unknown kind now passes admission and is surfaced as a status
+		// condition (ReasonUnknownConnectionKind) by the reconciler instead of
+		// being rejected at admission time.
 		twd := baseTWD("bad-kind")
 		twd.Spec.WorkerOptions.ConnectionRef = ConnectionReference{
 			ObjectRef: &corev1.TypedObjectReference{
@@ -271,9 +276,7 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 				Name:     "my-connection",
 			},
 		}
-		err := k8sClient.Create(ctx, twd)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("objectRef.kind must be Connection or ClusterConnection"))
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
 	})
 
 	It("rejects objectRef with a non-temporal.io apiGroup", func() {

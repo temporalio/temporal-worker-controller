@@ -72,7 +72,7 @@ func (r *WorkerDeploymentReconciler) generateStatus(
 			if prevStatusByWorkflowID[wf.WorkflowID] == wf.Status {
 				continue
 			}
-			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonGateWorkflowFailed,
+			r.Recorder.Eventf(workerDeploy, nil, corev1.EventTypeWarning, ReasonGateWorkflowFailed, ReasonGateWorkflowFailed,
 				"Gate/test workflow %s for version %s ended with status %s", wf.WorkflowID, targetBuildID, wf.Status)
 		}
 

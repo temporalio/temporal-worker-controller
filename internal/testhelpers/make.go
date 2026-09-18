@@ -6,6 +6,8 @@ import (
 
 	"github.com/pborman/uuid"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/controller/connectionprovider"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/server/common/worker_versioning"
 	corev1 "k8s.io/api/core/v1"
@@ -216,4 +218,11 @@ func MakeBaseVersion(namespace, twdName, imageName, unsafeCustomBuildID string, 
 
 func ModifyObj[T any](obj T, callback func(obj T) T) T {
 	return callback(obj)
+}
+
+// NewResolvedConnection wraps spec in a default ResolvedConnection backed by a
+// nil-internal ClientPool, for tests that drive the planner or deployment
+// builders without a real Fetch.
+func NewResolvedConnection(spec temporaliov1alpha1.ConnectionSpec) connectionprovider.ResolvedConnection {
+	return clientpool.NewResolvedConnection(clientpool.New(nil, nil), spec)
 }
