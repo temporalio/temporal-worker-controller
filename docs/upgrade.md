@@ -78,7 +78,7 @@ In release `v1.11.0` (Chart version `v0.30.0`), that dependent sub-chart was rem
 
 Users who previously set `certmanager.install: true` in their Temporal Worker Controller Helm Chart values triggered the installation of `cert-manager`. Note that the default value for `certmanager.install` was `false`.
 
-If you are unsure if you're affected, check:
+To determine if you are affected, run:
 
 ```bash
 helm get values temporal-worker-controller -n temporal-system -o json | jq '.certmanager.install'
