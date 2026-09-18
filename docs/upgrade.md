@@ -293,7 +293,7 @@ kubectl delete validatingwebhookconfiguration \
   temporal-worker-controller-cert-manager-webhook
 ```
 
-#### Step 6: Install cert-manager independently
+#### Install cert-manager independently
 
 ```bash
 helm install cert-manager jetstack/cert-manager \
