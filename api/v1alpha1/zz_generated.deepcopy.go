@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -845,6 +846,11 @@ func (in *WorkerDeploymentSpec) DeepCopyInto(out *WorkerDeploymentSpec) {
 		in, out := &in.ProgressDeadlineSeconds, &out.ProgressDeadlineSeconds
 		*out = new(int32)
 		**out = **in
+	}
+	if in.Deployment != nil {
+		in, out := &in.Deployment, &out.Deployment
+		*out = new(appsv1.DeploymentSpec)
+		(*in).DeepCopyInto(*out)
 	}
 	in.RolloutStrategy.DeepCopyInto(&out.RolloutStrategy)
 	in.SunsetStrategy.DeepCopyInto(&out.SunsetStrategy)

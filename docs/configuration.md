@@ -444,6 +444,54 @@ gate:
 
 ## Advanced Configuration
 
+### Per-version Kubernetes Deployment configuration
+
+You can control the configuration of the Kubernetes Deployment create by
+Temporal Worker Controller for each WorkerDeploymentVersion (Build ID) by
+setting the `WorkerDeploymentSpec.Deployment` field. This field is of type
+`appsv1.DeploymentSpec` and supports all the configuration options available to
+normal Kubernetes Deployments.
+
+Set the `spec.deployment.strategy.type` field to the desired Kubernetes
+Deployment strategy -- e.g. `RollingUpdate`.
+
+To control the maximum number or percent of unavailable Pods during a rollout
+restart of the Deployment, set the
+`spec.deployment.strategy.rollout.maxUnavailable` field.
+
+To control the maximum number or percent of extra Pods with the latest Pod
+definition during a rollout restart of the Deployment, set the
+`spec.deployment.strategy.rollout.maxSurge` field.
+
+`spec.deployment.rollout.maxUnavailable` and `spec.rollout.maxSurge`controls how Pods are
+replaced **within a single versioned Kubernetes `Deployment`**.
+
+These configuration settings impact the behaviour of Kubernetes when you issue
+a `kubectl rollout restart` CLI command.
+
+> **NOTE**: It does **not** affect Temporal traffic routing across worker
+> versions (see [Rollout Strategies](#rollout-strategies)).
+
+When omitted, Kubernetes defaults apply `maxUnavailable`/`maxSurge` of `25%`).
+
+> **NOTE**: The Kubernetes Deployment strategy defaults to `RollingUpdate`.
+
+On large fleets, set a more conservative strategy if you rely on in-place
+restarts of Current workers:
+
+```yaml
+spec:
+  deployment:
+    replicas: 100
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 5%
+        maxSurge: 0
+  rollout:
+    strategy: Progressive
+```
+
 ### Environment-Specific Configurations
 
 **Production Configuration:**
@@ -454,7 +502,8 @@ metadata:
   name: order-processor
   namespace: production
 spec:
-  replicas: 5
+  deployment:
+    replicas: 5
   workerOptions:
     connectionRef:
       name: production-temporal
@@ -483,7 +532,8 @@ metadata:
   name: order-processor
   namespace: staging
 spec:
-  replicas: 2
+  deployment:
+    replicas: 2
   workerOptions:
     connectionRef:
       name: staging-temporal

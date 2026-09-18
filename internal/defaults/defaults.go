@@ -13,6 +13,11 @@ const (
 	ServerMaxVersions                = 100
 	MaxVersionsIneligibleForDeletion = int32(ServerMaxVersions * 0.75)
 
+	// DeploymentMaxUnavailable / DeploymentMaxSurge match the apps/v1 Deployment
+	// API defaults for RollingUpdate strategy fields.
+	DeploymentMaxUnavailable = "25%"
+	DeploymentMaxSurge       = "25%"
+
 	// DeprecatedDefaultControllerIdentity is no longer used, except to detect deployments previously
 	// managed by this identity for clean reclamation with the new identity format.
 	DeprecatedDefaultControllerIdentity = "temporal-worker-controller"
