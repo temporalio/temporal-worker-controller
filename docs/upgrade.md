@@ -247,7 +247,7 @@ kubectl annotate issuer temporal-worker-controller-selfsigned-issuer \
   -n temporal-system meta.helm.sh/release-namespace=cert-manager --overwrite
 ```
 
-#### Step 5: Clean up old cert-manager resources
+#### Clean up old cert-manager resources
 
 Remove the old subchart's cert-manager resources from the TWC namespace. This must be done **before** installing cert-manager independently to avoid RBAC conflicts.
 
