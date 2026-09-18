@@ -28,23 +28,27 @@ helm get manifest <release-name> -n <namespace> > backup-manifest.yaml
 
 Review the [compatibility commitment](crd-management.md#compatibility-commitment)
 
-## Upgrade Procedure
+## Upgrade
+
+First upgrade the CRDs.
 
 ```bash
-# 1. Upgrade CRDs first
 helm upgrade temporal-worker-controller-crds \
   oci://docker.io/temporalio/temporal-worker-controller-crds \
   --version <target-version> \
   --namespace temporal-system
+```
 
-# 2. Then upgrade the controller
+> See [CRD Management — Upgrading](crd-management.md#upgrading) for detailed instructions and rollback procedures.
+
+Next, upgrade Temporal Worker Controller.
+
+```bash
 helm upgrade temporal-worker-controller \
   oci://docker.io/temporalio/temporal-worker-controller \
   --version <target-version> \
   --namespace temporal-system
 ```
-
-See [CRD Management — Upgrading](crd-management.md#upgrading) for detailed instructions and rollback procedures.
 
 ## Webhook and TLS Configuration
 
