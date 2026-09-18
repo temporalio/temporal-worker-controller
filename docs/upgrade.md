@@ -98,7 +98,15 @@ Removing the subchart dependency (upgrading to a version without it) would cause
 
 ### Migration steps
 
-The following steps have been tested on both Helm 3.21.4 and Helm 4.2.3.
+The following steps have been tested on both Helm 3.21.4 and Helm 4.2.3:
+
+1. Annotate cert-manager resources
+2. Upgrade Temporal Worker Controller with subchart disabled
+3. Transfer cert-manager CRD ownership
+4. Transfer Certificate and Issuer ownership
+5. Clean up old cert-manager resources
+6. Install cert-manager independently
+7. Verify
 
 #### Step 1: Annotate cert-manager resources
 
