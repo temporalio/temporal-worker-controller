@@ -752,25 +752,6 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 		}
 		markedForDeletion = append(markedForDeletion, d)
 	}
-	// Keep resources belonging to inactive Deployments whose deletion was refused.
-	// Other resource deletions, such as orphan cleanup, remain in the plan.
-	for _, d := range p.DeleteDeployments {
-		if slices.Contains(markedForDeletion, d) {
-			continue
-		}
-		buildID, ok := d.Labels[k8s.BuildIDLabel]
-		if !ok {
-			continue
-		}
-		if !slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
-			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
-		}) {
-			continue
-		}
-		p.DeleteWorkerResources = slices.DeleteFunc(p.DeleteWorkerResources, func(ref planner.WorkerResourceRef) bool {
-			return ref.BuildID == buildID
-		})
-	}
 	p.DeleteDeployments = markedForDeletion
 }
 
