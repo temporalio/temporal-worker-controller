@@ -303,7 +303,7 @@ helm install cert-manager jetstack/cert-manager \
   --wait
 ```
 
-#### Step 7: Verify
+#### Verify
 
 ```bash
 # New cert-manager is running
