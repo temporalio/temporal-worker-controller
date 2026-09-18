@@ -84,7 +84,7 @@ To determine if you are affected, run:
 helm get values temporal-worker-controller -n temporal-system -o json | jq '.certmanager.install'
 ```
 
-If the output is not `true`, you can skip this section.
+If the output is not `true`, you can do not need to take any action.
 
 ### Why migration is required
 
