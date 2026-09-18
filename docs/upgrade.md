@@ -193,7 +193,7 @@ kubectl annotate validatingwebhookconfiguration \
 
 Replace `<namespace>` with the namespace where TWC is installed.
 
-#### Step 2: Upgrade TWC with the subchart disabled
+#### Upgrade Temporal Worker Controller with the subchart disabled
 
 ```bash
 helm upgrade temporal-worker-controller <chart> \
