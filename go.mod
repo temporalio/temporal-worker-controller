@@ -19,6 +19,7 @@ require (
 	k8s.io/apiextensions-apiserver v0.36.0
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3
+	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 	sigs.k8s.io/controller-runtime v0.24.0
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -217,7 +218,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260501160325-927ab1f70cd6 // indirect
-	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

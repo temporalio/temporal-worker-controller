@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -84,6 +86,10 @@ type WorkerDeploymentReconciler struct {
 	// server value of `matching.maxVersionsInDeployment=100`.
 	// Users who reduce `matching.maxVersionsInDeployment` in their dynamicconfig should also reduce this value.
 	MaxDeploymentVersionsIneligibleForDeletion int32
+
+	// deleteBackoff rate-limits repeated DeleteVersion failures per (worker deployment, build ID).
+	deleteBackoff     *flowcontrol.Backoff
+	deleteBackoffOnce sync.Once
 }
 
 // +kubebuilder:rbac:groups=temporal.io,resources=temporalconnections,verbs=get;list;watch;update;patch
