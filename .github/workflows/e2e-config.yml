@@ -1,0 +1,184 @@
+name: E2E Configuration Matrix
+
+on:
+  pull_request:
+    paths:
+      - '**.go'
+      - 'helm/**'
+      - '.github/workflows/e2e-config.yml'
+      - 'Dockerfile'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: e2e-${{ matrix.mode.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: default
+            helm-args: "--set certmanager.enabled=true"
+            install-cert-manager: true
+          - name: namespace-scoped
+            helm-args: "--set rbac.restrictWatchNamespaces='{default}' --set certmanager.enabled=true"
+            install-cert-manager: true
+          - name: byo-cert
+            helm-args: "--set certmanager.enabled=false --set webhook.certSecretName=byo-webhook-cert"
+            install-cert-manager: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2
+        with:
+          cluster_name: twc-e2e
+
+      - name: Build controller image
+        run: docker build -t temporal-worker-controller:e2e .
+
+      - name: Load image into Kind
+        run: kind load docker-image temporal-worker-controller:e2e --name twc-e2e
+
+      - name: Add Helm repos
+        run: helm repo add jetstack https://charts.jetstack.io
+
+      - name: Install cert-manager
+        if: matrix.mode.install-cert-manager
+        run: |
+          helm install cert-manager jetstack/cert-manager \
+            --namespace cert-manager \
+            --create-namespace \
+            --set crds.enabled=true \
+            --wait --timeout 2m
+
+      - name: Wait for cert-manager readiness
+        if: matrix.mode.install-cert-manager
+        run: |
+          echo "Waiting for cert-manager webhook to be ready..."
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/component=webhook \
+            -n cert-manager --timeout=60s
+          sleep 5
+
+      - name: Generate BYO certificate
+        if: ${{ !matrix.mode.install-cert-manager }}
+        run: |
+          kubectl create namespace temporal-system --dry-run=client -o yaml | kubectl apply -f -
+          openssl req -x509 -newkey rsa:2048 -keyout tls.key -out tls.crt \
+            -days 1 -nodes \
+            -subj "/CN=temporal-worker-controller-webhook-service.temporal-system.svc" \
+            -addext "subjectAltName=DNS:temporal-worker-controller-webhook-service.temporal-system.svc"
+          kubectl create secret tls byo-webhook-cert \
+            --cert=tls.crt --key=tls.key -n temporal-system
+          echo "BYO_CA_BUNDLE=$(base64 < tls.crt | tr -d '\n')" >> "$GITHUB_ENV"
+
+      - name: Install CRDs chart
+        run: |
+          helm install temporal-worker-controller-crds helm/temporal-worker-controller-crds \
+            --namespace temporal-system \
+            --create-namespace
+
+      - name: Install TWC
+        run: |
+          EXTRA_ARGS=""
+          if [ "${{ matrix.mode.name }}" = "byo-cert" ]; then
+            EXTRA_ARGS="--set certmanager.caBundle=${BYO_CA_BUNDLE}"
+          fi
+          # EXTRA_ARGS is intentionally word-split into separate helm flags;
+          # when empty it expands to nothing (no empty-string argument).
+          # shellcheck disable=SC2086
+          helm install temporal-worker-controller helm/temporal-worker-controller \
+            --namespace temporal-system \
+            --set image.repository=temporal-worker-controller \
+            --set image.tag=e2e \
+            --set image.pullPolicy=IfNotPresent \
+            --set webhook.enabled=true \
+            ${{ matrix.mode.helm-args }} \
+            $EXTRA_ARGS
+
+      - name: Wait for webhook cert
+        run: |
+          SECRET_NAME="webhook-server-cert"
+          if [ "${{ matrix.mode.name }}" = "byo-cert" ]; then
+            SECRET_NAME="byo-webhook-cert"
+          fi
+          echo "Waiting for webhook cert Secret ${SECRET_NAME}..."
+          for i in $(seq 1 60); do
+            if kubectl get secret "$SECRET_NAME" -n temporal-system 2>/dev/null; then
+              echo "Secret found after ${i} attempts"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "FAIL: Secret not created after 5 minutes"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Restart controller pods
+        run: |
+          kubectl rollout restart deployment/temporal-worker-controller-manager \
+            -n temporal-system
+          kubectl rollout status deployment/temporal-worker-controller-manager \
+            -n temporal-system --timeout=120s
+
+      - name: Wait for webhook readiness
+        run: |
+          echo "Waiting for webhook to be ready..."
+          for i in $(seq 1 30); do
+            if kubectl get validatingwebhookconfiguration \
+              temporal-worker-controller-wd-validating-webhook-configuration -o jsonpath='{.webhooks[0].clientConfig.caBundle}' 2>/dev/null | grep -q .; then
+              echo "Webhook CA bundle injected after ${i} attempts"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "WARNING: Webhook CA bundle not injected after 150s, proceeding anyway"
+            fi
+            sleep 5
+          done
+
+      - name: Check for error logs
+        run: |
+          errors=$(kubectl logs -n temporal-system \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            --tail=100 2>&1 | grep '"level":"error"' || true)
+          if [ -n "$errors" ]; then
+            echo "ERROR: Found error-level logs:"
+            echo "$errors"
+            exit 1
+          fi
+          echo "No error logs detected"
+
+      - name: Apply test WorkerDeployment
+        run: kubectl apply -f test/e2e/fixtures/basic-wd.yaml
+
+      - name: Verify WorkerDeployment accepted
+        run: |
+          kubectl get workerdeployment test-worker -n temporal-system
+          echo "WorkerDeployment accepted by webhook"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== Pod status ==="
+          kubectl get pods -n temporal-system -o wide
+          echo "=== Pod describe ==="
+          kubectl describe pods -n temporal-system -l app.kubernetes.io/name=temporal-worker-controller
+          echo "=== Pod logs ==="
+          kubectl logs -n temporal-system -l app.kubernetes.io/name=temporal-worker-controller --all-containers --tail=100 || true
+          echo "=== Events ==="
+          kubectl get events -n temporal-system --sort-by=.lastTimestamp | tail -30
+          echo "=== Secrets ==="
+          kubectl get secrets -n temporal-system
+          echo "=== Certificates ==="
+          kubectl get certificate -n temporal-system -o wide || true
+      
+          
+          
