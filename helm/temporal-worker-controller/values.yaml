@@ -143,6 +143,12 @@ webhook:
 
 # Configuration for WorkerResourceTemplate objects.
 workerResourceTemplate:
+  # hpaMatchLabelsStripTemporalPrefix removes the "temporal_" prefix from
+  # controller-managed HPA external metric matchLabels. Enable this for
+  # self-hosted Temporal Server metrics that use worker_deployment_name,
+  # worker_build_id, and namespace.
+  hpaMatchLabelsStripTemporalPrefix: false
+
   # allowedResources defines which resource kinds may be embedded in WRT objects.
   # The webhook rejects any kind not listed here, and the controller is granted RBAC
   # to manage exactly these resource types. An empty list rejects all kinds — at

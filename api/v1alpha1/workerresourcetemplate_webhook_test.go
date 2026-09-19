@@ -423,6 +423,49 @@ func TestWorkerResourceTemplate_ValidateCreate(t *testing.T) {
 	}
 }
 
+func TestWorkerResourceTemplate_ValidateCreate_StrippedMetricLabelKeys(t *testing.T) {
+	wrt := newWRT("metric-sel-stripped", "my-worker", map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"minReplicas": float64(2),
+			"maxReplicas": float64(10),
+			"metrics": []interface{}{
+				map[string]interface{}{
+					"type": "External",
+					"external": map[string]interface{}{
+						"metric": map[string]interface{}{
+							"name": "temporal_cloud_v0_poll_success_sync_count",
+							"selector": map[string]interface{}{
+								"matchLabels": map[string]interface{}{
+									"worker_deployment_name": "default_my-worker",
+									"worker_build_id":        "abc123",
+									"namespace":              "my-ns",
+								},
+							},
+						},
+						"target": map[string]interface{}{"type": "AverageValue", "averageValue": "10"},
+					},
+				},
+			},
+		},
+	})
+
+	ctx := context.Background()
+
+	off := newValidatorNoAPI()
+	_, err := off.ValidateCreate(ctx, wrt)
+	require.NoError(t, err)
+
+	on := newValidatorNoAPI()
+	on.HPAMatchLabelsStripTemporalPrefix = true
+	_, err = on.ValidateCreate(ctx, wrt)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"worker_deployment_name" is managed by the controller`)
+	assert.Contains(t, err.Error(), `"worker_build_id" is managed by the controller`)
+	assert.Contains(t, err.Error(), `"namespace" is managed by the controller`)
+}
+
 // newValidatorNoAPIWithKEDA mirrors newValidatorNoAPI but additionally allows the
 // KEDA ScaledObject kind, so tests of KEDA-specific validation can reach the relevant
 // check without being rejected by the allow-list.

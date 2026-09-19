@@ -280,6 +280,23 @@ func TestAutoInjectFields_MetricSelector(t *testing.T) {
 	})
 }
 
+func TestStripMetricLabelPrefix(t *testing.T) {
+	labels := map[string]string{
+		"temporal_worker_deployment_name": "default_my-worker",
+		"temporal_worker_build_id":        "abc123",
+		"temporal_namespace":              "my-ns",
+	}
+
+	stripped := stripMetricLabelPrefix(labels, "temporal_")
+
+	assert.Equal(t, map[string]string{
+		"worker_deployment_name": "default_my-worker",
+		"worker_build_id":        "abc123",
+		"namespace":              "my-ns",
+	}, stripped)
+	assert.Contains(t, labels, "temporal_worker_deployment_name", "input map must not be mutated")
+}
+
 // scaledObjectSpec builds a minimal KEDA ScaledObject spec with one temporal trigger
 // whose metadata starts with the given base entries.
 func scaledObjectSpec(temporalMetadata map[string]interface{}) map[string]interface{} {
@@ -447,7 +464,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	}
 	buildID := "abc123"
 
-	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns")
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", false)
 	require.NoError(t, err)
 
 	// Check metadata — name follows the hash-suffix formula
@@ -472,6 +489,64 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	ref, ok := spec["scaleTargetRef"].(map[string]interface{})
 	require.True(t, ok, "scaleTargetRef should have been auto-injected")
 	assert.Equal(t, "my-worker-abc123", ref["name"])
+}
+
+func TestRenderWorkerResourceTemplate_StripsTemporalMetricLabelPrefix(t *testing.T) {
+	hpaSpec := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"scaleTargetRef": map[string]interface{}{},
+			"minReplicas":    float64(2),
+			"maxReplicas":    float64(10),
+			"metrics": []interface{}{
+				map[string]interface{}{
+					"type": "External",
+					"external": map[string]interface{}{
+						"metric": map[string]interface{}{
+							"name": "approximate_backlog_count",
+							"selector": map[string]interface{}{
+								"matchLabels": map[string]interface{}{
+									"task_type": "Activity",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	rawBytes, err := json.Marshal(hpaSpec)
+	require.NoError(t, err)
+
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-hpa",
+			Namespace: "default",
+			UID:       types.UID("wrt-uid-456"),
+		},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{
+				Name: "my-worker",
+			},
+			Template: runtime.RawExtension{Raw: rawBytes},
+		},
+	}
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-worker-abc123", Namespace: "default"},
+	}
+
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, "abc123", "my-temporal-ns", true)
+	require.NoError(t, err)
+
+	ml := obj.Object["spec"].(map[string]interface{})["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
+	assert.Equal(t, "Activity", ml["task_type"])
+	assert.Equal(t, "default_my-worker", ml["worker_deployment_name"])
+	assert.Equal(t, "abc123", ml["worker_build_id"])
+	assert.Equal(t, "my-temporal-ns", ml["namespace"])
+	assert.NotContains(t, ml, "temporal_worker_deployment_name")
+	assert.NotContains(t, ml, "temporal_worker_build_id")
+	assert.NotContains(t, ml, "temporal_namespace")
 }
 
 func TestHasScaleTarget(t *testing.T) {

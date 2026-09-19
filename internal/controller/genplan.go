@@ -136,7 +136,8 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
-		RolloutStrategy: rolloutStrategy,
+		RolloutStrategy:                      rolloutStrategy,
+		WRTHPAMatchLabelsStripTemporalPrefix: r.WRTHPAMatchLabelsStripTemporalPrefix,
 	}
 
 	// Fetch all WorkerResourceTemplates that reference this TWD so that the planner

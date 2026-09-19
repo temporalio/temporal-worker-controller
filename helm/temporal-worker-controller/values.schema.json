@@ -210,6 +210,15 @@
         }
       }
     },
+    "workerResourceTemplate": {
+      "type": "object",
+      "properties": {
+        "hpaMatchLabelsStripTemporalPrefix": {
+          "type": "boolean",
+          "description": "Whether to remove the temporal_ prefix from controller-managed HPA external metric matchLabels"
+        }
+      }
+    },
     "certmanager": {
       "type": "object",
       "properties": {

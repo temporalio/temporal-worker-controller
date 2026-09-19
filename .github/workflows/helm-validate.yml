@@ -63,6 +63,20 @@ jobs:
           helm template test-release helm/temporal-worker-controller \
             --set 'rbac.restrictWatchNamespaces={ns-a,ns-b}'
 
+      - name: Template with stripped WRT HPA matchLabel prefixes
+        run: |
+          set -euo pipefail
+          default_rendered=$(helm template test-release helm/temporal-worker-controller)
+          echo "$default_rendered" \
+            | grep -A1 'name: WRT_HPA_MATCH_LABELS_STRIP_TEMPORAL_PREFIX' \
+            | grep -q 'value: "false"'
+
+          enabled_rendered=$(helm template test-release helm/temporal-worker-controller \
+            --set workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix=true)
+          echo "$enabled_rendered" \
+            | grep -A1 'name: WRT_HPA_MATCH_LABELS_STRIP_TEMPORAL_PREFIX' \
+            | grep -q 'value: "true"'
+
       - name: Template with extra manager environment variables
         run: |
           set -euo pipefail
