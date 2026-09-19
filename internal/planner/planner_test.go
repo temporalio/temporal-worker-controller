@@ -947,6 +947,126 @@ func TestGetScaleDeployments(t *testing.T) {
 			expectScales: map[string]uint32{"test-456": 0},
 		},
 		{
+			name: "draining version at 0 replicas is scaled back up",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "old",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-old"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(3); return &r }(), // controller managed
+			},
+			expectScales: map[string]uint32{"test-old": 3},
+		},
+		{
+			name: "draining version at 0 replicas is scaled to 1 when a scaler manages replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "old",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-old"},
+						},
+					},
+				},
+			},
+			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{}, // scaler managed
+			expectScales: map[string]uint32{"test-old": 1},
+		},
+		{
+			name: "draining version with pollers is left untouched",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					// Intentionally different from spec.Replicas. If the count was overwritten
+					// but is not 0, the draining version is left at that count.
+					"old": createDeploymentWithDefaultConnectionSpecHash(2),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "old",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-old"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(3); return &r }(),
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "draining version at 0 is left alone when the WD is scaled to 0",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "old",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-old"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: func() *int32 { r := int32(0); return &r }(),
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
 			name: "inactive non-target version needs scaling down",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
@@ -1171,7 +1291,7 @@ func TestGetScaleDeployments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scales := getScaleDeployments(tc.k8sState, tc.status, tc.spec)
+			scales := getScaleDeployments(logr.Discard(), tc.k8sState, tc.status, tc.spec)
 			assert.Equal(t, len(tc.expectScales), len(scales), "unexpected number of scales")
 			actualScaleDeploymentNames := make([]string, 0)
 			for deploymentRef, actualReplicas := range scales {

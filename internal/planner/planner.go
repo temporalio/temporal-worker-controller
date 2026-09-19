@@ -163,7 +163,7 @@ func GeneratePlan(
 
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
-	plan.ScaleDeployments = getScaleDeployments(k8sState, status, spec)
+	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
@@ -787,9 +787,10 @@ func getDeleteDeployments(
 }
 
 // getScaleDeployments determines which deployments should be explicitly scaled and to what size.
-// It only runs when spec.Replicas is set (controller-managed mode). Drained versions and inactive
-// versions that are not the rollout target are always scaled to zero during sunset.
+// Drained versions and inactive versions that are not the rollout target are always scaled to
+// zero during sunset.
 func getScaleDeployments(
+	l logr.Logger,
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
@@ -863,6 +864,27 @@ func getScaleDeployments(
 			if spec.Replicas != nil {
 				replicas := *spec.Replicas
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+					scaleDeployments[version.Deployment] = uint32(replicas)
+				}
+			}
+		case temporaliov1alpha1.VersionStatusDraining:
+			// A draining version with 0 replicas has no pollers, so it will never finish
+			// draining and will never be retired. We detect and repair this scenario
+			// here. Any other non-zero count still has pollers and will drain on its own.
+			if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+				replicas := int32(1)
+				// If the controller manages the replicas we set it to the spec's value. If a
+				// scaler manages them, we explicitly set it to 1 to unblock drainage.
+				if spec.Replicas != nil {
+					replicas = *spec.Replicas
+				}
+				// spec.Replicas may legitimately be 0, so we guard it.
+				if replicas != 0 {
+					l.Info("scaling draining version back up from 0 replicas",
+						"buildID", version.BuildID,
+						"deployment", version.Deployment.Name,
+						"replicas", replicas,
+					)
 					scaleDeployments[version.Deployment] = uint32(replicas)
 				}
 			}

@@ -2,7 +2,7 @@
 
 This document describes practical reactivity and reliability tradeoffs when scaling Temporal workers per worker deployment version on Kubernetes, and recommends which tool fits which workload pattern.
 
-The `internal/demo/` example wires the HPA path described here. The KEDA path is mentioned for comparison and as a recommendation for workloads that cannot tolerate the HPA path's limits.
+The `internal/demo/` example wires the HPA path described here. The KEDA path is a supported alternative that polls the Temporal API directly instead of going through a metrics pipeline. They can't both run in the same cluster, because Kubernetes allows only one provider for the `external.metrics.k8s.io` API and each of them claims it.
 
 ## TL;DR
 
@@ -45,6 +45,8 @@ Examples of potential combinations:
  * Temporal Cloud Metrics integration (Temporal Cloud -> OpenTelemetry)
  * AWS CloudWatch OpenTelemetry integration (OpenTelemetry -> CloudWatch)
  * HPA adapter for AWS CloudWatch (CloudWatch -> HPA)
+
+This provider flexibility applies to the HPA path only. KEDA has triggers for several of these providers, but per-version scaling with KEDA works with the `temporal` trigger alone; see [KEDA limitations](#keda-limitations).
 
 ## HPA scaling signal
 
@@ -186,23 +188,51 @@ spec:
       selectPolicy: Max
 ```
 
+## KEDA scaling signal
+
+This section describes the signal used by KEDA's Temporal scaler to adjust the count of workers in a Kubernetes deployment managed by Temporal Worker Controller.
+
+KEDA calls `DescribeWorkerDeploymentVersion` over gRPC directly against the Temporal server, reading the approximate backlog count for one specific Worker Deployment Version, with nothing scraped, aggregated, or relabelled along the way.
+
+As of September, 2026, and the v2.20.0 KEDA Temporal Scaler release, backlog is the only signal available on this path, which has consequences for scale-down; see [KEDA limitations](#keda-limitations).
+
+Three fields do most of the tuning:
+
+| Field | Default | Effect |
+|-------|---------|--------|
+| `pollingInterval` | 30s | how often KEDA queries Temporal. See [KEDA limitations](#keda-limitations) for the polling budget |
+| `targetQueueSize` | 5 | target backlog per replica; the HPA adds replicas when the backlog per active replica exceeds it |
+| `cooldownPeriod` | 300s | applies only when scaling to zero and has no effect when `minReplicaCount` is 1 or higher |
+
+For HPA users, the equivalent of `scaleDown.stabilizationWindowSeconds` is available at `advanced.horizontalPodAutoscalerConfig.behavior.scaleDown.stabilizationWindowSeconds`. KEDA creates an HPA behind each ScaledObject, and any `behavior` settings you provide are copied to it unchanged.
+
 ## KEDA strengths
 
-KEDA's Temporal scaler calls `DescribeTaskQueue(stats=true)` (or `DescribeWorkerDeploymentVersion`), which loads the queue synchronously and returns the backlog directly. This allows KEDA to scale Temporal workers from zero.
+Because there is no metrics aggregation pipeline in front of the KEDA Temporal Scaler, there is no delay in receiving the scaling signal. With HPA, there is a delay introduced by Temporal Cloud's metrics aggregation service. See [HPA scaling signal](#hpa-scaling-signal) for more information.
+
+Per-version scoping needs no Temporal Cloud configuration when using KEDA. On the other hand, when using HPA, you must opt in to the `temporal_worker_deployment_name` and `temporal_worker_build_id` OpenMetrics labels.
 
 ## KEDA limitations
 
-As of June 2026 and the KEDA 2.20 release, the KEDA Temporal Scaler uses backlog count *only*. Releases of Temporal Worker Controller before v1.8.0 do not support per-version metrics queries in KEDA Temporal Scaler configuration of Worker Resource Templates.
+Per-version scaling with KEDA requires KEDA >= 2.20.0, which added the `workerDeploymentName` and `workerDeploymentBuildId` trigger metadata ([kedacore/keda#7672](https://github.com/kedacore/keda/pull/7672)), and Temporal Worker Controller >= v1.8.0, which auto-injects them. Earlier KEDA releases can only query a task queue in aggregate across all versions.
 
-KEDA bypasses the metric pipeline but uses Temporal API calls, which are subject to a per-namespace rate limit:
+Only the `temporal` trigger can be scoped to a single version. Triggers like `prometheus`, `datadog`, and `dynatrace` take their query as a single string rather than a structured selector, so there is no field for the controller to inject a Build ID into. As of September, 2026, and Temporal Worker Controller v1.10.1, there is no supported templating syntax to do this per-version query interpolation. (See [#355](https://github.com/temporalio/temporal-worker-controller/issues/355) for more information). You can scale per version on backlog, but not on arbitrary cluster metrics such as slot utilization.
+
+Backlog is a good signal for scaling up, but a poor one for scaling down because both an idle fleet and a busy fleet will report zero backlog.
+
+HPA uses backlog as its scale up signal and slot utilization as its scale down signal specifically to address this problem.
+
+Slot utilization is not available per version with KEDA. A conservative `scaleDown` stabilization window on the KEDA ScaledObject mitigates this, but it delays scale-down rather than detecting busy workers. If your workload cannot tolerate scaling down while workers are still busy, use HPA instead of KEDA.
+
+Querying Temporal directly has its own cost. Every poll is an API call, and those calls share a per-namespace rate limit:
 
 ```
 FrontendGlobalWorkerDeploymentReadRPS = 50  # per namespace, evenly distributed across frontend instances
 ```
 
-For a namespace with N task queues × M worker-deployment-versions = K HPAs, each KEDA poll uses ~1 API call. The polling budget:
+For a namespace with N task queues × M worker-deployment-versions = K ScaledObjects, every scaler query costs one API call per trigger. Two things query the scaler: KEDA at `pollingInterval`, and the HPA independently at its own sync period (15s by default). Setting `useCachedMetrics: true` (defaults to `false`) on the trigger serves the HPA from KEDA's polled value, so `pollingInterval` alone determines how often Temporal is queried. The budget below assumes one trigger per ScaledObject with caching enabled:
 
-| HPA count | Poll every 30s | Poll every 10s | Poll every 5s |
+| ScaledObjects | Poll every 30s | Poll every 10s | Poll every 5s |
 |-----------|----------------|----------------|---------------|
 | 50        | 1.7 RPS (3%)   | 5 RPS (10%)    | 10 RPS (20%)  |
 | 250       | 8 RPS (17%)    | 25 RPS (50%)   | 50 RPS (100%) |
@@ -210,6 +240,73 @@ For a namespace with N task queues × M worker-deployment-versions = K HPAs, eac
 
 
 If you are using KEDA with Temporal Cloud and hitting the API rate limit described above, you will need to contact your Temporal Cloud account team to discuss increasing the rate limits.
+
+## KEDA example configuration
+
+> **Warning**: Do not install KEDA into a cluster that already runs prometheus-adapter. KEDA's metrics-apiserver takes over the `external.metrics.k8s.io` APIService.
+
+Here is an example KEDA ScaledObject configuration (snipped for brevity).
+
+**Controller Helm values**: `ScaledObject` must be added to the allow-list, which lists `HorizontalPodAutoscaler` only by default.
+```yaml
+workerResourceTemplate:
+  allowedResources:
+    - kinds: ["HorizontalPodAutoscaler"]
+      apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+    - kinds: ["ScaledObject"]
+      apiGroups: ["keda.sh"]
+      resources: ["scaledobjects"]
+```
+
+This entry serves two purposes: it is the validating webhook's allow-list and generates the RBAC the controller needs to create `ScaledObject`s.
+
+**TriggerAuthentication**: KEDA takes the Temporal Cloud API key as a parameter named `apiKey`, never as trigger metadata.
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-trigger-auth-temporal
+  namespace: default
+spec:
+  secretTargetRef:
+    - parameter: apiKey
+      name: temporal-cloud-api-key
+      key: api-key
+```
+
+This maps `apiKey` onto an existing secret whose key is `api-key`, so the same credential can serve the workers, the controller, and the scaler.
+
+**WorkerResourceTemplate** (`examples/wrt-keda.yaml`): the empty string is the opt-in sentinel for the three identifiers the controller owns.
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+spec:
+  workerDeploymentRef:
+    name: helloworld
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      scaleTargetRef: {}
+      minReplicaCount: 1
+      maxReplicaCount: 3
+      pollingInterval: 10
+      triggers:
+        - type: temporal
+          authenticationRef:
+            name: keda-trigger-auth-temporal
+          metadata:
+            endpoint: us-east-1.aws.api.temporal.io:7233
+            taskQueue: default/helloworld
+            queueTypes: activity
+            targetQueueSize: "5"
+            namespace: ""
+            workerDeploymentName: ""
+            workerDeploymentBuildId: ""
+```
+
+A non-empty value for `namespace`, `workerDeploymentName`, or `workerDeploymentBuildId` is rejected by the validating webhook. `minReplicaCount` must stay at 1 or higher: a version whose workers are not polling never registers with Temporal, and its rollout will not progress.
 
 ## References
 
@@ -219,4 +316,7 @@ If you are using KEDA with Temporal Cloud and hitting the API rate limit describ
 - [prometheus-adapter externalmetrics.md](https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/docs/externalmetrics.md) — external rules, `namespaced: false` for cluster-scoped metrics
 - [Prometheus HTTP API: `/api/v1/series`](https://prometheus.io/docs/prometheus/latest/querying/api/#finding-series-by-label-matchers) — series discovery semantics
 - [Prometheus scrape config: `honor_timestamps`](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config) — preserving source timestamps
-- [KEDA Temporal scaler](https://keda.sh/docs/latest/scalers/temporal/) — direct API polling alternative
+- [KEDA Temporal scaler](https://keda.sh/docs/latest/scalers/temporal/) — trigger metadata and authentication parameters
+- [KEDA ScaledObject specification](https://keda.sh/docs/latest/reference/scaledobject-spec/) — `pollingInterval`, `cooldownPeriod`, and HPA `behavior` overrides
+- [kedacore/keda#7672](https://github.com/kedacore/keda/pull/7672) — Worker Deployment Version support in the Temporal scaler, released in KEDA 2.20.0
+- [Temporal Cloud service regions](https://docs.temporal.io/cloud/regions) — regional gRPC endpoints
