@@ -991,6 +991,10 @@ func TestIntegration(t *testing.T) {
 	// Conditions and events tests
 	runConditionsAndEventsTests(t, k8sClient, mgr, ts, testNamespace.Name)
 
+	// kstatus verdict tests: assert what Helm --wait and Flux conclude from the
+	// conditions written above, read back from the real API server.
+	runKstatusTests(t, k8sClient, mgr, ts, testNamespace.Name)
+
 	// Version-summary divergence safety test
 	runNotRegisteredVersionTests(t, k8sClient, clientPool, ts, testNamespace.Name)
 
