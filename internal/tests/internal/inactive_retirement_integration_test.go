@@ -23,7 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// A superseded rollout that was never Current or Ramping stays Inactive forever.
+// With server-side reactivation disabled, a never-promoted version remains
+// Inactive even when a workflow is pinned to it.
 // Exercise real version registration, visibility, poller expiry and DeleteVersion,
 // including a pinned override on a version which has never received routed traffic.
 func testInactiveVersionRetirement(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string, pinned bool) {
