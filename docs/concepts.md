@@ -125,6 +125,12 @@ Defines how Drained versions are cleaned up:
 - **scaledownDelay**: How long to wait after a version has been Drained before scaling pods to zero
 - **deleteDelay**: How long to wait after a version has been Drained before deleting the Kubernetes `Deployment`
 
+> **NOTE**: Versions superseded before ever becoming Current or Ramping remain Inactive in Temporal;
+> they never acquire a drainage timestamp. The controller retires these versions after
+> their Deployment has fully scaled to zero, visibility reports no running pinned workflows,
+> and Temporal accepts the normal version deletion request. The drainage-based sunset delays
+> do not apply to these unused versions.
+
 ### Template
 The pod template used for the target version of this worker deployment. Similar to the pod template used in a standar Kubernetes `Deployment`, but managed by the controller.
 
