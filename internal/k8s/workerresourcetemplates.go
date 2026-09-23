@@ -79,6 +79,7 @@ func RenderWorkerResourceTemplate(
 	deployment *appsv1.Deployment,
 	buildID string,
 	temporalNamespace string,
+	stripTemporalMetricLabelPrefix bool,
 ) (*unstructured.Unstructured, error) {
 	// Step 1: unmarshal the raw template directly into an Unstructured object.
 	obj := &unstructured.Unstructured{}
@@ -102,6 +103,9 @@ func RenderWorkerResourceTemplate(
 		"temporal_worker_deployment_name": cleanDeploymentNameForK8sLabelValue(serverWDName),
 		"temporal_worker_build_id":        buildID,
 		"temporal_namespace":              temporalNamespace,
+	}
+	if stripTemporalMetricLabelPrefix {
+		metricSelectorLabels = stripMetricLabelPrefix(metricSelectorLabels, "temporal_")
 	}
 
 	// Step 2: auto-inject scaleTargetRef, selector.matchLabels, metric selector labels,
@@ -186,6 +190,14 @@ func autoInjectFields(spec map[string]interface{}, deploymentName, serverWDName,
 
 	// scaleTargetRef: inject anywhere in the spec tree.
 	injectScaleTargetRefRecursive(spec, deploymentName)
+}
+
+func stripMetricLabelPrefix(labels map[string]string, prefix string) map[string]string {
+	stripped := make(map[string]string, len(labels))
+	for key, value := range labels {
+		stripped[strings.TrimPrefix(key, prefix)] = value
+	}
+	return stripped
 }
 
 // appendMetricsMatchLabelSelector appends temporal metric labels to the metrics[*].external.metric.selector.matchLabels

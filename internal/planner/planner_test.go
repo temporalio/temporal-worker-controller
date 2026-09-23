@@ -3697,7 +3697,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil, false)
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of worker resource applies")
 		})
 	}
@@ -3714,7 +3714,7 @@ func TestGetWorkerResourceApplies_RenderError(t *testing.T) {
 		createTestWRT("my-hpa", "my-worker"),
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil)
+	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil, false)
 	require.Len(t, applies, 2)
 
 	var errEntry, okEntry *WorkerResourceApply
@@ -3746,7 +3746,7 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, false)
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -3838,7 +3838,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, false)
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -3854,6 +3854,60 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		assert.Equal(t, v, matchLabels[k], "injected matchLabels[%q]", k)
 	}
 	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
+}
+
+func TestGetWorkerResourceApplies_StripsTemporalMetricLabelPrefix(t *testing.T) {
+	hpaSpec := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"metrics": []interface{}{
+				map[string]interface{}{
+					"type": "External",
+					"external": map[string]interface{}{
+						"metric": map[string]interface{}{
+							"name":     "approximate_backlog_count",
+							"selector": map[string]interface{}{"matchLabels": map[string]interface{}{}},
+						},
+					},
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(hpaSpec)
+	require.NoError(t, err)
+	wrt := temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-hpa", Namespace: "default"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Template:            runtime.RawExtension{Raw: raw},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-abc": createDeploymentWithUID("my-worker-build-abc", "uid-abc"),
+		},
+	}
+
+	applies := getWorkerResourceApplies(
+		logr.Discard(),
+		[]temporaliov1alpha1.WorkerResourceTemplate{wrt},
+		k8sState,
+		"test-temporal-ns",
+		nil,
+		nil,
+		true,
+	)
+
+	require.Len(t, applies, 1)
+	metrics := applies[0].Resource.Object["spec"].(map[string]interface{})["metrics"].([]interface{})
+	matchLabels := metrics[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
+	assert.Equal(t, "default_my-worker", matchLabels["worker_deployment_name"])
+	assert.Equal(t, "build-abc", matchLabels["worker_build_id"])
+	assert.Equal(t, "test-temporal-ns", matchLabels["namespace"])
+	assert.NotContains(t, matchLabels, "temporal_worker_deployment_name")
+	assert.NotContains(t, matchLabels, "temporal_worker_build_id")
+	assert.NotContains(t, matchLabels, "temporal_namespace")
 }
 
 // createTestWRTWithInvalidTemplate builds a WRT whose spec.template contains invalid json
@@ -4540,7 +4594,7 @@ func TestGetWorkerResourceApplies_SunsetBuildIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, false)
 			assert.ElementsMatch(t, tc.expectKeys, applyKeys(applies))
 		})
 	}

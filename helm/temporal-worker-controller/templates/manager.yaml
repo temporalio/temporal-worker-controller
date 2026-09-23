@@ -103,6 +103,8 @@ spec:
         {{- end }}
         - name: ALLOWED_KINDS
           value: {{ join "," $allKinds | quote }}
+        - name: WRT_HPA_MATCH_LABELS_STRIP_TEMPORAL_PREFIX
+          value: {{ .Values.workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix | quote }}
         {{- with .Values.rbac.restrictWatchNamespaces }}
         - name: WATCH_NAMESPACES
           value: {{ join "," . | quote }}

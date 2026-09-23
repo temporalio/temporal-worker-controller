@@ -36,7 +36,9 @@ The controller auto-injects two fields when you set them to `{}` (empty object) 
 
 `spec.metrics[*].external.metric.selector.matchLabels` appends the three Temporal metric identity labels (`temporal_worker_deployment_name`, `temporal_worker_build_id`, `temporal_namespace`) to any External metric selector where the `matchLabels` key is present (including `{}`). User labels like `task_type: "Activity"` coexist — the controller merges its keys alongside whatever you provide. If `matchLabels` is absent on a metric entry, no injection occurs for that entry.
 
-The webhook rejects any template that hardcodes `temporal_worker_deployment_name`, `temporal_worker_build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned.
+For metrics backends that use Temporal Server's native label names, set the Helm value `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix: true` (or run the controller with `--wrt-hpa-match-labels-strip-temporal-prefix`). The controller will inject `worker_deployment_name`, `worker_build_id`, and `namespace` instead.
+
+The webhook rejects any template that hardcodes `temporal_worker_deployment_name`, `temporal_worker_build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned. When prefix stripping is enabled, it also rejects `worker_deployment_name`, `worker_build_id`, and `namespace`.
 
 ## Resource naming
 

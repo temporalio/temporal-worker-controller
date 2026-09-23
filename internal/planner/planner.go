@@ -133,6 +133,9 @@ type WorkflowConfig struct {
 type Config struct {
 	// RolloutStrategy to use
 	RolloutStrategy temporaliov1alpha1.RolloutStrategy
+	// WRTHPAMatchLabelsStripTemporalPrefix removes the "temporal_" prefix from
+	// controller-managed external metric matchLabels.
+	WRTHPAMatchLabelsStripTemporalPrefix bool
 }
 
 // GeneratePlan creates a plan for updating the worker deployment
@@ -180,7 +183,15 @@ func GeneratePlan(
 	// not exist while that's true
 	sunsetBuildIDs := getSunsetScaleDownBuildIDs(status, spec)
 
-	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments, sunsetBuildIDs)
+	plan.ApplyWorkerResources = getWorkerResourceApplies(
+		l,
+		wrts,
+		k8sState,
+		spec.WorkerOptions.TemporalNamespace,
+		plan.DeleteDeployments,
+		sunsetBuildIDs,
+		config.WRTHPAMatchLabelsStripTemporalPrefix,
+	)
 	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
@@ -197,6 +208,7 @@ func getWorkerResourceApplies(
 	temporalNamespace string,
 	deleteDeployments []*appsv1.Deployment,
 	sunsetBuildIDs map[string]struct{},
+	stripTemporalMetricLabelPrefix bool,
 ) []WorkerResourceApply {
 	// Build a set of deployment names that are scheduled for deletion so we can
 	// skip rendering WRTs for them. Their rendered resources are deleted explicitly
@@ -232,7 +244,13 @@ func getWorkerResourceApplies(
 					continue
 				}
 			}
-			rendered, renderErr := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
+			rendered, renderErr := k8s.RenderWorkerResourceTemplate(
+				wrt,
+				deployment,
+				buildID,
+				temporalNamespace,
+				stripTemporalMetricLabelPrefix,
+			)
 			if renderErr != nil {
 				l.Error(renderErr, "failed to render WorkerResourceTemplate",
 					"wrt", wrt.Name,

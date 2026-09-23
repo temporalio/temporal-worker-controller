@@ -39,6 +39,7 @@ const (
 	IdentityEnvKey                                   = "CONTROLLER_IDENTITY"
 	IdentitySuffixEnvKey                             = "CONTROLLER_IDENTITY_SUFFIX"
 	MaxDeploymentVersionsIneligibleForDeletionEnvKey = "CONTROLLER_MAX_DEPLOYMENT_VERSIONS_INELIGIBLE_FOR_DELETION"
+	WRTHPAMatchLabelsStripTemporalPrefixEnvKey       = "WRT_HPA_MATCH_LABELS_STRIP_TEMPORAL_PREFIX"
 
 	serverDeleteVersionIdentity = "try-delete-for-add-version"
 )
@@ -87,4 +88,9 @@ func GetControllerMaxDeploymentVersionsIneligibleForDeletion() int32 {
 		}
 	}
 	return defaults.MaxVersionsIneligibleForDeletion
+}
+
+func GetWRTHPAMatchLabelsStripTemporalPrefix() bool {
+	stripPrefix, err := strconv.ParseBool(os.Getenv(WRTHPAMatchLabelsStripTemporalPrefixEnvKey))
+	return err == nil && stripPrefix
 }

@@ -28,6 +28,9 @@ type WorkerResourceTemplateValidator struct {
 	RESTMapper            meta.RESTMapper
 	ControllerSAName      string
 	ControllerSANamespace string
+	// HPAMatchLabelsStripTemporalPrefix, when true, also treats the unprefixed
+	// metric selector keys as controller-owned.
+	HPAMatchLabelsStripTemporalPrefix bool
 	// AllowedKinds is the explicit list of resource kinds permitted as WorkerResourceTemplate objects.
 	// Must be non-empty; when empty or nil, all kinds are rejected.
 	// Populated from the ALLOWED_KINDS environment variable (comma-separated).
@@ -143,7 +146,7 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	var warnings admission.Warnings
 
 	// Pure spec validation (no API calls needed)
-	specWarnings, specErrs := validateWorkerResourceTemplateSpec(newWRT.Spec, v.AllowedKinds)
+	specWarnings, specErrs := validateWorkerResourceTemplateSpec(newWRT.Spec, v.AllowedKinds, v.HPAMatchLabelsStripTemporalPrefix)
 	warnings = append(warnings, specWarnings...)
 	allErrs = append(allErrs, specErrs...)
 
@@ -182,7 +185,7 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 
 // validateWorkerResourceTemplateSpec performs pure (no-API) validation of the spec fields.
 // It checks structural constraints that can be evaluated without talking to the API server.
-func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowedKinds []string) (admission.Warnings, field.ErrorList) {
+func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowedKinds []string, stripTemporalPrefix bool) (admission.Warnings, field.ErrorList) {
 	var allErrs field.ErrorList
 	var warnings admission.Warnings
 
@@ -312,7 +315,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		// metric selector matchLabels that is present. These keys must not be hardcoded —
 		// the controller generates the correct per-version values at render time.
 		// User labels (e.g. task_type: "Activity") are allowed alongside the controller-owned keys.
-		checkMetricSelectorLabelsNotSet(innerSpec, innerSpecPath, &allErrs)
+		checkMetricSelectorLabelsNotSet(innerSpec, innerSpecPath, stripTemporalPrefix, &allErrs)
 
 		// 8. triggers[*].metadata.workerDeploymentName / workerDeploymentBuildId
 		// (KEDA ScaledObject): the controller owns these for triggers of type "temporal" so
@@ -402,7 +405,7 @@ func checkScaleTargetRefNotSet(obj map[string]interface{}, path *field.Path, all
 // temporal_worker_deployment_name, temporal_worker_build_id, and temporal_namespace to whatever
 // matchLabels the user provides. User labels (e.g. task_type: "Activity") are permitted alongside
 // the controller-owned keys.
-func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Path, allErrs *field.ErrorList) {
+func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Path, stripTemporalPrefix bool, allErrs *field.ErrorList) {
 	metrics, ok := spec["metrics"].([]interface{})
 	if !ok {
 		return
@@ -429,7 +432,15 @@ func checkMetricSelectorLabelsNotSet(spec map[string]interface{}, path *field.Pa
 		if !ok || len(ml) == 0 {
 			continue // absent or {} — both valid
 		}
-		for _, key := range ControllerOwnedMetricLabelKeys {
+		ownedKeys := ControllerOwnedMetricLabelKeys
+		if stripTemporalPrefix {
+			ownedKeys = append(ownedKeys,
+				"worker_deployment_name",
+				"worker_build_id",
+				"namespace",
+			)
+		}
+		for _, key := range ownedKeys {
 			if _, exists := ml[key]; exists {
 				*allErrs = append(*allErrs, field.Forbidden(
 					metricsPath.Index(i).Child("external").Child("metric").Child("selector").Child("matchLabels").Key(key),
