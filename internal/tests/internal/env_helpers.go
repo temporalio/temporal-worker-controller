@@ -161,6 +161,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		Recorder:            mgr.GetEventRecorderFor("temporal-worker-controller"),
 		DisableRecoverPanic: true,
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
+		WRTHPAMatchLabelsStripTemporalPrefix:       controller.GetWRTHPAMatchLabelsStripTemporalPrefix(),
 	}
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {
