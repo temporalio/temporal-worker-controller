@@ -68,7 +68,7 @@ func getDeprecatedControllerIdentity() string {
 	return defaults.DeprecatedDefaultControllerIdentity
 }
 
-// getControllerIdentity returns the identity with controller env var and namespace uid suffix.
+// getControllerIdentity returns the identity with controller env var and namespace UID suffix.
 // Presence of both are ensured by main() and in Reconcile() for users of the controller as a library.
 func getControllerIdentity() string {
 	id := os.Getenv(IdentityEnvKey)
