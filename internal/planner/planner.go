@@ -475,56 +475,56 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 	for i := range deployment.Spec.Template.Spec.Containers {
 		container := &deployment.Spec.Template.Spec.Containers[i]
 
-		container.Env = setEnvVar(container.Env, "TEMPORAL_ADDRESS", connection.HostPort)
+		container.Env = setEnvVar(container.Env, k8s.EnvTemporalAddress, connection.HostPort)
 
 		if tlsServerName != "" {
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_SERVER_NAME", tlsServerName)
+			container.Env = setEnvVar(container.Env, k8s.EnvTemporalTLSServerName, tlsServerName)
 		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_SERVER_NAME")
+			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalTLSServerName)
 		}
 
 		if mtls || caCertSecretName != "" {
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS", "true")
+			container.Env = setEnvVar(container.Env, k8s.EnvTemporalTLS, "true")
 		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS")
+			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalTLS)
 		}
 
 		if mtls {
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH", "/etc/temporal/tls/tls.key")
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH", "/etc/temporal/tls/tls.crt")
-			container.VolumeMounts = ensureTLSVolumeMount(container.VolumeMounts)
+			container.Env = setEnvVar(container.Env, k8s.EnvTemporalTLSClientKeyPath, k8s.TemporalTLSClientKeyPath)
+			container.Env = setEnvVar(container.Env, k8s.EnvTemporalTLSClientCertPath, k8s.TemporalTLSClientCertPath)
+			container.VolumeMounts = k8s.EnsureTLSVolumeMount(container.VolumeMounts)
 		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH")
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH")
-			container.VolumeMounts = removeTLSVolumeMount(container.VolumeMounts)
+			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalTLSClientKeyPath)
+			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalTLSClientCertPath)
+			container.VolumeMounts = k8s.RemoveTLSVolumeMount(container.VolumeMounts)
 		}
 
 		if caCertSecretName != "" {
-			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_SERVER_CA_CERT_PATH", "/etc/temporal/tls-ca/ca.crt")
-			container.VolumeMounts = ensureTLSCAVolumeMount(container.VolumeMounts)
+			container.Env = setEnvVar(container.Env, k8s.EnvTemporalTLSServerCACertPath, k8s.TemporalTLSCACertPath)
+			container.VolumeMounts = k8s.EnsureTLSCAVolumeMount(container.VolumeMounts)
 		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
-			container.VolumeMounts = removeTLSCAVolumeMount(container.VolumeMounts)
+			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalTLSServerCACertPath)
+			container.VolumeMounts = k8s.RemoveTLSCAVolumeMount(container.VolumeMounts)
 		}
 
 		if apiKey {
-			container.Env = setEnvVarFrom(container.Env, "TEMPORAL_API_KEY", &corev1.EnvVarSource{SecretKeyRef: connection.APIKeySecretRef})
+			container.Env = setEnvVarFrom(container.Env, k8s.EnvTemporalAPIKey, &corev1.EnvVarSource{SecretKeyRef: connection.APIKeySecretRef})
 		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_API_KEY")
+			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalAPIKey)
 		}
 	}
 
 	if mtls {
-		deployment.Spec.Template.Spec.Volumes = ensureTLSVolume(deployment.Spec.Template.Spec.Volumes,
+		deployment.Spec.Template.Spec.Volumes = k8s.EnsureTLSVolume(deployment.Spec.Template.Spec.Volumes,
 			connection.MutualTLSSecretRef.Name)
 	} else {
-		deployment.Spec.Template.Spec.Volumes = removeTLSVolume(deployment.Spec.Template.Spec.Volumes)
+		deployment.Spec.Template.Spec.Volumes = k8s.RemoveTLSVolume(deployment.Spec.Template.Spec.Volumes)
 	}
 
 	if caCertSecretName != "" {
-		deployment.Spec.Template.Spec.Volumes = ensureTLSCAVolume(deployment.Spec.Template.Spec.Volumes, caCertSecretName)
+		deployment.Spec.Template.Spec.Volumes = k8s.EnsureTLSCAVolume(deployment.Spec.Template.Spec.Volumes, caCertSecretName)
 	} else {
-		deployment.Spec.Template.Spec.Volumes = removeTLSCAVolume(deployment.Spec.Template.Spec.Volumes)
+		deployment.Spec.Template.Spec.Volumes = k8s.RemoveTLSCAVolume(deployment.Spec.Template.Spec.Volumes)
 	}
 }
 
@@ -559,100 +559,6 @@ func setEnvVarFrom(envVars []corev1.EnvVar, name string, src *corev1.EnvVarSourc
 		}
 	}
 	return append(envVars, corev1.EnvVar{Name: name, ValueFrom: src})
-}
-
-// ensureTLSVolume adds the temporal-tls secret volume or updates its secret name if present.
-func ensureTLSVolume(volumes []corev1.Volume, secretName string) []corev1.Volume {
-	for i := range volumes {
-		if volumes[i].Name == "temporal-tls" {
-			volumes[i].VolumeSource = corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
-			}
-			return volumes
-		}
-	}
-	return append(volumes, corev1.Volume{
-		Name:         "temporal-tls",
-		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secretName}},
-	})
-}
-
-// removeTLSVolume removes the temporal-tls volume if present
-func removeTLSVolume(volumes []corev1.Volume) []corev1.Volume {
-	for i := range volumes {
-		if volumes[i].Name == "temporal-tls" {
-			return slices.Delete(volumes, i, i+1)
-		}
-	}
-	return volumes
-}
-
-// ensureTLSVolumeMount adds the temporal-tls mount to a container, or fixes its path if present.
-func ensureTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
-	for i := range mounts {
-		if mounts[i].Name == "temporal-tls" {
-			mounts[i].MountPath = "/etc/temporal/tls"
-			return mounts
-		}
-	}
-	return append(mounts, corev1.VolumeMount{Name: "temporal-tls", MountPath: "/etc/temporal/tls"})
-}
-
-// removeTLSVolumeMount removes the temporal-tls mount from a container if present.
-func removeTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
-	for i := range mounts {
-		if mounts[i].Name == "temporal-tls" {
-			return slices.Delete(mounts, i, i+1)
-		}
-	}
-	return mounts
-}
-
-// ensureTLSCAVolume adds the temporal-tls-ca secret volume or updates its secret name if present.
-func ensureTLSCAVolume(volumes []corev1.Volume, secretName string) []corev1.Volume {
-	for i := range volumes {
-		if volumes[i].Name == "temporal-tls-ca" {
-			volumes[i].VolumeSource = corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
-			}
-			return volumes
-		}
-	}
-	return append(volumes, corev1.Volume{
-		Name:         "temporal-tls-ca",
-		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secretName}},
-	})
-}
-
-// removeTLSCAVolume removes the temporal-tls-ca volume if present.
-func removeTLSCAVolume(volumes []corev1.Volume) []corev1.Volume {
-	for i := range volumes {
-		if volumes[i].Name == "temporal-tls-ca" {
-			return slices.Delete(volumes, i, i+1)
-		}
-	}
-	return volumes
-}
-
-// ensureTLSCAVolumeMount adds the temporal-tls-ca mount to a container, or fixes its path if present.
-func ensureTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
-	for i := range mounts {
-		if mounts[i].Name == "temporal-tls-ca" {
-			mounts[i].MountPath = "/etc/temporal/tls-ca"
-			return mounts
-		}
-	}
-	return append(mounts, corev1.VolumeMount{Name: "temporal-tls-ca", MountPath: "/etc/temporal/tls-ca"})
-}
-
-// removeTLSCAVolumeMount removes the temporal-tls-ca mount from a container if present.
-func removeTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
-	for i := range mounts {
-		if mounts[i].Name == "temporal-tls-ca" {
-			return slices.Delete(mounts, i, i+1)
-		}
-	}
-	return mounts
 }
 
 // checkAndUpdateDeploymentPodTemplateSpec determines whether the Deployment for the given buildID is
