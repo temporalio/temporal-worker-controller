@@ -318,6 +318,7 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.ConnectionSpec) str
 	// Hash connection spec fields in deterministic order
 	_, _ = hasher.Write([]byte(connection.HostPort))
 	_, _ = hasher.Write([]byte(connection.TLSServerName()))
+	_, _ = hasher.Write([]byte(connection.TLSCACertSecretName()))
 	if connection.MutualTLSSecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
 	} else if connection.APIKeySecretRef != nil {
@@ -424,6 +425,37 @@ func ApplyControllerPodSpecModifications(
 			)
 			podSpec.Containers[i] = container
 		}
+	}
+
+	// Trust a private CA for API-key or no-credentials auth. Mutually exclusive with
+	// MutualTLSSecretRef (enforced by ConnectionSpec's CEL validation) -- mTLS bundles its
+	// own CA into that secret's ca.crt key instead, see ConnectionTLSConfig.CACertSecretRef.
+	if caCertSecretName := connection.TLSCACertSecretName(); caCertSecretName != "" {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env,
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS",
+					Value: "true",
+				},
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS_SERVER_CA_CERT_PATH",
+					Value: "/etc/temporal/tls-ca/ca.crt",
+				},
+			)
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+				Name:      "temporal-tls-ca",
+				MountPath: "/etc/temporal/tls-ca",
+			})
+			podSpec.Containers[i] = container
+		}
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "temporal-tls-ca",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: caCertSecretName,
+				},
+			},
+		})
 	}
 }
 
