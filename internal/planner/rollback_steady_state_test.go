@@ -6,11 +6,10 @@ import (
 
 	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestGetVersionConfigDiff_NoRollbackWhenTargetIsAlreadyCurrent(t *testing.T) {
