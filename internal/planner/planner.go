@@ -1081,6 +1081,11 @@ func isRollbackScenario(
 		return false
 	}
 
+	// The target version is already current, so there is nothing to roll back to
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
+		return false
+	}
+
 	// The target version was not seen before, rollback is not possible
 	targetVersionInfo, exists := temporalState.Versions[status.TargetVersion.BuildID]
 	if !exists {
