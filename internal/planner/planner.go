@@ -163,7 +163,7 @@ func GeneratePlan(
 
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
-	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec)
+	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec, temporalState, maxVersionsIneligibleForDeletion)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
@@ -776,6 +776,13 @@ func getDeleteDeployments(
 	return deleteDeployments
 }
 
+// drainingScaleUpGrace is how long a 0-replica draining version is left at 0
+// once the deployment is already at the ineligible-version cap. The drainage
+// check can still mark it drained in this window. Scaling it up sooner starts
+// pollers, and the server will not delete a version that has pollers in order
+// to admit the next build.
+const drainingScaleUpGrace = time.Minute
+
 // getScaleDeployments determines which deployments should be explicitly scaled and to what size.
 // Drained versions and inactive versions that are not the rollout target are always scaled to
 // zero during sunset.
@@ -784,6 +791,8 @@ func getScaleDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	temporalState *temporal.TemporalWorkerState,
+	maxVersionsIneligibleForDeletion int32,
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
 
@@ -858,10 +867,13 @@ func getScaleDeployments(
 				}
 			}
 		case temporaliov1alpha1.VersionStatusDraining:
-			// A draining version with 0 replicas has no pollers, so it will never finish
-			// draining and will never be retired. We detect and repair this scenario
-			// here. Any other non-zero count still has pollers and will drain on its own.
-			if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+			// A draining version with 0 replicas has no pollers. Pinned workflows on
+			// that version cannot complete, so it stays draining. Scale it back up,
+			// except while the deployment is already at the ineligible-version cap
+			// and drainage only just started: leave it at 0 so a version with no
+			// pinned work can reach drained and be deleted to free a slot.
+			if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				(d.Status.Replicas > 0 || !holdDrainingVersionAtZero(temporalState, status, version.BuildID, maxVersionsIneligibleForDeletion)) {
 				replicas := int32(1)
 				// If the controller manages the replicas we set it to the spec's value. If a
 				// scaler manages them, we explicitly set it to 1 to unblock drainage.
@@ -907,6 +919,37 @@ func getSunsetScaleDownBuildIDs(
 	return buildIDs
 }
 
+func ineligibleVersionCount(status *temporaliov1alpha1.WorkerDeploymentStatus) int32 {
+	var n int32
+	for _, v := range status.DeprecatedVersions {
+		if !v.EligibleForDeletion {
+			n++
+		}
+	}
+	return n
+}
+
+// holdDrainingVersionAtZero reports whether a 0-replica draining version should
+// stay at 0 so the server can delete it once drainage completes.
+func holdDrainingVersionAtZero(
+	temporalState *temporal.TemporalWorkerState,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	buildID string,
+	maxVersionsIneligibleForDeletion int32,
+) bool {
+	if ineligibleVersionCount(status) < maxVersionsIneligibleForDeletion {
+		return false
+	}
+	if temporalState == nil {
+		return false
+	}
+	version, ok := temporalState.Versions[buildID]
+	if !ok || version.DrainageChangedAt == nil {
+		return false
+	}
+	return time.Since(*version.DrainageChangedAt) < drainingScaleUpGrace
+}
+
 // shouldCreateDeployment determines if a new deployment needs to be created
 func shouldCreateDeployment(
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
@@ -917,15 +960,7 @@ func shouldCreateDeployment(
 		return false
 	}
 
-	versionCountIneligibleForDeletion := int32(0)
-
-	for _, v := range status.DeprecatedVersions {
-		if !v.EligibleForDeletion {
-			versionCountIneligibleForDeletion++
-		}
-	}
-
-	if versionCountIneligibleForDeletion >= maxVersionsIneligibleForDeletion {
+	if ineligibleVersionCount(status) >= maxVersionsIneligibleForDeletion {
 		return false
 	}
 

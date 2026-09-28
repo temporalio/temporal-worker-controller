@@ -46,6 +46,10 @@ type VersionInfo struct {
 	// Nil if the version was never current or if the server doesn't support this field.
 	LastCurrentTime *time.Time
 
+	// DrainageChangedAt is when this version's drainage status last changed.
+	// Nil if the server did not report drainage info.
+	DrainageChangedAt *time.Time
+
 	// TaskQueuesWithoutPollers lists the names of this version's task queues that were
 	// confirmed to have no active poller. A checked version with no such queues has a
 	// non-nil, empty slice. Nil means poller status was never checked for this version
@@ -259,6 +263,10 @@ func versionInfoFromVersionSummary(
 		return nil
 	}
 	out.Status = apiVersionStatus
+	if changedAt := summary.GetDrainageInfo().GetLastChangedTime(); changedAt != nil {
+		t := changedAt.AsTime()
+		out.DrainageChangedAt = &t
+	}
 
 	sumDeploymentName := summary.DeploymentVersion.DeploymentName
 	sumBuildID := summary.DeploymentVersion.BuildId
