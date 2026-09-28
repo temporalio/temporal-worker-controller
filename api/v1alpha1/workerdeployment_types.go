@@ -127,9 +127,6 @@ const (
 	// stop reporting Failed to kstatus consumers.
 	ReasonReconcileSucceeded = "ReconcileSucceeded"
 
-	// ReasonWaitingForPollers is set on ConditionProgressing=True when the target
-	// version's Kubernetes Deployment has been created but the version is not yet
-	// registered with Temporal (workers have not started polling yet).
 	// ReasonWaitingForPollers is set on ConditionProgressing=True when workers are
 	// not yet (or are no longer) actively polling Temporal. This covers both:
 	// (1) the target version's Kubernetes Deployment has been created but the

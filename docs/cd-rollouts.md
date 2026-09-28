@@ -73,7 +73,7 @@ The trade-off is that an incorrect `connectionRef` or a `Connection` that was ne
 
 `Connection` and `ClusterConnection` are configuration-only resources. They have no controller of their own and expose no conditions, so tools that assess health from conditions like Helm `--wait`, Flux, and anything else built on [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) treat them as healthy as soon as they exist. This is intentional as there is no reconcile loop behind them and therefore nothing to wait for. Kubernetes treats `ConfigMap` and `Secret` the same way.
 
-A broken connection is still reported, just on the `WorkerDeployment` that references it rather than on the connection itself (see the `ConnectionNotFound` and `AuthSecretInvalid` reasons above). Gate your rollouts on the `WorkerDeployment` as waiting on a `Connection` tells you only that the object was accepted by the API server, not that the credentials in it work.
+A broken connection is still reported, just on the `WorkerDeployment` that references it rather than on the connection itself (see the `ConnectionNotFound` and `AuthSecretInvalid` reasons above). Your rollouts should wait on the `WorkerDeployment` as waiting on a `Connection` does not necessarily tell you that the credentials in it work.
 
 ## Triggering a rollout
 
