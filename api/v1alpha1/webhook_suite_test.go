@@ -173,8 +173,8 @@ func loadWebhookFromHelmChart(chartPath, webhookName string, extraArgs ...string
 	}
 	out, err := exec.Command(helmBin, args...).Output()
 	Expect(err).NotTo(HaveOccurred(),
-		"helm template failed — is helm installed and the chart's dependencies built? "+
-			"Run via 'make test-unit' (which provisions ./bin/helm and the chart deps), "+
+		"helm template failed — is helm installed? "+
+			"Run via 'make test-unit' (which provisions ./bin/helm), "+
 			"or set HELM to a helm binary path.")
 
 	// The file contains multiple YAML documents; find the requested ValidatingWebhookConfiguration.

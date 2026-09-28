@@ -242,6 +242,7 @@
               }
             }
           }
+          "description": "Whether to create cert-manager Issuer and Certificate resources for webhook TLS"
         }
       }
     },

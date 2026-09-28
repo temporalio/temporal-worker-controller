@@ -77,7 +77,8 @@ When you update the image, the controller automatically:
 - Helm [v3.0+](https://github.com/helm/helm/releases) if deploying via our Helm chart
 - [Temporal Server](https://docs.temporal.io/) (Cloud or self-hosted [v1.29.1](https://github.com/temporalio/temporal/releases/tag/v1.29.1))
 - Basic familiarity with Temporal [Workers](https://docs.temporal.io/workers), [Workflows](https://docs.temporal.io/workflows), and [Worker Versioning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning)
-- **TLS for the validating webhook** *(required for `WorkerResourceTemplate`)* — the recommended path is [cert-manager](https://cert-manager.io/docs/installation/), which handles certificate provisioning automatically. Install it separately or as a subchart of the controller chart (`certmanager.install: true`). If you prefer to manage TLS yourself, see [Webhook TLS](docs/worker-resource-templates.md#webhook-tls).
+
+- **TLS for the validating webhook** *(required for `WorkerResourceTemplate`)* — the recommended path is [cert-manager](https://cert-manager.io/docs/installation/), which handles certificate provisioning automatically. Install it separately before installing the controller chart. If you prefer to manage TLS yourself, see [Webhook TLS](docs/worker-resource-templates.md#webhook-tls).
 
 ### 🔧 Installation
 

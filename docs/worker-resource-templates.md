@@ -91,8 +91,7 @@ Users who create `WorkerResourceTemplates` need RBAC permission to manage the em
 
 The `WorkerResourceTemplate` validating webhook requires TLS. The Helm chart uses cert-manager to provision the certificate (`certmanager.enabled: true` is the default).
 
-If cert-manager is not already installed in your cluster, you can either install it separately ([cert-manager installation docs](https://cert-manager.io/docs/installation/)) or let the Helm chart install it as a subchart by setting `certmanager.install: true`.
-
+If cert-manager is not already installed in your cluster, install it separately before installing the controller chart ([cert-manager installation docs](https://cert-manager.io/docs/installation/)).
 ## Example: HPA per worker version
 
 ```yaml

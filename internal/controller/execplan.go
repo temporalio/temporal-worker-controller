@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-logr/logr"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	commonpb "go.temporal.io/api/common/v1"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/flowcontrol"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -710,6 +712,10 @@ func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
 			markedForDeletion = append(markedForDeletion, d)
 			continue
 		}
+		backoffKey := k8s.ComputeWorkerDeploymentName(workerDeploy) + "/" + buildID
+		if r.skipVersionDelete(backoffKey) {
+			continue
+		}
 		_, err := depHandle.DeleteVersion(
 			ctx,
 			sdkclient.WorkerDeploymentDeleteVersionOptions{
@@ -722,15 +728,47 @@ func (r *WorkerDeploymentReconciler) deleteDrainedVersions(
 			if !errors.As(err, &notFound) {
 				l.Info("could not delete worker deployment version, keeping its k8s Deployment to reconcile",
 					"buildID", buildID, "deployment", d.Name, "error", err)
+				r.noteVersionDeleteFailure(backoffKey)
 				continue
 			}
 			l.Info("worker deployment version already deleted", "buildID", buildID)
 		} else {
 			l.Info("deleted drained worker deployment version", "buildID", buildID)
 		}
+		r.noteVersionDeleteSuccess(backoffKey)
 		markedForDeletion = append(markedForDeletion, d)
 	}
 	p.DeleteDeployments = markedForDeletion
+}
+
+// versionDeleteBackoff returns the per-version DeleteVersion backoff.
+func (r *WorkerDeploymentReconciler) versionDeleteBackoff() *flowcontrol.Backoff {
+	r.deleteBackoffOnce.Do(func() {
+		if r.deleteBackoff == nil {
+			r.deleteBackoff = flowcontrol.NewBackOff(
+				defaults.VersionDeleteBaseInterval,
+				defaults.VersionDeleteMaxInterval,
+			)
+		}
+	})
+	return r.deleteBackoff
+}
+
+// skipVersionDelete is true while this version is still inside its DeleteVersion backoff window.
+func (r *WorkerDeploymentReconciler) skipVersionDelete(key string) bool {
+	b := r.versionDeleteBackoff()
+	return b.IsInBackOffSinceUpdate(key, b.Clock.Now())
+}
+
+// noteVersionDeleteFailure records a DeleteVersion failure and doubles this version's delay.
+func (r *WorkerDeploymentReconciler) noteVersionDeleteFailure(key string) {
+	b := r.versionDeleteBackoff()
+	b.Next(key, b.Clock.Now())
+}
+
+// noteVersionDeleteSuccess clears this version's DeleteVersion backoff so the next failure starts over.
+func (r *WorkerDeploymentReconciler) noteVersionDeleteSuccess(key string) {
+	r.versionDeleteBackoff().Reset(key)
 }
 
 // isVersionNotRegistered checks whether the Temporal server had no record of buildID when

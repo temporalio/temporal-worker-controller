@@ -123,7 +123,7 @@ jobs:
 
           # Update Chart.yaml with new version and appVersion.
           # Use ^version: to only match the top-level chart version, not indented
-          # dependency versions (e.g. cert-manager) which would otherwise be overwritten.
+          # dependency versions which would otherwise be overwritten.
           sed -i "s/^version: .*/version: $NEW_VERSION/" helm/temporal-worker-controller/Chart.yaml
           sed -i "s/appVersion: .*/appVersion: ${GITHUB_REF_NAME#v}/" helm/temporal-worker-controller/Chart.yaml
 
@@ -138,9 +138,6 @@ jobs:
           git add helm/temporal-worker-controller-crds/Chart.yaml
           git commit -m "Bump chart version to $NEW_VERSION [skip ci]"
           git push
-
-      - name: Build chart dependencies
-        run: helm repo add jetstack https://charts.jetstack.io && helm dependency build ./helm/temporal-worker-controller
 
       - name: Package and Push Helm charts
         run: |
