@@ -227,8 +227,12 @@ test-all: manifests generate envtest ## Run tests.
 test-unit: envtest ## Run unit tests and webhook integration tests (requires envtest binaries and a rendered-chart-capable helm).
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
+.PHONY: go-work
+go-work: ## Create a local go.work spanning all modules if missing (gitignored; matches CI).
+	@test -f go.work || (go work init && go work use -r .)
+
 .PHONY: test-integration
-test-integration: manifests generate envtest ## Run integration tests against local Temporal dev server.
+test-integration: manifests generate envtest go-work ## Run integration tests against local Temporal dev server.
 	@echo "Running integration tests..."
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -v -tags test_dep ./internal/tests/internal -run TestIntegration
 
