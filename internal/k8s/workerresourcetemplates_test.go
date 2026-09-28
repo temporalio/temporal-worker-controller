@@ -549,6 +549,159 @@ func TestRenderWorkerResourceTemplate_StripsTemporalMetricLabelPrefix(t *testing
 	assert.NotContains(t, ml, "temporal_namespace")
 }
 
+func TestRenderWorkerResourceTemplate_MetricTemplateVars(t *testing.T) {
+	const buildID = "abc123"
+	query := `max(temporal_slot_utilization{temporal_worker_deployment_name="{{temporal_worker_deployment_name}}",temporal_worker_build_id="{{temporal_worker_build_id}}",temporal_namespace="{{temporal_namespace}}"})`
+	raw := map[string]interface{}{
+		"apiVersion": "keda.sh/v1alpha1",
+		"kind":       "ScaledObject",
+		"metadata": map[string]interface{}{
+			"annotations": map[string]interface{}{
+				"example.com/build": "{{temporal_worker_build_id}}",
+			},
+		},
+		"spec": map[string]interface{}{
+			"scaleTargetRef":  map[string]interface{}{},
+			"minReplicaCount": float64(1),
+			"triggers": []interface{}{
+				map[string]interface{}{
+					"type": "temporal",
+					"metadata": map[string]interface{}{
+						"taskQueue":               "my-tq",
+						"workerDeploymentName":    "",
+						"workerDeploymentBuildId": "",
+						"namespace":               "",
+					},
+				},
+				map[string]interface{}{
+					"type": "prometheus",
+					"metadata": map[string]interface{}{
+						"serverAddress": "http://prometheus:9090",
+						"query":         query,
+						"threshold":     "0.7",
+					},
+				},
+			},
+		},
+	}
+	rawBytes, err := json.Marshal(raw)
+	require.NoError(t, err)
+
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-scaledobject",
+			Namespace: "default",
+			UID:       types.UID("wrt-uid-789"),
+		},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Template:            runtime.RawExtension{Raw: rawBytes},
+		},
+	}
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-worker-abc123", Namespace: "default"},
+	}
+
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", false)
+	require.NoError(t, err)
+
+	annotations := obj.GetAnnotations()
+	assert.Equal(t, buildID, annotations["example.com/build"])
+
+	spec := obj.Object["spec"].(map[string]interface{})
+	assert.Equal(t, float64(1), spec["minReplicaCount"])
+	triggers := spec["triggers"].([]interface{})
+
+	temporalMD := triggers[0].(map[string]interface{})["metadata"].(map[string]interface{})
+	assert.Equal(t, "default/my-worker", temporalMD["workerDeploymentName"])
+	assert.Equal(t, buildID, temporalMD["workerDeploymentBuildId"])
+	assert.Equal(t, "my-temporal-ns", temporalMD["namespace"])
+	assert.Equal(t, "my-tq", temporalMD["taskQueue"])
+
+	promMD := triggers[1].(map[string]interface{})["metadata"].(map[string]interface{})
+	assert.Equal(t, `max(temporal_slot_utilization{temporal_worker_deployment_name="default_my-worker",temporal_worker_build_id="abc123",temporal_namespace="my-temporal-ns"})`, promMD["query"])
+	assert.Equal(t, "0.7", promMD["threshold"])
+	assert.Equal(t, "http://prometheus:9090", promMD["serverAddress"])
+}
+
+func TestRenderWorkerResourceTemplate_MetricTemplateVarsStripPrefix(t *testing.T) {
+	const buildID = "abc123"
+	query := `max(temporal_slot_utilization{worker_deployment_name="{{worker_deployment_name}}",worker_build_id="{{worker_build_id}}",namespace="{{namespace}}",temporal_namespace="{{temporal_namespace}}"})`
+	raw := map[string]interface{}{
+		"apiVersion": "keda.sh/v1alpha1",
+		"kind":       "ScaledObject",
+		"spec": map[string]interface{}{
+			"scaleTargetRef": map[string]interface{}{},
+			"triggers": []interface{}{
+				map[string]interface{}{
+					"type": "prometheus",
+					"metadata": map[string]interface{}{
+						"query": query,
+					},
+				},
+			},
+		},
+	}
+	rawBytes, err := json.Marshal(raw)
+	require.NoError(t, err)
+
+	wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-scaledobject",
+			Namespace: "default",
+			UID:       types.UID("wrt-uid-789"),
+		},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Template:            runtime.RawExtension{Raw: rawBytes},
+		},
+	}
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-worker-abc123", Namespace: "default"},
+	}
+
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", true)
+	require.NoError(t, err)
+
+	promMD := obj.Object["spec"].(map[string]interface{})["triggers"].([]interface{})[0].(map[string]interface{})["metadata"].(map[string]interface{})
+	assert.Equal(t, `max(temporal_slot_utilization{worker_deployment_name="default_my-worker",worker_build_id="abc123",namespace="my-temporal-ns",temporal_namespace="{{temporal_namespace}}"})`, promMD["query"])
+}
+
+func TestSubstituteMetricTemplateVars(t *testing.T) {
+	vars := map[string]string{
+		"temporal_worker_deployment_name": "default_my-worker",
+		"temporal_worker_build_id":        "abc123",
+		"temporal_namespace":              "my-ns",
+	}
+
+	t.Run("replaces only the exact token", func(t *testing.T) {
+		obj := map[string]interface{}{
+			"query": "{{temporal_worker_build_id}}-{{temporal_worker_build_id}}-{{ temporal_worker_build_id }}-{{nope}}",
+		}
+		substituteMetricTemplateVars(obj, vars)
+		assert.Equal(t, "abc123-abc123-{{ temporal_worker_build_id }}-{{nope}}", obj["query"])
+	})
+
+	t.Run("leaves strings without tokens unchanged", func(t *testing.T) {
+		obj := map[string]interface{}{
+			"nested": []interface{}{"plain", map[string]interface{}{"k": "still-plain"}},
+		}
+		substituteMetricTemplateVars(obj, vars)
+		assert.Equal(t, "plain", obj["nested"].([]interface{})[0])
+		assert.Equal(t, "still-plain", obj["nested"].([]interface{})[1].(map[string]interface{})["k"])
+	})
+
+	t.Run("does not rewrite non-strings or map keys", func(t *testing.T) {
+		obj := map[string]interface{}{
+			"{{temporal_worker_build_id}}": float64(1),
+			"flag":                         true,
+		}
+		substituteMetricTemplateVars(obj, vars)
+		assert.Equal(t, float64(1), obj["{{temporal_worker_build_id}}"])
+		assert.True(t, obj["flag"].(bool))
+	})
+}
+
 func TestHasScaleTarget(t *testing.T) {
 	t.Run("detects the sentinel in a KEDA ScaledObject", func(t *testing.T) {
 		raw := []byte(`{
