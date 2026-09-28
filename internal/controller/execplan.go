@@ -578,6 +578,12 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		results := wrtResults[key]
 		deleted := deletedBuildIDs[key]
 
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
+			statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
+			continue
+		}
+
 		allSkipped := true
 		for _, res := range results {
 			if !res.skipped {
@@ -600,28 +606,14 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			// write happens. A stale observedGeneration would make kstatus report
 			// InProgress forever.
 			//
-			// The Get is served from the informer cache, and the write still only
-			// happens when something has actually changed, so this branch's
-			// optimisation is preserved.
-			wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
-			if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
-				if !apierrors.IsNotFound(err) {
-					statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s to refresh observedGeneration: %w", key.namespace, key.name, err))
-				}
-				continue
-			}
+			// The WRT was already fetched from the informer cache above, and the write
+			// only happens when something has actually changed.
 			if wrt.Status.ObservedGeneration != wrt.Generation {
 				wrt.Status.ObservedGeneration = wrt.Generation
 				if err := r.Status().Update(ctx, wrt); err != nil {
 					statusErrs = append(statusErrs, fmt.Errorf("refresh observedGeneration for WRT %s/%s: %w", key.namespace, key.name, err))
 				}
 			}
-			continue
-		}
-
-		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
-			statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
 			continue
 		}
 
