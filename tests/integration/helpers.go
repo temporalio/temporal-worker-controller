@@ -1,4 +1,7 @@
-package internal
+//go:build integration
+// +build integration
+
+package integration
 
 import (
 	"context"
@@ -23,6 +26,7 @@ import (
 	temporalClient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/workflow"
+	"go.temporal.io/server/temporaltest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -46,6 +50,105 @@ const (
 	testControllerIdentity               = testControllerIdentityPrefix + "/" + testControllerIdentitySuffix
 )
 
+type testCase struct {
+	name    string
+	builder *testhelpers.TestCaseBuilder
+}
+
+// testWorkerDeploymentCreation tests the creation of a WorkerDeployment and waits for the expected status
+func testWorkerDeploymentCreation(
+	ctx context.Context,
+	t *testing.T,
+	k8sClient client.Client,
+	mgr manager.Manager,
+	ts *temporaltest.TestServer,
+	tc testhelpers.TestCase,
+) {
+	twd := tc.GetTWD()
+	expectedStatus := tc.GetExpectedStatus()
+
+	t.Log("Creating a Connection")
+	temporalConnection := &temporaliov1alpha1.Connection{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      twd.Spec.WorkerOptions.ConnectionRef.Name,
+			Namespace: twd.Namespace,
+		},
+		Spec: temporaliov1alpha1.ConnectionSpec{
+			HostPort: ts.GetFrontendHostPort(),
+		},
+	}
+	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
+		t.Fatalf("failed to create Connection: %v", err)
+	}
+
+	env := testhelpers.TestEnv{
+		K8sClient:                  k8sClient,
+		Mgr:                        mgr,
+		Ts:                         ts,
+		Connection:                 temporalConnection,
+		ExistingDeploymentReplicas: tc.GetExistingDeploymentReplicas(),
+		ExistingDeploymentImages:   tc.GetExistingDeploymentImages(),
+		ExpectedDeploymentReplicas: tc.GetExpectedDeploymentReplicas(),
+	}
+
+	makePreliminaryStatusTrue(ctx, t, env, twd, tc.GetPreviouslyCurrentImages())
+
+	// verify that temporal state matches the preliminary status, to confirm that makePreliminaryStatusTrue worked
+	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, twd.Status, 30*time.Second, 5*time.Second)
+
+	// apply post-status setup function
+	if f := tc.GetSetupFunc(); f != nil {
+		f(t, ctx, tc, env)
+	}
+
+	// Apply any test-specific mutations to the TWD before it is created.
+	if f := tc.GetTWDMutatorFunc(); f != nil {
+		f(twd)
+	}
+
+	t.Log("Creating a WorkerDeployment")
+	if err := k8sClient.Create(ctx, twd); err != nil {
+		t.Fatalf("failed to create WorkerDeployment: %v", err)
+	}
+
+	// k8sClient.Create strips the status subresource, so the TWD starts with an empty
+	// status. Not guaranteed to precede the controller's first reconcile, but seeding it
+	// here helps test cases with pre-existing target/deprecated versions converge faster
+	// and avoid flaking against the eventually timeouts below.
+	if twd.Status.TargetVersion.BuildID != "" {
+		if err := k8sClient.Status().Update(ctx, twd); err != nil {
+			t.Fatalf("failed to pre-apply TWD status: %v", err)
+		}
+	}
+
+	// Hook: runs after TWD creation but before waiting for the target Deployment.
+	// Use this to assert blocking behaviour and then unblock the rollout.
+	if f := tc.GetPostTWDCreateFunc(); f != nil {
+		f(t, ctx, tc, env)
+	}
+
+	t.Log("Waiting for the controller to reconcile")
+	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
+
+	// only wait for and create the deployment if it is expected
+	if expectedStatus.TargetVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
+		waitForExpectedTargetDeployment(t, twd, env, 30*time.Second)
+		workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
+		defer handleStopFuncs(workerStopFuncs)
+	}
+
+	if wait := tc.GetWaitTime(); wait != nil {
+		time.Sleep(*wait)
+	}
+	verifyWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, expectedStatus, 30*time.Second, 5*time.Second)
+	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, *expectedStatus, 30*time.Second, 5*time.Second)
+
+	// apply post-expected-status validation function
+	if f := tc.GetValidatorFunc(); f != nil {
+		tc.GetValidatorFunc()(t, ctx, tc, env)
+	}
+}
+
 // setupKubebuilderAssets sets up the KUBEBUILDER_ASSETS environment variable if not already set
 func setupKubebuilderAssets() error {
 	if os.Getenv("KUBEBUILDER_ASSETS") != "" {
@@ -57,7 +160,7 @@ func setupKubebuilderAssets() error {
 	if !ok {
 		return errors.New("failed to get current file path")
 	}
-	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(currentFile), "../../.."))
+	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(currentFile), "../.."))
 	if err != nil {
 		return fmt.Errorf("failed to get repository root: %v", err)
 	}
@@ -87,7 +190,7 @@ func getRepoRoot(t *testing.T) string {
 		t.Fatalf("failed to get current file path")
 	}
 
-	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(currentFile), "../../.."))
+	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(currentFile), "../.."))
 	if err != nil {
 		t.Fatalf("failed to get repository root: %v", err)
 	}

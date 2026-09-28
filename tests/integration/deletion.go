@@ -1,4 +1,7 @@
-package internal
+//go:build integration
+// +build integration
+
+package integration
 
 // Tests that deleting a WorkerDeployment CRD correctly cleans up
 // Temporal server-side versioning data and handles edge cases like the

@@ -1,4 +1,4 @@
-name: Integration Tests
+name: Unit Tests
 
 on:
   push:
@@ -10,8 +10,8 @@ permissions:
 
 jobs:
 
-  test-integration:
-    name: Run Integration Tests
+  unit-test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
     
     steps:
@@ -24,16 +24,16 @@ jobs:
         go-version-file: 'go.mod'
         check-latest: true
         cache: true
-      
-    - name: Run integration tests
-      run: make test-integration
+
+    - name: Run unit tests
+      run: make test-unit
       
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
-        name: test-results
+        name: unit-test-results
         path: |
           cover.out
           bin/
-        retention-days: 7
+        retention-days: 7 
