@@ -1,6 +1,15 @@
 package v1alpha1
 
 // Condition type constants.
+//
+// These conditions follow the conventions of kstatus
+// (https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus), the
+// library that Helm --wait, Argo CD, Argo Rollouts, Flux, and kubectl wait
+// --for=jsonpath use to decide whether a custom resource is ready.
+//
+// Ready and Progressing remain the conditions for human-facing status and for
+// automation written against this controller. Reconciling and Stalled exist so
+// generic tooling can read the same state without custom health checks.
 const (
 	// ConditionReady is True for WorkerDeployment when the Temporal
 	// connection is reachable and the target version is the current version in Temporal.
