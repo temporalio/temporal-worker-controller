@@ -811,13 +811,6 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 	twd *temporaliov1alpha1.WorkerDeployment,
 	temporalState *temporal.TemporalWorkerState,
 ) {
-	// A successful reconcile clears any Stalled condition left by an earlier blocked
-	// one. meta.SetStatusCondition only ever upserts, so without this removal
-	// Stalled=True would be permanent and kstatus would keep reporting Failed after
-	// the WorkerDeployment recovered. Removing rather than setting False follows the
-	// abnormal-true convention: absent means normal.
-	meta.RemoveStatusCondition(&twd.Status.Conditions, temporaliov1alpha1.ConditionStalled)
-
 	// Deprecated: set ConnectionHealthy=True on all successful reconciles for v1.3.x compat.
 	r.setCondition(twd, temporaliov1alpha1.ConditionConnectionHealthy, //nolint:staticcheck // backward compat
 		metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy, //nolint:staticcheck // backward compat
@@ -844,8 +837,19 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
 
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
+			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
+			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
+
 		r.setConditionProgressingForCurrent(twd, temporalState)
-		// Deprecated: set RolloutComplete=True for v1.3.x compat.
+
+		// Deprecated: set RolloutComplete=True for v1.3.x compat. This deliberately
+		// mirrors rollout completion only, not poller presence, matching its
+		// pre-existing (Kubernetes-readiness-only) semantics for v1.3.x compat
+		// consumers.
 		r.setCondition(twd, temporaliov1alpha1.ConditionRolloutComplete, //nolint:staticcheck // backward compat
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
