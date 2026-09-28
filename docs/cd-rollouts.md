@@ -8,9 +8,9 @@ For migration help, see [migration-to-versioned.md](migration-to-versioned.md).
 
 ## Understanding the conditions
 
-The `WorkerDeployment` resource exposes four standard conditions on `status.conditions` that CD tools and scripts can consume, in two pairs.
+The `WorkerDeployment` resource exposes four standard conditions on `status.conditions` that CD tools and scripts can consume.
 
-`Ready` and `Progressing` describe the rollout in the controller's own terms. They are the ones to read in a script, a dashboard, or `kubectl describe`, and their `reason` fields carry the detail.
+`Ready` and `Progressing` describe the rollout in the controller's own terms. They are the ones to read in a script, a dashboard, or `kubectl describe`, and their `reason` fields describe why the controller has set the condition's `Status` field to `True` or `False`.
 
 `Stalled` and `Reconciling` say the same thing in the vocabulary [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) understands, the library behind Helm 4 `--wait` and Flux health assessment. They follow kstatus's "abnormal-true" convention: each is present and `True` only while something unusual is happening, and absent otherwise. You rarely need to read them yourself; they exist so those tools reach the right verdict without a custom health check.
 
@@ -51,17 +51,17 @@ Once the underlying problem is fixed, the next successful reconcile will restore
 
 `Reconciling=True` means the controller is still working toward the spec. kstatus-based tools report the resource as **in progress** and keep waiting. `Stalled=True` means reconciliation cannot proceed and waiting will not help. The kstatus tools report **failed** and stop. Both are absent once a rollout is complete, and only one is ever set at a time.
 
-`Stalled` is set only for failures that are decidable from information already in hand, where nothing arriving later could change the answer:
+`Stalled` is set to `True` only for failures that are decidable from information already in hand, where nothing arriving later could change the answer. The `Reason` field is used to describe why that decision cannot change.
+* `InvalidSpec` is used when the spec you just applied is not valid.
+* `ClusterConnectionUnsupported` is used when the type of Connection is not supported by the controller.
 
-| Reason | Condition set | Why |
-|---|---|---|
-| `InvalidSpec` | `Stalled` | Settled by the spec you just applied |
-| `ClusterConnectionUnsupported` | `Stalled` | Settled by the spec plus how the controller was deployed |
-| `ConnectionNotFound` | `Reconciling` | Waiting on another object — the `Connection` may not exist *yet* |
-| `AuthSecretInvalid` | `Reconciling` | Same, and this reason also covers a credential Secret that is simply absent |
-| `TemporalClientCreationFailed` | `Reconciling` | Server unreachable; retried |
-| `TemporalStateFetchFailed` | `Reconciling` | Includes rate limiting; retried |
-| `PlanGenerationFailed`, `PlanExecutionFailed` | `Reconciling` | Retried with backoff |
+`Reconciling` is set to `True` when the controller is still working to make the observed state of the resource match the desired state of the resource, with the `Reason` field used to provide more detail about why `Reconciling=True`.
+
+* `ConnectionNotFound` is used when the `Connection` may not exist *yet* or is simply absent.
+* `AuthSecretInvalid` a credential Secret may not exist *yet* or is simply absent.
+* `TemporalClientCreationFailed` is used when the Temporal Server is unreachable.
+* `TemporalStateFetchFailed` is used when rate-limiting is encountered.
+* `PlanGenerationFailed`, `PlanExecutionFailed` is used when errors occurred during plan generation or execution that can be potentially be recovered from in the next reconciliation loop.
 
 The reason a missing `Connection` is not treated as terminal is ordering. Applying a `WorkerDeployment` alongside its `Connection` and credentials in one release gives no guarantee about which lands first, so a missing reference is frequently a normal gap of a few seconds rather than a mistake.
 
