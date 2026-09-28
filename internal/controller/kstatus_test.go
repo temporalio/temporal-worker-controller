@@ -69,7 +69,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusNotRegistered
-				r.syncConditions(wd)
+				r.syncConditions(wd, nil)
 				return wd
 			},
 			today:   kstatus.InProgressStatus,
@@ -83,7 +83,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
-				r.syncConditions(wd)
+				r.syncConditions(wd, nil)
 				return wd
 			},
 			today:   kstatus.InProgressStatus,
@@ -97,7 +97,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
-				r.syncConditions(wd)
+				r.syncConditions(wd, nil)
 				return wd
 			},
 			today:   kstatus.InProgressStatus,
@@ -112,7 +112,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-				r.syncConditions(wd)
+				r.syncConditions(wd, nil)
 				return wd
 			},
 			today:   kstatus.CurrentStatus,
@@ -212,7 +212,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				// The user creates the Connection; the next reconcile succeeds.
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-				r.syncConditions(wd)
+				r.syncConditions(wd, nil)
 				return wd
 			},
 			today:   kstatus.CurrentStatus,
@@ -231,7 +231,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd.Finalizers = []string{finalizerName}
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-				r.syncConditions(wd)
+				r.syncConditions(wd, nil)
 				return wd
 			},
 			today:   kstatus.TerminatingStatus,
@@ -281,7 +281,7 @@ func TestConditionsAreKstatusCompatible(t *testing.T) {
 			wd := makeWD("wd", "default", "conn")
 			wd.Status.ObservedGeneration = wd.Generation
 			wd.Status.TargetVersion.Status = st
-			r.syncConditions(wd)
+			r.syncConditions(wd, nil)
 
 			assert.False(t, isTrue(wd, temporaliov1alpha1.ConditionStalled),
 				"a successful reconcile must never leave Stalled=True")
@@ -343,7 +343,7 @@ func TestConditionsAreKstatusCompatible(t *testing.T) {
 		// The user fixes the spec; the next reconcile succeeds and completes.
 		wd.Status.ObservedGeneration = wd.Generation
 		wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-		r.syncConditions(wd)
+		r.syncConditions(wd, nil)
 
 		// Both are set to False rather than removed, matching how every other
 		// condition syncConditions writes is handled. kstatus only ever tests for
