@@ -271,9 +271,8 @@ func verifyTemporalStateMatchesStatusEventually(
 				}
 			}
 		}
-		// The controller reads version status. The SDK drainage field can say
-		// Drained while that status is still Draining, so wait for the status
-		// the controller will act on.
+		// The checks above only cover the target version. Wait until each
+		// deprecated version has the status the fixture claims.
 		if err := deprecatedVersionsMatchServerStatus(ctx, ts, deploymentName, expectedDeploymentStatus.DeprecatedVersions); err != nil {
 			return err
 		}
