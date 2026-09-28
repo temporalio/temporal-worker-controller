@@ -46,9 +46,9 @@ Any string in `spec.template` may contain these tokens. The controller replaces 
 
 | Token | Value |
 |-------|-------|
-| `{{temporal_worker_deployment_name}}` | `<k8s-namespace>_<worker-deployment-name>` |
-| `{{temporal_worker_build_id}}` | Build ID of that copy |
-| `{{temporal_namespace}}` | Temporal namespace from the Connection |
+| `{{temporal_worker_deployment_name}}` | `<ns>_<wd-name>` |
+| `{{temporal_worker_build_id}}` | `<buildID>` |
+| `{{temporal_namespace}}` | `<temporal-ns>` |
 
 The values are the same ones appended to `spec.metrics[*].external.metric.selector.matchLabels`. The controller replaces the exact token, the same way an empty `matchLabels: {}` or `""` opts in to injection.
 

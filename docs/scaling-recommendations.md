@@ -218,9 +218,9 @@ Prometheus, Datadog, and Dynatrace triggers take a query string. Any string in t
 
 | Token | Value |
 |-------|-------|
-| `{{temporal_worker_deployment_name}}` | `<k8s-namespace>_<worker-deployment-name>` |
-| `{{temporal_worker_build_id}}` | Build ID of the rendered copy |
-| `{{temporal_namespace}}` | Temporal namespace from the Connection |
+| `{{temporal_worker_deployment_name}}` | `<ns>_<wd-name>` |
+| `{{temporal_worker_build_id}}` | `<buildID>` |
+| `{{temporal_namespace}}` | `<temporal-ns>` |
 
 Those are the same values appended to HPA external metric `matchLabels`. The controller replaces the exact token, the same way an empty `matchLabels: {}` or `""` opts in to injection. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
 
