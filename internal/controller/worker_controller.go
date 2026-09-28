@@ -838,7 +838,6 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
-		// Deprecated: set RolloutComplete=True for v1.3.x compat.
 
 		r.setConditionProgressingForCurrent(twd, temporalState)
 
