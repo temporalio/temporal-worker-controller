@@ -10,6 +10,8 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/server/temporaltest"
@@ -269,8 +271,70 @@ func verifyTemporalStateMatchesStatusEventually(
 				}
 			}
 		}
+		// The controller reads version status. The SDK drainage field can say
+		// Drained while that status is still Draining, so wait for the status
+		// the controller will act on.
+		if err := deprecatedVersionsMatchServerStatus(ctx, ts, deploymentName, expectedDeploymentStatus.DeprecatedVersions); err != nil {
+			return err
+		}
 		return nil // All assertions passed!
 	})
+}
+
+func deprecatedVersionsMatchServerStatus(
+	ctx context.Context,
+	ts *temporaltest.TestServer,
+	deploymentName string,
+	deprecated []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion,
+) error {
+	if len(deprecated) == 0 {
+		return nil
+	}
+	resp, err := ts.GetDefaultClient().WorkflowService().DescribeWorkerDeployment(ctx, &workflowservice.DescribeWorkerDeploymentRequest{
+		Namespace:      ts.GetDefaultNamespace(),
+		DeploymentName: deploymentName,
+	})
+	if err != nil {
+		return fmt.Errorf("error describing worker deployment %s: %w", deploymentName, err)
+	}
+	summaries := resp.GetWorkerDeploymentInfo().GetVersionSummaries()
+	for _, dv := range deprecated {
+		want, ok := serverVersionStatus(dv.Status)
+		if !ok {
+			continue
+		}
+		found := false
+		for _, summary := range summaries {
+			if summary.GetDeploymentVersion().GetBuildId() != dv.BuildID {
+				continue
+			}
+			found = true
+			if got := summary.GetStatus(); got != want {
+				return fmt.Errorf("expected deprecated build id '%s' to be %s, got %s", dv.BuildID, want, got)
+			}
+		}
+		if !found {
+			return fmt.Errorf("expected deprecated build id '%s' to be %s, but it was not registered", dv.BuildID, want)
+		}
+	}
+	return nil
+}
+
+func serverVersionStatus(status temporaliov1alpha1.VersionStatus) (enumspb.WorkerDeploymentVersionStatus, bool) {
+	switch status {
+	case temporaliov1alpha1.VersionStatusInactive:
+		return enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_INACTIVE, true
+	case temporaliov1alpha1.VersionStatusCurrent:
+		return enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_CURRENT, true
+	case temporaliov1alpha1.VersionStatusRamping:
+		return enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_RAMPING, true
+	case temporaliov1alpha1.VersionStatusDraining:
+		return enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINING, true
+	case temporaliov1alpha1.VersionStatusDrained:
+		return enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED, true
+	default:
+		return enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_UNSPECIFIED, false
+	}
 }
 
 // TODO(carlydf): check version task queues and reduce code repetition

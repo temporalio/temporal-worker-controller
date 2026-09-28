@@ -759,7 +759,6 @@ func TestIntegration(t *testing.T) {
 	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusVisibilityGracePeriod"), testDrainageVisibilityGracePeriod)
 	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusRefreshInterval"), testDrainageRefreshInterval)
 	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.maxVersionsInDeployment"), testMaxVersionsInDeployment)
-	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("history.enableVersionReactivationSignals"), false)
 	tsShortTTL := temporaltest.NewServer(
 		temporaltest.WithT(t),
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcShortTTL)),

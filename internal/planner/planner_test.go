@@ -880,8 +880,6 @@ func TestGetScaleDeployments(t *testing.T) {
 		state    *temporal.TemporalWorkerState
 		// map of build id to scaled replicas
 		expectScales map[string]uint32
-		// nil uses the default ineligible-version cap
-		maxVersions *int32
 	}{
 		{
 			name: "current version needs scaling",
@@ -1005,78 +1003,6 @@ func TestGetScaleDeployments(t *testing.T) {
 			},
 			spec:         &temporaliov1alpha1.WorkerDeploymentSpec{}, // scaler managed
 			expectScales: map[string]uint32{"test-old": 1},
-		},
-		{
-			name: "draining version at 0 replicas stays at 0 when the version cap was just reached",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"old": createDeploymentWithDefaultConnectionSpecHash(0),
-				},
-			},
-			status: &temporaliov1alpha1.WorkerDeploymentStatus{
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "new",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-new"},
-					},
-				},
-				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
-					{
-						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-							BuildID:    "old",
-							Status:     temporaliov1alpha1.VersionStatusDraining,
-							Deployment: &corev1.ObjectReference{Name: "test-old"},
-						},
-					},
-				},
-			},
-			state: &temporal.TemporalWorkerState{
-				Versions: map[string]*temporal.VersionInfo{
-					"old": {DrainageChangedAt: func() *time.Time { t := time.Now(); return &t }()},
-				},
-			},
-			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
-				Replicas: func() *int32 { r := int32(1); return &r }(),
-			},
-			maxVersions:  func() *int32 { i := int32(1); return &i }(),
-			expectScales: map[string]uint32{},
-		},
-		{
-			name: "draining version at 0 replicas is scaled up at the version cap once drainage has had time to finish",
-			k8sState: &k8s.DeploymentState{
-				Deployments: map[string]*appsv1.Deployment{
-					"old": createDeploymentWithDefaultConnectionSpecHash(0),
-				},
-			},
-			status: &temporaliov1alpha1.WorkerDeploymentStatus{
-				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
-					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-						BuildID:    "new",
-						Status:     temporaliov1alpha1.VersionStatusCurrent,
-						Deployment: &corev1.ObjectReference{Name: "test-new"},
-					},
-				},
-				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
-					{
-						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
-							BuildID:    "old",
-							Status:     temporaliov1alpha1.VersionStatusDraining,
-							Deployment: &corev1.ObjectReference{Name: "test-old"},
-						},
-					},
-				},
-			},
-			state: &temporal.TemporalWorkerState{
-				Versions: map[string]*temporal.VersionInfo{
-					"old": {DrainageChangedAt: func() *time.Time { t := time.Now().Add(-2 * drainingScaleUpGrace); return &t }()},
-				},
-			},
-			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
-				Replicas: func() *int32 { r := int32(2); return &r }(),
-			},
-			maxVersions:  func() *int32 { i := int32(1); return &i }(),
-			expectScales: map[string]uint32{"test-old": 2},
 		},
 		{
 			name: "draining version with pollers is left untouched",
@@ -1365,11 +1291,7 @@ func TestGetScaleDeployments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			maxV := defaults.MaxVersionsIneligibleForDeletion
-			if tc.maxVersions != nil {
-				maxV = *tc.maxVersions
-			}
-			scales := getScaleDeployments(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, maxV)
+			scales := getScaleDeployments(logr.Discard(), tc.k8sState, tc.status, tc.spec)
 			assert.Equal(t, len(tc.expectScales), len(scales), "unexpected number of scales")
 			actualScaleDeploymentNames := make([]string, 0)
 			for deploymentRef, actualReplicas := range scales {
