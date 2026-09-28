@@ -217,7 +217,7 @@
           "type": "boolean",
           "description": "Whether to enable cert-manager"
         },
-        "caInjector": {
+        "caInjectorJob": {
           "type": "object",
           "properties": {
             "enabled": {
@@ -228,13 +228,18 @@
               "type": "string",
               "description": "Image for the CA-injector Job (must contain kubectl and coreutils base64)"
             },
-            "caSecretName": {
-              "type": "string",
-              "description": "Name of the Secret containing the CA that signed the webhook server's TLS certificate"
-            },
-            "caSecretKey": {
-              "type": "string",
-              "description": "Key within caSecretName holding the base64 PEM CA certificate"
+            "secret": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Name of the Secret containing the CA that signed the webhook server's TLS certificate"
+                },
+                "key": {
+                  "type": "string",
+                  "description": "Key within secret.name holding the base64 PEM CA certificate"
+                }
+              }
             }
           }
         }

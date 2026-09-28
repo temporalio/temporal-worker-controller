@@ -1,4 +1,4 @@
-{{- if and (not .Values.certmanager.enabled) .Values.certmanager.caInjector.enabled }}
+{{- if and (not .Values.certmanager.enabled) .Values.certmanager.caInjectorJob.enabled }}
 # Patches the caBundle onto both ValidatingWebhookConfigurations at every
 # install/upgrade, reading the CA fresh from a Secret each time. Alternative
 # to a static certmanager.caBundle value for CAs that rotate.
@@ -80,7 +80,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: ca-injector
-          image: {{ .Values.certmanager.caInjector.image }}
+          image: {{ .Values.certmanager.caInjectorJob.image }}
           command: ["/bin/sh", "-c"]
           # Each ValidatingWebhookConfiguration in this chart has exactly one
           # entry under .webhooks, hence the hardcoded /webhooks/0 path. "add"
@@ -89,7 +89,7 @@ spec:
           args:
             - |
               set -eu
-              CA_BUNDLE=$(base64 -w0 < /ca/{{ .Values.certmanager.caInjector.caSecretKey }})
+              CA_BUNDLE=$(base64 -w0 < /ca/{{ .Values.certmanager.caInjectorJob.secret.key }})
               kubectl patch validatingwebhookconfigurations {{ .Release.Name }}-wrt-validating-webhook-configuration \
                 --type=json -p="[{\"op\":\"add\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"$CA_BUNDLE\"}]"
               {{- if .Values.webhook.enabled }}
@@ -103,5 +103,5 @@ spec:
       volumes:
         - name: ca
           secret:
-            secretName: {{ .Values.certmanager.caInjector.caSecretName }}
+            secretName: {{ .Values.certmanager.caInjectorJob.secret.name }}
 {{- end }}
