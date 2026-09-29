@@ -8,6 +8,8 @@
 #   {{temporal_worker_deployment_name}}  <ns>_<wd-name>
 #   {{temporal_worker_build_id}}         <buildID>
 #   {{temporal_namespace}}               <temporal-ns>
+# With hpaMatchLabelsStripTemporalPrefix, the tokens are
+# {{worker_deployment_name}}, {{worker_build_id}}, and {{namespace}}.
 #
 # ScaledObject must be listed in workerResourceTemplate.allowedResources.
 # KEDA and prometheus-adapter cannot both own external.metrics.k8s.io.

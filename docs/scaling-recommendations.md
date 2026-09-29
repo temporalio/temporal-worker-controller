@@ -210,7 +210,7 @@ For HPA users, the equivalent of `scaleDown.stabilizationWindowSeconds` is avail
 
 Because there is no metrics aggregation pipeline in front of the KEDA Temporal Scaler, there is no delay in receiving the scaling signal. With HPA, there is a delay introduced by Temporal Cloud's metrics aggregation service. See [HPA scaling signal](#hpa-scaling-signal) for more information.
 
-Per-version scoping of the `temporal` trigger needs no Temporal Cloud configuration. HPA, and KEDA triggers that query a metrics backend, need the `temporal_worker_deployment_name` and `temporal_worker_build_id` labels on the series.
+Per-version scoping of the `temporal` trigger needs no Temporal Cloud configuration. HPA, and KEDA triggers that query a metrics backend, need the `temporal_worker_deployment_name` and `temporal_worker_build_id` labels on the series. With prefix stripping enabled, those series use `worker_deployment_name` and `worker_build_id`.
 
 ## Per-version query tokens
 
@@ -222,7 +222,7 @@ Prometheus, Datadog, and Dynatrace triggers take a query string. Any string in t
 | `{{temporal_worker_build_id}}` | `<buildID>` |
 | `{{temporal_namespace}}` | `<temporal-ns>` |
 
-Those are the same values appended to HPA external metric `matchLabels`. The controller replaces the exact token, the same way an empty `matchLabels: {}` or `""` opts in to injection. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
+Those are the same values appended to HPA external metric `matchLabels`. The controller replaces the exact token, the same way an empty `matchLabels: {}` or `""` opts in to injection. When `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix` is enabled, the tokens are `{{worker_deployment_name}}`, `{{worker_build_id}}`, and `{{namespace}}`. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
 
 ## KEDA limitations
 

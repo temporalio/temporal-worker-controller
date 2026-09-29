@@ -52,6 +52,8 @@ Any string in `spec.template` may contain these tokens. The controller replaces 
 
 The values are the same ones appended to `spec.metrics[*].external.metric.selector.matchLabels`. The controller replaces the exact token, the same way an empty `matchLabels: {}` or `""` opts in to injection.
 
+When `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix` is enabled, the tokens are `{{worker_deployment_name}}`, `{{worker_build_id}}`, and `{{namespace}}`, matching the injected matchLabels.
+
 Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `datadog`, `dynatrace`, and others) so each ScaledObject filters metrics to one worker version. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
 
 ## Resource naming
