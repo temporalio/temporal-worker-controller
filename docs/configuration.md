@@ -311,11 +311,51 @@ echo -n "your-api-key-token-here" | base64
 
 **Important Notes:**
 - Both secrets must be created in the same Kubernetes namespace as the `Connection` resource
-- Only one authentication method can be specified per `Connection` (either `mutualTLSSecretRef` or `apiKeySecretRef`)
+- Only one authentication method can be specified per `Connection` (either `mutualTLSSecretRef`, `apiKeySecretRef`, or `manualAuth`)
 - The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
 - `tls.serverName` affects TLS certificate verification by the controller and is injected into Worker Pods as `TEMPORAL_TLS_SERVER_NAME` for SDK envconfig users.
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
 - `tls.caCertSecretRef` trusts an extra CA for API-key or no-credentials connections (mTLS already covers this via its own secret's `ca.crt` key, and cannot be combined with `tls.caCertSecretRef`). The referenced Secret must have a `ca.crt` key.
+
+**Using Manual Authentication:**
+
+`manualAuth` is intended for wrapper binaries that embed the controller and need to own client construction — for example, to inject a custom gRPC headers provider, xDS/mTLS dial credentials, or tracing options that the pool does not derive from a Kubernetes Secret.
+
+When `manualAuth: true` is set on a `Connection`, the pool:
+- skips Kubernetes Secret parsing (no `mutualTLSSecretRef` or `apiKeySecretRef` may be set),
+- skips the Temporal `CheckHealth` probe (the wrapper's credentials are expected to be namespace-scoped, like API keys, and would fail this system-level RPC),
+- builds the base SDK options (logger, host/port, namespace, identity, and the `temporal-namespace` header provider) and then hands them to a wrapper-supplied hook for customization before dialing.
+
+The wrapper binary registers the hook after constructing the pool:
+
+```go
+cp := clientpool.New(logger, k8sClient)
+cp.CustomizeClientOptions = func(opts sdkclient.Options) sdkclient.Options {
+    // Wrap the existing HeadersProvider (do not replace it) so the
+    // temporal-namespace header is preserved, then add auth, dial
+    // credentials, tracing, etc.
+    opts.HeadersProvider = newAuthHeadersProvider(opts.HeadersProvider)
+    opts.ConnectionOptions.DialOptions = append(opts.ConnectionOptions.DialOptions, /* ... */)
+    return opts
+}
+```
+
+A `Connection` using manual auth:
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: Connection
+metadata:
+  name: production-temporal
+spec:
+  hostPort: "production.abc123.tmprl.cloud:7233"
+  manualAuth: true
+```
+
+**Important Notes:**
+- `manualAuth` is mutually exclusive with `mutualTLSSecretRef` and `apiKeySecretRef`.
+- The wrapper must wrap, not replace, the pool's `HeadersProvider` so the `temporal-namespace` header continues to ride every RPC (including system-level RPCs like `GetSystemInfo`).
+- The pool still owns the client cache and eviction; the wrapper only customizes options. On transport-class failures the reconciler evicts the cached client as usual so the next reconcile re-dials with fresh options.
 
 ## Gate Configuration
 
