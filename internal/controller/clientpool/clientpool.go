@@ -104,11 +104,17 @@ func (cp *ClientPool) GetClient(
 		return nil, ClientPoolKey{}, &AuthConfigError{Err: err}
 	}
 	clientOpts := cp.getClientOptions(spec, temporalNamespace, identity, auth)
-	c, err := cp.DialAndUpsertClient(clientOpts, key, auth)
+	client, err := cp.dialFn(clientOpts)
 	if err != nil {
 		return nil, ClientPoolKey{}, &DialError{Err: err}
 	}
-	return c, key, nil
+	if err := cp.healthCheck(client, auth); err != nil {
+		client.Close()
+		return nil, ClientPoolKey{}, &DialError{Err: err}
+	}
+	// Cache the new client
+	cp.cacheClient(key, client, auth)
+	return client, key, nil
 }
 
 func (cp *ClientPool) createKey(spec v1alpha1.ConnectionSpec, temporalNamespace string) ClientPoolKey {
@@ -346,39 +352,32 @@ func (cp *ClientPool) parseClientSecret(
 	}
 }
 
-func (cp *ClientPool) DialAndUpsertClient(clientOpts sdkclient.Options, clientPoolKey ClientPoolKey, clientAuth ClientAuth) (sdkclient.Client, error) {
-	c, err := cp.dialFn(clientOpts)
-	if err != nil {
-		return nil, err
+// healthCheck probes the Temporal server with CheckHealth to fail fast when the
+// server is unreachable. It is skipped for API key auth: CheckHealth is a
+// system-level RPC, but Temporal Cloud API keys are namespace-scoped and lack
+// permission to call it, so the probe would always fail. Skipping is safe
+// because client.Dial already performs GetSystemInfo, which is a superset of
+// CheckHealth.
+func (cp *ClientPool) healthCheck(c sdkclient.Client, auth ClientAuth) error {
+	if auth.mode == v1alpha1.AuthModeAPIKey {
+		return nil
 	}
-
-	// Skip health check for API key auth — CheckHealth is a system-level
-	// (non-namespace-scoped) RPC that fails with namespace-scoped API keys
-	// on Temporal Cloud. This is safe because client.Dial already calls
-	// GetSystemInfo internally, which is a superset of CheckHealth.
-	if clientAuth.mode != v1alpha1.AuthModeAPIKey {
-		if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
-			c.Close()
-			return nil, fmt.Errorf("temporal server health check failed: %w", err)
-		}
+	if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
+		return fmt.Errorf("temporal server health check failed: %w", err)
 	}
+	return nil
+}
 
+func (cp *ClientPool) cacheClient(key ClientPoolKey, c sdkclient.Client, auth ClientAuth) {
 	cp.mux.Lock()
 	defer cp.mux.Unlock()
-
-	cp.clients[clientPoolKey] = ClientInfo{
-		client: c,
-		auth:   clientAuth,
-	}
-	return c, nil
+	cp.clients[key] = ClientInfo{client: c, auth: auth}
 }
 
 // SetClientForTesting pre-populates the pool with a stub client, bypassing the network dial.
 // Intended for use in unit tests only.
 func (cp *ClientPool) SetClientForTesting(key ClientPoolKey, c sdkclient.Client) {
-	cp.mux.Lock()
-	defer cp.mux.Unlock()
-	cp.clients[key] = ClientInfo{client: c, auth: ClientAuth{mode: key.AuthMode}}
+	cp.cacheClient(key, c, ClientAuth{mode: key.AuthMode})
 }
 
 func (cp *ClientPool) Close() {
