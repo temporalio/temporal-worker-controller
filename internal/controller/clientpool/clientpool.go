@@ -103,17 +103,7 @@ func (cp *ClientPool) GetClient(
 	if err != nil {
 		return nil, ClientPoolKey{}, &AuthConfigError{Err: err}
 	}
-	newOpts := NewClientOptions{
-		K8sNamespace:      k8sNamespace,
-		TemporalNamespace: temporalNamespace,
-		Spec:              spec,
-		Identity:          identity,
-	}
-	clientOpts := cp.newClientOptions(newOpts)
-	clientOpts.ConnectionOptions.TLS = auth.tls
-	if auth.credentials != nil {
-		clientOpts.Credentials = auth.credentials
-	}
+	clientOpts := cp.getClientOptions(spec, temporalNamespace, identity, auth)
 	c, err := cp.DialAndUpsertClient(clientOpts, key, auth)
 	if err != nil {
 		return nil, ClientPoolKey{}, &DialError{Err: err}
@@ -169,27 +159,25 @@ func (cp *ClientPool) Clients() map[ClientPoolKey]sdkclient.Client {
 	return out
 }
 
-type NewClientOptions struct {
-	TemporalNamespace string
-	K8sNamespace      string
-	Spec              v1alpha1.ConnectionSpec
-	Identity          string
-}
-
 type namespaceHeadersProvider string
 
 func (p namespaceHeadersProvider) GetHeaders(context.Context) (map[string]string, error) {
 	return map[string]string{"temporal-namespace": string(p)}, nil
 }
 
-func (cp *ClientPool) newClientOptions(opts NewClientOptions) sdkclient.Options {
-	return sdkclient.Options{
+func (cp *ClientPool) getClientOptions(spec v1alpha1.ConnectionSpec, temporalNamespace, identity string, auth ClientAuth) sdkclient.Options {
+	opts := sdkclient.Options{
 		Logger:          cp.logger,
-		HostPort:        opts.Spec.HostPort,
-		Namespace:       opts.TemporalNamespace,
-		Identity:        opts.Identity,
-		HeadersProvider: namespaceHeadersProvider(opts.TemporalNamespace),
+		HostPort:        spec.HostPort,
+		Namespace:       temporalNamespace,
+		Identity:        identity,
+		HeadersProvider: namespaceHeadersProvider(temporalNamespace),
 	}
+	opts.ConnectionOptions.TLS = auth.tls
+	if auth.credentials != nil {
+		opts.Credentials = auth.credentials
+	}
+	return opts
 }
 
 func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, spec v1alpha1.ConnectionSpec) (ClientAuth, error) {
