@@ -721,6 +721,10 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			markedForDeletion = append(markedForDeletion, d)
 			continue
 		}
+		backoffKey := k8s.ComputeWorkerDeploymentName(workerDeploy) + "/" + buildID
+		if r.skipVersionDelete(backoffKey) {
+			continue
+		}
 		if slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
 			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
 		}) {
@@ -733,10 +737,6 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 				l.Info("inactive version has running pinned workflows, keeping its Deployment", "buildID", buildID, "count", count.Count)
 				continue
 			}
-		}
-		backoffKey := k8s.ComputeWorkerDeploymentName(workerDeploy) + "/" + buildID
-		if r.skipVersionDelete(backoffKey) {
-			continue
 		}
 		_, err := depHandle.DeleteVersion(
 			ctx,
@@ -763,15 +763,27 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	p.DeleteDeployments = markedForDeletion
 }
 
+const (
+	// Visibility's TemporalWorkerDeploymentVersion holds either delimiter form.
+	legacyDeploymentVersionDelimiter = "."
+	deploymentVersionDelimiter       = ":"
+)
+
+// getDeploymentVersionStrings returns the legacy (dot) and current (colon) encodings of a
+// deployment version, escaped for use inside a single-quoted visibility query literal.
+func getDeploymentVersionStrings(deploymentName, buildID string) (legacy, current string) {
+	escape := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+	return escape(deploymentName + legacyDeploymentVersionDelimiter + buildID),
+		escape(deploymentName + deploymentVersionDelimiter + buildID)
+}
+
 func getOpenPinnedWorkflowExecutions(
 	ctx context.Context,
 	temporalClient sdkclient.Client,
 	deploymentName string,
 	buildID string,
 ) (*workflowservice.CountWorkflowExecutionsResponse, error) {
-	// Visibility can contain either the legacy dot separator or the newer colon form.
-	legacyVersion := strings.ReplaceAll(deploymentName+"."+buildID, "'", "''")
-	version := strings.ReplaceAll(deploymentName+":"+buildID, "'", "''")
+	legacyVersion, version := getDeploymentVersionStrings(deploymentName, buildID)
 	qs := fmt.Sprintf(
 		"TemporalWorkerDeploymentVersion IN ('%s', '%s') "+
 			"AND TemporalWorkflowVersioningBehavior = 'Pinned' "+
