@@ -220,17 +220,16 @@ start-temporal-server: ## Start an ephemeral Temporal server with versioning API
 		--dynamic-config-value system.enableDeploymentVersions=true
 
 .PHONY: test-all
-test-all: manifests generate envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags test_dep ./... -coverprofile cover.out
+test-all: test-unit test-integration ## Run all tests.
 
 .PHONY: test-unit
 test-unit: envtest ## Run unit tests and webhook integration tests (requires envtest binaries and a rendered-chart-capable helm).
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" GOWORK=off go test ./... -coverprofile cover.out
 
 .PHONY: test-integration
 test-integration: manifests generate envtest ## Run integration tests against local Temporal dev server.
 	@echo "Running integration tests..."
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -v -tags test_dep ./internal/tests/internal -run TestIntegration
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" GOWORK=off go test -v -tags integration ./tests/integration/...
 
 ##@ Build
 

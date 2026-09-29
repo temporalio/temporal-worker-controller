@@ -1,4 +1,7 @@
-package internal
+//go:build integration
+// +build integration
+
+package integration
 
 // Tests that deleting a WorkerDeployment CRD correctly cleans up
 // Temporal server-side versioning data and handles edge cases like the
@@ -49,6 +52,12 @@ func runDeletionTests(
 	t.Run("drained-version-pruned-from-temporal-on-sunset", func(t *testing.T) {
 		testDrainedVersionPrunedOnSunset(t, k8sClient, ts, testNamespace)
 	})
+
+	for _, pinned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inactive-version-retirement/pinned-%t", pinned), func(t *testing.T) {
+			testInactiveVersionRetirement(t, k8sClient, ts, testNamespace, pinned)
+		})
+	}
 }
 
 // testDeletionSetsCurrentToUnversioned verifies the core fix: when a WD is deleted,

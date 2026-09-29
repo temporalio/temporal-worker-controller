@@ -52,6 +52,7 @@ func main() {
 	var webhookCertDir string
 	var webhookCertName string
 	var webhookKeyName string
+	wrtHPAMatchLabelsStripTemporalPrefix := controller.GetWRTHPAMatchLabelsStripTemporalPrefix()
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -68,6 +69,12 @@ func main() {
 		"Name of the TLS certificate file within webhook-cert-dir.")
 	flag.StringVar(&webhookKeyName, "webhook-key-name", "tls.key",
 		"Name of the TLS private key file within webhook-cert-dir.")
+	flag.BoolVar(
+		&wrtHPAMatchLabelsStripTemporalPrefix,
+		"wrt-hpa-match-labels-strip-temporal-prefix",
+		wrtHPAMatchLabelsStripTemporalPrefix,
+		"Remove the temporal_ prefix from auto-injected WorkerResourceTemplate HPA external metric matchLabels.",
+	)
 	opts := zap.Options{
 		Development: true,
 	}
@@ -170,6 +177,7 @@ func main() {
 		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 		DisableDeprecatedTWD:                       !deprecatedCRDWatches.TemporalWorkerDeployments,
 		DisableClusterConnections:                  namespaceScoped,
+		WRTHPAMatchLabelsStripTemporalPrefix:       wrtHPAMatchLabelsStripTemporalPrefix,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
 		os.Exit(1)
@@ -190,7 +198,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if err = temporaliov1alpha1.NewWorkerResourceTemplateValidator(mgr).SetupWebhookWithManager(mgr); err != nil {
+	wrtValidator := temporaliov1alpha1.NewWorkerResourceTemplateValidator(mgr)
+	wrtValidator.HPAMatchLabelsStripTemporalPrefix = wrtHPAMatchLabelsStripTemporalPrefix
+	if err = wrtValidator.SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "WorkerResourceTemplate")
 		os.Exit(1)
 	}
