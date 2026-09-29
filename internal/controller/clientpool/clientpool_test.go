@@ -101,12 +101,7 @@ func makeMTLSSpec(hostPort string) temporaliov1alpha1.ConnectionSpec {
 }
 
 func TestNewClientOptionsSetsTemporalNamespaceHeader(t *testing.T) {
-	opts := NewClientOptions{
-		TemporalNamespace: "routing-namespace",
-		K8sNamespace:      "test-ns",
-		Spec:              makeMTLSSpec("localhost:7233"),
-	}
-	clientOpts := newTestPool().newClientOptions(opts)
+	clientOpts := newTestPool().getClientOptions(makeMTLSSpec("localhost:7233"), "routing-namespace", "identity", ClientAuth{})
 
 	headers, err := clientOpts.HeadersProvider.GetHeaders(t.Context())
 
