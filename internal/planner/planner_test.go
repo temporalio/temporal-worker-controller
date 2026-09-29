@@ -2913,6 +2913,89 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		assert.Equal(t, "v1-image:pinned", c.Image)
 	})
 
+	caCertConn := func(host, apiSecret, caSecret string) temporaliov1alpha1.ConnectionSpec {
+		return temporaliov1alpha1.ConnectionSpec{
+			HostPort: host,
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: apiSecret},
+				Key:                  "key",
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: caSecret},
+			},
+		}
+	}
+	caVolumeSecretName := func(d *appsv1.Deployment) string {
+		for _, v := range d.Spec.Template.Spec.Volumes {
+			if v.Name == "temporal-tls-ca" && v.Secret != nil {
+				return v.Secret.SecretName
+			}
+		}
+		return ""
+	}
+
+	t.Run("API key to API key with CA cert", func(t *testing.T) {
+		res := run(apiKeyConn(defaultHostPort(), "api-secret", "key"), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok, "TEMPORAL_TLS must be set once a CA cert is configured")
+		assert.Equal(t, "true", e.Value)
+
+		e, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		require.True(t, ok, "TEMPORAL_TLS_SERVER_CA_CERT_PATH must be set")
+		assert.Equal(t, "/etc/temporal/tls-ca/ca.crt", e.Value)
+
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+		assert.True(t, hasVolume(res, "temporal-tls-ca"))
+		assert.Equal(t, "ca-secret", caVolumeSecretName(res))
+
+		// API key must still be present alongside the CA config.
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.True(t, ok)
+	})
+
+	t.Run("API key with CA cert back to plain API key removes the CA volume and mount", func(t *testing.T) {
+		res := run(caCertConn(defaultHostPort(), "api-secret", "ca-secret"), apiKeyConn(defaultHostPort(), "api-secret", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		_, ok := getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok, "TEMPORAL_TLS must be removed once the CA cert is unset")
+		_, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasMount(c, "temporal-tls-ca"))
+		assert.False(t, hasVolume(res, "temporal-tls-ca"))
+	})
+
+	t.Run("same-mode CA cert secret rotation", func(t *testing.T) {
+		res := run(caCertConn(defaultHostPort(), "api-secret", "old-ca-secret"), caCertConn(defaultHostPort(), "api-secret", "new-ca-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		assert.True(t, hasVolume(res, "temporal-tls-ca"))
+		assert.Equal(t, "new-ca-secret", caVolumeSecretName(res))
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+	})
+
+	t.Run("mTLS to CA cert (auth mode switch)", func(t *testing.T) {
+		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		// mTLS artifacts must be fully removed.
+		_, ok := getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.False(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasMount(c, "temporal-tls"))
+		assert.False(t, hasVolume(res, "temporal-tls"))
+
+		// CA-cert artifacts must be present, and TEMPORAL_TLS stays true across the switch.
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok)
+		assert.Equal(t, "true", e.Value)
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+		assert.Equal(t, "ca-secret", caVolumeSecretName(res))
+	})
+
 }
 
 func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {

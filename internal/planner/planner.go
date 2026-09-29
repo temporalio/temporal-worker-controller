@@ -449,6 +449,10 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 	tlsServerName := connection.TLSServerName()
 	mtls := connection.MutualTLSSecretRef != nil
 	apiKey := !mtls && connection.APIKeySecretRef != nil
+	// TLSCACertSecretName is mutually exclusive with MutualTLSSecretRef (enforced by
+	// ConnectionSpec's CEL validation) -- mTLS bundles its own CA into that secret's ca.crt
+	// key instead, see ConnectionTLSConfig.CACertSecretRef.
+	caCertSecretName := connection.TLSCACertSecretName()
 
 	for i := range deployment.Spec.Template.Spec.Containers {
 		container := &deployment.Spec.Template.Spec.Containers[i]
@@ -461,16 +465,28 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_SERVER_NAME")
 		}
 
-		if mtls {
+		if mtls || caCertSecretName != "" {
 			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS", "true")
+		} else {
+			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS")
+		}
+
+		if mtls {
 			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH", "/etc/temporal/tls/tls.key")
 			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH", "/etc/temporal/tls/tls.crt")
 			container.VolumeMounts = ensureTLSVolumeMount(container.VolumeMounts)
 		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS")
 			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH")
 			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH")
 			container.VolumeMounts = removeTLSVolumeMount(container.VolumeMounts)
+		}
+
+		if caCertSecretName != "" {
+			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_SERVER_CA_CERT_PATH", "/etc/temporal/tls-ca/ca.crt")
+			container.VolumeMounts = ensureTLSCAVolumeMount(container.VolumeMounts)
+		} else {
+			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+			container.VolumeMounts = removeTLSCAVolumeMount(container.VolumeMounts)
 		}
 
 		if apiKey {
@@ -485,6 +501,12 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 			connection.MutualTLSSecretRef.Name)
 	} else {
 		deployment.Spec.Template.Spec.Volumes = removeTLSVolume(deployment.Spec.Template.Spec.Volumes)
+	}
+
+	if caCertSecretName != "" {
+		deployment.Spec.Template.Spec.Volumes = ensureTLSCAVolume(deployment.Spec.Template.Spec.Volumes, caCertSecretName)
+	} else {
+		deployment.Spec.Template.Spec.Volumes = removeTLSCAVolume(deployment.Spec.Template.Spec.Volumes)
 	}
 }
 
@@ -562,6 +584,53 @@ func ensureTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 func removeTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 	for i := range mounts {
 		if mounts[i].Name == "temporal-tls" {
+			return slices.Delete(mounts, i, i+1)
+		}
+	}
+	return mounts
+}
+
+// ensureTLSCAVolume adds the temporal-tls-ca secret volume or updates its secret name if present.
+func ensureTLSCAVolume(volumes []corev1.Volume, secretName string) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == "temporal-tls-ca" {
+			volumes[i].VolumeSource = corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
+			}
+			return volumes
+		}
+	}
+	return append(volumes, corev1.Volume{
+		Name:         "temporal-tls-ca",
+		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secretName}},
+	})
+}
+
+// removeTLSCAVolume removes the temporal-tls-ca volume if present.
+func removeTLSCAVolume(volumes []corev1.Volume) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == "temporal-tls-ca" {
+			return slices.Delete(volumes, i, i+1)
+		}
+	}
+	return volumes
+}
+
+// ensureTLSCAVolumeMount adds the temporal-tls-ca mount to a container, or fixes its path if present.
+func ensureTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == "temporal-tls-ca" {
+			mounts[i].MountPath = "/etc/temporal/tls-ca"
+			return mounts
+		}
+	}
+	return append(mounts, corev1.VolumeMount{Name: "temporal-tls-ca", MountPath: "/etc/temporal/tls-ca"})
+}
+
+// removeTLSCAVolumeMount removes the temporal-tls-ca mount from a container if present.
+func removeTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == "temporal-tls-ca" {
 			return slices.Delete(mounts, i, i+1)
 		}
 	}
