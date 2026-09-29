@@ -1,0 +1,56 @@
+name: Skaffold
+
+# This workflow should only ever be manually executed, since it's only related
+# to the demo code.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  skaffold-build:
+    name: Test Skaffold Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+        cache: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+    - name: Install Skaffold
+      run: |
+        curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+        sudo install skaffold /usr/local/bin/
+        skaffold config set --global collect-metrics false
+
+    - name: Build worker-controller image
+      run: |
+        skaffold build --profile worker-controller --push=false
+      env:
+        DOCKER_BUILDKIT: 1
+        BUILDKIT_PROGRESS: plain
+
+    - name: Build helloworld worker image
+      run: |
+        skaffold build --profile helloworld-worker --push=false
+      env:
+        DOCKER_BUILDKIT: 1
+        BUILDKIT_PROGRESS: plain
+
+    # Verify that the demo worker patch applies successfully and builds.
+    - name: Build helloworld worker image patch
+      run: |
+        git apply internal/demo/helloworld/changes/no-version-gate.patch
+        skaffold build --profile helloworld-worker --push=false
+      env:
+        DOCKER_BUILDKIT: 1
+        BUILDKIT_PROGRESS: plain

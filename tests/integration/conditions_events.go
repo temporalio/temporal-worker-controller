@@ -1,4 +1,7 @@
-package internal
+//go:build integration
+// +build integration
+
+package integration
 
 // This file tests that status.conditions and Kubernetes Events are correctly
 // populated by the controller. Only scenarios that are naturally triggered by

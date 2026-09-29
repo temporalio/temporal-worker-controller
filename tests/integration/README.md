@@ -2,17 +2,7 @@
 
 This directory contains integration tests for the Temporal Worker Controller that run against a locally-running Temporal dev server. The tests use Go's native testing framework.
 
-## Prerequisites
-
-**Go Dependencies**: Make sure all Go dependencies are installed:
-
-```bash
-go mod tidy
-```
-
 ## Running the Integration Tests
-
-### Run Integration Tests (Recommended)
 
 The integration tests require the proper envtest setup. Use the Makefile target which handles this automatically:
 
@@ -21,7 +11,7 @@ make test-integration
 ```
 
 This command will:
-1. Set up the envtest environment with proper KUBEBUILDER_ASSETS
+1. Set up the envtest environment with proper `KUBEBUILDER_ASSETS`
 2. Run the integration tests
 
 ## Test Structure
@@ -84,12 +74,3 @@ Each test function should follow the same pattern:
 4. Wait for expected state changes
 5. Verify results
 6. Clean up resources
-
-## CI/CD Integration
-
-For CI/CD pipelines, you can use the Makefile target which handles everything automatically:
-
-```yaml
-- name: Run Integration Tests
-  run: make test-integration
-```
