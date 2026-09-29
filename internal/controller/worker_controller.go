@@ -74,6 +74,10 @@ type WorkerDeploymentReconciler struct {
 	// authorize listing it and the watch would retry forever against a 403.
 	DisableClusterConnections bool
 
+	// WRTHPAMatchLabelsStripTemporalPrefix removes the "temporal_" prefix from
+	// controller-managed external metric matchLabels in rendered WorkerResourceTemplates.
+	WRTHPAMatchLabelsStripTemporalPrefix bool
+
 	// When a Worker Deployment has the maximum number of versions (100 per Worker Deployment by default),
 	// it will delete the oldest eligible version when a worker with the 101st version arrives.
 	// If no versions are eligible for deletion, that worker's poll will fail, which is dangerous.
