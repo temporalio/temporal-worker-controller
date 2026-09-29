@@ -981,8 +981,8 @@ func TestIntegration(t *testing.T) {
 	})
 
 	// WRT integration tests: per-Build-ID HPA owner refs and scaleTargetRef injection,
-	// PDB matchLabels injection, multiple WRTs on the same TWD, template variable rendering,
-	// multi-version rollout copies, SSA apply failure handling, and SSA idempotency.
+	// PDB matchLabels injection, multiple WRTs on the same TWD, multi-version rollout
+	// copies, SSA apply failure handling, and SSA idempotency.
 	// Each entry uses the standard runner; WRT-specific assertions are in ValidatorFunction.
 	for _, tc := range wrtTestCases() {
 		t.Run(tc.name, func(t *testing.T) {

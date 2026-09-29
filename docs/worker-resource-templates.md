@@ -40,6 +40,22 @@ For metrics backends that use Temporal Server's native label names, set the Helm
 
 The webhook rejects any template that hardcodes `temporal_worker_deployment_name`, `temporal_worker_build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned. When prefix stripping is enabled, it also rejects `worker_deployment_name`, `worker_build_id`, and `namespace`.
 
+## Template variables
+
+Any string in `spec.template` may contain these tokens. The controller replaces them on each rendered copy:
+
+| Token | Value |
+|-------|-------|
+| `{{temporal_worker_deployment_name}}` | `<ns>_<wd-name>` |
+| `{{temporal_worker_build_id}}` | `<buildID>` |
+| `{{temporal_namespace}}` | `<temporal-ns>` |
+
+The values are the same ones appended to `spec.metrics[*].external.metric.selector.matchLabels`. The controller replaces the exact token, the same way an empty `matchLabels: {}` or `""` opts in to injection.
+
+When `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix` is enabled, the tokens are `{{worker_deployment_name}}`, `{{worker_build_id}}`, and `{{namespace}}`, matching the injected matchLabels.
+
+Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `datadog`, `dynatrace`, and others) so each ScaledObject filters metrics to one worker version. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
+
 ## Resource naming
 
 Each per-Build-ID copy is given a unique, DNS-safe name derived from the `(wdName, wrtName, buildID)` triple. Names are capped at 47 characters to be safe for all Kubernetes resource types, including Deployment (which has pod-naming constraints that effectively limit Deployment names to ~47 characters). The name always ends with an 8-character hash of the full triple, so uniqueness is guaranteed even when the human-readable prefix is truncated.

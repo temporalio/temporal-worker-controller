@@ -1,0 +1,60 @@
+# WorkerResourceTemplate — KEDA ScaledObject on backlog and slot utilization.
+#
+# One ScaledObject per active Build ID. The temporal trigger reads that version's
+# backlog. The prometheus trigger reads slot utilization for the same version.
+# KEDA uses whichever trigger asks for more replicas.
+#
+# Any string may contain these tokens; the controller replaces them per copy:
+#   {{temporal_worker_deployment_name}}  <ns>_<wd-name>
+#   {{temporal_worker_build_id}}         <buildID>
+#   {{temporal_namespace}}               <temporal-ns>
+# With hpaMatchLabelsStripTemporalPrefix, the tokens are
+# {{worker_deployment_name}}, {{worker_build_id}}, and {{namespace}}.
+#
+# ScaledObject must be listed in workerResourceTemplate.allowedResources.
+# KEDA and prometheus-adapter cannot both own external.metrics.k8s.io.
+# See docs/scaling-recommendations.md.
+#
+# Apply:
+#   kubectl apply -f examples/wrt-keda-prometheus.yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-keda-prometheus
+  namespace: default
+spec:
+  workerDeploymentRef:
+    name: helloworld
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      scaleTargetRef: {}
+      minReplicaCount: 1
+      maxReplicaCount: 15
+      pollingInterval: 30
+      cooldownPeriod: 120
+      triggers:
+        - type: temporal
+          authenticationRef:
+            name: keda-trigger-auth-temporal
+          metadata:
+            endpoint: us-east-1.aws.api.temporal.io:7233
+            taskQueue: default/helloworld
+            queueTypes: activity
+            targetQueueSize: "5"
+            # Empty string opts in. The webhook rejects any other value.
+            namespace: ""
+            workerDeploymentName: ""
+            workerDeploymentBuildId: ""
+        - type: prometheus
+          metadata:
+            serverAddress: http://prometheus-kube-prometheus-prometheus.monitoring.svc:9090
+            threshold: "0.7"
+            query: >-
+              max(temporal_slot_utilization{
+                temporal_worker_deployment_name="{{temporal_worker_deployment_name}}",
+                temporal_worker_build_id="{{temporal_worker_build_id}}",
+                temporal_namespace="{{temporal_namespace}}",
+                worker_type="ActivityWorker"
+              })
