@@ -551,11 +551,11 @@ func TestParseClientSecret_OpaqueSecretType(t *testing.T) {
 	assert.NotNil(t, a.expiryTime)
 }
 
-// ─── Tests: DialAndUpsertClient ───────────────────────────────────────────────
+// ─── Tests: dial / healthCheck / upsert ────────────────────────────────────
 
 // TestDialAndUpsert_APIKeySkipsCheckHealth is the regression test for PR #232.
 //
-// Before the fix, DialAndUpsertClient called c.CheckHealth() unconditionally. On Temporal
+// Before the fix, the dial path called c.CheckHealth() unconditionally. On Temporal
 // Cloud, namespace-scoped API keys do not have permission to call the system-scoped
 // CheckHealth RPC, so every connection attempt failed.
 //
@@ -569,9 +569,11 @@ func TestDialAndUpsert_APIKeySkipsCheckHealth(t *testing.T) {
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeAPIKey}
 	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeAPIKey}
 
-	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
-
+	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
+	require.NoError(t, cp.healthCheck(c, auth))
+	cp.cacheClient(key, c, auth)
+
 	assert.NotNil(t, c)
 	assert.False(t, mock.checkHealthCalled,
 		"CheckHealth must NOT be called for API key auth (regression: PR #232 — fails on Temporal Cloud with namespace-scoped keys)")
@@ -591,9 +593,11 @@ func TestDialAndUpsert_TLSCallsCheckHealth(t *testing.T) {
 		expiryTime: time.Now().Add(time.Hour),
 	}
 
-	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
-
+	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
+	require.NoError(t, cp.healthCheck(c, auth))
+	cp.cacheClient(key, c, auth)
+
 	assert.NotNil(t, c)
 	assert.True(t, mock.checkHealthCalled, "CheckHealth must be called for TLS auth")
 }
@@ -607,9 +611,11 @@ func TestDialAndUpsert_NoCredsCallsCheckHealth(t *testing.T) {
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeNoCredentials}
 	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeNoCredentials}
 
-	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
-
+	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
+	require.NoError(t, cp.healthCheck(c, auth))
+	cp.cacheClient(key, c, auth)
+
 	assert.NotNil(t, c)
 	assert.True(t, mock.checkHealthCalled, "CheckHealth must be called for no-credentials auth")
 }
@@ -648,7 +654,7 @@ func TestEvictClient_NoopWhenKeyAbsent(t *testing.T) {
 //
 // These verify the cache-hit / error-classification behavior of GetClient. The
 // Secret/TLS/dial internals behind it are covered by the fetchClientUsing* and
-// DialAndUpsertClient tests above.
+// dial / healthCheck / upsert tests above.
 
 // newPoolWithDefaults builds a ClientPool with a controllable dialFn.
 func newPoolWithDefaults(dialFn func(sdkclient.Options) (sdkclient.Client, error)) *ClientPool {
