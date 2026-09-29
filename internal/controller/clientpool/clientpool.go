@@ -31,14 +31,11 @@ type ClientPoolKey struct {
 	AuthMode            v1alpha1.AuthMode // Include auth mode in key to invalidate cache when the auth mode changes for the secret
 }
 
-type MTLSAuth struct {
-	tlsConfig  *tls.Config
-	expiryTime time.Time // Time we consider the cert expired (NotAfter minus safety buffer)
-}
-
 type ClientAuth struct {
-	mode v1alpha1.AuthMode
-	mTLS *MTLSAuth // non-nil when mode == AuthMTLS, nil when mode == AuthAPIKey
+	mode        v1alpha1.AuthMode
+	tls         *tls.Config           // set on SDK ConnectionOptions.TLS at dial time
+	credentials sdkclient.Credentials // non-nil only for API key auth; set on SDK Options.Credentials
+	expiryTime  time.Time             // mTLS only: NotAfter minus safety buffer; zero for other modes
 }
 
 type ClientInfo struct {
@@ -55,20 +52,24 @@ type ClientPool struct {
 	// this is sdkclient.Dial; in tests it can be replaced with a function that returns a
 	// mock client without making any network calls.
 	dialFn func(sdkclient.Options) (sdkclient.Client, error)
-	// systemCertPoolFn loads the host OS certificate pool used as the base when a custom
-	// CA is appended via ca.crt. In production this is x509.SystemCertPool; in tests it
-	// can be replaced to inject a known set of "system" root CAs without depending on the
-	// OS trust store.
-	systemCertPoolFn func() (*x509.CertPool, error)
 }
+
+type AuthConfigError struct{ Err error }
+
+func (e *AuthConfigError) Error() string { return e.Err.Error() }
+func (e *AuthConfigError) Unwrap() error { return e.Err }
+
+type DialError struct{ Err error }
+
+func (e *DialError) Error() string { return e.Err.Error() }
+func (e *DialError) Unwrap() error { return e.Err }
 
 func New(l log.Logger, c runtimeclient.Client) *ClientPool {
 	return &ClientPool{
-		logger:           l,
-		clients:          make(map[ClientPoolKey]ClientInfo),
-		k8sClient:        c,
-		dialFn:           sdkclient.Dial,
-		systemCertPoolFn: x509.SystemCertPool,
+		logger:    l,
+		clients:   make(map[ClientPoolKey]ClientInfo),
+		k8sClient: c,
+		dialFn:    sdkclient.Dial,
 	}
 }
 
@@ -83,29 +84,89 @@ func (cp *ClientPool) EvictClient(key ClientPoolKey) {
 	}
 }
 
-func (cp *ClientPool) GetSDKClient(key ClientPoolKey) (sdkclient.Client, bool) {
+func (cp *ClientPool) GetClient(
+	ctx context.Context,
+	spec v1alpha1.ConnectionSpec,
+	temporalNamespace, k8sNamespace, identity string,
+) (sdkclient.Client, ClientPoolKey, error) {
+	// Validate the spec
+	if err := spec.Validate(); err != nil {
+		return nil, ClientPoolKey{}, &AuthConfigError{Err: err}
+	}
+	// Check if client is already in cache
+	key := cp.createKey(spec, temporalNamespace)
+	if info, ok := cp.getClientByKey(key); ok && cp.isCachedClientValid(info) {
+		return info.client, key, nil
+	}
+	// Create a new client
+	auth, err := cp.parseClientSecret(ctx, spec, k8sNamespace)
+	if err != nil {
+		return nil, ClientPoolKey{}, &AuthConfigError{Err: err}
+	}
+	newOpts := NewClientOptions{
+		K8sNamespace:      k8sNamespace,
+		TemporalNamespace: temporalNamespace,
+		Spec:              spec,
+		Identity:          identity,
+	}
+	clientOpts := cp.newClientOptions(newOpts)
+	clientOpts.ConnectionOptions.TLS = auth.tls
+	if auth.credentials != nil {
+		clientOpts.Credentials = auth.credentials
+	}
+	c, err := cp.DialAndUpsertClient(clientOpts, key, auth)
+	if err != nil {
+		return nil, ClientPoolKey{}, &DialError{Err: err}
+	}
+	return c, key, nil
+}
+
+func (cp *ClientPool) createKey(spec v1alpha1.ConnectionSpec, temporalNamespace string) ClientPoolKey {
+	return ClientPoolKey{
+		HostPort:            spec.HostPort,
+		TLSServerName:       spec.TLSServerName(),
+		Namespace:           temporalNamespace,
+		SecretName:          spec.SecretName(),
+		TLSCACertSecretName: spec.TLSCACertSecretName(),
+		AuthMode:            spec.AuthMode(),
+	}
+}
+
+func (cp *ClientPool) getClientByKey(key ClientPoolKey) (ClientInfo, bool) {
 	cp.mux.RLock()
 	defer cp.mux.RUnlock()
 
 	info, ok := cp.clients[key]
 	if !ok {
-		return nil, false
+		return ClientInfo{}, false
 	}
+	return info, true
+}
 
-	if key.AuthMode == v1alpha1.AuthModeTLS {
-		// Check if any certificate is expired
-		expired, err := isCertificateExpired(info.auth.mTLS.expiryTime)
-		if err != nil {
-			cp.logger.Error("Error checking certificate expiration", "error", err)
-			return nil, false
-		}
-		if expired {
-			cp.logger.Warn("Certificate is expired or is going to expire soon")
-			return nil, false
-		}
+func (cp *ClientPool) isCachedClientValid(info ClientInfo) bool {
+	if info.auth.mode != v1alpha1.AuthModeTLS {
+		return true
 	}
+	expired, err := isCertificateExpired(info.auth.expiryTime)
+	if err != nil {
+		cp.logger.Error("Error checking certificate expiration", "error", err)
+		return false
+	}
+	if expired {
+		cp.logger.Warn("Certificate is expired or is going to expire soon")
+		return false
+	}
+	return true
+}
 
-	return info.client, true
+func (cp *ClientPool) Clients() map[ClientPoolKey]sdkclient.Client {
+	cp.mux.RLock()
+	defer cp.mux.RUnlock()
+	out := make(map[ClientPoolKey]sdkclient.Client, len(cp.clients))
+	for k, info := range cp.clients {
+		out[k] = info.client
+	}
+	return out
 }
 
 type NewClientOptions struct {
@@ -131,32 +192,28 @@ func (cp *ClientPool) newClientOptions(opts NewClientOptions) sdkclient.Options 
 	}
 }
 
-func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewClientOptions) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
-	tlsServerName := opts.Spec.TLSServerName()
-	clientOpts := cp.newClientOptions(opts)
-
-	var pemCert []byte
-	var expiryTime time.Time
+func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, spec v1alpha1.ConnectionSpec) (ClientAuth, error) {
+	tlsServerName := spec.TLSServerName()
 
 	// Extract the certificate to calculate the effective expiration time
-	pemCert = secret.Data["tls.crt"]
+	pemCert := secret.Data["tls.crt"]
 
 	// Check if certificate is expired before creating the client
 	exp, err := calculateCertificateExpirationTime(pemCert, 5*time.Minute)
 	if err != nil {
-		return nil, nil, nil, errors.New("failed to check certificate expiration: " + err.Error())
+		return ClientAuth{}, errors.New("failed to check certificate expiration: " + err.Error())
 	}
 	expired, err := isCertificateExpired(exp)
 	if err != nil {
-		return nil, nil, nil, errors.New("failed to check certificate expiration: " + err.Error())
+		return ClientAuth{}, errors.New("failed to check certificate expiration: " + err.Error())
 	}
 	if expired {
-		return nil, nil, nil, errors.New("certificate is expired or is going to expire soon")
+		return ClientAuth{}, errors.New("certificate is expired or is going to expire soon")
 	}
 
 	cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])
 	if err != nil {
-		return nil, nil, nil, err
+		return ClientAuth{}, err
 	}
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -171,88 +228,55 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, opts NewC
 	if caCert, ok := secret.Data["ca.crt"]; ok && len(caCert) > 0 {
 		rootCAs, err := cp.TLSCertPool(caCert)
 		if err != nil {
-			return nil, nil, nil, err
+			return ClientAuth{}, err
 		}
 		tlsCfg.RootCAs = rootCAs
 	}
-	clientOpts.ConnectionOptions.TLS = tlsCfg
-	expiryTime = exp
 
-	key := ClientPoolKey{
-		HostPort:      opts.Spec.HostPort,
-		TLSServerName: tlsServerName,
-		Namespace:     opts.TemporalNamespace,
-		SecretName:    opts.Spec.MutualTLSSecretRef.Name,
-		// Always empty here: CEL validation forbids combining mutualTLSSecretRef with tls.caCertSecretRef.
-		TLSCACertSecretName: "",
-		AuthMode:            v1alpha1.AuthModeTLS,
-	}
-	auth := ClientAuth{
-		mode: v1alpha1.AuthModeTLS,
-		mTLS: &MTLSAuth{tlsConfig: clientOpts.ConnectionOptions.TLS, expiryTime: expiryTime},
-	}
-	return &clientOpts, &key, &auth, nil
+	return ClientAuth{
+		mode:       v1alpha1.AuthModeTLS,
+		tls:        tlsCfg,
+		expiryTime: exp,
+	}, nil
 }
 
-func (cp *ClientPool) fetchClientUsingAPIKeySecret(opts NewClientOptions, caCert []byte) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
-	tlsServerName := opts.Spec.TLSServerName()
-	clientOpts := cp.newClientOptions(opts)
+func (cp *ClientPool) fetchClientUsingAPIKeySecret(spec v1alpha1.ConnectionSpec, k8sNamespace string, caCert []byte) (ClientAuth, error) {
+	tlsServerName := spec.TLSServerName()
 	tlsCfg := &tls.Config{ServerName: tlsServerName}
 	rootCAs, err := cp.TLSCertPool(caCert)
 	if err != nil {
-		return nil, nil, nil, err
+		return ClientAuth{}, err
 	}
 	tlsCfg.RootCAs = rootCAs
-	clientOpts.ConnectionOptions.TLS = tlsCfg
 
-	secretName := opts.Spec.APIKeySecretRef.Name
-	secretKey := opts.Spec.APIKeySecretRef.Key
-	k8sNamespace := opts.K8sNamespace
-	clientOpts.Credentials = sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
+	secretName := spec.APIKeySecretRef.Name
+	secretKey := spec.APIKeySecretRef.Key
+	credentials := sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
 		return cp.fetchAPIKeyFromSecret(ctx, secretName, k8sNamespace, secretKey)
 	})
 
-	key := ClientPoolKey{
-		HostPort:            opts.Spec.HostPort,
-		TLSServerName:       tlsServerName,
-		Namespace:           opts.TemporalNamespace,
-		SecretName:          opts.Spec.APIKeySecretRef.Name,
-		TLSCACertSecretName: opts.Spec.TLSCACertSecretName(),
-		AuthMode:            v1alpha1.AuthModeAPIKey,
-	}
-	auth := ClientAuth{
-		mode: v1alpha1.AuthModeAPIKey,
-		mTLS: nil,
-	}
-
-	return &clientOpts, &key, &auth, nil
+	return ClientAuth{
+		mode:        v1alpha1.AuthModeAPIKey,
+		tls:         tlsCfg,
+		credentials: credentials,
+	}, nil
 }
 
-func (cp *ClientPool) fetchClientUsingNoCredentials(opts NewClientOptions, caCert []byte) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
-	tlsServerName := opts.Spec.TLSServerName()
-	clientOpts := cp.newClientOptions(opts)
+func (cp *ClientPool) fetchClientUsingNoCredentials(spec v1alpha1.ConnectionSpec, caCert []byte) (ClientAuth, error) {
+	tlsServerName := spec.TLSServerName()
 	rootCAs, err := cp.TLSCertPool(caCert)
 	if err != nil {
-		return nil, nil, nil, err
+		return ClientAuth{}, err
 	}
+	var tlsCfg *tls.Config
 	if tlsServerName != "" || rootCAs != nil {
-		clientOpts.ConnectionOptions.TLS = &tls.Config{ServerName: tlsServerName, RootCAs: rootCAs}
+		tlsCfg = &tls.Config{ServerName: tlsServerName, RootCAs: rootCAs}
 	}
 
-	key := ClientPoolKey{
-		HostPort:            opts.Spec.HostPort,
-		TLSServerName:       tlsServerName,
-		Namespace:           opts.TemporalNamespace,
-		SecretName:          "",
-		TLSCACertSecretName: opts.Spec.TLSCACertSecretName(),
-		AuthMode:            v1alpha1.AuthModeNoCredentials,
-	}
-	auth := ClientAuth{
+	return ClientAuth{
 		mode: v1alpha1.AuthModeNoCredentials,
-		mTLS: nil,
-	}
-
-	return &clientOpts, &key, &auth, nil
+		tls:  tlsCfg,
+	}, nil
 }
 
 // TLSCertPool returns the system CA pool with caCert appended, so a connection can trust a
@@ -262,7 +286,7 @@ func (cp *ClientPool) TLSCertPool(caCert []byte) (*x509.CertPool, error) {
 	if len(caCert) == 0 {
 		return nil, nil
 	}
-	rootCAs, err := cp.systemCertPoolFn()
+	rootCAs, err := x509.SystemCertPool()
 	if err != nil {
 		cp.logger.Warn("Failed to load system CA pool, falling back to empty pool", "error", err)
 		rootCAs = x509.NewCertPool()
@@ -273,20 +297,19 @@ func (cp *ClientPool) TLSCertPool(caCert []byte) (*x509.CertPool, error) {
 	return rootCAs, nil
 }
 
-func (cp *ClientPool) ParseClientSecret(
+func (cp *ClientPool) parseClientSecret(
 	ctx context.Context,
-	secretName string,
-	authMode v1alpha1.AuthMode,
-	opts NewClientOptions,
-) (*sdkclient.Options, *ClientPoolKey, *ClientAuth, error) {
+	spec v1alpha1.ConnectionSpec,
+	k8sNamespace string,
+) (ClientAuth, error) {
 	// Fetch the secret from k8s cluster, if it exists. Otherwise, create a connection with the server without using any credentials.
 	var secret corev1.Secret
-	if secretName != "" {
+	if spec.SecretName() != "" {
 		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
-			Name:      secretName,
-			Namespace: opts.K8sNamespace,
+			Name:      spec.SecretName(),
+			Namespace: k8sNamespace,
 		}, &secret); err != nil {
-			return nil, nil, nil, err
+			return ClientAuth{}, err
 		}
 	}
 
@@ -294,13 +317,13 @@ func (cp *ClientPool) ParseClientSecret(
 	// AuthModeNoCredentials. AuthModeTLS ignores it — MutualTLSSecretRef's own ca.crt
 	// key already covers that case, and the two are mutually exclusive by CEL validation.
 	var caCert []byte
-	if caCertSecretName := opts.Spec.TLSCACertSecretName(); caCertSecretName != "" {
+	if caCertSecretName := spec.TLSCACertSecretName(); caCertSecretName != "" {
 		var caSecret corev1.Secret
 		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
 			Name:      caCertSecretName,
-			Namespace: opts.K8sNamespace,
+			Namespace: k8sNamespace,
 		}, &caSecret); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to read CA secret %q: %w", caCertSecretName, err)
+			return ClientAuth{}, fmt.Errorf("failed to read CA secret %q: %w", caCertSecretName, err)
 		}
 		// Unlike MutualTLSSecretRef's ca.crt (a secret whose primary job is tls.crt/tls.key,
 		// where a CA is genuinely optional), this field's only purpose is carrying a CA. A
@@ -309,31 +332,29 @@ func (cp *ClientPool) ParseClientSecret(
 		var ok bool
 		caCert, ok = caSecret.Data["ca.crt"]
 		if !ok || len(caCert) == 0 {
-			return nil, nil, nil, fmt.Errorf("CA secret %q referenced by tls.caCertSecretRef has no ca.crt key", caCertSecretName)
+			return ClientAuth{}, fmt.Errorf("CA secret %q referenced by tls.caCertSecretRef has no ca.crt key", caCertSecretName)
 		}
 	}
 
 	// Check the secret type
-	switch authMode {
+	switch spec.AuthMode() {
 	case v1alpha1.AuthModeTLS:
 		if secret.Type != corev1.SecretTypeTLS && secret.Type != corev1.SecretTypeOpaque {
-			err := fmt.Errorf("secret %s must be of type kubernetes.io/tls or Opaque", secret.Name)
-			return nil, nil, nil, err
+			return ClientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/tls or Opaque", secret.Name)
 		}
-		return cp.fetchClientUsingMTLSSecret(secret, opts)
+		return cp.fetchClientUsingMTLSSecret(secret, spec)
 
 	case v1alpha1.AuthModeAPIKey:
 		if secret.Type != corev1.SecretTypeOpaque {
-			err := fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
-			return nil, nil, nil, err
+			return ClientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
 		}
-		return cp.fetchClientUsingAPIKeySecret(opts, caCert)
+		return cp.fetchClientUsingAPIKeySecret(spec, k8sNamespace, caCert)
 
 	case v1alpha1.AuthModeNoCredentials:
-		return cp.fetchClientUsingNoCredentials(opts, caCert)
+		return cp.fetchClientUsingNoCredentials(spec, caCert)
 
 	default:
-		return nil, nil, nil, fmt.Errorf("invalid auth mode: %s", authMode)
+		return ClientAuth{}, fmt.Errorf("invalid auth mode: %s", spec.AuthMode())
 	}
 }
 

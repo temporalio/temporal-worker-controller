@@ -895,8 +895,8 @@ func TestReconcile_EvictsCachedClientOnTransportFailure(t *testing.T) {
 	poisoned.describeDeploymentErr = context.DeadlineExceeded
 	r.TemporalClientPool.SetClientForTesting(poolKey, poisoned)
 
-	cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
-	require.True(t, ok, "poisoned client should be cached before Reconcile runs")
+	cached := r.TemporalClientPool.Clients()[poolKey]
+	require.NotNil(t, cached, "poisoned client should be cached before Reconcile runs")
 	require.Same(t, poisoned, cached)
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -906,8 +906,8 @@ func TestReconcile_EvictsCachedClientOnTransportFailure(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded, "the original transport error must propagate")
 	assertEventEmitted(t, drainEvents(recorder), temporaliov1alpha1.ReasonTemporalStateFetchFailed)
 
-	_, ok = r.TemporalClientPool.GetSDKClient(poolKey)
-	require.False(t, ok, "poisoned client must be evicted so the next reconcile dials a fresh one")
+	evicted := r.TemporalClientPool.Clients()[poolKey]
+	require.Nil(t, evicted, "poisoned client must be evicted so the next reconcile dials a fresh one")
 }
 
 // ─── executeK8sOperations tests ──────────────────────────────────────────────
@@ -1105,16 +1105,16 @@ func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
 		r.TemporalClientPool.SetClientForTesting(poolKey, poisoned)
 
 		// Sanity: the poisoned client is what handleDeletion will pick up.
-		cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
-		require.True(t, ok, "poisoned client should be cached before handleDeletion runs")
+		cached := r.TemporalClientPool.Clients()[poolKey]
+		require.NotNil(t, cached, "poisoned client should be cached before handleDeletion runs")
 		require.Same(t, poisoned, cached)
 
 		err := r.handleDeletion(context.Background(), logr.Discard(), twd)
 		require.Error(t, err, "handleDeletion must surface the Temporal Describe error")
 		require.ErrorIs(t, err, context.DeadlineExceeded, "the original error must propagate so the reconciler requeues")
 
-		_, ok = r.TemporalClientPool.GetSDKClient(poolKey)
-		require.False(t, ok, "poisoned client must be evicted from the pool after a Temporal-server-side failure so the next reconcile dials a fresh one")
+		evicted := r.TemporalClientPool.Clients()[poolKey]
+		require.Nil(t, evicted, "poisoned client must be evicted from the pool after a Temporal-server-side failure so the next reconcile dials a fresh one")
 	})
 
 	t.Run("DescribeNotFound_RetainsClient", func(t *testing.T) {
@@ -1135,8 +1135,8 @@ func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
 		err := r.handleDeletion(context.Background(), logr.Discard(), twd)
 		require.NoError(t, err, "Describe returning NotFound must be treated as success")
 
-		cached, ok := r.TemporalClientPool.GetSDKClient(poolKey)
-		require.True(t, ok, "a healthy cached client must remain in the pool after a successful handleDeletion")
+		cached := r.TemporalClientPool.Clients()[poolKey]
+		require.NotNil(t, cached, "a healthy cached client must remain in the pool after a successful handleDeletion")
 		require.Same(t, healthy, cached)
 	})
 }
