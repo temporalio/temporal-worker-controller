@@ -744,6 +744,16 @@ func getDeleteDeployments(
 		}
 
 		switch version.Status {
+		case temporaliov1alpha1.VersionStatusInactive:
+			// Superseded versions that never received routed traffic never become Drained.
+			// Wait for scale-down to finish; execution checks pinned workflows before pruning.
+			if foundDeploymentInTemporal && status.TargetVersion.BuildID != version.BuildID &&
+				(status.CurrentVersion == nil || status.CurrentVersion.BuildID != version.BuildID) &&
+				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == 0 &&
+				(d.Status.TerminatingReplicas == nil || *d.Status.TerminatingReplicas == 0) {
+				deleteDeployments = append(deleteDeployments, d)
+			}
 		case temporaliov1alpha1.VersionStatusDrained:
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
@@ -754,7 +764,7 @@ func getDeleteDeployments(
 			//    reconcile as the Deployment delete: EligibleForDeletion is only
 			//    computable while the Deployment (and thus this DeprecatedVersions
 			//    entry) still exists, so this is the only point that can reliably
-			//    prune it. See execplan.deleteDrainedVersions.
+			//    prune it. See execplan.deleteDeprecatedVersions.
 			if version.DrainedSince != nil &&
 				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
 				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&

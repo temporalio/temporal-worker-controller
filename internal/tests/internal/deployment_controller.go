@@ -177,6 +177,7 @@ func scaleDeploymentToZero(t *testing.T, ctx context.Context, k8sClient client.C
 		dep.Status.ReadyReplicas = 0
 		dep.Status.AvailableReplicas = 0
 		dep.Status.UpdatedReplicas = 0
+		dep.Status.ObservedGeneration = dep.Generation
 		return k8sClient.Status().Update(ctx, &dep)
 	}); err != nil {
 		t.Fatalf("failed to zero status of deployment %s: %v", name, err)
