@@ -52,6 +52,13 @@ type ClientPool struct {
 	// this is sdkclient.Dial; in tests it can be replaced with a function that returns a
 	// mock client without making any network calls.
 	dialFn func(sdkclient.Options) (sdkclient.Client, error)
+
+	// CustomizeClientOptions, when set, lets a wrapper binary
+	// mutate the SDK client options before dialing. It runs after
+	// the pool's base options; the wrapper should wrap, not replace,
+	// the existing HeadersProvider to preserve the temporal-namespace
+	// header.
+	CustomizeClientOptions func(sdkclient.Options) sdkclient.Options
 }
 
 type AuthConfigError struct{ Err error }
@@ -104,6 +111,9 @@ func (cp *ClientPool) GetClient(
 		return nil, ClientPoolKey{}, &AuthConfigError{Err: err}
 	}
 	clientOpts := cp.getClientOptions(spec, temporalNamespace, identity, auth)
+	if cp.CustomizeClientOptions != nil {
+		clientOpts = cp.CustomizeClientOptions(clientOpts)
+	}
 	client, err := cp.dialFn(clientOpts)
 	if err != nil {
 		return nil, ClientPoolKey{}, &DialError{Err: err}
@@ -347,19 +357,23 @@ func (cp *ClientPool) parseClientSecret(
 	case v1alpha1.AuthModeNoCredentials:
 		return cp.fetchClientUsingNoCredentials(spec, caCert)
 
+	case v1alpha1.AuthModeManual:
+		// No Secret to parse; auth and options are wired by the
+		// wrapper via CustomizeClientOptions.
+		return ClientAuth{mode: v1alpha1.AuthModeManual}, nil
+
 	default:
 		return ClientAuth{}, fmt.Errorf("invalid auth mode: %s", spec.AuthMode())
 	}
 }
 
-// healthCheck probes the Temporal server with CheckHealth to fail fast when the
-// server is unreachable. It is skipped for API key auth: CheckHealth is a
-// system-level RPC, but Temporal Cloud API keys are namespace-scoped and lack
-// permission to call it, so the probe would always fail. Skipping is safe
-// because client.Dial already performs GetSystemInfo, which is a superset of
-// CheckHealth.
+// healthCheck probes the Temporal server with CheckHealth to fail
+// fast when it is unreachable. It is skipped for API key and MANUAL
+// auth, whose credentials are namespace-scoped and lack permission to
+// call this system-level RPC. Skipping is safe because client.Dial
+// already performs GetSystemInfo, a superset of CheckHealth.
 func (cp *ClientPool) healthCheck(c sdkclient.Client, auth ClientAuth) error {
-	if auth.mode == v1alpha1.AuthModeAPIKey {
+	if auth.mode == v1alpha1.AuthModeAPIKey || auth.mode == v1alpha1.AuthModeManual {
 		return nil
 	}
 	if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {
