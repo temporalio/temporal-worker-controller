@@ -80,6 +80,9 @@ type Plan struct {
 	// deleted. The controller sets this (rather than the webhook) because the owner
 	// ref requires the TWD's UID, resolved from spec.temporalWorkerDeploymentRef.
 	EnsureWRTOwnerRefs []WRTOwnerRefPatch
+	// WRTsWithMissingPool names the WRTs whose pool no version has and the spec does
+	// not declare.
+	WRTsWithMissingPool []string
 }
 
 // WorkerResourceRef identifies a single rendered WRT resource copy to delete.
@@ -199,17 +202,19 @@ func GeneratePlan(
 	// not exist while that's true
 	sunsetBuildIDs := getSunsetScaleDownBuildIDs(status, spec)
 
+	deletingDeployments := slices.Concat(plan.DeleteDeployments, plan.DeletePoolDeployments)
 	plan.ApplyWorkerResources = getWorkerResourceApplies(
 		l,
 		wrts,
 		k8sState,
 		spec.WorkerOptions.TemporalNamespace,
-		plan.DeleteDeployments,
+		deletingDeployments,
 		sunsetBuildIDs,
 		config.WRTHPAMatchLabelsStripTemporalPrefix,
 	)
-	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs)
+	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, deletingDeployments, k8sState, sunsetBuildIDs)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
+	plan.WRTsWithMissingPool = getWRTsWithMissingPool(wrts, k8sState, spec)
 
 	return plan, nil
 }
@@ -248,7 +253,11 @@ func getWorkerResourceApplies(
 		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
-		for buildID, deployment := range k8sState.Deployments {
+		for _, buildID := range k8sState.BuildIDs() {
+			deployment, ok := k8sState.VersionDeployments(buildID)[wrt.Spec.EffectivePool()]
+			if !ok {
+				continue
+			}
 			if _, deleting := deletingDeployments[deployment.Name]; deleting {
 				continue
 			}
@@ -370,11 +379,14 @@ func getDeleteWorkerResources(
 		return nil
 	}
 
-	// Collect the build IDs that are being deleted.
-	var deletingBuildIDs []string
+	// Collect the pools being deleted, by build ID.
+	deletingPools := make(map[string]map[string]bool)
 	for _, d := range deleteDeployments {
 		if bid, ok := d.Labels[k8s.BuildIDLabel]; ok && bid != "" {
-			deletingBuildIDs = append(deletingBuildIDs, bid)
+			if deletingPools[bid] == nil {
+				deletingPools[bid] = make(map[string]bool)
+			}
+			deletingPools[bid][k8s.PoolName(d)] = true
 		}
 	}
 
@@ -394,10 +406,15 @@ func getDeleteWorkerResources(
 			continue
 		}
 
-		// Union of builds being sunset this cycle, orphaned status entries and builds
-		// pinned to zero (autoscalers only)
-		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
-		buildIDs = append(buildIDs, deletingBuildIDs...)
+		// Union of builds whose pool Deployment is deleted this cycle, orphaned status
+		// entries and builds pinned to zero (autoscalers only)
+		pool := wrt.Spec.EffectivePool()
+		buildIDs := make([]string, 0, len(deletingPools)+len(wrt.Status.Versions))
+		for bid, pools := range deletingPools {
+			if pools[pool] {
+				buildIDs = append(buildIDs, bid)
+			}
+		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for _, v := range wrt.Status.Versions {
@@ -405,7 +422,7 @@ func getDeleteWorkerResources(
 				continue
 			}
 			if k8sState != nil {
-				if _, live := k8sState.Deployments[v.BuildID]; live {
+				if _, live := k8sState.VersionDeployments(v.BuildID)[pool]; live {
 					if hasScaleTarget {
 						// Remove the autoscaler as soon as the controller starts holding
 						// replicas at zero. The k8s Deployment outlives it by deleteDelay.
@@ -444,6 +461,31 @@ func getDeleteWorkerResources(
 		}
 	}
 	return refs
+}
+
+// getWRTsWithMissingPool returns the names of WRTs whose pool no version has and the
+// spec does not declare.
+func getWRTsWithMissingPool(
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
+	k8sState *k8s.DeploymentState,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) []string {
+	known := make(map[string]bool)
+	for _, pool := range spec.PoolNames() {
+		known[pool] = true
+	}
+	for _, buildID := range k8sState.BuildIDs() {
+		for pool := range k8sState.VersionDeployments(buildID) {
+			known[pool] = true
+		}
+	}
+	var missing []string
+	for i := range wrts {
+		if !known[wrts[i].Spec.EffectivePool()] {
+			missing = append(missing, wrts[i].Name)
+		}
+	}
+	return missing
 }
 
 // checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is

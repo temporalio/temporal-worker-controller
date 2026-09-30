@@ -413,3 +413,123 @@ func TestGetTestWorkflows_MultiPoolTargetWaitsForHealth(t *testing.T) {
 	status.TargetVersion.HealthySince = &metav1.Time{Time: time.Now()}
 	assert.Len(t, getTestWorkflows(status, config, "ns/wd", nil, false), 1)
 }
+
+func poolWRT(name, pool string, template func(string, string) temporaliov1alpha1.WorkerResourceTemplate) temporaliov1alpha1.WorkerResourceTemplate {
+	wrt := template(name, "wd")
+	wrt.Spec.Pool = pool
+	return wrt
+}
+
+func renderedScaleTarget(t *testing.T, apply WorkerResourceApply) string {
+	t.Helper()
+	spec := apply.Resource.Object["spec"].(map[string]interface{})
+	return spec["scaleTargetRef"].(map[string]interface{})["name"].(string)
+}
+
+func TestGetWorkerResourceApplies_Pools(t *testing.T) {
+	state := poolState(
+		labelledPoolDeployment("v1", "", 1),
+		labelledPoolDeployment("v1", "activities", 1),
+		labelledPoolDeployment("v2", "", 1),
+		labelledPoolDeployment("v2", "activities", 1),
+		poolDeployment("old", "", 1),
+	)
+
+	t.Run("pool WRT renders once per build that has the pool", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{poolWRT("hpa", "activities", createTestWRT)}
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, false)
+
+		targets := map[string]string{}
+		for _, a := range applies {
+			targets[a.BuildID] = renderedScaleTarget(t, a)
+		}
+		assert.Equal(t, map[string]string{"v1": "wd-v1-activities", "v2": "wd-v2-activities"}, targets)
+	})
+
+	t.Run("WRT without a pool targets the default pool", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{poolWRT("hpa", "", createTestWRT)}
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, false)
+
+		targets := map[string]string{}
+		for _, a := range applies {
+			targets[a.BuildID] = renderedScaleTarget(t, a)
+		}
+		assert.Equal(t, map[string]string{"v1": "wd-v1", "v2": "wd-v2", "old": "wd-old"}, targets)
+	})
+
+	t.Run("PDB selects only its pool's pods", func(t *testing.T) {
+		activities := labelledPoolDeployment("v1", "activities", 1)
+		activities.Spec.Selector = &metav1.LabelSelector{MatchLabels: k8s.ComputePoolSelectorLabels("wd", "v1", "activities")}
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{poolWRT("pdb", "activities", createTestPDBWRT)}
+
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, poolState(activities), "ns", nil, nil, false)
+		require.Len(t, applies, 1)
+
+		spec := applies[0].Resource.Object["spec"].(map[string]interface{})
+		matchLabels := spec["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
+		assert.Equal(t, "activities", matchLabels[k8s.PoolLabel])
+	})
+
+	t.Run("pool Deployment being removed is not re-rendered", func(t *testing.T) {
+		removing := state.PoolDeployments["v1"]["activities"]
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{poolWRT("hpa", "activities", createTestWRT)}
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", []*appsv1.Deployment{removing}, nil, false)
+
+		require.Len(t, applies, 1)
+		assert.Equal(t, "v2", applies[0].BuildID)
+	})
+}
+
+func TestGetDeleteWorkerResources_Pools(t *testing.T) {
+	state := poolState(
+		labelledPoolDeployment("v1", "", 1),
+		labelledPoolDeployment("v1", "activities", 1),
+		labelledPoolDeployment("v1", "batch", 1),
+	)
+	withStatus := func(wrt temporaliov1alpha1.WorkerResourceTemplate, buildIDs ...string) temporaliov1alpha1.WorkerResourceTemplate {
+		for _, b := range buildIDs {
+			wrt.Status.Versions = append(wrt.Status.Versions, temporaliov1alpha1.WorkerResourceTemplateVersionStatus{BuildID: b})
+		}
+		return wrt
+	}
+	refsFor := func(refs []WorkerResourceRef) map[string][]string {
+		out := map[string][]string{}
+		for _, r := range refs {
+			out[r.WRTName] = append(out[r.WRTName], r.BuildID)
+		}
+		return out
+	}
+
+	t.Run("removing one pool deletes only that pool's WRT copies", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+			withStatus(poolWRT("default-hpa", "", createTestWRT), "v1"),
+			withStatus(poolWRT("activities-hpa", "activities", createTestWRT), "v1"),
+			withStatus(poolWRT("batch-hpa", "batch", createTestWRT), "v1"),
+		}
+		removing := []*appsv1.Deployment{state.PoolDeployments["v1"]["batch"]}
+
+		assert.Equal(t, map[string][]string{"batch-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, removing, state, nil)))
+	})
+
+	t.Run("status entry for a build without the pool is cleaned up", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+			withStatus(poolWRT("gone-hpa", "gone", createTestWRT), "v1"),
+			withStatus(poolWRT("activities-hpa", "activities", createTestWRT), "v1"),
+		}
+
+		assert.Equal(t, map[string][]string{"gone-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, nil, state, nil)))
+	})
+}
+
+func TestGetWRTsWithMissingPool(t *testing.T) {
+	state := poolState(labelledPoolDeployment("old", "", 1), labelledPoolDeployment("old", "retired", 1))
+	spec := pooledSpec(t, "worker:v1", nil, "activities")
+	wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+		poolWRT("default-hpa", "", createTestWRT),
+		poolWRT("activities-hpa", "activities", createTestWRT),
+		poolWRT("retired-hpa", "retired", createTestWRT),
+		poolWRT("ghost-hpa", "ghost", createTestWRT),
+	}
+
+	assert.Equal(t, []string{"ghost-hpa"}, getWRTsWithMissingPool(wrts, state, spec))
+}

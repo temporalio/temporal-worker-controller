@@ -54,6 +54,9 @@ type plan struct {
 	// WRTs that need a controller owner reference added, as (base, patched) pairs
 	// ready for client.MergeFrom patching in executePlan.
 	EnsureWRTOwnerRefs []planner.WRTOwnerRefPatch
+
+	// WRTsWithMissingPool names WRTs whose pool no version has and the spec does not declare.
+	WRTsWithMissingPool []string
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -188,6 +191,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
 	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
+	plan.WRTsWithMissingPool = planResult.WRTsWithMissingPool
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

@@ -1001,7 +1001,43 @@ func (r *WorkerDeploymentReconciler) executePlan(
 
 	r.ensureWRTOwnerRefs(ctx, l, p)
 
-	return r.executeWRTOperations(
+	if err := r.executeWRTOperations(
 		ctx, l, workerDeploy, temporalClient, p, deletedWorkerResources,
-	)
+	); err != nil {
+		return err
+	}
+	return r.markWRTsPoolNotFound(ctx, l, workerDeploy, p.WRTsWithMissingPool)
+}
+
+// markWRTsPoolNotFound sets Ready=False on WRTs whose pool no version has and the spec
+// does not declare. They get no applies or deletes, so nothing else writes their status.
+func (r *WorkerDeploymentReconciler) markWRTsPoolNotFound(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
+	names []string,
+) error {
+	var errs []error
+	for _, name := range names {
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: workerDeploy.Namespace, Name: name}, wrt); err != nil {
+			errs = append(errs, fmt.Errorf("get WRT %s/%s for status update: %w", workerDeploy.Namespace, name, err))
+			continue
+		}
+		changed := apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               temporaliov1alpha1.ConditionReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             temporaliov1alpha1.ReasonWRTPoolNotFound,
+			Message:            fmt.Sprintf("WorkerDeployment %q has no pool %q", workerDeploy.Name, wrt.Spec.Pool),
+			ObservedGeneration: wrt.Generation,
+		})
+		if !changed {
+			continue
+		}
+		if err := r.Status().Update(ctx, wrt); err != nil {
+			l.Error(err, "unable to update WorkerResourceTemplate status for missing pool", "WorkerResourceTemplate", name)
+			errs = append(errs, fmt.Errorf("update status for WorkerResourceTemplate %s/%s: %w", workerDeploy.Namespace, name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
