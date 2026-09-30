@@ -38,11 +38,9 @@ func (noopLogger) Warn(string, ...interface{})  {}
 func (noopLogger) Error(string, ...interface{}) {}
 
 func newTestPool() *ClientPool {
-	return &ClientPool{
-		logger:  noopLogger{},
-		clients: make(map[ClientPoolKey]ClientInfo),
-		dialFn:  sdkclient.Dial,
-	}
+	cp := New(noopLogger{}, nil)
+	cp.dialFn = sdkclient.Dial
+	return cp
 }
 
 // generateSelfSignedCACert creates a self-signed CA cert and returns the parsed cert, private key, and PEM bytes.
@@ -101,7 +99,7 @@ func makeMTLSSpec(hostPort string) temporaliov1alpha1.ConnectionSpec {
 }
 
 func TestNewClientOptionsSetsTemporalNamespaceHeader(t *testing.T) {
-	clientOpts := newTestPool().getClientOptions(makeMTLSSpec("localhost:7233"), "routing-namespace", "identity", ClientAuth{})
+	clientOpts := newTestPool().getClientOptions(makeMTLSSpec("localhost:7233"), "routing-namespace", "identity", clientAuth{})
 
 	headers, err := clientOpts.HeadersProvider.GetHeaders(t.Context())
 
@@ -298,12 +296,9 @@ func newTestPoolWithFakeClient(objects ...runtime.Object) *ClientPool {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()
-	return &ClientPool{
-		logger:    noopLogger{},
-		clients:   make(map[ClientPoolKey]ClientInfo),
-		k8sClient: k8sClient,
-		dialFn:    sdkclient.Dial,
-	}
+	cp := New(noopLogger{}, k8sClient)
+	cp.dialFn = sdkclient.Dial
+	return cp
 }
 
 // ─── Tests: fetchClientUsingAPIKeySecret ──────────────────────────────────────
@@ -567,12 +562,12 @@ func TestDialAndUpsert_APIKeySkipsCheckHealth(t *testing.T) {
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeAPIKey}
-	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeAPIKey}
+	auth := clientAuth{mode: temporaliov1alpha1.AuthModeAPIKey}
 
 	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
 	require.NoError(t, cp.healthCheck(c, auth))
-	cp.cacheClient(key, c, auth)
+	cp.cacheClient(key, CachedClient{Client: c, IsValid: cp.defaultValidityCheck(auth)})
 
 	assert.NotNil(t, c)
 	assert.False(t, mock.checkHealthCalled,
@@ -587,7 +582,7 @@ func TestDialAndUpsert_TLSCallsCheckHealth(t *testing.T) {
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeTLS}
-	auth := ClientAuth{
+	auth := clientAuth{
 		mode:       temporaliov1alpha1.AuthModeTLS,
 		tls:        &tls.Config{},
 		expiryTime: time.Now().Add(time.Hour),
@@ -596,7 +591,7 @@ func TestDialAndUpsert_TLSCallsCheckHealth(t *testing.T) {
 	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
 	require.NoError(t, cp.healthCheck(c, auth))
-	cp.cacheClient(key, c, auth)
+	cp.cacheClient(key, CachedClient{Client: c, IsValid: cp.defaultValidityCheck(auth)})
 
 	assert.NotNil(t, c)
 	assert.True(t, mock.checkHealthCalled, "CheckHealth must be called for TLS auth")
@@ -609,12 +604,12 @@ func TestDialAndUpsert_NoCredsCallsCheckHealth(t *testing.T) {
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeNoCredentials}
-	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeNoCredentials}
+	auth := clientAuth{mode: temporaliov1alpha1.AuthModeNoCredentials}
 
 	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
 	require.NoError(t, cp.healthCheck(c, auth))
-	cp.cacheClient(key, c, auth)
+	cp.cacheClient(key, CachedClient{Client: c, IsValid: cp.defaultValidityCheck(auth)})
 
 	assert.NotNil(t, c)
 	assert.True(t, mock.checkHealthCalled, "CheckHealth must be called for no-credentials auth")
