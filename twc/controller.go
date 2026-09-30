@@ -65,7 +65,7 @@ func NewController(mgr ctrl.Manager, opts ...ControllerOption) *WorkerDeployment
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
 		TemporalClientPool: pool,
-		Recorder:           mgr.GetEventRecorderFor("temporal-worker-controller"), //nolint:staticcheck TODO migrate to the new GetEventRecorder
+		Recorder:           mgr.GetEventRecorderFor("temporal-worker-controller"), //nolint:staticcheck // deprecated; migration to GetEventRecorder requires changing the reconciler field type and all Eventf call sites
 		MaxDeploymentVersionsIneligibleForDeletion: cfg.maxDeploymentVersionsIneligibleForDeletion,
 		DisableDeprecatedTWD:                       cfg.disableDeprecatedTWD,
 		DisableClusterConnections:                  cfg.disableClusterConnections,
