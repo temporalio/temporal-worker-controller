@@ -665,7 +665,7 @@ func TestGeneratePlan(t *testing.T) {
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
 			assert.Equal(t, tc.expectScale, len(plan.ScaleDeployments), "unexpected number of scales")
-			assert.Equal(t, tc.expectCreate, plan.ShouldCreateDeployment, "unexpected create flag")
+			assert.Equal(t, tc.expectCreate, len(plan.CreateDeploymentPools) > 0, "unexpected create flag")
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
@@ -1355,7 +1355,7 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 		},
 	}
 	spec := &temporaliov1alpha1.WorkerDeploymentSpec{} // spec.Replicas == nil
-	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
+	updateDeploymentWithPodTemplateSpec(dep, spec.DeploymentSpec(), spec.WorkerOptions.TemporalNamespace, temporaliov1alpha1.ConnectionSpec{})
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
 }
@@ -1379,7 +1379,7 @@ func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
 			},
 		},
 	}
-	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
+	updateDeploymentWithPodTemplateSpec(dep, spec.DeploymentSpec(), spec.WorkerOptions.TemporalNamespace, temporaliov1alpha1.ConnectionSpec{})
 	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
 	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
 	assert.Equal(t, maxUnavailable, *dep.Spec.Strategy.RollingUpdate.MaxUnavailable)
@@ -3284,7 +3284,10 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				k8sState.Deployments[buildID] = tt.existingDeployment
 			}
 
-			result := checkAndUpdateDeploymentPodTemplateSpec(buildID, k8sState, tt.newSpec, tt.connection)
+			var result *appsv1.Deployment
+			if d, ok := k8sState.Deployments[buildID]; ok && checkAndUpdatePoolPodTemplateSpec(d, tt.newSpec, tt.connection) {
+				result = d
+			}
 
 			if !tt.expectUpdate {
 				assert.Nil(t, result, "Expected no update, but got deployment")

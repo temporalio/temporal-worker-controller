@@ -46,19 +46,19 @@ import (
 // the next reconcile. Rendered-resource delete failures are logged rather than returned as
 // errors, so the returned slice can be partial even when the error is nil.
 func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) ([]planner.WorkerResourceRef, error) {
-	// Create deployment
-	if p.CreateDeployment != nil {
-		l.Info("creating deployment", "deployment", p.CreateDeployment.Name)
-		if err := r.Create(ctx, p.CreateDeployment); err != nil {
-			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment.Name)
+	// Create deployments
+	for _, d := range p.CreateDeployments {
+		l.Info("creating deployment", "deployment", d.Name)
+		if err := r.Create(ctx, d); err != nil {
+			l.Error(err, "unable to create deployment", "deployment", d.Name)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentCreateFailed,
-				"Failed to create Deployment %q: %v", p.CreateDeployment.Name, err)
+				"Failed to create Deployment %q: %v", d.Name, err)
 			return nil, err
 		}
 	}
 
 	// Delete deployments
-	for _, d := range p.DeleteDeployments {
+	for _, d := range slices.Concat(p.DeleteDeployments, p.DeletePoolDeployments) {
 		l.Info("deleting deployment", "deployment", d.Name)
 		if err := r.Delete(ctx, d); err != nil {
 			l.Error(err, "unable to delete deployment", "deployment", d.Name)
@@ -132,7 +132,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 	// Update deployments
 	for _, d := range p.UpdateDeployments {
 		// No point in updating a deleted Deployment...
-		if containsDeployment(d, p.DeleteDeployments) {
+		if containsDeployment(d, p.DeleteDeployments) || containsDeployment(d, p.DeletePoolDeployments) {
 			continue
 		}
 		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
@@ -155,14 +155,26 @@ func buildIDForDeployment(workerDeploy *temporaliov1alpha1.WorkerDeployment, dep
 			versionDeployment.Name == deployment.Name
 	}
 
-	if matches(workerDeploy.Status.TargetVersion.Deployment) {
+	matchesVersion := func(v temporaliov1alpha1.BaseWorkerDeploymentVersion) bool {
+		if matches(v.Deployment) {
+			return true
+		}
+		for _, pool := range v.Pools {
+			if matches(pool.Deployment) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if matchesVersion(workerDeploy.Status.TargetVersion.BaseWorkerDeploymentVersion) {
 		return workerDeploy.Status.TargetVersion.BuildID
 	}
-	if workerDeploy.Status.CurrentVersion != nil && matches(workerDeploy.Status.CurrentVersion.Deployment) {
+	if workerDeploy.Status.CurrentVersion != nil && matchesVersion(workerDeploy.Status.CurrentVersion.BaseWorkerDeploymentVersion) {
 		return workerDeploy.Status.CurrentVersion.BuildID
 	}
 	for _, version := range workerDeploy.Status.DeprecatedVersions {
-		if version != nil && matches(version.Deployment) {
+		if version != nil && matchesVersion(version.BaseWorkerDeploymentVersion) {
 			return version.BuildID
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -433,6 +434,11 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// actively polling Temporal into ConditionProgressing (Ready itself remains
 	// about rollout completion only).
 	r.syncConditions(&workerDeploy, temporalState)
+	if plan.BlockedReason != "" {
+		r.setCondition(&workerDeploy, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, plan.BlockedReason)
+		r.Recorder.Event(&workerDeploy, corev1.EventTypeWarning, temporaliov1alpha1.ReasonInvalidSpec, plan.BlockedReason)
+	}
 
 	// Single status write per reconcile: persists the generated status and
 	// conditions set during this loop (Ready, Progressing). Do not send the update
@@ -819,6 +825,15 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping,
 			fmt.Sprintf("Target version %s is receiving a percentage of new workflows", twd.Status.TargetVersion.BuildID))
 	case temporaliov1alpha1.VersionStatusInactive:
+		if pending := pendingTargetPools(twd); len(pending) > 0 {
+			msg := fmt.Sprintf("Target version %s is registered but these pools are not available yet: %s",
+				twd.Status.TargetVersion.BuildID, strings.Join(pending, ", "))
+			r.setCondition(twd, temporaliov1alpha1.ConditionReady,
+				metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers, msg)
+			r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+				metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers, msg)
+			break
+		}
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion,
 			fmt.Sprintf("Target version %s is registered but not yet promoted", twd.Status.TargetVersion.BuildID))
@@ -833,6 +848,25 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers,
 			fmt.Sprintf("Waiting for workers with buildID %s to start polling", twd.Status.TargetVersion.BuildID))
 	}
+}
+
+// pendingTargetPools returns the spec's pools that the target version does not have
+// available yet, or nil when the target is healthy or has no named pools.
+func pendingTargetPools(twd *temporaliov1alpha1.WorkerDeployment) []string {
+	if !twd.Spec.HasPools() || twd.Status.TargetVersion.HealthySince != nil {
+		return nil
+	}
+	available := make(map[string]bool, len(twd.Status.TargetVersion.Pools))
+	for _, pool := range twd.Status.TargetVersion.Pools {
+		available[pool.Name] = pool.HealthySince != nil
+	}
+	var pending []string
+	for _, pool := range twd.Spec.PoolNames() {
+		if !available[pool] {
+			pending = append(pending, pool)
+		}
+	}
+	return pending
 }
 
 // recordWarningAndSetBlocked emits a warning event, sets Progressing=False and Ready=False

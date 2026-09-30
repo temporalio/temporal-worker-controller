@@ -6,6 +6,7 @@ package k8s_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -105,4 +107,141 @@ func TestDeploymentState_VersionDeploymentsFallsBackToDefaultMap(t *testing.T) {
 
 	assert.Equal(t, map[string]*appsv1.Deployment{temporaliov1alpha1.DefaultPoolName: d}, state.VersionDeployments("v1"))
 	assert.Equal(t, []string{"v1"}, state.BuildIDs())
+}
+
+func poolsFixture() *temporaliov1alpha1.WorkerDeployment {
+	w := identityFixture("registry.example.com/payments/worker:v1.2.3")
+	w.Spec.Pools = []temporaliov1alpha1.WorkerPool{
+		{Name: "activities", Deployment: appsv1.DeploymentSpec{
+			Replicas: ptr.To[int32](4),
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				ServiceAccountName: "activities",
+				Containers:         []corev1.Container{{Name: "worker", Image: "registry.example.com/payments/activities:v1.2.3"}},
+			}},
+		}},
+		{Name: "batch", Deployment: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "worker", Image: "registry.example.com/payments/batch:v1.2.3"}},
+			}},
+		}},
+	}
+	return w
+}
+
+func TestComputeBuildID_Pools(t *testing.T) {
+	base := k8s.ComputeBuildID(poolsFixture())
+	assert.Regexp(t, `^v1\.2\.3-[0-9a-f]{10}$`, base)
+	assert.NotEqual(t, k8s.ComputeBuildID(identityFixture("registry.example.com/payments/worker:v1.2.3")), base,
+		"adding pools starts a new version")
+
+	tests := []struct {
+		name   string
+		mutate func(*temporaliov1alpha1.WorkerDeployment)
+		same   bool
+	}{
+		{name: "reordered pools", same: true, mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.Pools[0], w.Spec.Pools[1] = w.Spec.Pools[1], w.Spec.Pools[0]
+		}},
+		{name: "pool replicas changed", same: true, mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.Pools[0].Deployment.Replicas = ptr.To[int32](9)
+		}},
+		{name: "named pool template changed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.Pools[1].Deployment.Template.Spec.Containers[0].Image = "registry.example.com/payments/batch:v1.2.4"
+		}},
+		{name: "default pool template changed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.Deployment.Template.Labels["tier"] = "gold"
+		}},
+		{name: "pool renamed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.Pools[1].Name = "bulk"
+		}},
+		{name: "pool removed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.Pools = w.Spec.Pools[:1]
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := poolsFixture()
+			tt.mutate(w)
+			if tt.same {
+				assert.Equal(t, base, k8s.ComputeBuildID(w))
+			} else {
+				assert.NotEqual(t, base, k8s.ComputeBuildID(w))
+			}
+		})
+	}
+
+	t.Run("custom build ID wins", func(t *testing.T) {
+		w := poolsFixture()
+		w.Spec.WorkerOptions.UnsafeCustomBuildID = "release-7"
+		assert.Equal(t, "release-7", k8s.ComputeBuildID(w))
+	})
+
+	t.Run("long image tag fits in a label", func(t *testing.T) {
+		w := poolsFixture()
+		w.Spec.Deployment.Template.Spec.Containers[0].Image = "worker:" + strings.Repeat("t", 100)
+		id := k8s.ComputeBuildID(w)
+		assert.LessOrEqual(t, len(id), k8s.MaxBuildIDLen)
+		assert.Regexp(t, `-[0-9a-f]{10}$`, id)
+	})
+}
+
+func TestComputePoolDeploymentName(t *testing.T) {
+	name := k8s.ComputePoolDeploymentName("payments", "activities", "v1.2.3-abcd")
+	assert.Regexp(t, `^payments-activities-v1-2-3-abcd-[0-9a-f]{8}$`, name)
+
+	long := k8s.ComputePoolDeploymentName("a-very-long-worker-deployment-name", "document-extraction", "release-2024-01-15-abcdef")
+	assert.LessOrEqual(t, len(long), k8s.MaxDeploymentNameLen)
+	assert.Regexp(t, `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, long)
+
+	assert.NotEqual(t, k8s.ComputeVersionedDeploymentName("wd", "activities-v2"), k8s.ComputePoolDeploymentName("wd", "activities", "v2"),
+		"a named pool never takes a default pool's name")
+	assert.NotEqual(t, k8s.ComputePoolDeploymentName("wd", "a", "b-c"), k8s.ComputePoolDeploymentName("wd", "a-b", "c"))
+}
+
+func TestNewPoolDeploymentWithOwnerRef(t *testing.T) {
+	w := poolsFixture()
+	buildID := k8s.ComputeBuildID(w)
+	wdName := k8s.ComputeWorkerDeploymentName(w)
+
+	activities, err := k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, "activities", true, identityConnection)
+	require.NoError(t, err)
+	def, err := k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, temporaliov1alpha1.DefaultPoolName, true, identityConnection)
+	require.NoError(t, err)
+
+	assert.Equal(t, k8s.ComputePoolDeploymentName(w.Name, "activities", buildID), activities.Name)
+	assert.Equal(t, k8s.ComputeVersionedDeploymentName(w.Name, buildID), def.Name)
+
+	wantActivitiesSelector := map[string]string{
+		k8s.WorkerDeploymentNameLabel: "payment-processor",
+		k8s.BuildIDLabel:              buildID,
+		k8s.PoolLabel:                 "activities",
+	}
+	assert.Equal(t, wantActivitiesSelector, activities.Spec.Selector.MatchLabels)
+	assert.Equal(t, wantActivitiesSelector, activities.Labels)
+	assert.Equal(t, temporaliov1alpha1.DefaultPoolName, def.Spec.Selector.MatchLabels[k8s.PoolLabel],
+		"the default pool is labelled too, so selectors never overlap")
+	for k, v := range activities.Spec.Selector.MatchLabels {
+		assert.Equal(t, v, activities.Spec.Template.Labels[k])
+	}
+
+	assert.Equal(t, ptr.To[int32](4), activities.Spec.Replicas)
+	assert.Equal(t, "activities", activities.Spec.Template.Spec.ServiceAccountName)
+	assert.Equal(t, "registry.example.com/payments/activities:v1.2.3", activities.Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, temporaliov1alpha1.DefaultDeploymentStrategy(), activities.Spec.Strategy)
+	assert.Equal(t, def.Spec.Template.Spec.Containers[0].Env, activities.Spec.Template.Spec.Containers[0].Env,
+		"every pool gets the same controller-injected env")
+
+	_, err = k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, "missing", true, identityConnection)
+	assert.Error(t, err)
+}
+
+func TestNewPoolDeploymentWithOwnerRef_UnlabelledDefaultMatchesSingleTemplate(t *testing.T) {
+	w := identityFixture("registry.example.com/payments/worker:v1.2.3")
+	buildID := k8s.ComputeBuildID(w)
+	wdName := k8s.ComputeWorkerDeploymentName(w)
+
+	pooled, err := k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, temporaliov1alpha1.DefaultPoolName, false, identityConnection)
+	require.NoError(t, err)
+
+	assert.Equal(t, k8s.NewDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, identityConnection), pooled)
 }

@@ -256,6 +256,10 @@ type stubWDClient struct {
 
 func (s *stubWDClient) GetHandle(_ string) sdkclient.WorkerDeploymentHandle { return s.handle }
 
+func (s *stubWDClient) Delete(_ context.Context, _ sdkclient.WorkerDeploymentDeleteOptions) (sdkclient.WorkerDeploymentDeleteResponse, error) {
+	return sdkclient.WorkerDeploymentDeleteResponse{}, nil
+}
+
 // stubWorkflowServiceClient implements workflowservice.WorkflowServiceClient, returning
 // a valid empty response for DescribeWorkerDeployment (no versions, no routing config),
 // or a configurable error if describeDeploymentErr is set.
@@ -972,9 +976,9 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 				},
 			},
 			makePlan: func(ns string) *plan {
-				return &plan{CreateDeployment: &appsv1.Deployment{
+				return &plan{CreateDeployments: []*appsv1.Deployment{{
 					ObjectMeta: metav1.ObjectMeta{Name: "new-deploy", Namespace: ns},
-				}}
+				}}}
 			},
 			expectedReason: ReasonDeploymentCreateFailed,
 		},

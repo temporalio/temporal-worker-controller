@@ -27,9 +27,14 @@ type plan struct {
 
 	// Which actions to take
 	DeleteDeployments []*appsv1.Deployment
-	CreateDeployment  *appsv1.Deployment
-	ScaleDeployments  map[*corev1.ObjectReference]uint32
-	UpdateDeployments []*appsv1.Deployment
+	// DeletePoolDeployments are Deployments of pools removed from the target version.
+	// Deleting them never deletes the version in Temporal.
+	DeletePoolDeployments []*appsv1.Deployment
+	CreateDeployments     []*appsv1.Deployment
+	ScaleDeployments      map[*corev1.ObjectReference]uint32
+	UpdateDeployments     []*appsv1.Deployment
+	// BlockedReason explains a spec change the controller refuses to apply.
+	BlockedReason string
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
@@ -172,8 +177,10 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 
 	// Convert planner result to controller plan
 	plan.DeleteDeployments = planResult.DeleteDeployments
+	plan.DeletePoolDeployments = planResult.DeletePoolDeployments
 	plan.ScaleDeployments = planResult.ScaleDeployments
 	plan.UpdateDeployments = planResult.UpdateDeployments
+	plan.BlockedReason = planResult.BlockedReason
 
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
@@ -197,22 +204,13 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	}
 
 	// Handle deployment creation if needed
-	if planResult.ShouldCreateDeployment {
-		d, err := r.newDeployment(w, targetBuildID, connection)
+	for _, pool := range planResult.CreateDeploymentPools {
+		d, err := k8s.NewPoolDeploymentWithControllerRef(w, targetBuildID, pool, planResult.LabelDefaultPool, connection, r.Scheme)
 		if err != nil {
 			return nil, err
 		}
-		plan.CreateDeployment = d
+		plan.CreateDeployments = append(plan.CreateDeployments, d)
 	}
 
 	return plan, nil
-}
-
-// Create a new deployment with owner reference
-func (r *WorkerDeploymentReconciler) newDeployment(
-	w *temporaliov1alpha1.WorkerDeployment,
-	buildID string,
-	connection temporaliov1alpha1.ConnectionSpec,
-) (*appsv1.Deployment, error) {
-	return k8s.NewDeploymentWithControllerRef(w, buildID, connection, r.Scheme)
 }

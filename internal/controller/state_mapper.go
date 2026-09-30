@@ -20,6 +20,8 @@ type stateMapper struct {
 	k8sState             *k8s.DeploymentState
 	temporalState        *temporal.TemporalWorkerState
 	workerDeploymentName string
+	// targetSpec, when set, lists the pools the target version must run before it is healthy.
+	targetSpec *v1alpha1.WorkerDeploymentSpec
 }
 
 // newStateMapper creates a new state mapper
@@ -128,6 +130,9 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 	}
 
 	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
+	if m.targetSpec != nil && m.targetSpec.HasPools() {
+		version.HealthySince = targetPoolsHealthySince(m.targetSpec, m.k8sState.VersionDeployments(buildID))
+	}
 
 	// Set version status from temporal state
 	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
@@ -206,6 +211,57 @@ func (m *stateMapper) setVersionDeployments(version *v1alpha1.BaseWorkerDeployme
 	}
 	version.Deployment = m.k8sState.DeploymentRefs[buildID]
 	version.HealthySince = versionHealthySince(deployments)
+	version.Pools = poolStatuses(deployments)
+}
+
+// poolStatuses reports each pool of a multi-pool version, sorted by name so status
+// doesn't churn. Versions without pool labels keep an empty list.
+func poolStatuses(deployments map[string]*appsv1.Deployment) []v1alpha1.WorkerPoolStatus {
+	labelled := false
+	for _, d := range deployments {
+		if _, ok := d.Labels[k8s.PoolLabel]; ok {
+			labelled = true
+		}
+	}
+	if !labelled {
+		return nil
+	}
+	pools := make([]v1alpha1.WorkerPoolStatus, 0, len(deployments))
+	for name, d := range deployments {
+		pool := v1alpha1.WorkerPoolStatus{Name: name, Deployment: k8s.NewObjectRef(d)}
+		if healthy, since := k8s.IsDeploymentHealthy(d); healthy {
+			pool.HealthySince = since
+		}
+		pools = append(pools, pool)
+	}
+	slices.SortFunc(pools, func(a, b v1alpha1.WorkerPoolStatus) int { return cmp.Compare(a.Name, b.Name) })
+	return pools
+}
+
+// targetPoolsHealthySince returns when the last of the spec's pools became available, or
+// nil while any pool is missing, unavailable, or has no available replica. A Deployment
+// is Available at zero replicas, which would pass a pool that never polled.
+func targetPoolsHealthySince(spec *v1alpha1.WorkerDeploymentSpec, deployments map[string]*appsv1.Deployment) *metav1.Time {
+	var latest *metav1.Time
+	for _, pool := range spec.PoolNames() {
+		d, ok := deployments[pool]
+		if !ok {
+			return nil
+		}
+		healthy, since := k8s.IsDeploymentHealthy(d)
+		if !healthy {
+			return nil
+		}
+		poolSpec, _ := spec.PoolDeploymentSpec(pool)
+		scaledToZero := poolSpec.Replicas != nil && *poolSpec.Replicas == 0
+		if d.Status.AvailableReplicas < 1 && !scaledToZero {
+			return nil
+		}
+		if latest == nil || since.After(latest.Time) {
+			latest = since
+		}
+	}
+	return latest
 }
 
 // versionHealthySince returns when the last of the deployments became available, or
