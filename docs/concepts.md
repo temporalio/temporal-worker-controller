@@ -30,7 +30,7 @@ The actual Kubernetes `Deployment` resources that run worker pods. The controlle
 
 **Key characteristics:**
 - Multiple Kubernetes `Deployment` resources per `WorkerDeployment` Custom Resource (one per version, or one per [worker pool](#worker-pools) per version)
-- Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `staging/payment-processor-v1.5.1`)
+- Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `staging/payment-processor-v1.5.1`). Named worker pools use `{worker-deployment-name}-{pool}-{build-id}-{hash}`
 - Each runs a specific version of your worker code
 
 ### Key Relationship

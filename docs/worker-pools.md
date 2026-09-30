@@ -44,6 +44,9 @@ spec:
                 env:
                   - name: WORKER_ROLE
                     value: parse
+                resources:
+                  requests:
+                    cpu: "1"
     - name: extract
       deployment:
         replicas: 4
@@ -84,13 +87,13 @@ A full example is in [examples/worker-pools.yaml](../examples/worker-pools.yaml)
 
 ## Rollouts
 
-A version with pools counts as healthy only when every pool's Deployment is Available and has at least one available replica. A pool with `replicas: 0` is exempt. The gate workflow and every promotion wait for that, whatever the rollout strategy.
+A target version with pools counts as healthy only when every pool in the spec has a Deployment that is Available with at least one available replica. A pool with `replicas: 0` is exempt. The gate workflow waits for that, and so do the promotions the controller makes under `AllAtOnce` and `Progressive`.
 
 Make each worker's readiness probe pass only once the worker is polling Temporal. Otherwise a pod can be Ready before its task queues are in the version.
 
 Temporal adds its own check. When the controller sets a new current or ramping version, the server rejects it if the new version is missing a task queue the current version still uses. So a pool whose pods have not polled yet blocks the promotion rather than splitting builds. The server skips this check on a WorkerDeployment's first rollout, and for task queues that are new in this version.
 
-While the target version waits on pools, the `Progressing` condition has reason `WaitingForPollers` and names the pools that are not available yet.
+Once the target version is registered with Temporal but still waiting on pools, the `Progressing` condition has reason `WaitingForPollers` and names the pools that are not ready yet.
 
 ### Gate workflows
 
