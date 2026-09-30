@@ -1,5 +1,4 @@
 //go:build integration
-// +build integration
 
 package integration
 
@@ -35,18 +34,37 @@ func runWorkerPoolTests(t *testing.T, k8sClient client.Client, ts *temporaltest.
 	})
 }
 
-// pooledWorkerDeployment returns a WorkerDeployment whose default pool polls taskQueue for
-// workflows and whose activities pool polls taskQueue-activities for activities only.
-func pooledWorkerDeployment(name, namespace, temporalNamespace, image string) *temporaliov1alpha1.WorkerDeployment {
+// poolScenario is a WorkerDeployment whose default pool polls a workflow queue named after
+// it and whose activities pool polls <name>-activities for activities only.
+type poolScenario struct {
+	t              *testing.T
+	k8sClient      client.Client
+	ts             *temporaltest.TestServer
+	namespace      string
+	name           string
+	key            types.NamespacedName
+	deploymentName string
+}
+
+// poolVersion holds the Deployments of one version and the stop functions of their workers.
+type poolVersion struct {
+	buildID    string
+	def        appsv1.Deployment
+	activities appsv1.Deployment
+	stopDef    func()
+	stopActs   func()
+}
+
+func (s *poolScenario) workerDeployment(image string) *temporaliov1alpha1.WorkerDeployment {
 	tc := testhelpers.NewTestCase().WithInput(testhelpers.NewWorkerDeploymentBuilder().
 		WithAllAtOnceStrategy().WithReplicas(1).WithTargetTemplate(image)).
-		BuildWithValues(name, namespace, temporalNamespace)
+		BuildWithValues(s.name, s.namespace, s.ts.GetDefaultNamespace())
 	twd := tc.GetTWD()
 	twd.Spec.SunsetStrategy = temporaliov1alpha1.SunsetStrategy{
 		ScaledownDelay: &metav1.Duration{},
 		DeleteDelay:    &metav1.Duration{},
 	}
-	activities := testhelpers.SetTaskQueue(*twd.Spec.Deployment.Template.DeepCopy(), name+"-activities")
+	activities := testhelpers.SetTaskQueue(*twd.Spec.Deployment.Template.DeepCopy(), s.name+"-activities")
 	activities = testhelpers.SetWorkerRole(activities, testhelpers.ActivityWorkerRole)
 	replicas := int32(1)
 	twd.Spec.Pools = []temporaliov1alpha1.WorkerPool{{
@@ -56,20 +74,34 @@ func pooledWorkerDeployment(name, namespace, temporalNamespace, image string) *t
 	return twd
 }
 
-func waitForDeployment(t *testing.T, ctx context.Context, k8sClient client.Client, namespace, name string) appsv1.Deployment {
-	t.Helper()
+func (s *poolScenario) waitForDeployment(ctx context.Context, name string) appsv1.Deployment {
+	s.t.Helper()
 	var d appsv1.Deployment
-	eventually(t, 30*time.Second, time.Second, func() error {
-		return k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &d)
+	eventually(s.t, 30*time.Second, time.Second, func() error {
+		return s.k8sClient.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: name}, &d)
 	})
 	return d
 }
 
-func waitForTargetStatus(t *testing.T, ctx context.Context, k8sClient client.Client, key types.NamespacedName, buildID string, status temporaliov1alpha1.VersionStatus) temporaliov1alpha1.WorkerDeployment {
-	t.Helper()
+func (s *poolScenario) waitForVersionDeployments(ctx context.Context, buildID string) *poolVersion {
+	s.t.Helper()
+	return &poolVersion{
+		buildID:    buildID,
+		def:        s.waitForDeployment(ctx, k8s.ComputeVersionedDeploymentName(s.name, buildID)),
+		activities: s.waitForDeployment(ctx, k8s.ComputePoolDeploymentName(s.name, activitiesPool, buildID)),
+	}
+}
+
+func (s *poolScenario) startWorkers(ctx context.Context, d appsv1.Deployment) func() {
+	stops := applyDeployment(s.t, ctx, s.k8sClient, d.Name, s.namespace)
+	return sync.OnceFunc(func() { handleStopFuncs(stops) })
+}
+
+func (s *poolScenario) waitForTarget(ctx context.Context, buildID string, status temporaliov1alpha1.VersionStatus) temporaliov1alpha1.WorkerDeployment {
+	s.t.Helper()
 	var wd temporaliov1alpha1.WorkerDeployment
-	eventually(t, 60*time.Second, time.Second, func() error {
-		if err := k8sClient.Get(ctx, key, &wd); err != nil {
+	eventually(s.t, 60*time.Second, time.Second, func() error {
+		if err := s.k8sClient.Get(ctx, s.key, &wd); err != nil {
 			return err
 		}
 		if wd.Status.TargetVersion.BuildID != buildID || wd.Status.TargetVersion.Status != status {
@@ -82,67 +114,41 @@ func waitForTargetStatus(t *testing.T, ctx context.Context, k8sClient client.Cli
 
 // runCrossPoolWorkflow starts a workflow pinned to buildID on the default pool's queue and
 // returns the build ID of the activities pool worker that ran its activity.
-func runCrossPoolWorkflow(t *testing.T, ctx context.Context, ts *temporaltest.TestServer, deploymentName, taskQueue, buildID string) string {
-	t.Helper()
-	run, err := ts.GetDefaultClient().ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
-		ID:        fmt.Sprintf("%s-cross-pool-%s", taskQueue, buildID),
-		TaskQueue: taskQueue,
+func (s *poolScenario) runCrossPoolWorkflow(ctx context.Context, buildID string) string {
+	s.t.Helper()
+	run, err := s.ts.GetDefaultClient().ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
+		ID:        fmt.Sprintf("%s-cross-pool-%s", s.name, buildID),
+		TaskQueue: s.name,
 		VersioningOverride: &sdkclient.PinnedVersioningOverride{
-			Version: sdkworker.WorkerDeploymentVersion{DeploymentName: deploymentName, BuildID: buildID},
+			Version: sdkworker.WorkerDeploymentVersion{DeploymentName: s.deploymentName, BuildID: buildID},
 		},
-	}, testhelpers.CrossPoolWorkflowType, taskQueue+"-activities")
+	}, testhelpers.CrossPoolWorkflowType, s.name+"-activities")
 	if err != nil {
-		t.Fatalf("failed to start cross-pool workflow: %v", err)
+		s.t.Fatalf("failed to start cross-pool workflow: %v", err)
 	}
 	var got string
 	if err := run.Get(ctx, &got); err != nil {
-		t.Fatalf("cross-pool workflow failed: %v", err)
+		s.t.Fatalf("cross-pool workflow failed: %v", err)
 	}
 	return got
 }
 
-func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
-	ctx := context.Background()
-	const name = "pools"
-	twd := pooledWorkerDeployment(name, namespace, ts.GetDefaultNamespace(), "v1.0")
-	key := types.NamespacedName{Namespace: namespace, Name: name}
-	deploymentName := k8s.ComputeWorkerDeploymentName(twd)
-	v1 := k8s.ComputeBuildID(twd)
+func (s *poolScenario) assertPoolSelectors(v *poolVersion) {
+	s.t.Helper()
+	if got := v.def.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != temporaliov1alpha1.DefaultPoolName {
+		s.t.Errorf("default pool selector has pool label %q", got)
+	}
+	if got := v.activities.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != activitiesPool {
+		s.t.Errorf("activities pool selector has pool label %q", got)
+	}
+}
 
-	connection := &temporaliov1alpha1.Connection{
-		ObjectMeta: metav1.ObjectMeta{Name: twd.Spec.WorkerOptions.ConnectionRef.Name, Namespace: namespace},
-		Spec:       temporaliov1alpha1.ConnectionSpec{HostPort: ts.GetFrontendHostPort()},
-	}
-	if err := k8sClient.Create(ctx, connection); err != nil {
-		t.Fatal(err)
-	}
-	wrt := makeHPAWRT(name+"-activities-hpa", namespace, name)
-	wrt.Spec.Pool = activitiesPool
-	if err := k8sClient.Create(ctx, wrt); err != nil {
-		t.Fatal(err)
-	}
-	if err := k8sClient.Create(ctx, twd); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log("Every pool of v1 gets its own Deployment with a pool selector")
-	v1Default := waitForDeployment(t, ctx, k8sClient, namespace, k8s.ComputeVersionedDeploymentName(name, v1))
-	v1Activities := waitForDeployment(t, ctx, k8sClient, namespace, k8s.ComputePoolDeploymentName(name, activitiesPool, v1))
-	if got := v1Default.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != temporaliov1alpha1.DefaultPoolName {
-		t.Errorf("default pool selector has pool label %q", got)
-	}
-	if got := v1Activities.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != activitiesPool {
-		t.Errorf("activities pool selector has pool label %q", got)
-	}
-
-	t.Log("v1 is not promoted while its activities pool is unavailable")
-	v1DefaultStops := applyDeployment(t, ctx, k8sClient, v1Default.Name, namespace)
-	stopV1Default := sync.OnceFunc(func() { handleStopFuncs(v1DefaultStops) })
-	defer stopV1Default()
-	waitForTargetStatus(t, ctx, k8sClient, key, v1, temporaliov1alpha1.VersionStatusInactive)
-	eventually(t, 30*time.Second, time.Second, func() error {
+func (s *poolScenario) assertWaitingForActivitiesPool(ctx context.Context, buildID string) {
+	s.t.Helper()
+	s.waitForTarget(ctx, buildID, temporaliov1alpha1.VersionStatusInactive)
+	eventually(s.t, 30*time.Second, time.Second, func() error {
 		var wd temporaliov1alpha1.WorkerDeployment
-		if err := k8sClient.Get(ctx, key, &wd); err != nil {
+		if err := s.k8sClient.Get(ctx, s.key, &wd); err != nil {
 			return err
 		}
 		cond := meta.FindStatusCondition(wd.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
@@ -152,109 +158,159 @@ func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *tempora
 		return nil
 	})
 	time.Sleep(3 * time.Second)
-	if wd := waitForTargetStatus(t, ctx, k8sClient, key, v1, temporaliov1alpha1.VersionStatusInactive); wd.Status.CurrentVersion != nil {
-		t.Fatalf("v1 was promoted before every pool was available")
+	if wd := s.waitForTarget(ctx, buildID, temporaliov1alpha1.VersionStatusInactive); wd.Status.CurrentVersion != nil {
+		s.t.Fatalf("version %s was promoted before every pool was available", buildID)
 	}
+}
 
-	t.Log("v1 is promoted once every pool is available")
-	v1ActivitiesStops := applyDeployment(t, ctx, k8sClient, v1Activities.Name, namespace)
-	stopV1Activities := sync.OnceFunc(func() { handleStopFuncs(v1ActivitiesStops) })
-	defer stopV1Activities()
-	wd := waitForTargetStatus(t, ctx, k8sClient, key, v1, temporaliov1alpha1.VersionStatusCurrent)
-	if len(wd.Status.TargetVersion.Pools) != 2 {
-		t.Errorf("target version pools = %+v, want default and activities", wd.Status.TargetVersion.Pools)
-	}
-
-	t.Log("Both pools' task queues are in one Temporal version")
-	desc, err := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(deploymentName).
-		DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{BuildID: v1})
+func (s *poolScenario) assertTaskQueuesInOneVersion(ctx context.Context, buildID string) {
+	s.t.Helper()
+	desc, err := s.ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(s.deploymentName).
+		DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{BuildID: buildID})
 	if err != nil {
-		t.Fatal(err)
+		s.t.Fatal(err)
 	}
-	queues := map[string]sdkclient.TaskQueueType{}
+	type queue struct {
+		name string
+		typ  sdkclient.TaskQueueType
+	}
+	queues := map[queue]bool{}
 	for _, tq := range desc.Info.TaskQueuesInfos {
-		queues[tq.Name] = tq.Type
+		queues[queue{tq.Name, tq.Type}] = true
 	}
-	if queues[name] != sdkclient.TaskQueueTypeWorkflow || queues[name+"-activities"] != sdkclient.TaskQueueTypeActivity {
-		t.Errorf("v1 task queues = %+v, want %s (workflow) and %s-activities (activity)", queues, name, name)
+	activities := s.name + "-activities"
+	if !queues[queue{s.name, sdkclient.TaskQueueTypeWorkflow}] || !queues[queue{activities, sdkclient.TaskQueueTypeActivity}] {
+		s.t.Errorf("version task queues = %+v, want %s (workflow) and %s (activity)", queues, s.name, activities)
 	}
+	if queues[queue{activities, sdkclient.TaskQueueTypeWorkflow}] {
+		s.t.Errorf("activity-only pool registered %s as a workflow queue, so the gate would run there", activities)
+	}
+}
 
-	t.Log("The activities WRT targets only the activities pool's Deployment")
-	waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, namespace,
-		k8s.ComputeWorkerResourceTemplateName(name, wrt.Name, v1), v1Activities.Name, 30*time.Second)
-
-	t.Log("A new image rolls out as v2 across both pools")
-	eventually(t, 10*time.Second, time.Second, func() error {
+func (s *poolScenario) updateImage(ctx context.Context, image string) string {
+	s.t.Helper()
+	var buildID string
+	eventually(s.t, 10*time.Second, time.Second, func() error {
 		var latest temporaliov1alpha1.WorkerDeployment
-		if err := k8sClient.Get(ctx, key, &latest); err != nil {
+		if err := s.k8sClient.Get(ctx, s.key, &latest); err != nil {
 			return err
 		}
-		latest.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
-		latest.Spec.Pools[0].Deployment.Template.Spec.Containers[0].Image = "v2.0"
-		return k8sClient.Update(ctx, &latest)
+		latest.Spec.Deployment.Template.Spec.Containers[0].Image = image
+		latest.Spec.Pools[0].Deployment.Template.Spec.Containers[0].Image = image
+		buildID = k8s.ComputeBuildID(&latest)
+		return s.k8sClient.Update(ctx, &latest)
 	})
-	var latest temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, key, &latest); err != nil {
-		t.Fatal(err)
-	}
-	v2 := k8s.ComputeBuildID(&latest)
-	v2Default := waitForDeployment(t, ctx, k8sClient, namespace, k8s.ComputeVersionedDeploymentName(name, v2))
-	v2Activities := waitForDeployment(t, ctx, k8sClient, namespace, k8s.ComputePoolDeploymentName(name, activitiesPool, v2))
-	v2DefaultStops := applyDeployment(t, ctx, k8sClient, v2Default.Name, namespace)
-	defer handleStopFuncs(v2DefaultStops)
-	v2ActivitiesStops := applyDeployment(t, ctx, k8sClient, v2Activities.Name, namespace)
-	defer handleStopFuncs(v2ActivitiesStops)
-	waitForTargetStatus(t, ctx, k8sClient, key, v2, temporaliov1alpha1.VersionStatusCurrent)
+	return buildID
+}
 
-	t.Log("Activities on the activities pool run on the calling workflow's build")
-	if got := runCrossPoolWorkflow(t, ctx, ts, deploymentName, name, v1); got != v1 {
-		t.Errorf("activity for a workflow pinned to %s ran on %s", v1, got)
-	}
-	if got := runCrossPoolWorkflow(t, ctx, ts, deploymentName, name, v2); got != v2 {
-		t.Errorf("activity for a workflow pinned to %s ran on %s", v2, got)
-	}
-
-	t.Log("v1 sunsets every pool together")
-	eventually(t, 60*time.Second, time.Second, func() error {
+func (s *poolScenario) waitForDrained(ctx context.Context, buildID string) {
+	s.t.Helper()
+	eventually(s.t, 60*time.Second, time.Second, func() error {
 		var wd temporaliov1alpha1.WorkerDeployment
-		if err := k8sClient.Get(ctx, key, &wd); err != nil {
+		if err := s.k8sClient.Get(ctx, s.key, &wd); err != nil {
 			return err
 		}
 		for _, v := range wd.Status.DeprecatedVersions {
-			if v.BuildID == v1 && v.Status == temporaliov1alpha1.VersionStatusDrained {
+			if v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusDrained {
 				return nil
 			}
 		}
-		return fmt.Errorf("v1 is not drained yet: %+v", wd.Status.DeprecatedVersions)
+		return fmt.Errorf("version %s is not drained yet: %+v", buildID, wd.Status.DeprecatedVersions)
 	})
-	stopV1Default()
-	stopV1Activities()
-	scaleDeploymentToZero(t, ctx, k8sClient, v1Default.Name, namespace)
-	scaleDeploymentToZero(t, ctx, k8sClient, v1Activities.Name, namespace)
-	eventually(t, 90*time.Second, time.Second, func() error {
-		for _, d := range []string{v1Default.Name, v1Activities.Name} {
-			if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: d}, &appsv1.Deployment{}); err == nil {
+}
+
+func (s *poolScenario) assertSunsetTogether(ctx context.Context, v *poolVersion, hpaName string) {
+	s.t.Helper()
+	eventually(s.t, 90*time.Second, time.Second, func() error {
+		for _, d := range []string{v.def.Name, v.activities.Name} {
+			if err := s.k8sClient.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: d}, &appsv1.Deployment{}); err == nil {
 				return fmt.Errorf("deployment %s still exists", d)
 			} else if client.IgnoreNotFound(err) != nil {
 				return err
 			}
 		}
-		_, err := ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(deploymentName).
-			DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{BuildID: v1})
+		_, err := s.ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(s.deploymentName).
+			DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{BuildID: v.buildID})
 		var notFound *serviceerror.NotFound
 		if !errors.As(err, &notFound) {
-			return fmt.Errorf("expected v1 to be deleted from Temporal, got %v", err)
+			return fmt.Errorf("expected version %s to be deleted from Temporal, got %v", v.buildID, err)
 		}
 		return nil
 	})
-	eventually(t, 30*time.Second, time.Second, func() error {
-		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: k8s.ComputeWorkerResourceTemplateName(name, wrt.Name, v1)}, &autoscalingv2.HorizontalPodAutoscaler{})
+	eventually(s.t, 30*time.Second, time.Second, func() error {
+		err := s.k8sClient.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: hpaName}, &autoscalingv2.HorizontalPodAutoscaler{})
 		if err == nil {
-			return fmt.Errorf("v1 HPA still exists")
+			return errors.New("HPA of the sunset version still exists")
 		}
 		return client.IgnoreNotFound(err)
 	})
-	for _, d := range []string{v2Default.Name, v2Activities.Name} {
+}
+
+func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
+	ctx := context.Background()
+	s := &poolScenario{t: t, k8sClient: k8sClient, ts: ts, namespace: namespace, name: "pools"}
+	s.key = types.NamespacedName{Namespace: namespace, Name: s.name}
+	twd := s.workerDeployment("v1.0")
+	s.deploymentName = k8s.ComputeWorkerDeploymentName(twd)
+
+	connection := &temporaliov1alpha1.Connection{
+		ObjectMeta: metav1.ObjectMeta{Name: twd.Spec.WorkerOptions.ConnectionRef.Name, Namespace: namespace},
+		Spec:       temporaliov1alpha1.ConnectionSpec{HostPort: ts.GetFrontendHostPort()},
+	}
+	wrt := makeHPAWRT(s.name+"-activities-hpa", namespace, s.name)
+	wrt.Spec.Pool = activitiesPool
+	for _, obj := range []client.Object{connection, wrt, twd} {
+		if err := k8sClient.Create(ctx, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Log("Every pool of v1 gets its own Deployment with a pool selector")
+	v1 := s.waitForVersionDeployments(ctx, k8s.ComputeBuildID(twd))
+	s.assertPoolSelectors(v1)
+
+	t.Log("v1 is not promoted while its activities pool is unavailable")
+	v1.stopDef = s.startWorkers(ctx, v1.def)
+	defer v1.stopDef()
+	s.assertWaitingForActivitiesPool(ctx, v1.buildID)
+
+	t.Log("v1 is promoted once every pool is available")
+	v1.stopActs = s.startWorkers(ctx, v1.activities)
+	defer v1.stopActs()
+	if wd := s.waitForTarget(ctx, v1.buildID, temporaliov1alpha1.VersionStatusCurrent); len(wd.Status.TargetVersion.Pools) != 2 {
+		t.Errorf("target version pools = %+v, want default and activities", wd.Status.TargetVersion.Pools)
+	}
+
+	t.Log("Both pools' task queues are in one Temporal version")
+	s.assertTaskQueuesInOneVersion(ctx, v1.buildID)
+
+	t.Log("The activities WRT targets only the activities pool's Deployment")
+	v1HPA := k8s.ComputeWorkerResourceTemplateName(s.name, wrt.Name, v1.buildID)
+	waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, namespace, v1HPA, v1.activities.Name, 30*time.Second)
+
+	t.Log("A new image rolls out as v2 across both pools")
+	v2 := s.waitForVersionDeployments(ctx, s.updateImage(ctx, "v2.0"))
+	v2.stopDef = s.startWorkers(ctx, v2.def)
+	defer v2.stopDef()
+	v2.stopActs = s.startWorkers(ctx, v2.activities)
+	defer v2.stopActs()
+	s.waitForTarget(ctx, v2.buildID, temporaliov1alpha1.VersionStatusCurrent)
+
+	t.Log("Activities on the activities pool run on the calling workflow's build")
+	for _, v := range []*poolVersion{v1, v2} {
+		if got := s.runCrossPoolWorkflow(ctx, v.buildID); got != v.buildID {
+			t.Errorf("activity for a workflow pinned to %s ran on %s", v.buildID, got)
+		}
+	}
+
+	t.Log("v1 sunsets every pool together")
+	s.waitForDrained(ctx, v1.buildID)
+	v1.stopDef()
+	v1.stopActs()
+	scaleDeploymentToZero(t, ctx, k8sClient, v1.def.Name, namespace)
+	scaleDeploymentToZero(t, ctx, k8sClient, v1.activities.Name, namespace)
+	s.assertSunsetTogether(ctx, v1, v1HPA)
+	for _, d := range []string{v2.def.Name, v2.activities.Name} {
 		if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: d}, &appsv1.Deployment{}); err != nil {
 			t.Errorf("v2 deployment %s: %v", d, err)
 		}
