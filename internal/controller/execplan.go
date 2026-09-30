@@ -819,7 +819,9 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	p *plan,
 ) {
 	identity := getControllerIdentity()
-	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
+	// A version's pool Deployments are pruned together, after one DeleteVersion call.
+	var buildIDs []string
+	deploymentsByBuildID := make(map[string][]*appsv1.Deployment)
 	for _, d := range p.DeleteDeployments {
 		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
 		if !ok {
@@ -830,8 +832,17 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			l.Info("deployment has no build ID label, leaving the k8s Deployment alone", "deployment", d.Name)
 			continue
 		}
+		if _, seen := deploymentsByBuildID[buildID]; !seen {
+			buildIDs = append(buildIDs, buildID)
+		}
+		deploymentsByBuildID[buildID] = append(deploymentsByBuildID[buildID], d)
+	}
+
+	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
+	for _, buildID := range buildIDs {
+		deployments := deploymentsByBuildID[buildID]
 		if isVersionNotRegistered(workerDeploy, buildID) {
-			markedForDeletion = append(markedForDeletion, d)
+			markedForDeletion = append(markedForDeletion, deployments...)
 			continue
 		}
 		backoffKey := k8s.ComputeWorkerDeploymentName(workerDeploy) + "/" + buildID
@@ -861,8 +872,8 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 		if err != nil {
 			var notFound *serviceerror.NotFound
 			if !errors.As(err, &notFound) {
-				l.Info("could not delete worker deployment version, keeping its k8s Deployment to reconcile",
-					"buildID", buildID, "deployment", d.Name, "error", err)
+				l.Info("could not delete worker deployment version, keeping its k8s Deployments to reconcile",
+					"buildID", buildID, "error", err)
 				r.noteVersionDeleteFailure(backoffKey)
 				continue
 			}
@@ -871,7 +882,7 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			l.Info("deleted deprecated worker deployment version", "buildID", buildID)
 		}
 		r.noteVersionDeleteSuccess(backoffKey)
-		markedForDeletion = append(markedForDeletion, d)
+		markedForDeletion = append(markedForDeletion, deployments...)
 	}
 	p.DeleteDeployments = markedForDeletion
 }

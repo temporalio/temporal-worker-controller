@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	deploymentpb "go.temporal.io/api/deployment/v1"
@@ -261,6 +262,7 @@ func (s *stubWDClient) GetHandle(_ string) sdkclient.WorkerDeploymentHandle { re
 type stubWorkflowServiceClient struct {
 	workflowservice.WorkflowServiceClient
 	describeDeploymentErr error
+	describedBuildIDs     *[]string
 }
 
 func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, _ *workflowservice.DescribeWorkerDeploymentRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentResponse, error) {
@@ -274,7 +276,10 @@ func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, 
 	}, nil
 }
 
-func (s *stubWorkflowServiceClient) DescribeWorkerDeploymentVersion(_ context.Context, _ *workflowservice.DescribeWorkerDeploymentVersionRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentVersionResponse, error) {
+func (s *stubWorkflowServiceClient) DescribeWorkerDeploymentVersion(_ context.Context, req *workflowservice.DescribeWorkerDeploymentVersionRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentVersionResponse, error) {
+	if s.describedBuildIDs != nil {
+		*s.describedBuildIDs = append(*s.describedBuildIDs, req.GetDeploymentVersion().GetBuildId())
+	}
 	return nil, &serviceerror.NotFound{}
 }
 
@@ -285,6 +290,7 @@ type stubTemporalClient struct {
 	wdClient              sdkclient.WorkerDeploymentClient
 	execErr               error
 	describeDeploymentErr error
+	describedBuildIDs     []string
 }
 
 func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeploymentClient {
@@ -292,7 +298,7 @@ func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeployment
 }
 
 func (s *stubTemporalClient) WorkflowService() workflowservice.WorkflowServiceClient {
-	return &stubWorkflowServiceClient{describeDeploymentErr: s.describeDeploymentErr}
+	return &stubWorkflowServiceClient{describeDeploymentErr: s.describeDeploymentErr, describedBuildIDs: &s.describedBuildIDs}
 }
 
 func (s *stubTemporalClient) ExecuteWorkflow(_ context.Context, _ sdkclient.StartWorkflowOptions, _ interface{}, _ ...interface{}) (sdkclient.WorkflowRun, error) {
@@ -803,6 +809,42 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	// with no reconciliation errors.
 	require.NoError(t, err)
 	assertNoEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
+}
+
+func TestReconcile_DescribesBuildsWithOnlyNamedPoolDeployments(t *testing.T) {
+	k8sNamespace := "default"
+	tc := makeNoCredsConnection("my-conn", k8sNamespace, "localhost:7233")
+	twd := makeWD("test-worker", k8sNamespace, tc.Name)
+	controller := true
+	orphan := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-worker-activities-old",
+			Namespace: k8sNamespace,
+			Labels: map[string]string{
+				k8s.WorkerDeploymentNameLabel: "test-worker",
+				k8s.BuildIDLabel:              "old",
+				k8s.PoolLabel:                 "activities",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: temporaliov1alpha1.GroupVersion.String(),
+				Kind:       "WorkerDeployment",
+				Name:       twd.Name,
+				Controller: &controller,
+			}},
+		},
+	}
+
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, tc, orphan}, interceptor.Funcs{})
+	stub := newStubTemporalClient(nil)
+	r.TemporalClientPool.SetClientForTesting(noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace), stub)
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, stub.describedBuildIDs, "old",
+		"a build missing from the deployment summary must be described before it can map to NotRegistered")
 }
 
 // TestReconcile_SteadyState_SkipsStatusWrite verifies that once the rollout settles, a

@@ -136,6 +136,10 @@ type WorkerDeploymentSpec struct {
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
+// DefaultPoolName names the worker pool described by spec.deployment (or the
+// deprecated spec.template fields).
+const DefaultPoolName = "default"
+
 // DeploymentSpec returns the appsv1.DeploymentSpec struct constructed by
 // examining the WorkerDeploymentSpec. If WorkerDeploymentSpec.deployment is
 // non-nil, we return that. Otherwise, we construct an appsv1.DeploymentSpec

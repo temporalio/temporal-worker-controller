@@ -339,7 +339,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		temporalClient,
 		workerDeploymentName,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		k8sState.Deployments,
+		k8sState.BuildIDs(),
 		targetBuildID,
 		workerDeploy.Spec.RolloutStrategy.Strategy,
 		getControllerIdentity(),

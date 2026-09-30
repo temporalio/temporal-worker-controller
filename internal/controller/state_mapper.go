@@ -11,6 +11,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -57,7 +58,7 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.WorkerDeployme
 
 	// Add deprecated versions
 	var deprecatedVersions []*v1alpha1.DeprecatedWorkerDeploymentVersion
-	for buildID := range m.k8sState.Deployments {
+	for _, buildID := range m.k8sState.BuildIDs() {
 		// Skip current and target versions
 		if buildID == currentBuildID || buildID == targetBuildID {
 			continue
@@ -100,16 +101,7 @@ func (m *stateMapper) mapCurrentWorkerDeploymentVersionByBuildID(buildID string)
 		},
 	}
 
-	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[buildID]
-
-		// Check deployment health
-		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
-		if healthy {
-			version.HealthySince = healthySince
-		}
-	}
+	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 
 	// Set version status from temporal state
 	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
@@ -135,16 +127,7 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 		return version
 	}
 
-	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[buildID]
-
-		// Check deployment health
-		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
-		if healthy {
-			version.HealthySince = healthySince
-		}
-	}
+	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 
 	// Set version status from temporal state
 	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
@@ -181,8 +164,8 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 	eligibleForDeletion := false
 	if vInfo, exists := m.temporalState.Versions[buildID]; exists {
 		hasActiveDeployment := false
-		if d, ok := m.k8sState.Deployments[buildID]; ok {
-			hasActiveDeployment = d.Status.Replicas > 0
+		for _, d := range m.k8sState.VersionDeployments(buildID) {
+			hasActiveDeployment = hasActiveDeployment || d.Status.Replicas > 0
 		}
 		eligibleForDeletion = vInfo.Status == v1alpha1.VersionStatusDrained && !hasActiveDeployment
 	}
@@ -195,16 +178,7 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 		EligibleForDeletion: eligibleForDeletion,
 	}
 
-	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[buildID]
-
-		// Check deployment health
-		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
-		if healthy {
-			version.HealthySince = healthySince
-		}
-	}
+	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 
 	// Set version status from temporal state
 	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
@@ -221,4 +195,31 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 	}
 
 	return version
+}
+
+// setVersionDeployments points a version at its default pool's deployment and marks
+// it healthy once every pool's deployment is available.
+func (m *stateMapper) setVersionDeployments(version *v1alpha1.BaseWorkerDeploymentVersion, buildID string) {
+	deployments := m.k8sState.VersionDeployments(buildID)
+	if len(deployments) == 0 {
+		return
+	}
+	version.Deployment = m.k8sState.DeploymentRefs[buildID]
+	version.HealthySince = versionHealthySince(deployments)
+}
+
+// versionHealthySince returns when the last of the deployments became available, or
+// nil while any of them is unavailable.
+func versionHealthySince(deployments map[string]*appsv1.Deployment) *metav1.Time {
+	var latest *metav1.Time
+	for _, d := range deployments {
+		healthy, since := k8s.IsDeploymentHealthy(d)
+		if !healthy {
+			return nil
+		}
+		if latest == nil || since.After(latest.Time) {
+			latest = since
+		}
+	}
+	return latest
 }

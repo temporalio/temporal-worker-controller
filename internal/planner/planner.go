@@ -444,17 +444,20 @@ func checkAndUpdateDeploymentConnectionSpec(
 	if !exists {
 		return nil
 	}
-
-	// If the connection spec hash has changed, update the deployment
-	currentHash := k8s.ComputeConnectionSpecHash(connection)
-	if currentHash != existingDeployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
-
-		// Update the deployment in-place with new connection info
-		updateDeploymentWithConnection(existingDeployment, connection)
-		return existingDeployment // Return the modified deployment
+	if updateDeploymentConnectionIfStale(existingDeployment, connection) {
+		return existingDeployment
 	}
-
 	return nil
+}
+
+// updateDeploymentConnectionIfStale updates a deployment in-place when its connection
+// spec hash differs from the provided ConnectionSpec, and reports whether it did.
+func updateDeploymentConnectionIfStale(d *appsv1.Deployment, connection temporaliov1alpha1.ConnectionSpec) bool {
+	if k8s.ComputeConnectionSpecHash(connection) == d.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
+		return false
+	}
+	updateDeploymentWithConnection(d, connection)
+	return true
 }
 
 // updateDeploymentWithConnection updates an existing deployment in-place to match a new ConnectionSpec.
@@ -716,31 +719,36 @@ func getUpdateDeployments(
 ) []*appsv1.Deployment {
 	var updateDeployments []*appsv1.Deployment
 	// Track which deployments we've already added to avoid duplicates
-	updatedBuildIDs := make(map[string]bool)
+	updated := make(map[*appsv1.Deployment]bool)
+	add := func(d *appsv1.Deployment) {
+		if !updated[d] {
+			updated[d] = true
+			updateDeployments = append(updateDeployments, d)
+		}
+	}
 
 	// Check target version deployment for pod template spec drift
 	// This enables rolling updates when the build ID is stable but spec changed
 	if status.TargetVersion.BuildID != "" {
 		if deployment := checkAndUpdateDeploymentPodTemplateSpec(status.TargetVersion.BuildID, k8sState, spec, connection); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[status.TargetVersion.BuildID] = true
+			add(deployment)
 		}
 	}
 
-	// Check target version deployment if it has an expired connection spec hash
-	// (only if not already updated by pod template check)
-	if status.TargetVersion.BuildID != "" && !updatedBuildIDs[status.TargetVersion.BuildID] {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.BuildID, k8sState, connection); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[status.TargetVersion.BuildID] = true
-		}
+	// Check the target and current versions' deployments for an expired connection spec
+	// hash (skipping deployments already rebuilt by the pod template check)
+	connectionBuildIDs := []string{status.TargetVersion.BuildID}
+	if status.CurrentVersion != nil {
+		connectionBuildIDs = append(connectionBuildIDs, status.CurrentVersion.BuildID)
 	}
-
-	// Check current version deployment if it has an expired connection spec hash
-	if status.CurrentVersion != nil && status.CurrentVersion.BuildID != "" && !updatedBuildIDs[status.CurrentVersion.BuildID] {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.BuildID, k8sState, connection); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[status.CurrentVersion.BuildID] = true
+	for _, buildID := range connectionBuildIDs {
+		if buildID == "" {
+			continue
+		}
+		for _, d := range k8sState.VersionDeploymentList(buildID) {
+			if !updated[d] && updateDeploymentConnectionIfStale(d, connection) {
+				add(d)
+			}
 		}
 	}
 
@@ -750,16 +758,16 @@ func getUpdateDeployments(
 	// pod-template / connection checks so a Kubernetes Deployment already
 	// queued for update also picks up strategy changes in the same write.
 	for _, buildID := range ownedBuildIDs(status) {
-		if updatedBuildIDs[buildID] {
-			if deployment, exists := k8sState.Deployments[buildID]; exists {
-				wdDepSpec := spec.DeploymentSpec()
-				deployment.Spec.Strategy = wdDepSpec.Strategy
-			}
+		deployment, exists := k8sState.Deployments[buildID]
+		if !exists {
+			continue
+		}
+		if updated[deployment] {
+			deployment.Spec.Strategy = spec.DeploymentSpec().Strategy
 			continue
 		}
 		if deployment := checkAndUpdateDeploymentStrategy(buildID, k8sState, spec); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[buildID] = true
+			add(deployment)
 		}
 	}
 
@@ -796,13 +804,9 @@ func getDeleteDeployments(
 	var deleteDeployments []*appsv1.Deployment
 
 	for _, version := range status.DeprecatedVersions {
-		if version.Deployment == nil {
-			continue
-		}
-
-		// Look up the deployment using buildID
-		d, exists := k8sState.Deployments[version.BuildID]
-		if !exists {
+		// Every pool of a version is deleted together; the default pool goes last.
+		deployments := k8sState.VersionDeploymentList(version.BuildID)
+		if len(deployments) == 0 {
 			continue
 		}
 
@@ -812,10 +816,8 @@ func getDeleteDeployments(
 			// Wait for scale-down to finish; execution checks pinned workflows before pruning.
 			if foundDeploymentInTemporal && status.TargetVersion.BuildID != version.BuildID &&
 				(status.CurrentVersion == nil || status.CurrentVersion.BuildID != version.BuildID) &&
-				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
-				d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == 0 &&
-				(d.Status.TerminatingReplicas == nil || *d.Status.TerminatingReplicas == 0) {
-				deleteDeployments = append(deleteDeployments, d)
+				allDeployments(deployments, isFullyScaledDown) {
+				deleteDeployments = append(deleteDeployments, deployments...)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
 			// Deleting a deployment is only possible when:
@@ -830,9 +832,9 @@ func getDeleteDeployments(
 			//    prune it. See execplan.deleteDeprecatedVersions.
 			if version.DrainedSince != nil &&
 				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
-				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				allDeployments(deployments, isScaledToZero) &&
 				version.EligibleForDeletion {
-				deleteDeployments = append(deleteDeployments, d)
+				deleteDeployments = append(deleteDeployments, deployments...)
 			}
 		case temporaliov1alpha1.VersionStatusNotRegistered:
 			// Only delete Deployments of NotRegistered versions if temporalState was not empty
@@ -841,12 +843,31 @@ func getDeleteDeployments(
 				// Only delete if it's not the target version.
 				status.TargetVersion.BuildID != version.BuildID {
 				// Consider: Could call DescribeVersion here to assert NotFound before deleting, in case version summaries have diverged from version state
-				deleteDeployments = append(deleteDeployments, d)
+				deleteDeployments = append(deleteDeployments, deployments...)
 			}
 		}
 	}
 
 	return deleteDeployments
+}
+
+func allDeployments(deployments []*appsv1.Deployment, pred func(*appsv1.Deployment) bool) bool {
+	for _, d := range deployments {
+		if !pred(d) {
+			return false
+		}
+	}
+	return true
+}
+
+func isScaledToZero(d *appsv1.Deployment) bool {
+	return d.Spec.Replicas != nil && *d.Spec.Replicas == 0
+}
+
+func isFullyScaledDown(d *appsv1.Deployment) bool {
+	return isScaledToZero(d) &&
+		d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == 0 &&
+		(d.Status.TerminatingReplicas == nil || *d.Status.TerminatingReplicas == 0)
 }
 
 // getScaleDeployments determines which deployments should be explicitly scaled and to what size.
@@ -899,70 +920,96 @@ func getScaleDeployments(
 
 	// Scale other versions based on status
 	for _, version := range status.DeprecatedVersions {
-		if version.Deployment == nil {
-			continue
-		}
-
-		d, exists := k8sState.Deployments[version.BuildID]
-		if !exists {
-			continue
-		}
-
-		switch version.Status {
-		case temporaliov1alpha1.VersionStatusInactive:
-			// Scale down inactive versions that are not the target
-			if status.TargetVersion.BuildID == version.BuildID {
-				// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-				if wdDepSpec.Replicas != nil {
-					replicas := *wdDepSpec.Replicas
-					if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-						scaleDeployments[version.Deployment] = uint32(replicas)
-					}
-				}
-			} else if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target inactive versions with nil replicas or >0 replicas
-				scaleDeployments[version.Deployment] = 0
+		for pool, d := range k8sState.VersionDeployments(version.BuildID) {
+			ref := poolDeploymentRef(version.Deployment, pool, d)
+			if ref == nil {
+				continue
 			}
-		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
-			// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-			// Scale up these deployments
-			if wdDepSpec.Replicas != nil {
-				replicas := *wdDepSpec.Replicas
-				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-					scaleDeployments[version.Deployment] = uint32(replicas)
-				}
+			var replicas *int32
+			if pool == temporaliov1alpha1.DefaultPoolName {
+				replicas = wdDepSpec.Replicas
 			}
-		case temporaliov1alpha1.VersionStatusDraining:
-			// A draining version with 0 replicas has no pollers, so it will never finish
-			// draining and will never be retired. We detect and repair this scenario
-			// here. Any other non-zero count still has pollers and will drain on its own.
-			if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
-				replicas := int32(1)
-				// If the controller manages the replicas we set it to the spec's value. If a
-				// scaler manages them, we explicitly set it to 1 to unblock drainage.
-				if wdDepSpec.Replicas != nil {
-					replicas = *wdDepSpec.Replicas
-				}
-				// spec.Replicas may legitimately be 0, so we guard it.
-				if replicas != 0 {
-					l.Info("scaling draining version back up from 0 replicas",
-						"buildID", version.BuildID,
-						"deployment", version.Deployment.Name,
-						"replicas", replicas,
-					)
-					scaleDeployments[version.Deployment] = uint32(replicas)
-				}
-			}
-		case temporaliov1alpha1.VersionStatusDrained:
-			if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
-				// Scale down drained deployments after delay
-				if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target drained versions with nil replicas or >0 replicas
-					scaleDeployments[version.Deployment] = 0
-				}
-			}
+			scaleDeprecatedDeployment(l, scaleDeployments, version, d, ref, status.TargetVersion.BuildID, spec.SunsetStrategy.ScaledownDelay, replicas)
 		}
 	}
 
 	return scaleDeployments
+}
+
+// poolDeploymentRef returns the reference used to scale a pool's deployment. The
+// default pool keeps the reference from status so callers can match on it.
+func poolDeploymentRef(defaultRef *corev1.ObjectReference, pool string, d *appsv1.Deployment) *corev1.ObjectReference {
+	if pool == temporaliov1alpha1.DefaultPoolName {
+		return defaultRef
+	}
+	return k8s.NewObjectRef(d)
+}
+
+// scaleDeprecatedDeployment applies the sunset scaling rules to one pool's deployment
+// of a deprecated version. specReplicas is that pool's desired replicas, nil when a
+// scaler manages them.
+func scaleDeprecatedDeployment(
+	l logr.Logger,
+	scaleDeployments map[*corev1.ObjectReference]uint32,
+	version *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion,
+	d *appsv1.Deployment,
+	ref *corev1.ObjectReference,
+	targetBuildID string,
+	scaledownDelay *metav1.Duration,
+	specReplicas *int32,
+) {
+	switch version.Status {
+	case temporaliov1alpha1.VersionStatusInactive:
+		// Scale down inactive versions that are not the target
+		if targetBuildID == version.BuildID {
+			// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
+			if specReplicas != nil {
+				replicas := *specReplicas
+				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+					scaleDeployments[ref] = uint32(replicas)
+				}
+			}
+		} else if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target inactive versions with nil replicas or >0 replicas
+			scaleDeployments[ref] = 0
+		}
+	case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
+		// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
+		// Scale up these deployments
+		if specReplicas != nil {
+			replicas := *specReplicas
+			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
+				scaleDeployments[ref] = uint32(replicas)
+			}
+		}
+	case temporaliov1alpha1.VersionStatusDraining:
+		// A draining version with 0 replicas has no pollers, so it will never finish
+		// draining and will never be retired. We detect and repair this scenario
+		// here. Any other non-zero count still has pollers and will drain on its own.
+		if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+			replicas := int32(1)
+			// If the controller manages the replicas we set it to the spec's value. If a
+			// scaler manages them, we explicitly set it to 1 to unblock drainage.
+			if specReplicas != nil {
+				replicas = *specReplicas
+			}
+			// spec.Replicas may legitimately be 0, so we guard it.
+			if replicas != 0 {
+				l.Info("scaling draining version back up from 0 replicas",
+					"buildID", version.BuildID,
+					"deployment", ref.Name,
+					"replicas", replicas,
+				)
+				scaleDeployments[ref] = uint32(replicas)
+			}
+		}
+	case temporaliov1alpha1.VersionStatusDrained:
+		if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > scaledownDelay.Duration {
+			// Scale down drained deployments after delay
+			if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target drained versions with nil replicas or >0 replicas
+				scaleDeployments[ref] = 0
+			}
+		}
+	}
 }
 
 // getSunsetScaleDownBuildIDs returns the build IDs of drained versions the controller has
