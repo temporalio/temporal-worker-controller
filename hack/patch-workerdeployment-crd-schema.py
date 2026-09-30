@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Make controller-owned DeploymentSpec.selector optional in the generated CRD."""
+"""Make controller-owned DeploymentSpec.selector optional in the generated CRD.
 
+Both spec.deployment and spec.pools[].deployment embed appsv1.DeploymentSpec,
+whose selector the controller computes for each versioned Deployment.
+"""
+
+import re
 from pathlib import Path
 
 crd = Path("helm/temporal-worker-controller-crds/templates/temporal.io_workerdeployments.yaml")
-start_marker = "\n              deployment:\n"
-end_marker = "\n              minReadySeconds:\n"
-required = "                required:\n                - selector\n                - template\n"
-optional = "                required:\n                - template\n"
+required = re.compile(r"^( +)required:\n\1- selector\n\1- template\n", re.MULTILINE)
+expected = 2
 
 schema = crd.read_text()
-start = schema.index(start_marker)
-end = schema.index(end_marker, start)
-deployment = schema[start:end]
-if deployment.count(required) != 1:
-    raise SystemExit(f"ERROR: expected one required DeploymentSpec selector in {crd}")
-crd.write_text(schema[:start] + deployment.replace(required, optional) + schema[end:])
+patched, count = required.subn(r"\1required:\n\1- template\n", schema)
+if count != expected:
+    raise SystemExit(f"ERROR: expected {expected} required DeploymentSpec selectors in {crd}, found {count}")
+crd.write_text(patched)
