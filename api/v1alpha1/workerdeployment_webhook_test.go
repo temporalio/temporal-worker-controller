@@ -177,6 +177,23 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 	}
 }
 
+func TestWorkerDeployment_DeprecatedFieldEmitsWarning(t *testing.T) {
+	ctx := context.Background()
+	dep := testhelpers.MakeWDWithName("valid-worker", "")
+	replicas := int32(1)
+	// deliberately use the deprecated replicas top-level field and set the
+	// deployment field to nil to trigger a deprecation warning.
+	dep.Spec.Replicas = &replicas
+	dep.Spec.Deployment = nil
+
+	webhook := &temporaliov1alpha1.WorkerDeployment{}
+	warns, err := webhook.ValidateCreate(ctx, dep)
+
+	require.NoError(t, err)
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "spec.replicas is deprecated; use spec.deployment.replicas instead")
+}
+
 func TestWorkerDeployment_ValidateUpdate(t *testing.T) {
 	tests := map[string]struct {
 		oldObj   runtime.Object

@@ -8,6 +8,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"go.temporal.io/server/common/worker_versioning"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -51,8 +52,10 @@ func MakeWD(
 			Labels:    map[string]string{"app": "test-worker"},
 		},
 		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
-			Replicas:        &replicas,
-			Template:        podSpec,
+			Deployment: &appsv1.DeploymentSpec{
+				Replicas: &replicas,
+				Template: podSpec,
+			},
 			RolloutStrategy: r,
 			SunsetStrategy:  s,
 			WorkerOptions:   w,
@@ -121,9 +124,9 @@ func MakeBuildID(twdName, imageName, unsafeCustomBuildID string, podSpec *corev1
 			MakeWDWithName(twdName, ""),
 			func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
 				if podSpec != nil {
-					obj.Spec.Template = *podSpec
+					obj.Spec.Deployment.Template = *podSpec
 				} else {
-					obj.Spec.Template = SetTaskQueue(MakePodSpecWithImage(imageName), twdName)
+					obj.Spec.Deployment.Template = SetTaskQueue(MakePodSpecWithImage(imageName), twdName)
 				}
 				return obj
 			},

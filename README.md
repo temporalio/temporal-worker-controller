@@ -48,7 +48,13 @@ kind: WorkerDeployment
 metadata:
   name: my-worker
 spec:
-  replicas: 3
+  deployment:
+    replicas: 3
+    template:
+      spec:
+        containers:
+          - name: worker
+            image: my-worker:v2.0.0  # Safe to deploy!
   rollout:
     strategy: Progressive  # Gradual, safe rollout
     steps:
@@ -56,11 +62,6 @@ spec:
         pauseDuration: 5m
       - rampPercentage: 50
         pauseDuration: 10m
-  template:
-    spec:
-      containers:
-      - name: worker
-        image: my-worker:v2.0.0  # Safe to deploy!
 ```
 
 When you update the image, the controller automatically:

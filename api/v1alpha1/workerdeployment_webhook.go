@@ -77,15 +77,15 @@ func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj ru
 		return nil, apierrors.NewBadRequest("expected a WorkerDeployment")
 	}
 
-	return validateForUpdateOrCreate(nil, dep)
+	return validateForUpdateOrCreate(dep)
 }
 
-func validateForUpdateOrCreate(old, new *WorkerDeployment) (admission.Warnings, error) {
-	allErrs := validateRolloutStrategy(new.Spec.RolloutStrategy)
+func validateForUpdateOrCreate(dep *WorkerDeployment) (admission.Warnings, error) {
+	allErrs := validateRolloutStrategy(dep.Spec.RolloutStrategy)
 	if len(allErrs) > 0 {
-		return nil, newInvalidErr(new, allErrs)
+		return nil, newInvalidErr(dep, allErrs)
 	}
-	return nil, nil
+	return validateDeploymentSpec(dep.Spec), nil
 }
 
 // validateRolloutStrategy checks constraints that the CRD schema cannot enforce:
@@ -154,6 +154,26 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 	}
 
 	return allErrs
+}
+
+// validateDeploymentSpec examines the supplied WorkerDeploymentSpec structs
+// and returns any warnings about using the deprecated replicas,
+// minReadySeconds and ProgressDeadlineSeconds fields instead of the
+// WorkerDeploymentSpec.Deployment struct field.
+func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
+	var warns admission.Warnings
+	if spec.Deployment == nil {
+		if spec.MinReadySeconds > 0 {
+			warns = append(warns, "spec.minReadySeconds is deprecated; use spec.deployment.minReadySeconds instead")
+		}
+		if spec.ProgressDeadlineSeconds != nil {
+			warns = append(warns, "spec.progressDeadlineSeconds is deprecated; use spec.deployment.progressDeadlineSeconds instead")
+		}
+		if spec.Replicas != nil {
+			warns = append(warns, "spec.replicas is deprecated; use spec.deployment.replicas instead")
+		}
+	}
+	return warns
 }
 
 func newInvalidErr(dep *WorkerDeployment, errs field.ErrorList) *apierrors.StatusError {

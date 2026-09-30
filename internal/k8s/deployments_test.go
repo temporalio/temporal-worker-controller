@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/sdk/contrib/envconfig"
@@ -31,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -535,7 +537,7 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 			Namespace: "demo",
 		},
 		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
-			Template: corev1.PodTemplateSpec{
+			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
@@ -592,6 +594,31 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 
 	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
 	assert.Equal(t, "build123", deployment.Labels[k8s.BuildIDLabel])
+}
+
+func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {
+	defaultMaxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
+	defaultMaxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
+
+	t.Run("empty rollout strategy uses RollingUpdate deployment strategy and Kubernetes defaults", func(t *testing.T) {
+		deployment := k8s.NewDeploymentWithOwnerRef(
+			&metav1.TypeMeta{},
+			&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+			&temporaliov1alpha1.WorkerDeploymentSpec{},
+			"test-deployment",
+			"build123",
+			temporaliov1alpha1.ConnectionSpec{},
+		)
+
+		expected := appsv1.DeploymentStrategy{
+			Type: appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: &defaultMaxUnavailable,
+				MaxSurge:       &defaultMaxSurge,
+			},
+		}
+		assert.Equal(t, expected, deployment.Spec.Strategy)
+	})
 }
 
 func TestComputeConnectionSpecHash(t *testing.T) {
@@ -1071,7 +1098,7 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
@@ -1208,7 +1235,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
