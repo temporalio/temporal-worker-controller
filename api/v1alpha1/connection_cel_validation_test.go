@@ -11,6 +11,8 @@ package v1alpha1
 // valid and semantically correct.
 
 import (
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -87,4 +89,25 @@ var _ = Describe("Connection CRD CEL validation", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("tls.caCertSecretRef cannot be combined with mutualTLSSecretRef"))
 	})
+
+	DescribeTable("hostPort validation", func(hostPort string, shouldSucceed bool) {
+		It("validates hostPort="+hostPort, func() {
+			conn := baseConnection("hostport-" + strings.ReplaceAll(hostPort, "://", "-") + "-" + strings.ReplaceAll(hostPort, ":", "-"))
+			conn.Spec.HostPort = hostPort
+			err := k8sClient.Create(ctx, conn)
+			if shouldSucceed {
+				Expect(err).To(Succeed())
+			} else {
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("hostPort"))
+			}
+		})
+	},
+		Entry("host:port", "temporal.example.com:7233", true),
+		Entry("dns resolver", "dns:///temporal.example.com:7233", true),
+		Entry("xds resolver", "xds://example.dest", true),
+		Entry("passthrough resolver", "passthrough:///temporal", true),
+		Entry("missing port", "temporal.example.com", false),
+		Entry("invalid scheme", "ftp://temporal.example.com", false),
+	)
 })
