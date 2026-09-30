@@ -94,6 +94,11 @@ func RenderWorkerResourceTemplate(
 	serverWDName := computeWorkerDeploymentName(wrt.Namespace, wdName)
 
 	selectorLabels := ComputeSelectorLabels(wdName, buildID)
+	if deployment.Spec.Selector != nil {
+		if pool, ok := deployment.Spec.Selector.MatchLabels[PoolLabel]; ok {
+			selectorLabels[PoolLabel] = pool
+		}
+	}
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
 	// that is present in the template. These identify the exact per-version Prometheus series.

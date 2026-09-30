@@ -157,3 +157,34 @@ func TestHandleDeletion_DeletesEveryPool(t *testing.T) {
 	assert.False(t, deploymentExists(t, r, namespace, def.Name))
 	assert.False(t, deploymentExists(t, r, namespace, activities.Name))
 }
+
+func TestExecutePlan_WRTWithMissingPool_SetsPoolNotFound(t *testing.T) {
+	const namespace = "default"
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makePooledWD("my-worker", namespace, "activities")
+	buildID := k8s.ComputeBuildID(twd)
+	ghost := makeExecplanWRT("ghost-hpa", twd)
+	ghost.Spec.Pool = "ghost"
+	activities := makeExecplanWRT("activities-hpa", twd)
+	activities.Spec.Pool = "activities"
+	r, _ := newTestReconciler([]client.Object{twd, ghost, activities})
+
+	status := temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: buildID},
+		},
+	}
+	runPlanCycle(t, r, twd, connection, status)
+
+	var got temporaliov1alpha1.WorkerResourceTemplate
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: ghost.Name}, &got))
+	cond := meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, cond)
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, temporaliov1alpha1.ReasonWRTPoolNotFound, cond.Reason)
+	assert.Contains(t, cond.Message, `"ghost"`)
+
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: activities.Name}, &got))
+	assert.Nil(t, meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady),
+		"a declared pool without a Deployment yet is not missing")
+}
