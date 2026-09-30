@@ -14,7 +14,7 @@ import (
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
-	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/twc"
 	"go.temporal.io/sdk/log"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -162,23 +162,16 @@ func main() {
 		setupLog.Info("skipping deprecated TemporalConnection watches")
 	}
 
-	if err = (&controller.WorkerDeploymentReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		TemporalClientPool: clientpool.New(
-			log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-				AddSource:   false,
-				Level:       nil,
-				ReplaceAttr: nil,
-			}))),
-			mgr.GetClient(),
-		),
-		Recorder: mgr.GetEventRecorderFor("temporal-worker-controller"),
-		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
-		DisableDeprecatedTWD:                       !deprecatedCRDWatches.TemporalWorkerDeployments,
-		DisableClusterConnections:                  namespaceScoped,
-		WRTHPAMatchLabelsStripTemporalPrefix:       wrtHPAMatchLabelsStripTemporalPrefix,
-	}).SetupWithManager(mgr); err != nil {
+	if err = (twc.NewController(mgr,
+		twc.WithLogger(log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			AddSource:   false,
+			Level:       nil,
+			ReplaceAttr: nil,
+		})))),
+		twc.WithDisableDeprecatedTWD(!deprecatedCRDWatches.TemporalWorkerDeployments),
+		twc.WithDisableClusterConnections(namespaceScoped),
+		twc.WithWRTHPAMatchLabelsStripTemporalPrefix(wrtHPAMatchLabelsStripTemporalPrefix),
+	)).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
 		os.Exit(1)
 	}

@@ -49,7 +49,7 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               hostPort:
-                pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
+                pattern: ^([a-zA-Z0-9.-]+:[0-9]+|(dns|xds|passthrough)://[a-zA-Z0-9._/:-]+)$
                 type: string
               mutualTLSSecretRef:
                 properties:

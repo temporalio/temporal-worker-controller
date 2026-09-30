@@ -279,59 +279,36 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
-	if err := connection.Spec.Validate(); err != nil {
-		l.Error(err, "connection spec not valid")
-		// TODO(jaypipes): As of TWC release <=v1.8.1, the only validation
-		// error for the connection spec is that the authentication secret is
-		// not valid. Revisit this warning reason when there are more potential
-		// validation failures.
-		r.recordWarningAndSetBlocked(ctx, &workerDeploy,
-			temporaliov1alpha1.ReasonAuthSecretInvalid,
-			fmt.Sprintf("Unable to resolve auth secret from Connection %q: %v", connObj.GetName(), err),
-			fmt.Sprintf("Unable to resolve auth secret: %v", err))
-		return ctrl.Result{}, err
-	}
-
-	// Get the Auth Mode and Secret Name
-	authMode := connection.Spec.AuthMode()
-	secretName := connection.Spec.SecretName()
-
-	// Get or update temporal client for connection
-	clientPoolKey := clientpool.ClientPoolKey{
-		HostPort:            connection.Spec.HostPort,
-		TLSServerName:       connection.Spec.TLSServerName(),
-		Namespace:           workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName:          secretName,
-		TLSCACertSecretName: connection.Spec.TLSCACertSecretName(),
-		AuthMode:            authMode,
-	}
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
-	if !ok {
-		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
-			K8sNamespace:      workerDeploy.Namespace,
-			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-			Spec:              connection.Spec,
-			Identity:          getControllerIdentity(),
-		})
-		if err != nil {
+	temporalClient, clientPoolKey, err := r.TemporalClientPool.GetClient(ctx,
+		connection.Spec,
+		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		workerDeploy.Namespace,
+		getControllerIdentity(),
+	)
+	if err != nil {
+		var authErr *clientpool.AuthConfigError
+		var dialErr *clientpool.DialError
+		switch {
+		case errors.As(err, &authErr):
 			l.Error(err, "invalid Temporal auth secret")
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonAuthSecretInvalid,
 				fmt.Sprintf("Invalid Temporal auth secret for %s:%s: %v", connection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
 				fmt.Sprintf("Invalid auth secret: %v", err))
-			return ctrl.Result{}, err
-		}
-
-		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
-		if err != nil {
+		case errors.As(err, &dialErr):
 			l.Error(err, "unable to create TemporalClient")
 			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
 				temporaliov1alpha1.ReasonTemporalClientCreationFailed,
 				fmt.Sprintf("Unable to create Temporal client for %s:%s: %v", connection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
 				fmt.Sprintf("Failed to connect to Temporal: %v", err))
-			return ctrl.Result{}, err
+		default:
+			l.Error(err, "unable to create TemporalClient")
+			r.recordWarningAndSetBlocked(ctx, &workerDeploy,
+				temporaliov1alpha1.ReasonTemporalClientCreationFailed,
+				fmt.Sprintf("Unable to create Temporal client for %s:%s: %v", connection.Spec.HostPort, workerDeploy.Spec.WorkerOptions.TemporalNamespace, err),
+				fmt.Sprintf("Failed to connect to Temporal: %v", err))
 		}
-		temporalClient = c
+		return ctrl.Result{}, err
 	}
 
 	workerDeploymentName := k8s.ComputeWorkerDeploymentName(&workerDeploy)
@@ -613,42 +590,14 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	}
 	connection := temporaliov1alpha1.Connection{Spec: connSpec}
 
-	if err := connection.Spec.Validate(); err != nil {
-		// TODO(jaypipes): As of TWC release <=v1.8.1, the only validation
-		// error for the connection spec is that the authentication secret is
-		// not valid. Revisit this error wrap when there are more potential
-		// validation failures.
-		return fmt.Errorf("unable to resolve auth secret name: %w", err)
-	}
-
-	authMode := connection.Spec.AuthMode()
-	secretName := connection.Spec.SecretName()
-
-	clientPoolKey := clientpool.ClientPoolKey{
-		HostPort:            connection.Spec.HostPort,
-		TLSServerName:       connection.Spec.TLSServerName(),
-		Namespace:           workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		SecretName:          secretName,
-		TLSCACertSecretName: connection.Spec.TLSCACertSecretName(),
-		AuthMode:            authMode,
-	}
-
-	temporalClient, ok := r.TemporalClientPool.GetSDKClient(clientPoolKey)
-	if !ok {
-		clientOpts, key, clientAuth, err := r.TemporalClientPool.ParseClientSecret(ctx, secretName, authMode, clientpool.NewClientOptions{
-			K8sNamespace:      workerDeploy.Namespace,
-			TemporalNamespace: workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-			Spec:              connection.Spec,
-			Identity:          getControllerIdentity(),
-		})
-		if err != nil {
-			return fmt.Errorf("unable to parse Temporal auth secret: %w", err)
-		}
-		c, err := r.TemporalClientPool.DialAndUpsertClient(*clientOpts, *key, *clientAuth)
-		if err != nil {
-			return fmt.Errorf("unable to create TemporalClient: %w", err)
-		}
-		temporalClient = c
+	temporalClient, clientPoolKey, err := r.TemporalClientPool.GetClient(ctx,
+		connection.Spec,
+		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
+		workerDeploy.Namespace,
+		getControllerIdentity(),
+	)
+	if err != nil {
+		return fmt.Errorf("unable to create TemporalClient: %w", err)
 	}
 
 	// Evict cached SDK clients on failures that indicate the cached client may
