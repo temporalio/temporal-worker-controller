@@ -115,7 +115,7 @@ func makeWD(name, namespace, connectionName string) *temporaliov1alpha1.WorkerDe
 		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
 			Replicas:                &replicas,
 			ProgressDeadlineSeconds: &progressDeadline,
-			Template: corev1.PodTemplateSpec{
+			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{

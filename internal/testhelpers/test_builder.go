@@ -7,6 +7,7 @@ import (
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"go.temporal.io/server/temporaltest"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -71,7 +72,7 @@ func (b *WorkerDeploymentBuilder) WithGate(expectSuccess bool) *WorkerDeployment
 // WithReplicas sets the number of replicas
 func (b *WorkerDeploymentBuilder) WithReplicas(replicas int32) *WorkerDeploymentBuilder {
 	if b.twd.Spec.Deployment == nil {
-		b.twd.Spec.Deployment = &temporaliov1alpha1.KubeDeploymentSpec{}
+		b.twd.Spec.Deployment = &appsv1.DeploymentSpec{}
 	}
 	b.twd.Spec.Deployment.Replicas = &replicas
 	return b
@@ -79,7 +80,12 @@ func (b *WorkerDeploymentBuilder) WithReplicas(replicas int32) *WorkerDeployment
 
 // WithTargetTemplate sets the template of the worker deployment to a pod spec with the given image name, thus defining the target version.
 func (b *WorkerDeploymentBuilder) WithTargetTemplate(imageName string) *WorkerDeploymentBuilder {
-	b.twd.Spec.Template = MakePodSpecWithImage(imageName)
+	// TODO: I think we need to still run all these tests with the deprecated fields to confirm that this is not a breaking change. We should run it in the old way and the new way
+	// b.twd.Spec.Template = MakePodSpecWithImage(imageName)
+	if b.twd.Spec.Deployment == nil {
+		b.twd.Spec.Deployment = &appsv1.DeploymentSpec{}
+	}
+	b.twd.Spec.Deployment.Template = MakePodSpecWithImage(imageName)
 	return b
 }
 
@@ -519,7 +525,7 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 		buildId := MakeBuildID(tcb.name, info.image, info.unsafeCustomBuildID, nil)
 		ret.expectedDeploymentReplicas[buildId] = info.replicas
 	}
-	ret.twd.Spec.Template = SetTaskQueue(ret.twd.Spec.Template, tcb.name)
+	ret.twd.Spec.Deployment.Template = SetTaskQueue(ret.twd.Spec.Deployment.Template, tcb.name)
 	return ret
 }
 

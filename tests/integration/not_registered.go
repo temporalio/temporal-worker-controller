@@ -217,7 +217,7 @@ func testMissingSummaryVersionIsDescribedBeforeDeletion(
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdV2); err != nil {
 		t.Fatalf("failed to get WorkerDeployment for v2 update: %v", err)
 	}
-	twdV2.Spec.Template.Spec.Containers[0].Image = "v2.0"
+	twdV2.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 	buildIDv2 := k8s.ComputeBuildID(&twdV2)
 	deploymentNameV2 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv2)
 	if err := k8sClient.Update(ctx, &twdV2); err != nil {

@@ -305,7 +305,7 @@ func createStatus(
 // Panics if the twd spec is nil, or if it has no containers, but that should never be true for these integration tests.
 func recreateTWD(twd *temporaliov1alpha1.WorkerDeployment, imageName string, replicas int32) *temporaliov1alpha1.WorkerDeployment {
 	ret := twd.DeepCopy()
-	ret.Spec.Template.Spec.Containers[0].Image = imageName
+	ret.Spec.Deployment.Template.Spec.Containers[0].Image = imageName
 	ret.Spec.Deployment.Replicas = &replicas
 	return ret
 }

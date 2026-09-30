@@ -35,7 +35,7 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 				Namespace: ns,
 			},
 			Spec: WorkerDeploymentSpec{
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{Name: "worker", Image: "worker:latest"}},
 					},

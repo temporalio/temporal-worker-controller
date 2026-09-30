@@ -1339,7 +1339,7 @@ func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
 		},
 	}
 	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-		Deployment: &temporaliov1alpha1.KubeDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{
 			Strategy: appsv1.DeploymentStrategy{
 				Type: appsv1.RollingUpdateDeploymentStrategyType,
 				RollingUpdate: &appsv1.RollingUpdateDeployment{
@@ -1367,7 +1367,7 @@ func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
 		},
 	}
 	desiredSpec := &temporaliov1alpha1.WorkerDeploymentSpec{
-		Deployment: &temporaliov1alpha1.KubeDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{
 			Strategy: desiredDeploymentStrategy,
 		},
 	}
@@ -3109,7 +3109,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "v1", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3130,7 +3130,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "my-image:v1"},
@@ -3151,7 +3151,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3173,7 +3173,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(3), // Changed from 1 to 3
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							// Same image as stored - hash will match
@@ -3198,7 +3198,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				[]corev1.EnvVar{{Name: "MY_VAR", Value: "old-value"}}),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
@@ -3224,7 +3224,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentWithoutHashAnnotation(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3516,7 +3516,7 @@ func defaultMutualTLSSecret() string {
 // createDefaultWorkerSpec creates a default WorkerDeploymentSpec for testing
 func createDefaultWorkerSpec() *temporaliov1alpha1.WorkerDeploymentSpec {
 	return &temporaliov1alpha1.WorkerDeploymentSpec{
-		Template: corev1.PodTemplateSpec{
+		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
@@ -3536,7 +3536,7 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.WorkerDeploymentSpec {
 func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.WorkerDeploymentSpec {
 	return &temporaliov1alpha1.WorkerDeploymentSpec{
 		Replicas: int32Ptr(1),
-		Template: corev1.PodTemplateSpec{
+		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
