@@ -20,17 +20,20 @@ This is also the recommended mechanism for metric-based or backlog-based autosca
 
 ## Auto-injection
 
-The controller auto-injects two fields when you set them to `{}` (empty object) in `spec.template`. `{}` is the explicit opt-in sentinel:
+The controller auto-injects the fields below when you set them to `{}` (empty object) in `spec.template`. `{}` is the explicit opt-in sentinel:
 - If you omit the field entirely, nothing is injected.
 - If you set a non-empty value, the webhook rejects the `WorkerResourceTemplate` because the controller owns these fields.
 
 | Field | Scope | Injected value                                                                                                              |
 |-------|-------|-----------------------------------------------------------------------------------------------------------------------------|
 | `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
+| `spec.targetRef` | Only at this exact path | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
 | `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`                                                  |
 | `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{temporal_worker_deployment_name: <ns>_<wd-name>, temporal_worker_build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
 
 `scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
+
+`spec.targetRef` covers VerticalPodAutoscalers, which name their target in `spec.targetRef` instead of `scaleTargetRef`. It is injected only at this exact path, because `targetRef` is a common field name in other CRDs.
 
 `spec.selector.matchLabels` uses `{}` as the opt-in sentinel — absent means no injection; `{}` means inject pod selector labels.
 
@@ -161,6 +164,41 @@ spec:
       # {} tells the controller to auto-inject {temporal.io/build-id, temporal.io/deployment-name}.
       selector:
         matchLabels: {}
+```
+
+## Example: VerticalPodAutoscaler per worker version
+
+VerticalPodAutoscaler is not in the default allowed list. Add it to `workerResourceTemplate.allowedResources` first:
+
+```yaml
+workerResourceTemplate:
+  allowedResources:
+    - kinds: ["HorizontalPodAutoscaler"]
+      apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+    - kinds: ["VerticalPodAutoscaler"]
+      apiGroups: ["autoscaling.k8s.io"]
+      resources: ["verticalpodautoscalers"]
+```
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: my-worker-vpa
+  namespace: my-namespace
+spec:
+  workerDeploymentRef:
+    name: my-worker
+  template:
+    apiVersion: autoscaling.k8s.io/v1
+    kind: VerticalPodAutoscaler
+    spec:
+      # {} tells the controller to auto-inject the versioned Deployment reference.
+      targetRef: {}
+      updatePolicy:
+        # Initial sets requests only when a pod is created, so VPA never evicts a running worker.
+        updateMode: "Initial"
 ```
 
 ## Checking status
