@@ -537,7 +537,7 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 			Namespace: "demo",
 		},
 		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
-			Template: corev1.PodTemplateSpec{
+			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
@@ -1098,7 +1098,7 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
@@ -1235,7 +1235,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{

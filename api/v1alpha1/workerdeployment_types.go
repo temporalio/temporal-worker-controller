@@ -71,6 +71,7 @@ type WorkerOptions struct {
 }
 
 // WorkerDeploymentSpec defines the desired state of WorkerDeployment
+// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template)",message="one of deployment or template must be set"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -87,7 +88,9 @@ type WorkerDeploymentSpec struct {
 
 	// Template describes the pods that will be created.
 	// The only allowed template.spec.restartPolicy value is "Always".
-	Template corev1.PodTemplateSpec `json:"template"`
+	// Deprecated: Use deployment.template instead
+	// +optional
+	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 
 	// Minimum number of seconds for which a newly created pod should be ready
 	// without any of its container crashing, for it to be considered available.
@@ -114,8 +117,13 @@ type WorkerDeploymentSpec struct {
 	// When this field is not nil, the Replicas, MinReadySeconds, and
 	// ProgressDeadlineSeconds fields are ignored and those same-named fields
 	// on the Deployment field's struct are used instead.
+	//
+	// Selector is optional in the WorkerDeployment CRD because the controller
+	// computes it for each versioned Deployment. controller-gen cannot override
+	// the required marker on the imported appsv1.DeploymentSpec field, so
+	// `make manifests` removes selector from this field's required schema list.
 	// +optional
-	Deployment *KubeDeploymentSpec `json:"deployment,omitempty"`
+	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
@@ -127,41 +135,6 @@ type WorkerDeploymentSpec struct {
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
-// KubeDeploymentSpec contains the desired configuration for the Kubernetes
-// Deployment that is created by Temporal Worker Controller for each
-// WorkerDeploymentVersion (BuildID) in the Temporal WorkerDeployment described
-// by this WorkerDeploymentSpec.
-//
-// NOTE(jaypipes): The reason this isn't an appsv1.DeploymentSpec is because
-// the validation on appsv1.DeploymentSpec requires the Selector and Template
-// fields to be filled in, and those are the fields that the controller
-// manages/constructs.
-type KubeDeploymentSpec struct {
-	// Number of desired pods. This is a pointer to distinguish between explicit
-	// zero and not specified. Defaults to 1.
-	// +optional
-	Replicas *int32 `json:"replicas,omitempty"`
-
-	// The deployment strategy to use to replace existing pods with new ones.
-	// +optional
-	// +patchStrategy=retainKeys
-	Strategy appsv1.DeploymentStrategy `json:"strategy,omitempty" patchStrategy:"retainKeys"`
-
-	// Minimum number of seconds for which a newly created pod should be ready
-	// without any of its container crashing, for it to be considered available.
-	// Defaults to 0 (pod will be considered available as soon as it is ready)
-	// +optional
-	MinReadySeconds int32 `json:"minReadySeconds,omitempty"`
-
-	// The maximum time in seconds for a deployment to make progress before it
-	// is considered to be failed. The deployment controller will continue to
-	// process failed deployments and a condition with a ProgressDeadlineExceeded
-	// reason will be surfaced in the deployment status. Note that progress will
-	// not be estimated during the time a deployment is paused. Defaults to 600s.
-	// +optional
-	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty"`
-}
-
 // DeploymentSpec returns the appsv1.DeploymentSpec struct constructed by
 // examining the WorkerDeploymentSpec. If WorkerDeploymentSpec.deployment is
 // non-nil, we return that. Otherwise, we construct an appsv1.DeploymentSpec
@@ -169,13 +142,12 @@ type KubeDeploymentSpec struct {
 // ProgressDeadlineSeconds fields.
 func (s WorkerDeploymentSpec) DeploymentSpec() appsv1.DeploymentSpec {
 	depSpec := appsv1.DeploymentSpec{}
-	depSpec.Template = s.Template
 	if s.Deployment != nil {
-		depSpec.Replicas = s.Deployment.Replicas
-		depSpec.MinReadySeconds = s.Deployment.MinReadySeconds
-		depSpec.ProgressDeadlineSeconds = s.Deployment.ProgressDeadlineSeconds
-		depSpec.Strategy = s.Deployment.Strategy
+		depSpec = *s.Deployment
 	} else {
+		if s.Template != nil {
+			depSpec.Template = *s.Template
+		}
 		depSpec.Replicas = s.Replicas
 		depSpec.MinReadySeconds = s.MinReadySeconds
 		depSpec.ProgressDeadlineSeconds = s.ProgressDeadlineSeconds

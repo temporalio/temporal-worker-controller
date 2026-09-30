@@ -38,7 +38,7 @@ func makeWDForWebhook(name, ns string) *WorkerDeployment {
 			Namespace: ns,
 		},
 		Spec: WorkerDeploymentSpec{
-			Template: corev1.PodTemplateSpec{
+			Template: &corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"app": "test-worker"},
 				},

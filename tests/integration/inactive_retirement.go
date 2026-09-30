@@ -99,7 +99,7 @@ func testInactiveVersionRetirement(t *testing.T, k8sClient client.Client, ts *te
 	if err := k8sClient.Get(ctx, key, &next); err != nil {
 		t.Fatal(err)
 	}
-	next.Spec.Template.Spec.Containers[0].Image = "v2.0"
+	next.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 	newBuildID := k8s.ComputeBuildID(&next)
 	if err := k8sClient.Update(ctx, &next); err != nil {
 		t.Fatal(err)
