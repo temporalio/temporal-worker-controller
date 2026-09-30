@@ -14,7 +14,7 @@ import (
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller"
-	twc "github.com/temporalio/temporal-worker-controller/twc"
+	"github.com/temporalio/temporal-worker-controller/twc"
 	"go.temporal.io/sdk/log"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
