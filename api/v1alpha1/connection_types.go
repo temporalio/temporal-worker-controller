@@ -18,9 +18,6 @@ const (
 	AuthModeTLS           AuthMode = "TLS"
 	AuthModeAPIKey        AuthMode = "API_KEY"
 	AuthModeNoCredentials AuthMode = "NO_CREDENTIALS"
-	// AuthModeManual indicates that auth is wired manually by the
-	// wrapper binary rather than derived from a Kubernetes Secret.
-	AuthModeManual AuthMode = "MANUAL"
 	// Add more auth modes here as they are supported
 )
 
@@ -82,13 +79,6 @@ type ConnectionSpec struct {
 	//   - Key: the data key within Secret.Data whose value is the API key token
 	// +optional
 	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
-
-	// ManualAuth, when true, selects MANUAL auth: the wrapper binary
-	// that embeds the controller owns client auth and options, and the
-	// pool skips Secret parsing and the health check. Mutually
-	// exclusive with MutualTLSSecretRef and APIKeySecretRef.
-	// +optional
-	ManualAuth bool `json:"manualAuth,omitempty"`
 }
 
 // Validate returns an error if the ConnectionSpec is not valid.
@@ -102,19 +92,12 @@ func (s ConnectionSpec) Validate() error {
 		if s.APIKeySecretRef == nil || s.APIKeySecretRef.Name == "" {
 			return errors.New("API key secret name is not set")
 		}
-	case AuthModeManual:
-		if s.MutualTLSSecretRef != nil || s.APIKeySecretRef != nil {
-			return errors.New("manualAuth is mutually exclusive with mutualTLSSecretRef and apiKeySecretRef")
-		}
 	}
 	return nil
 }
 
 // AuthMode returns the authentication mode for the ConnectionSpec.
 func (s ConnectionSpec) AuthMode() AuthMode {
-	if s.ManualAuth {
-		return AuthModeManual
-	}
 	switch {
 	case s.MutualTLSSecretRef != nil:
 		return AuthModeTLS

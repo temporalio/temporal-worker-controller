@@ -51,8 +51,6 @@ spec:
               hostPort:
                 pattern: ^[a-zA-Z0-9.-]+:[0-9]+$
                 type: string
-              manualAuth:
-                type: boolean
               mutualTLSSecretRef:
                 properties:
                   name:
