@@ -31,6 +31,9 @@ const (
 	BuildIDLabel = "temporal.io/build-id"
 	// WorkerDeploymentNameLabel identifies Deployments managed for a TemporalWorkerDeployment.
 	WorkerDeploymentNameLabel = "temporal.io/deployment-name"
+	// PoolLabel names the worker pool of a Deployment in a multi-pool version.
+	// Deployments without it belong to the default pool.
+	PoolLabel = "temporal.io/worker-pool"
 	// WorkerDeploymentNameSeparator joins the K8s namespace and the WorkerDeployment resource
 	// name to form the Temporal-server-side worker deployment name (namespace/wdName).
 	WorkerDeploymentNameSeparator = "/"
@@ -47,12 +50,73 @@ const (
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
 type DeploymentState struct {
-	// Map of buildID to deployment
+	// Map of buildID to the default pool's deployment. Use VersionDeployments to
+	// decide whether a version has any deployment.
 	Deployments map[string]*appsv1.Deployment
 	// Sorted deployments by creation time
 	DeploymentsByTime []*appsv1.Deployment
-	// Map of buildID to deployment references
+	// Map of buildID to the default pool's deployment reference
 	DeploymentRefs map[string]*corev1.ObjectReference
+	// Map of buildID to pool name to deployment, for every pool including the default
+	PoolDeployments map[string]map[string]*appsv1.Deployment
+}
+
+// VersionDeployments returns every pool's deployment for a build ID, keyed by pool name.
+func (s *DeploymentState) VersionDeployments(buildID string) map[string]*appsv1.Deployment {
+	if s.PoolDeployments != nil {
+		return s.PoolDeployments[buildID]
+	}
+	// States built without PoolDeployments (e.g. in tests) only have default pools.
+	if d, ok := s.Deployments[buildID]; ok {
+		return map[string]*appsv1.Deployment{temporaliov1alpha1.DefaultPoolName: d}
+	}
+	return nil
+}
+
+// VersionDeploymentList returns every pool's deployment for a build ID: named
+// pools sorted by name, then the default pool.
+func (s *DeploymentState) VersionDeploymentList(buildID string) []*appsv1.Deployment {
+	pools := s.VersionDeployments(buildID)
+	names := make([]string, 0, len(pools))
+	for name := range pools {
+		if name != temporaliov1alpha1.DefaultPoolName {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	list := make([]*appsv1.Deployment, 0, len(pools))
+	for _, name := range names {
+		list = append(list, pools[name])
+	}
+	if d, ok := pools[temporaliov1alpha1.DefaultPoolName]; ok {
+		list = append(list, d)
+	}
+	return list
+}
+
+// BuildIDs returns the sorted build IDs that have at least one deployment.
+func (s *DeploymentState) BuildIDs() []string {
+	seen := make(map[string]struct{}, len(s.Deployments)+len(s.PoolDeployments))
+	for buildID := range s.Deployments {
+		seen[buildID] = struct{}{}
+	}
+	for buildID := range s.PoolDeployments {
+		seen[buildID] = struct{}{}
+	}
+	buildIDs := make([]string, 0, len(seen))
+	for buildID := range seen {
+		buildIDs = append(buildIDs, buildID)
+	}
+	sort.Strings(buildIDs)
+	return buildIDs
+}
+
+// PoolName returns the worker pool a deployment belongs to.
+func PoolName(d *appsv1.Deployment) string {
+	if pool := d.GetLabels()[PoolLabel]; pool != "" {
+		return pool
+	}
+	return temporaliov1alpha1.DefaultPoolName
 }
 
 // GetDeploymentState queries Kubernetes to get the state of all deployments
@@ -68,6 +132,7 @@ func GetDeploymentState(
 		Deployments:       make(map[string]*appsv1.Deployment),
 		DeploymentsByTime: []*appsv1.Deployment{},
 		DeploymentRefs:    make(map[string]*corev1.ObjectReference),
+		PoolDeployments:   make(map[string]map[string]*appsv1.Deployment),
 	}
 
 	// List k8s deployments that correspond to managed worker deployment versions
@@ -90,9 +155,16 @@ func GetDeploymentState(
 	for i := range childDeploys.Items {
 		deploy := &childDeploys.Items[i]
 		if buildID, ok := deploy.GetLabels()[BuildIDLabel]; ok {
-			state.Deployments[buildID] = deploy
+			pool := PoolName(deploy)
+			if state.PoolDeployments[buildID] == nil {
+				state.PoolDeployments[buildID] = make(map[string]*appsv1.Deployment)
+			}
+			state.PoolDeployments[buildID][pool] = deploy
 			state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
-			state.DeploymentRefs[buildID] = NewObjectRef(deploy)
+			if pool == temporaliov1alpha1.DefaultPoolName {
+				state.Deployments[buildID] = deploy
+				state.DeploymentRefs[buildID] = NewObjectRef(deploy)
+			}
 		}
 		// Any deployments without the build ID label are ignored
 	}
