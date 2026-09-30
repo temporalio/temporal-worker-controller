@@ -1087,53 +1087,68 @@ func scaleDeprecatedDeployment(
 		// Scale down inactive versions that are not the target
 		if targetBuildID == version.BuildID {
 			// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-			if specReplicas != nil {
-				replicas := *specReplicas
-				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-					scaleDeployments[ref] = uint32(replicas)
-				}
-			}
-		} else if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target inactive versions with nil replicas or >0 replicas
+			scaleToSpecReplicas(scaleDeployments, d, ref, specReplicas)
+		} else if !isScaledToZero(d) { // these are non-target inactive versions with nil replicas or >0 replicas
 			scaleDeployments[ref] = 0
 		}
 	case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
 		// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-		// Scale up these deployments
-		if specReplicas != nil {
-			replicas := *specReplicas
-			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-				scaleDeployments[ref] = uint32(replicas)
-			}
-		}
+		scaleToSpecReplicas(scaleDeployments, d, ref, specReplicas)
 	case temporaliov1alpha1.VersionStatusDraining:
-		// A draining version with 0 replicas has no pollers, so it will never finish
-		// draining and will never be retired. We detect and repair this scenario
-		// here. Any other non-zero count still has pollers and will drain on its own.
-		if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
-			replicas := int32(1)
-			// If the controller manages the replicas we set it to the spec's value. If a
-			// scaler manages them, we explicitly set it to 1 to unblock drainage.
-			if specReplicas != nil {
-				replicas = *specReplicas
-			}
-			// spec.Replicas may legitimately be 0, so we guard it.
-			if replicas != 0 {
-				l.Info("scaling draining version back up from 0 replicas",
-					"buildID", version.BuildID,
-					"deployment", ref.Name,
-					"replicas", replicas,
-				)
-				scaleDeployments[ref] = uint32(replicas)
-			}
-		}
+		scaleDrainingBackUp(l, scaleDeployments, version, d, ref, specReplicas)
 	case temporaliov1alpha1.VersionStatusDrained:
-		if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > scaledownDelay.Duration {
-			// Scale down drained deployments after delay
-			if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target drained versions with nil replicas or >0 replicas
-				scaleDeployments[ref] = 0
-			}
+		// Scale down drained deployments after delay
+		if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > scaledownDelay.Duration &&
+			!isScaledToZero(d) { // these are non-target drained versions with nil replicas or >0 replicas
+			scaleDeployments[ref] = 0
 		}
+	default:
+		// NotRegistered and Created versions are left as they are.
 	}
+}
+
+// scaleToSpecReplicas scales a deployment to its pool's replicas when the controller manages them.
+func scaleToSpecReplicas(
+	scaleDeployments map[*corev1.ObjectReference]uint32,
+	d *appsv1.Deployment,
+	ref *corev1.ObjectReference,
+	specReplicas *int32,
+) {
+	if specReplicas != nil && d.Spec.Replicas != nil && *d.Spec.Replicas != *specReplicas {
+		scaleDeployments[ref] = uint32(*specReplicas)
+	}
+}
+
+// scaleDrainingBackUp repairs a draining version at 0 replicas: it has no pollers, so it
+// would never finish draining and never be retired. Any other non-zero count still has
+// pollers and will drain on its own.
+func scaleDrainingBackUp(
+	l logr.Logger,
+	scaleDeployments map[*corev1.ObjectReference]uint32,
+	version *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion,
+	d *appsv1.Deployment,
+	ref *corev1.ObjectReference,
+	specReplicas *int32,
+) {
+	if !isScaledToZero(d) {
+		return
+	}
+	// If the controller manages the replicas we set it to the spec's value. If a
+	// scaler manages them, we explicitly set it to 1 to unblock drainage.
+	replicas := int32(1)
+	if specReplicas != nil {
+		replicas = *specReplicas
+	}
+	// spec.Replicas may legitimately be 0, so we guard it.
+	if replicas == 0 {
+		return
+	}
+	l.Info("scaling draining version back up from 0 replicas",
+		"buildID", version.BuildID,
+		"deployment", ref.Name,
+		"replicas", replicas,
+	)
+	scaleDeployments[ref] = uint32(replicas)
 }
 
 // getSunsetScaleDownBuildIDs returns the build IDs of drained versions the controller has
