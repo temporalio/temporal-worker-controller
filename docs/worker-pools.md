@@ -94,7 +94,9 @@ While the target version waits on pools, the `Progressing` condition has reason 
 
 ### Gate workflows
 
-The gate runs one workflow on each workflow task queue in the target version. It therefore runs on the pools that poll workflow queues. Activity-only pools never run it. If you use a gate, at least one pool must poll a workflow queue.
+The gate runs one workflow on each workflow task queue in the target version. It therefore runs on the pools that poll workflow queues, and not on activity-only pools. If you use a gate, at least one pool must poll a workflow queue.
+
+Turn off workflow polling in activity-only pools. In Go, set `worker.Options.DisableWorkflowWorker`. By default the SDK polls for workflow tasks even when no workflows are registered, which puts the pool's queue in the version as a workflow queue. The gate would then start a workflow there that no worker can run.
 
 ## Scaling
 

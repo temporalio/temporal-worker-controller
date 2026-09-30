@@ -70,7 +70,12 @@ func newVersionedWorker(ctx context.Context, podTemplateSpec corev1.PodTemplateS
 	if err != nil {
 		return nil, nil, err
 	}
-	return NewWorker(ctx, temporalDeploymentName, workerBuildID, temporalTaskQueue, temporalHostPort, temporalNamespace, true)
+	role, _ := getEnv(podTemplateSpec, workerRoleEnvKey)
+	opts := versionedWorkerOptions(temporalDeploymentName, workerBuildID)
+	// Without this the SDK still polls for workflow tasks, which registers the queue as a
+	// workflow queue in the version.
+	opts.DisableWorkflowWorker = role == ActivityWorkerRole
+	return newWorker(ctx, temporalTaskQueue, temporalHostPort, temporalNamespace, opts)
 }
 
 // StartVersionedWorker creates a versioned worker and registers a dummy workflow on it.
@@ -96,22 +101,31 @@ func NewWorker(
 ) (w worker.Worker, stopFunc func(), err error) {
 	opts := worker.Options{}
 	if versioned {
-		opts.DeploymentOptions = worker.DeploymentOptions{
+		opts = versionedWorkerOptions(temporalDeploymentName, workerBuildID)
+	}
+	return newWorker(ctx, temporalTaskQueue, temporalHostPort, temporalNamespace, opts)
+}
+
+func versionedWorkerOptions(temporalDeploymentName, workerBuildID string) worker.Options {
+	return worker.Options{
+		DeploymentOptions: worker.DeploymentOptions{
 			UseVersioning: true,
 			Version: worker.WorkerDeploymentVersion{
 				DeploymentName: temporalDeploymentName,
 				BuildID:        workerBuildID,
 			},
 			DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
-		}
+		},
 	}
+}
 
+func newWorker(ctx context.Context, temporalTaskQueue, temporalHostPort, temporalNamespace string, opts worker.Options) (worker.Worker, func(), error) {
 	c, err := newClient(ctx, temporalHostPort, temporalNamespace)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	w = worker.New(c, temporalTaskQueue, opts)
+	w := worker.New(c, temporalTaskQueue, opts)
 
 	return w, func() {
 		w.Stop()
