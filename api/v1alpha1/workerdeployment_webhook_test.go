@@ -182,7 +182,7 @@ func TestWorkerDeployment_DeprecatedFieldEmitsWarning(t *testing.T) {
 	dep := testhelpers.MakeWDWithName("valid-worker", "")
 	replicas := int32(1)
 	// deliberately use the deprecated replicas top-level field and set the
-	// deployment field to nil after copying over the template contents.
+	// deployment field to nil to trigger a deprecation warning.
 	dep.Spec.Replicas = &replicas
 	dep.Spec.Deployment = nil
 

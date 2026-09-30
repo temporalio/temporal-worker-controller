@@ -14,6 +14,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -35,9 +36,11 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 				Namespace: ns,
 			},
 			Spec: WorkerDeploymentSpec{
-				Template: &corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{{Name: "worker", Image: "worker:latest"}},
+				Deployment: &appsv1.DeploymentSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{{Name: "worker", Image: "worker:latest"}},
+						},
 					},
 				},
 				RolloutStrategy: RolloutStrategy{Strategy: UpdateAllAtOnce},
@@ -305,4 +308,12 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err.Error()).To(ContainSubstring("objectRef.namespace is not supported"))
 	})
 
+	It("rejects both template and deployment non-nil", func() {
+		twd := baseTWD("template-and-deployment")
+		tmp := twd.Spec.Deployment.Template.DeepCopy()
+		twd.Spec.Template = tmp
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("exactly one of deployment or template must be set"))
+	})
 })

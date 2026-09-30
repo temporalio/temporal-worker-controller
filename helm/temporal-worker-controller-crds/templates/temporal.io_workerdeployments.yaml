@@ -7907,6 +7907,8 @@ spec:
             x-kubernetes-validations:
             - message: one of deployment or template must be set
               rule: has(self.deployment) || has(self.template)
+            - message: exactly one of deployment or template must be set
+              rule: '!(has(self.deployment) && has(self.template))'
           status:
             properties:
               conditions:

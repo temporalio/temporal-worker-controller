@@ -69,12 +69,47 @@ func (b *WorkerDeploymentBuilder) WithGate(expectSuccess bool) *WorkerDeployment
 	return b
 }
 
+// WithReplicasDeprecatedField sets the number of replicas using the deprecated
+// Spec.Replicas field.
+func (b *WorkerDeploymentBuilder) WithReplicasDeprecatedField(
+	replicas int32,
+) *WorkerDeploymentBuilder {
+	if b.twd.Spec.Deployment != nil {
+		// Move field values from the new Spec.Deployment into the old
+		// deprecated fields, since having both Spec.Template and
+		// Spec.Deployment.Template will cause a validation failure.
+		tmp := b.twd.Spec.Deployment.Template.DeepCopy()
+		b.twd.Spec.Template = tmp
+		b.twd.Spec.Deployment = nil
+	}
+	b.twd.Spec.Replicas = &replicas
+	return b
+}
+
 // WithReplicas sets the number of replicas
 func (b *WorkerDeploymentBuilder) WithReplicas(replicas int32) *WorkerDeploymentBuilder {
 	if b.twd.Spec.Deployment == nil {
 		b.twd.Spec.Deployment = &appsv1.DeploymentSpec{}
 	}
 	b.twd.Spec.Deployment.Replicas = &replicas
+	return b
+}
+
+// WithTargetTemplateDeprecatedField sets the deprecated Spec.Template field of
+// the worker deployment to a pod spec with the given image name, thus defining
+// the target version.
+func (b *WorkerDeploymentBuilder) WithTargetTemplateDeprecatedField(
+	imageName string,
+) *WorkerDeploymentBuilder {
+	if b.twd.Spec.Deployment != nil {
+		// Move field values from the new Spec.Deployment into the old
+		// deprecated fields, since having both Spec.Template and
+		// Spec.Deployment.Template will cause a validation failure.
+		b.twd.Spec.Replicas = b.twd.Spec.Deployment.Replicas
+		b.twd.Spec.Deployment = nil
+	}
+	tmp := MakePodSpecWithImage(imageName)
+	b.twd.Spec.Template = &tmp
 	return b
 }
 
@@ -525,7 +560,16 @@ func (tcb *TestCaseBuilder) Build() TestCase {
 		buildId := MakeBuildID(tcb.name, info.image, info.unsafeCustomBuildID, nil)
 		ret.expectedDeploymentReplicas[buildId] = info.replicas
 	}
-	ret.twd.Spec.Deployment.Template = SetTaskQueue(ret.twd.Spec.Deployment.Template, tcb.name)
+	// NOTE(jaypipes): We have some integration tests that validate the older
+	// deprecated spec.template fields, so we check here to see if the newer
+	// spec.deployment field is non-nil. If it isn't, we assume the use of the
+	// older spec.template field.
+	if ret.twd.Spec.Deployment != nil {
+		ret.twd.Spec.Deployment.Template = SetTaskQueue(ret.twd.Spec.Deployment.Template, tcb.name)
+	} else {
+		tmp := SetTaskQueue(*ret.twd.Spec.Template, tcb.name)
+		ret.twd.Spec.Template = &tmp
+	}
 	return ret
 }
 

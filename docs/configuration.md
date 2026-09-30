@@ -446,7 +446,7 @@ gate:
 
 ### Per-version Kubernetes Deployment configuration
 
-You can control the configuration of the Kubernetes Deployment create by
+You can control the configuration of the Kubernetes Deployment created by
 Temporal Worker Controller for each WorkerDeploymentVersion (Build ID) by
 setting the `WorkerDeploymentSpec.Deployment` field. This field is of type
 `appsv1.DeploymentSpec` and supports all the configuration options available to

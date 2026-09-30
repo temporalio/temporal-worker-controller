@@ -4,7 +4,7 @@ IMG ?= temporal-worker-controller:latest
 ENVTEST_K8S_VERSION = 1.29.0
 
 MAIN_BRANCH = main
-ALL_TEST_TAGS = test_dep
+ALL_TEST_TAGS = integration
 
 ##### Variables ######
 
@@ -343,7 +343,7 @@ lint-actions: $(ACTIONLINT)
 
 lint-code: $(GOLANGCI_LINT)
 	@printf $(COLOR) "Linting code..."
-	@$(GOLANGCI_LINT) run --verbose --build-tags $(ALL_TEST_TAGS) --timeout 10m --fix=$(GOLANGCI_LINT_FIX) --new-from-rev=$(GOLANGCI_LINT_BASE_REV) --config=.github/.golangci.yml
+	@GOWORK=off $(GOLANGCI_LINT) run --verbose --build-tags $(ALL_TEST_TAGS) --timeout 10m --fix=$(GOLANGCI_LINT_FIX) --new-from-rev=$(GOLANGCI_LINT_BASE_REV) --config=.github/.golangci.yml
 
 fmt-imports: $(GCI) # Don't get confused, there is a single linter called gci, which is a part of the mega linter we use is called golangci-lint.
 	@printf $(COLOR) "Formatting imports..."

@@ -72,6 +72,7 @@ type WorkerOptions struct {
 
 // WorkerDeploymentSpec defines the desired state of WorkerDeployment
 // +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template)",message="one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="!(has(self.deployment) && has(self.template))",message="exactly one of deployment or template must be set"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -143,7 +144,8 @@ type WorkerDeploymentSpec struct {
 func (s WorkerDeploymentSpec) DeploymentSpec() appsv1.DeploymentSpec {
 	depSpec := appsv1.DeploymentSpec{}
 	if s.Deployment != nil {
-		depSpec = *s.Deployment
+		ds := s.Deployment.DeepCopy()
+		depSpec = *ds
 	} else {
 		if s.Template != nil {
 			depSpec.Template = *s.Template
@@ -550,7 +552,7 @@ type GateInputSource struct {
 }
 
 // RolloutStrategy defines the strategy Temporal Worker Controller uses to
-// update the Temporal WorkerDeployment's target version (build ID).
+// promote the Temporal WorkerDeployment's target version (build ID).
 //
 // This struct does *not* influence the shape of the Kubernetes Deployment that
 // is created by Temporal Worker Controller for an individual
