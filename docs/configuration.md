@@ -167,7 +167,7 @@ workerOptions:
 
 ### Connection Configuration
 
-Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname.
+Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname. `hostPort` accepts a host:port (e.g. `production.abc123.tmprl.cloud:7233`) or a gRPC resolver target URI (e.g. `dns:///production.abc123.tmprl.cloud:7233`, `xds://example.dest`).
 
 **Using mTLS Authentication:**
 
