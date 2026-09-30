@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.temporal.io/api/workflowservice/v1"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/worker"
@@ -19,7 +20,24 @@ import (
 const (
 	successTestWorkflowType = "successTestWorkflow"
 	failTestWorkflowType    = "failTestWorkflow"
+	// CrossPoolWorkflowType runs reportBuildID on the task queue passed as its argument and
+	// returns the build ID of the worker that ran it.
+	CrossPoolWorkflowType     = "crossPoolWorkflow"
+	reportBuildIDActivityType = "reportBuildID"
+
+	workerRoleEnvKey = "TEMPORAL_TEST_WORKER_ROLE"
+	// ActivityWorkerRole makes a test worker register only reportBuildID, so it polls its task
+	// queue for activities only.
+	ActivityWorkerRole = "activities"
 )
+
+// SetWorkerRole sets the test worker role in every container of the pod template.
+func SetWorkerRole(podSpec corev1.PodTemplateSpec, role string) corev1.PodTemplateSpec {
+	for i := range podSpec.Spec.Containers {
+		podSpec.Spec.Containers[i].Env = append(podSpec.Spec.Containers[i].Env, corev1.EnvVar{Name: workerRoleEnvKey, Value: role})
+	}
+	return podSpec
+}
 
 func getEnv(podTemplateSpec corev1.PodTemplateSpec, key string) (string, error) {
 	for _, e := range podTemplateSpec.Spec.Containers[0].Env {
@@ -135,12 +153,19 @@ func RunHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplate
 	if err != nil {
 		return
 	}
+	buildID, _ := getEnv(podTemplateSpec, "TEMPORAL_WORKER_BUILD_ID")
+	reportBuildID := func(context.Context) (string, error) { return buildID, nil }
 
-	// Register activities and workflows
-	w.RegisterWorkflowWithOptions(successTestWorkflow, workflow.RegisterOptions{Name: successTestWorkflowType})
-	w.RegisterWorkflowWithOptions(failTestWorkflow, workflow.RegisterOptions{Name: failTestWorkflowType})
-	w.RegisterActivity(getSubjectTestActivity)
-	w.RegisterActivity(sleepTestActivity)
+	if role, _ := getEnv(podTemplateSpec, workerRoleEnvKey); role == ActivityWorkerRole {
+		w.RegisterActivityWithOptions(reportBuildID, activity.RegisterOptions{Name: reportBuildIDActivityType})
+	} else {
+		// Register activities and workflows
+		w.RegisterWorkflowWithOptions(successTestWorkflow, workflow.RegisterOptions{Name: successTestWorkflowType})
+		w.RegisterWorkflowWithOptions(failTestWorkflow, workflow.RegisterOptions{Name: failTestWorkflowType})
+		w.RegisterWorkflowWithOptions(crossPoolWorkflow, workflow.RegisterOptions{Name: CrossPoolWorkflowType})
+		w.RegisterActivity(getSubjectTestActivity)
+		w.RegisterActivity(sleepTestActivity)
+	}
 
 	// Start the worker in a separate goroutine so that the stopFunc can be passed back to the caller via callback
 	go func() {
@@ -195,6 +220,16 @@ func failTestWorkflow(ctx workflow.Context) (string, error) {
 
 	// Return the greeting
 	return "", errors.New("this is a manufactured error to make the test fail")
+}
+
+func crossPoolWorkflow(ctx workflow.Context, activityTaskQueue string) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		TaskQueue:           activityTaskQueue,
+		StartToCloseTimeout: time.Minute,
+	})
+	var buildID string
+	err := workflow.ExecuteActivity(ctx, reportBuildIDActivityType).Get(ctx, &buildID)
+	return buildID, err
 }
 
 func sleepTestActivity(ctx context.Context, seconds uint) error {
