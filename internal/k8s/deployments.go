@@ -47,6 +47,8 @@ const (
 	MaxDeploymentNameLen                           = 47
 	ConnectionSpecHashAnnotation                   = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation                  = "temporal.io/pod-template-spec-hash"
+	poolsBuildIDHashLen                            = 10
+	poolDeploymentNameHashLen                      = 8
 
 	// Environment variables read by the Temporal Go SDK's envconfig package
 	// (go.temporal.io/sdk/contrib/envconfig) to configure the worker's connection.
@@ -232,6 +234,9 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 	}
 
 	depSpec := w.Spec.DeploymentSpec()
+	if w.Spec.HasPools() {
+		return computePoolsBuildID(w.Spec, depSpec)
+	}
 
 	if containers := depSpec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
@@ -242,6 +247,29 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 		}
 	}
 	return utils.ComputeHash(&depSpec.Template, nil, false)
+}
+
+// computePoolsBuildID hashes every pool's name and pod template, so a change to any
+// pool starts one new version for all of them.
+func computePoolsBuildID(spec temporaliov1alpha1.WorkerDeploymentSpec, defaultSpec appsv1.DeploymentSpec) string {
+	type poolTemplate struct {
+		Name     string                 `json:"name"`
+		Template corev1.PodTemplateSpec `json:"template"`
+	}
+	pools := make([]poolTemplate, 0, len(spec.Pools)+1)
+	for _, name := range spec.PoolNames() {
+		poolSpec, _ := spec.PoolDeploymentSpec(name)
+		pools = append(pools, poolTemplate{Name: name, Template: poolSpec.Template})
+	}
+	data, _ := json.Marshal(pools) // never errors for these types
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])[:poolsBuildIDHashLen]
+
+	if containers := defaultSpec.Template.Spec.Containers; len(containers) > 0 && containers[0].Image != "" {
+		suffix := ResourceNameSeparator + hash
+		return cleanBuildID(computeImagePrefix(containers[0].Image, MaxBuildIDLen-len(suffix)) + suffix)
+	}
+	return hash
 }
 
 // ComputeWorkerDeploymentName generates the base worker deployment name
@@ -263,6 +291,17 @@ func ComputeVersionedDeploymentName(baseName, buildID string) string {
 		fullName = TruncateString(baseName, 10) + ResourceNameSeparator + TruncateString(buildID, 10) + ResourceNameSeparator + hashName
 	}
 	return CleanStringForDNS(fullName)
+}
+
+// ComputePoolDeploymentName generates the name of a named pool's versioned Deployment.
+// It always ends in a hash of the full (name, pool, build ID) triple, so it never takes
+// another pool's name or a default pool's name.
+func ComputePoolDeploymentName(baseName, pool, buildID string) string {
+	sum := sha256.Sum256([]byte(baseName + WorkerDeploymentNameSeparator + pool + WorkerDeploymentNameSeparator + buildID))
+	suffix := ResourceNameSeparator + hex.EncodeToString(sum[:poolDeploymentNameHashLen/2])
+	prefix := CleanStringForDNS(baseName + ResourceNameSeparator + pool + ResourceNameSeparator + buildID)
+	prefix = strings.TrimRight(TruncateString(prefix, MaxDeploymentNameLen-len(suffix)), ResourceNameSeparator)
+	return prefix + suffix
 }
 
 func HashString(s string) string {
@@ -336,6 +375,14 @@ func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 	}
 }
 
+// ComputePoolSelectorLabels returns the selector labels of a pool's Deployment in a
+// multi-pool version.
+func ComputePoolSelectorLabels(twdName, buildID, pool string) map[string]string {
+	labels := ComputeSelectorLabels(twdName, buildID)
+	labels[PoolLabel] = pool
+	return labels
+}
+
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
 func NewDeploymentWithOwnerRef(
 	typeMeta *metav1.TypeMeta,
@@ -345,9 +392,68 @@ func NewDeploymentWithOwnerRef(
 	buildID string,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) *appsv1.Deployment {
-	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
+	return newVersionedDeployment(
+		typeMeta,
+		objectMeta,
+		spec.DeploymentSpec(),
+		spec.WorkerOptions.TemporalNamespace,
+		workerDeploymentName,
+		buildID,
+		ComputeVersionedDeploymentName(objectMeta.Name, buildID),
+		ComputeSelectorLabels(objectMeta.GetName(), buildID),
+		connection,
+	)
+}
 
-	depSpec := spec.DeploymentSpec()
+// NewPoolDeploymentWithOwnerRef creates one worker pool's deployment for a version.
+// Named pools always carry the pool label; labelDefault adds it to the default pool,
+// which every multi-pool version needs so its selectors never overlap.
+func NewPoolDeploymentWithOwnerRef(
+	typeMeta *metav1.TypeMeta,
+	objectMeta *metav1.ObjectMeta,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	workerDeploymentName string,
+	buildID string,
+	pool string,
+	labelDefault bool,
+	connection temporaliov1alpha1.ConnectionSpec,
+) (*appsv1.Deployment, error) {
+	depSpec, ok := spec.PoolDeploymentSpec(pool)
+	if !ok {
+		return nil, fmt.Errorf("worker pool %q is not in the WorkerDeployment spec", pool)
+	}
+	name := ComputeVersionedDeploymentName(objectMeta.Name, buildID)
+	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
+	if pool != temporaliov1alpha1.DefaultPoolName {
+		name = ComputePoolDeploymentName(objectMeta.Name, pool, buildID)
+		selectorLabels = ComputePoolSelectorLabels(objectMeta.GetName(), buildID, pool)
+	} else if labelDefault {
+		selectorLabels = ComputePoolSelectorLabels(objectMeta.GetName(), buildID, pool)
+	}
+	return newVersionedDeployment(
+		typeMeta,
+		objectMeta,
+		depSpec,
+		spec.WorkerOptions.TemporalNamespace,
+		workerDeploymentName,
+		buildID,
+		name,
+		selectorLabels,
+		connection,
+	), nil
+}
+
+func newVersionedDeployment(
+	typeMeta *metav1.TypeMeta,
+	objectMeta *metav1.ObjectMeta,
+	depSpec appsv1.DeploymentSpec,
+	temporalNamespace string,
+	workerDeploymentName string,
+	buildID string,
+	name string,
+	selectorLabels map[string]string,
+	connection temporaliov1alpha1.ConnectionSpec,
+) *appsv1.Deployment {
 	depSpec.Selector = &metav1.LabelSelector{
 		MatchLabels: selectorLabels,
 	}
@@ -383,7 +489,7 @@ func NewDeploymentWithOwnerRef(
 	ApplyControllerPodSpecModifications(
 		podSpec,
 		connection,
-		spec.WorkerOptions.TemporalNamespace,
+		temporalNamespace,
 		workerDeploymentName,
 		buildID,
 	)
@@ -391,7 +497,7 @@ func NewDeploymentWithOwnerRef(
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:                       ComputeVersionedDeploymentName(objectMeta.Name, buildID),
+			Name:                       name,
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
 			Labels:                     selectorLabels,
@@ -659,6 +765,35 @@ func RemoveTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 		}
 	}
 	return mounts
+}
+
+// NewPoolDeploymentWithControllerRef creates one worker pool's deployment for a version,
+// with the WorkerDeployment as its controller.
+func NewPoolDeploymentWithControllerRef(
+	w *temporaliov1alpha1.WorkerDeployment,
+	buildID string,
+	pool string,
+	labelDefault bool,
+	connection temporaliov1alpha1.ConnectionSpec,
+	reconcilerScheme *runtime.Scheme,
+) (*appsv1.Deployment, error) {
+	d, err := NewPoolDeploymentWithOwnerRef(
+		&w.TypeMeta,
+		&w.ObjectMeta,
+		&w.Spec,
+		ComputeWorkerDeploymentName(w),
+		buildID,
+		pool,
+		labelDefault,
+		connection,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctrl.SetControllerReference(w, d, reconcilerScheme); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 func NewDeploymentWithControllerRef(
