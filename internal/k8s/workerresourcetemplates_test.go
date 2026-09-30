@@ -120,6 +120,57 @@ func TestAutoInjectFields_ScaleTargetRef(t *testing.T) {
 	})
 }
 
+func TestAutoInjectFields_TargetRef(t *testing.T) {
+	selectorLabels := map[string]string{
+		BuildIDLabel:              "abc123",
+		WorkerDeploymentNameLabel: "my-worker",
+	}
+
+	t.Run("does not inject targetRef when key is entirely absent", func(t *testing.T) {
+		spec := map[string]interface{}{
+			"updatePolicy": map[string]interface{}{"updateMode": "Initial"},
+		}
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
+		_, hasKey := spec["targetRef"]
+		assert.False(t, hasKey, "targetRef should not be injected when absent (user must opt in with {})")
+	})
+
+	t.Run("injects targetRef when empty object (opt-in sentinel)", func(t *testing.T) {
+		spec := map[string]interface{}{
+			"targetRef": map[string]interface{}{},
+		}
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
+		ref, ok := spec["targetRef"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "my-worker-abc123", ref["name"])
+		assert.Equal(t, "Deployment", ref["kind"])
+		assert.Equal(t, appsv1.SchemeGroupVersion.String(), ref["apiVersion"])
+	})
+
+	t.Run("does not overwrite existing targetRef", func(t *testing.T) {
+		spec := map[string]interface{}{
+			"targetRef": map[string]interface{}{
+				"name": "custom-deployment",
+				"kind": "Deployment",
+			},
+		}
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
+		ref := spec["targetRef"].(map[string]interface{})
+		assert.Equal(t, "custom-deployment", ref["name"], "should not overwrite user-provided ref")
+	})
+
+	t.Run("does not inject a targetRef nested below spec", func(t *testing.T) {
+		spec := map[string]interface{}{
+			"policy": map[string]interface{}{
+				"targetRef": map[string]interface{}{},
+			},
+		}
+		autoInjectFields(spec, "my-worker-abc123", "my-worker", "abc123", "my-temporal-ns", selectorLabels, nil)
+		nested := spec["policy"].(map[string]interface{})
+		assert.Empty(t, nested["targetRef"], "targetRef is injected only at spec.targetRef")
+	})
+}
+
 func TestAutoInjectFields_MatchLabels(t *testing.T) {
 	selectorLabels := map[string]string{
 		BuildIDLabel:              "abc123",
@@ -627,6 +678,19 @@ func TestHasScaleTarget(t *testing.T) {
 			"spec": {
 				"minAvailable": 1,
 				"selector": {"matchLabels": {}}
+			}
+		}`)
+		assert.False(t, HasScaleTarget(raw))
+	})
+
+	// A VPA does not drive replica count, so it is kept until the versioned Deployment is deleted.
+	t.Run("returns false for a VerticalPodAutoscaler", func(t *testing.T) {
+		raw := []byte(`{
+			"apiVersion": "autoscaling.k8s.io/v1",
+			"kind": "VerticalPodAutoscaler",
+			"spec": {
+				"targetRef": {},
+				"updatePolicy": {"updateMode": "Initial"}
 			}
 		}`)
 		assert.False(t, HasScaleTarget(raw))
