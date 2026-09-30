@@ -1008,6 +1008,36 @@ func TestGetScaleDeployments(t *testing.T) {
 			expectScales: map[string]uint32{"test-old": 1},
 		},
 		{
+			name: "draining version at 0 replicas is scaled back up to spec.deployment.replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID:    "new",
+						Status:     temporaliov1alpha1.VersionStatusCurrent,
+						Deployment: &corev1.ObjectReference{Name: "test-new"},
+					},
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "old",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-old"},
+						},
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment: &appsv1.DeploymentSpec{Replicas: func() *int32 { r := int32(3); return &r }()},
+			},
+			expectScales: map[string]uint32{"test-old": 3},
+		},
+		{
 			name: "draining version with pollers is left untouched",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
