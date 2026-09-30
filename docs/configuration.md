@@ -311,36 +311,61 @@ echo -n "your-api-key-token-here" | base64
 
 **Important Notes:**
 - Both secrets must be created in the same Kubernetes namespace as the `Connection` resource
-- Only one authentication method can be specified per `Connection` (either `mutualTLSSecretRef`, `apiKeySecretRef`, or `manualAuth`)
+- Only one authentication method can be specified per `Connection` (either `mutualTLSSecretRef` or `apiKeySecretRef`)
 - The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
 - `tls.serverName` affects TLS certificate verification by the controller and is injected into Worker Pods as `TEMPORAL_TLS_SERVER_NAME` for SDK envconfig users.
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
 - `tls.caCertSecretRef` trusts an extra CA for API-key or no-credentials connections (mTLS already covers this via its own secret's `ca.crt` key, and cannot be combined with `tls.caCertSecretRef`). The referenced Secret must have a `ca.crt` key.
 
-**Using Manual Authentication:**
+**Using Custom Authentication:**
 
-`manualAuth` is intended for wrapper binaries that embed the controller and need to own client construction — for example, to inject a custom gRPC headers provider, xDS/mTLS dial credentials, or tracing options that the pool does not derive from a Kubernetes Secret.
+Wrapper binaries that embed the controller can customize Temporal client construction at two levels:
 
-When `manualAuth: true` is set on a `Connection`, the pool:
-- skips Kubernetes Secret parsing (no `mutualTLSSecretRef` or `apiKeySecretRef` may be set),
-- skips the Temporal `CheckHealth` probe (the wrapper's credentials are expected to be namespace-scoped, like API keys, and would fail this system-level RPC),
-- builds the base SDK options (logger, host/port, namespace, identity, and the `temporal-namespace` header provider) and then hands them to a wrapper-supplied hook for customization before dialing.
+- **Light-touch** — `WithCustomizeClientOptions`: mutate the SDK client options (e.g. add an interceptor, a custom `HeadersProvider`, or dial credentials) before the pool dials. The pool still owns Secret parsing, dialing, and the health check.
+- **Full control** — `WithCreateClient`: replace the entire client-creation path. The function owns secret parsing, options building, dialing, and health checking; the pool only caches the result. This is the path for wrappers that need to reuse their own client constructor (e.g. one that returns a ready-made client, not options).
 
-The wrapper binary registers the hook after constructing the pool:
+Both hooks are set on the controller via the `twc` facade. When either is set and a `Connection` has no `mutualTLSSecretRef` or `apiKeySecretRef`, the pool treats the connection as custom auth and skips Kubernetes Secret parsing.
+
+**Light-touch (add an interceptor):**
 
 ```go
-cp := clientpool.New(logger, k8sClient)
-cp.CustomizeClientOptions = func(opts sdkclient.Options) sdkclient.Options {
-    // Wrap the existing HeadersProvider (do not replace it) so the
-    // temporal-namespace header is preserved, then add auth, dial
-    // credentials, tracing, etc.
-    opts.HeadersProvider = newAuthHeadersProvider(opts.HeadersProvider)
-    opts.ConnectionOptions.DialOptions = append(opts.ConnectionOptions.DialOptions, /* ... */)
-    return opts
-}
+r := twc.NewController(mgr,
+    twc.WithCustomizeClientOptions(func(opts sdkclient.Options) sdkclient.Options {
+        opts.Interceptors = append(opts.Interceptors, myInterceptor)
+        return opts
+    }),
+)
 ```
 
-A `Connection` using manual auth:
+**Full control (reuse a custom client constructor):**
+
+```go
+r := twc.NewController(mgr,
+    twc.WithCreateClient(func(ctx context.Context, spec v1alpha1.ConnectionSpec, ns, k8sNs, identity string, key clientpool.ClientPoolKey) (twc.CachedClient, error) {
+        client, err := myClientConstructor(spec, ns, identity)
+        if err != nil {
+            return twc.CachedClient{}, err
+        }
+        return twc.CachedClient{
+            Client:  client,
+            IsValid: func() bool { return true }, // e.g. check cert/token expiry, not a readiness probe
+        }, nil
+    }),
+)
+```
+
+A wrapper can also delegate to the built-in path and customize only part of it:
+
+```go
+r := twc.NewController(mgr,
+    twc.WithCreateClient(func(ctx context.Context, spec v1alpha1.ConnectionSpec, ns, k8sNs, identity string, key clientpool.ClientPoolKey) (twc.CachedClient, error) {
+        // Delegate to the default, then wrap the result.
+        return pool.DefaultCreateClient(ctx, spec, ns, k8sNs, identity, key)
+    }),
+)
+```
+
+A `Connection` using custom auth (no Secret refs):
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
@@ -349,13 +374,12 @@ metadata:
   name: production-temporal
 spec:
   hostPort: "production.abc123.tmprl.cloud:7233"
-  manualAuth: true
 ```
 
 **Important Notes:**
-- `manualAuth` is mutually exclusive with `mutualTLSSecretRef` and `apiKeySecretRef`.
-- The wrapper must wrap, not replace, the pool's `HeadersProvider` so the `temporal-namespace` header continues to ride every RPC (including system-level RPCs like `GetSystemInfo`).
-- The pool still owns the client cache and eviction; the wrapper only customizes options. On transport-class failures the reconciler evicts the cached client as usual so the next reconcile re-dials with fresh options.
+- Custom auth is derived from a hook being set plus the absence of `mutualTLSSecretRef` and `apiKeySecretRef`; there is no `customAuth` field on the `Connection` CRD.
+- With `WithCustomizeClientOptions`, the wrapper should wrap, not replace, the pool's `HeadersProvider` so the `temporal-namespace` header continues to ride every RPC (including system-level RPCs like `GetSystemInfo`).
+- The pool owns the client cache and eviction in both cases. Creation success is determined by the `CreateClientFunc`'s error return — if it returns an error, the client is never cached. On a cache hit, the pool calls the cached client's `IsValid` closure; returning false triggers eviction and re-dial (the built-in path uses this for mTLS cert-expiry invalidation). On transport-class failures the reconciler evicts the cached client as usual so the next reconcile re-dials.
 
 ## Gate Configuration
 
