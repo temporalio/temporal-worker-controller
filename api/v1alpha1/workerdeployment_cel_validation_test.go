@@ -308,6 +308,76 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err.Error()).To(ContainSubstring("objectRef.namespace is not supported"))
 	})
 
+	poolTemplate := func() corev1.PodTemplateSpec {
+		return corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "worker", Image: "worker:latest"}}},
+		}
+	}
+
+	It("accepts named pools without a selector", func() {
+		twd := baseTWD("with-pools")
+		twd.Spec.Pools = []WorkerPool{
+			{Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: ptr(int32(2)), Template: poolTemplate()}},
+			{Name: "gpu-parse", Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}},
+		}
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
+	})
+
+	It("rejects a pool named default", func() {
+		twd := baseTWD("pool-default")
+		twd.Spec.Pools = []WorkerPool{{Name: DefaultPoolName, Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}}}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("pool name default is reserved"))
+	})
+
+	It("rejects duplicate pool names", func() {
+		twd := baseTWD("pool-duplicate")
+		twd.Spec.Pools = []WorkerPool{
+			{Name: "activities", Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}},
+			{Name: "activities", Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}},
+		}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Duplicate value"))
+	})
+
+	It("rejects more than 10 pools", func() {
+		twd := baseTWD("pool-too-many")
+		for i := range 11 {
+			twd.Spec.Pools = append(twd.Spec.Pools, WorkerPool{Name: fmt.Sprintf("pool-%d", i), Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}})
+		}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("must have at most 10 items"))
+	})
+
+	It("rejects a pool name that is not a DNS label", func() {
+		twd := baseTWD("pool-bad-name")
+		twd.Spec.Pools = []WorkerPool{{Name: "Activities_1", Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}}}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.pools[0].name"))
+	})
+
+	It("rejects a pool name longer than 24 characters", func() {
+		twd := baseTWD("pool-long-name")
+		twd.Spec.Pools = []WorkerPool{{Name: strings.Repeat("a", 25), Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}}}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.pools[0].name"))
+	})
+
+	It("rejects pools combined with the deprecated template field", func() {
+		twd := baseTWD("pool-with-template")
+		twd.Spec.Template = twd.Spec.Deployment.Template.DeepCopy()
+		twd.Spec.Deployment = nil
+		twd.Spec.Pools = []WorkerPool{{Name: "activities", Deployment: appsv1.DeploymentSpec{Template: poolTemplate()}}}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("pools require spec.deployment"))
+	})
+
 	It("rejects both template and deployment non-nil", func() {
 		twd := baseTWD("template-and-deployment")
 		tmp := twd.Spec.Deployment.Template.DeepCopy()
