@@ -5,6 +5,9 @@
 package v1alpha1
 
 import (
+	"slices"
+	"sort"
+
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -71,8 +74,9 @@ type WorkerOptions struct {
 }
 
 // WorkerDeploymentSpec defines the desired state of WorkerDeployment
-// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template)",message="one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template) || has(self.pools)",message="one of deployment, template or pools must be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.deployment) && has(self.template))",message="exactly one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.pools) || !(has(self.deployment) || has(self.template))",message="pools cannot be combined with deployment or template"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -126,6 +130,17 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
+	// Pools runs several named worker pools in one Worker Deployment Version, in
+	// place of Deployment. Each pool gets its own Kubernetes Deployment in every
+	// version, with the same deployment name and build ID, so pools roll out
+	// together while each one scales on its own.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=10
+	Pools []WorkerPool `json:"pools,omitempty"`
+
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 
@@ -134,6 +149,70 @@ type WorkerDeploymentSpec struct {
 
 	// WorkerOptions configures the worker's connection to Temporal.
 	WorkerOptions WorkerOptions `json:"workerOptions"`
+}
+
+// WorkerPool is a named group of workers with its own Kubernetes Deployment in
+// every version of a WorkerDeployment.
+type WorkerPool struct {
+	// Name identifies the pool. "default" is reserved for WorkerDeployments without pools.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=24
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self != 'default'",message="pool name default is reserved"
+	Name string `json:"name"`
+
+	// Deployment configures this pool's Kubernetes Deployment in each version.
+	// Selector is computed by the controller.
+	Deployment appsv1.DeploymentSpec `json:"deployment"`
+}
+
+// DefaultPoolName names the single pool of a WorkerDeployment without pools, described
+// by spec.deployment (or the deprecated spec.template fields).
+const DefaultPoolName = "default"
+
+// HasPools reports whether the spec declares worker pools.
+func (s WorkerDeploymentSpec) HasPools() bool {
+	return len(s.Pools) > 0
+}
+
+// HasPool reports whether the spec has a pool with the given name.
+func (s WorkerDeploymentSpec) HasPool(name string) bool {
+	if !s.HasPools() {
+		return name == DefaultPoolName
+	}
+	return slices.ContainsFunc(s.Pools, func(p WorkerPool) bool { return p.Name == name })
+}
+
+// PoolNames returns the pool names, sorted, or the default pool alone when the spec
+// has no pools.
+func (s WorkerDeploymentSpec) PoolNames() []string {
+	if !s.HasPools() {
+		return []string{DefaultPoolName}
+	}
+	names := make([]string, 0, len(s.Pools))
+	for _, p := range s.Pools {
+		names = append(names, p.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// PoolDeploymentSpec returns the DeploymentSpec of the named pool, with the
+// default rolling update strategy applied, and whether the pool exists.
+func (s WorkerDeploymentSpec) PoolDeploymentSpec(name string) (appsv1.DeploymentSpec, bool) {
+	if !s.HasPools() {
+		return s.DeploymentSpec(), name == DefaultPoolName
+	}
+	for _, p := range s.Pools {
+		if p.Name == name {
+			depSpec := *p.Deployment.DeepCopy()
+			if depSpec.Strategy.Type == "" {
+				depSpec.Strategy = DefaultDeploymentStrategy()
+			}
+			return depSpec, true
+		}
+	}
+	return appsv1.DeploymentSpec{}, false
 }
 
 // DeploymentSpec returns the appsv1.DeploymentSpec struct constructed by
@@ -403,9 +482,29 @@ type BaseWorkerDeploymentVersion struct {
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
+	// Pools lists each worker pool's Deployment in a version that uses pools.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Pools []WorkerPoolStatus `json:"pools,omitempty"`
+
 	// ManagedBy is the identity of the client that is managing the rollout of this version.
 	// +optional
 	ManagedBy string `json:"managedBy,omitempty"`
+}
+
+// WorkerPoolStatus describes one worker pool's Deployment in a version.
+type WorkerPoolStatus struct {
+	// Name of the pool.
+	Name string `json:"name"`
+
+	// A pointer to the pool's managed k8s deployment.
+	// +optional
+	Deployment *corev1.ObjectReference `json:"deployment,omitempty"`
+
+	// HealthySince is when the pool's deployment became available.
+	// +optional
+	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 }
 
 // CurrentWorkerDeploymentVersion represents a worker deployment version that is currently

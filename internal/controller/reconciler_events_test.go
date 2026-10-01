@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	deploymentpb "go.temporal.io/api/deployment/v1"
@@ -255,12 +256,17 @@ type stubWDClient struct {
 
 func (s *stubWDClient) GetHandle(_ string) sdkclient.WorkerDeploymentHandle { return s.handle }
 
+func (s *stubWDClient) Delete(_ context.Context, _ sdkclient.WorkerDeploymentDeleteOptions) (sdkclient.WorkerDeploymentDeleteResponse, error) {
+	return sdkclient.WorkerDeploymentDeleteResponse{}, nil
+}
+
 // stubWorkflowServiceClient implements workflowservice.WorkflowServiceClient, returning
 // a valid empty response for DescribeWorkerDeployment (no versions, no routing config),
 // or a configurable error if describeDeploymentErr is set.
 type stubWorkflowServiceClient struct {
 	workflowservice.WorkflowServiceClient
 	describeDeploymentErr error
+	describedBuildIDs     *[]string
 }
 
 func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, _ *workflowservice.DescribeWorkerDeploymentRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentResponse, error) {
@@ -274,7 +280,10 @@ func (s *stubWorkflowServiceClient) DescribeWorkerDeployment(_ context.Context, 
 	}, nil
 }
 
-func (s *stubWorkflowServiceClient) DescribeWorkerDeploymentVersion(_ context.Context, _ *workflowservice.DescribeWorkerDeploymentVersionRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentVersionResponse, error) {
+func (s *stubWorkflowServiceClient) DescribeWorkerDeploymentVersion(_ context.Context, req *workflowservice.DescribeWorkerDeploymentVersionRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentVersionResponse, error) {
+	if s.describedBuildIDs != nil {
+		*s.describedBuildIDs = append(*s.describedBuildIDs, req.GetDeploymentVersion().GetBuildId())
+	}
 	return nil, &serviceerror.NotFound{}
 }
 
@@ -285,6 +294,7 @@ type stubTemporalClient struct {
 	wdClient              sdkclient.WorkerDeploymentClient
 	execErr               error
 	describeDeploymentErr error
+	describedBuildIDs     []string
 }
 
 func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeploymentClient {
@@ -292,7 +302,7 @@ func (s *stubTemporalClient) WorkerDeploymentClient() sdkclient.WorkerDeployment
 }
 
 func (s *stubTemporalClient) WorkflowService() workflowservice.WorkflowServiceClient {
-	return &stubWorkflowServiceClient{describeDeploymentErr: s.describeDeploymentErr}
+	return &stubWorkflowServiceClient{describeDeploymentErr: s.describeDeploymentErr, describedBuildIDs: &s.describedBuildIDs}
 }
 
 func (s *stubTemporalClient) ExecuteWorkflow(_ context.Context, _ sdkclient.StartWorkflowOptions, _ interface{}, _ ...interface{}) (sdkclient.WorkflowRun, error) {
@@ -401,7 +411,7 @@ func TestSyncConditions(t *testing.T) {
 				twd.Status.TargetVersion.BuildID: {TaskQueuesWithoutPollers: []string{}},
 			},
 		}
-		r.syncConditions(twd, temporalState)
+		r.syncConditions(twd, temporalState, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonActivePollers)
@@ -418,7 +428,7 @@ func TestSyncConditions(t *testing.T) {
 				twd.Status.TargetVersion.BuildID: {TaskQueuesWithoutPollers: []string{"tq-1"}},
 			},
 		}
-		r.syncConditions(twd, temporalState)
+		r.syncConditions(twd, temporalState, "")
 
 		// Ready stays about rollout completion; poller presence is surfaced on Progressing.
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
@@ -431,7 +441,7 @@ func TestSyncConditions(t *testing.T) {
 		temporalState := &temporal.TemporalWorkerState{
 			Versions: map[string]*temporal.VersionInfo{},
 		}
-		r.syncConditions(twd, temporalState)
+		r.syncConditions(twd, temporalState, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown)
@@ -440,7 +450,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
-		r.syncConditions(twd, nil)
+		r.syncConditions(twd, nil, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping)
@@ -451,7 +461,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
-		r.syncConditions(twd, nil)
+		r.syncConditions(twd, nil, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion)
@@ -462,7 +472,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusNotRegistered
-		r.syncConditions(twd, nil)
+		r.syncConditions(twd, nil, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)
@@ -805,6 +815,42 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	assertNoEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
 }
 
+func TestReconcile_DescribesBuildsWithOnlyNamedPoolDeployments(t *testing.T) {
+	k8sNamespace := "default"
+	tc := makeNoCredsConnection("my-conn", k8sNamespace, "localhost:7233")
+	twd := makeWD("test-worker", k8sNamespace, tc.Name)
+	controller := true
+	orphan := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-worker-activities-old",
+			Namespace: k8sNamespace,
+			Labels: map[string]string{
+				k8s.WorkerDeploymentNameLabel: "test-worker",
+				k8s.BuildIDLabel:              "old",
+				k8s.PoolLabel:                 "activities",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: temporaliov1alpha1.GroupVersion.String(),
+				Kind:       "WorkerDeployment",
+				Name:       twd.Name,
+				Controller: &controller,
+			}},
+		},
+	}
+
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, tc, orphan}, interceptor.Funcs{})
+	stub := newStubTemporalClient(nil)
+	r.TemporalClientPool.SetClientForTesting(noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace), stub)
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace},
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, stub.describedBuildIDs, "old",
+		"a build missing from the deployment summary must be described before it can map to NotRegistered")
+}
+
 // TestReconcile_SteadyState_SkipsStatusWrite verifies that once the rollout settles, a
 // reconcile that recomputes the same status does not send it back to the API server.
 func TestReconcile_SteadyState_SkipsStatusWrite(t *testing.T) {
@@ -930,9 +976,9 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 				},
 			},
 			makePlan: func(ns string) *plan {
-				return &plan{CreateDeployment: &appsv1.Deployment{
+				return &plan{CreateDeployments: []*appsv1.Deployment{{
 					ObjectMeta: metav1.ObjectMeta{Name: "new-deploy", Namespace: ns},
-				}}
+				}}}
 			},
 			expectedReason: ReasonDeploymentCreateFailed,
 		},

@@ -45,7 +45,7 @@ func waitForExpectedTargetDeployment(t *testing.T, twd *temporaliov1alpha1.Worke
 		}, &deployment); err == nil {
 			t.Logf("Found deployment %s in namespace %s", deployment.Name, namespace)
 			expectedBuildID := k8s.ComputeBuildID(twd)
-			expectedDeployment, err := k8s.NewDeploymentWithControllerRef(twd, expectedBuildID, env.Connection.Spec, env.Mgr.GetScheme())
+			expectedDeployment, err := k8s.NewPoolDeploymentWithControllerRef(twd, expectedBuildID, temporaliov1alpha1.DefaultPoolName, env.Connection.Spec, env.Mgr.GetScheme())
 			if err != nil {
 				t.Fatalf("failed to create expected deployment: %v", err)
 			}

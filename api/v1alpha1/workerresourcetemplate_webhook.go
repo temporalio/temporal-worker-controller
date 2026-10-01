@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -167,6 +168,8 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 		)
 	}
 
+	warnings = append(warnings, v.poolWarnings(ctx, newWRT)...)
+
 	// API-dependent checks (RESTMapper scope + SubjectAccessReview)
 	apiWarnings, apiErrs := v.validateWithAPI(ctx, newWRT, verb)
 	warnings = append(warnings, apiWarnings...)
@@ -181,6 +184,23 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	}
 
 	return warnings, nil
+}
+
+// poolWarnings warns when the WRT's pool is not declared by its WorkerDeployment. It is
+// not an error, since the pool may be added to the WorkerDeployment after the WRT.
+func (v *WorkerResourceTemplateValidator) poolWarnings(ctx context.Context, wrt *WorkerResourceTemplate) admission.Warnings {
+	if v.Client == nil {
+		return nil
+	}
+	var wd WorkerDeployment
+	key := types.NamespacedName{Namespace: wrt.Namespace, Name: wrt.Spec.EffectiveWorkerDeploymentName()}
+	if err := v.Client.Get(ctx, key, &wd); err != nil || wd.Spec.HasPool(wrt.Spec.EffectivePool()) {
+		return nil
+	}
+	if wrt.Spec.Pool == "" {
+		return admission.Warnings{fmt.Sprintf("WorkerDeployment %q uses pools; set spec.pool", wd.Name)}
+	}
+	return admission.Warnings{fmt.Sprintf("spec.pool %q is not declared by WorkerDeployment %q", wrt.Spec.Pool, wd.Name)}
 }
 
 // validateWorkerResourceTemplateSpec performs pure (no-API) validation of the spec fields.

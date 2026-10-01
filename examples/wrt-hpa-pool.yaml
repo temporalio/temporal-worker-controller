@@ -1,0 +1,38 @@
+# WorkerResourceTemplate — HPA for one worker pool
+#
+# This example autoscales only the "parse" pool of the "documents" WorkerDeployment
+# from examples/worker-pools.yaml. The controller creates one HPA per version, each
+# targeting that version's parse Deployment. spec.pool is required for a WorkerDeployment
+# with pools.
+#
+# Apply:
+#   kubectl apply -f examples/worker-pools.yaml
+#   kubectl apply -f examples/wrt-hpa-pool.yaml
+#
+# Verify:
+#   kubectl get hpa   # one HPA per version, scaleTargetRef is the parse Deployment
+#
+# See docs/worker-pools.md and docs/worker-resource-templates.md.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: documents-parse-hpa
+spec:
+  workerDeploymentRef:
+    name: documents
+  pool: parse
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      scaleTargetRef: {}
+      # Keep at least one replica: a pool at zero never becomes healthy, which blocks rollouts.
+      minReplicas: 1
+      maxReplicas: 20
+      metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 70

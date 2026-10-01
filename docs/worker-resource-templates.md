@@ -27,7 +27,7 @@ The controller auto-injects two fields when you set them to `{}` (empty object) 
 | Field | Scope | Injected value                                                                                                              |
 |-------|-------|-----------------------------------------------------------------------------------------------------------------------------|
 | `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
-| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`                                                  |
+| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`, plus `temporal.io/worker-pool: <pool>` for versions with worker pools |
 | `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{temporal_worker_deployment_name: <ns>_<wd-name>, temporal_worker_build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
 
 `scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
@@ -39,6 +39,21 @@ The controller auto-injects two fields when you set them to `{}` (empty object) 
 For metrics backends that use Temporal Server's native label names, set the Helm value `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix: true` (or run the controller with `--wrt-hpa-match-labels-strip-temporal-prefix`). The controller will inject `worker_deployment_name`, `worker_build_id`, and `namespace` instead.
 
 The webhook rejects any template that hardcodes `temporal_worker_deployment_name`, `temporal_worker_build_id`, or `temporal_namespace` in a metric selector — these are always controller-owned. When prefix stripping is enabled, it also rejects `worker_deployment_name`, `worker_build_id`, and `namespace`.
+
+## Worker pools
+
+A `WorkerResourceTemplate` targets one [worker pool](worker-pools.md). Set `spec.pool` to the pool's name; it is required when the `WorkerDeployment` uses pools. The controller renders one copy per version that has that pool, pointing at that pool's Deployment:
+
+```yaml
+spec:
+  workerDeploymentRef:
+    name: documents
+  pool: parse
+```
+
+Create one `WorkerResourceTemplate` per pool you want to autoscale. If no version has the pool and the `WorkerDeployment` does not declare it, or `spec.pool` is missing on a `WorkerDeployment` with pools, the `Ready` condition is `False` with reason `PoolNotFound`. The webhook warns about both.
+
+Backlog metrics are tagged with the deployment name and Build ID, not the pool. Add `task_queue` to `matchLabels` so each pool scales on its own queue.
 
 ## Resource naming
 

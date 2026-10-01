@@ -52,19 +52,16 @@ const (
 // prefix is truncated. The buildID is therefore always uniquely represented via the hash,
 // regardless of how long wdName or wrtName are.
 func ComputeWorkerResourceTemplateName(wdName, wrtName, buildID string) string {
-	// Hash the full triple first, before any truncation.
-	h := sha256.Sum256([]byte(wdName + wrtName + buildID))
-	hashSuffix := hex.EncodeToString(h[:workerResourceTemplateHashLen/2]) // 4 bytes → 8 hex chars
+	return hashSuffixedName(wdName+wrtName+buildID, wdName+ResourceNameSeparator+wrtName+ResourceNameSeparator+buildID)
+}
 
-	// Build the human-readable prefix and truncate so the total fits in maxLen.
-	// suffixLen = len("-") + workerResourceTemplateHashLen
-	const suffixLen = 1 + workerResourceTemplateHashLen
-	raw := CleanStringForDNS(wdName + ResourceNameSeparator + wrtName + ResourceNameSeparator + buildID)
-	prefix := TruncateString(raw, workerResourceTemplateMaxNameLen-suffixLen)
+// hashSuffixedName returns readable, made DNS-safe and cut to fit in 47 characters,
+// followed by an 8-hex hash of hashInput taken before any truncation.
+func hashSuffixedName(hashInput, readable string) string {
+	suffix := ResourceNameSeparator + HashString(hashInput)[:workerResourceTemplateHashLen]
+	prefix := TruncateString(CleanStringForDNS(readable), workerResourceTemplateMaxNameLen-len(suffix))
 	// Trim any trailing separator that results from truncating mid-segment.
-	prefix = strings.TrimRight(prefix, ResourceNameSeparator)
-
-	return prefix + ResourceNameSeparator + hashSuffix
+	return strings.TrimRight(prefix, ResourceNameSeparator) + suffix
 }
 
 // RenderWorkerResourceTemplate produces the Unstructured object to apply via SSA for a given
@@ -94,6 +91,11 @@ func RenderWorkerResourceTemplate(
 	serverWDName := computeWorkerDeploymentName(wrt.Namespace, wdName)
 
 	selectorLabels := ComputeSelectorLabels(wdName, buildID)
+	if deployment.Spec.Selector != nil {
+		if pool, ok := deployment.Spec.Selector.MatchLabels[PoolLabel]; ok {
+			selectorLabels = ComputePoolSelectorLabels(wdName, buildID, pool)
+		}
+	}
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
 	// that is present in the template. These identify the exact per-version Prometheus series.

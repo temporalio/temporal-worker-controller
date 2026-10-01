@@ -194,6 +194,24 @@ func TestWorkerDeployment_DeprecatedFieldEmitsWarning(t *testing.T) {
 	assert.Contains(t, warns[0], "spec.replicas is deprecated; use spec.deployment.replicas instead")
 }
 
+func TestWorkerDeployment_PoolSelectorEmitsWarning(t *testing.T) {
+	ctx := context.Background()
+	dep := testhelpers.MakeWDWithName("valid-worker", "")
+	dep.Spec.Pools = []temporaliov1alpha1.WorkerPool{
+		{Name: "plain", Deployment: *dep.Spec.Deployment.DeepCopy()},
+		{Name: "selected", Deployment: *dep.Spec.Deployment.DeepCopy()},
+	}
+	dep.Spec.Deployment = nil
+	dep.Spec.Pools[1].Deployment.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "worker"}}
+
+	webhook := &temporaliov1alpha1.WorkerDeployment{}
+	warns, err := webhook.ValidateCreate(ctx, dep)
+
+	require.NoError(t, err)
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "spec.pools[1].deployment.selector is ignored")
+}
+
 func TestWorkerDeployment_ValidateUpdate(t *testing.T) {
 	tests := map[string]struct {
 		oldObj   runtime.Object

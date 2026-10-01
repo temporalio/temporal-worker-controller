@@ -123,13 +123,13 @@ sequenceDiagram
 
 ### WorkerDeployment (Custom Resource)
 - **Purpose**: High-level configuration for a worker deployment across all versions
-- **Manages**: Multiple Kubernetes `Deployment` resources (one per version)
+- **Manages**: Multiple Kubernetes `Deployment` resources (one per version, or one per [worker pool](worker-pools.md) per version)
 - **Lifecycle**: Long-lived, persists across worker version changes
 
 ### Kubernetes Deployment (Managed by Controller)
-- **Purpose**: Runs pods for a specific worker deployment version
-- **Naming**: `{worker-deployment-name}-{build-id}`
-- **Lifecycle**: Created when new version deployed, deleted when version drained
+- **Purpose**: Runs pods for a specific worker deployment version, or for one worker pool of that version
+- **Naming**: `{worker-deployment-name}-{build-id}`; with worker pools, `{worker-deployment-name}-{pool}-{build-id}-{hash}`
+- **Lifecycle**: Created when new version deployed, deleted when version drained. All pools of a version are deleted together
 
 ### Connection (Custom Resource)
 - **Purpose**: Connection configuration to Temporal server(s)

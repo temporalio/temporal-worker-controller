@@ -42,6 +42,9 @@ How the controller gets permission to manage a Worker Deployment, how a human cl
 ### [Scaling Recommendations](scaling-recommendations.md)
 Practical reactivity and reliability tradeoffs between HPA + prometheus-adapter and KEDA when scaling Temporal workers per worker-deployment-version. Covers steady-state reactivity (~3:15 via the metric path), task-queue unloading, scale-from-zero limits, and when to pick which tool.
 
+### [Worker Pools](worker-pools.md)
+How to run several worker pools, each with its own pod template and scaling, in one `WorkerDeployment` so they share one Worker Deployment Version and roll out together.
+
 ### [WorkerResourceTemplate](worker-resource-templates.md)
 How to attach HPAs, PodDisruptionBudgets, and other Kubernetes resources to each active versioned Deployment. Covers the auto-injection model, RBAC setup, webhook TLS, and examples.
 

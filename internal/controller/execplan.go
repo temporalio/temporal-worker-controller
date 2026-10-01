@@ -46,19 +46,19 @@ import (
 // the next reconcile. Rendered-resource delete failures are logged rather than returned as
 // errors, so the returned slice can be partial even when the error is nil.
 func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) ([]planner.WorkerResourceRef, error) {
-	// Create deployment
-	if p.CreateDeployment != nil {
-		l.Info("creating deployment", "deployment", p.CreateDeployment.Name)
-		if err := r.Create(ctx, p.CreateDeployment); err != nil {
-			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment.Name)
+	// Create deployments
+	for _, d := range p.CreateDeployments {
+		l.Info("creating deployment", "deployment", d.Name)
+		if err := r.Create(ctx, d); err != nil {
+			l.Error(err, "unable to create deployment", "deployment", d.Name)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentCreateFailed,
-				"Failed to create Deployment %q: %v", p.CreateDeployment.Name, err)
+				"Failed to create Deployment %q: %v", d.Name, err)
 			return nil, err
 		}
 	}
 
 	// Delete deployments
-	for _, d := range p.DeleteDeployments {
+	for _, d := range slices.Concat(p.DeleteDeployments, p.DeletePoolDeployments) {
 		l.Info("deleting deployment", "deployment", d.Name)
 		if err := r.Delete(ctx, d); err != nil {
 			l.Error(err, "unable to delete deployment", "deployment", d.Name)
@@ -132,7 +132,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 	// Update deployments
 	for _, d := range p.UpdateDeployments {
 		// No point in updating a deleted Deployment...
-		if containsDeployment(d, p.DeleteDeployments) {
+		if containsDeployment(d, p.DeleteDeployments) || containsDeployment(d, p.DeletePoolDeployments) {
 			continue
 		}
 		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
@@ -155,14 +155,26 @@ func buildIDForDeployment(workerDeploy *temporaliov1alpha1.WorkerDeployment, dep
 			versionDeployment.Name == deployment.Name
 	}
 
-	if matches(workerDeploy.Status.TargetVersion.Deployment) {
+	matchesVersion := func(v temporaliov1alpha1.BaseWorkerDeploymentVersion) bool {
+		if matches(v.Deployment) {
+			return true
+		}
+		for _, pool := range v.Pools {
+			if matches(pool.Deployment) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if matchesVersion(workerDeploy.Status.TargetVersion.BaseWorkerDeploymentVersion) {
 		return workerDeploy.Status.TargetVersion.BuildID
 	}
-	if workerDeploy.Status.CurrentVersion != nil && matches(workerDeploy.Status.CurrentVersion.Deployment) {
+	if workerDeploy.Status.CurrentVersion != nil && matchesVersion(workerDeploy.Status.CurrentVersion.BaseWorkerDeploymentVersion) {
 		return workerDeploy.Status.CurrentVersion.BuildID
 	}
 	for _, version := range workerDeploy.Status.DeprecatedVersions {
-		if version != nil && matches(version.Deployment) {
+		if version != nil && matchesVersion(version.BaseWorkerDeploymentVersion) {
 			return version.BuildID
 		}
 	}
@@ -566,6 +578,19 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	for key := range deletedBuildIDs {
 		statusKeys[key] = struct{}{}
 	}
+	// WRTs with a missing or recovered pool get no applies, so nothing else rewrites their Ready condition.
+	missingPool := make(map[wrtKey]bool, len(p.WRTsWithMissingPool))
+	for _, name := range p.WRTsWithMissingPool {
+		key := wrtKey{workerDeploy.Namespace, name}
+		missingPool[key] = true
+		statusKeys[key] = struct{}{}
+	}
+	stalePool := make(map[wrtKey]bool, len(p.WRTsWithStalePoolNotFound))
+	for _, name := range p.WRTsWithStalePoolNotFound {
+		key := wrtKey{workerDeploy.Namespace, name}
+		stalePool[key] = true
+		statusKeys[key] = struct{}{}
+	}
 
 	var applyErrs, statusErrs []error
 	for key := range statusKeys {
@@ -579,13 +604,16 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				break
 			}
 		}
-		if allSkipped && len(deleted) == 0 {
+		onlyPoolCheck := allSkipped && len(deleted) == 0
+		if onlyPoolCheck && !missingPool[key] && !stalePool[key] {
 			continue
 		}
 
 		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
-			statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
+			if client.IgnoreNotFound(err) != nil {
+				statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
+			}
 			continue
 		}
 
@@ -647,7 +675,15 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		condStatus := metav1.ConditionTrue
 		condReason := temporaliov1alpha1.ReasonWRTAllVersionsApplied
 		condMessage := ""
-		if anyFailed {
+		switch {
+		case missingPool[key]:
+			condStatus = metav1.ConditionFalse
+			condReason = temporaliov1alpha1.ReasonWRTPoolNotFound
+			condMessage = fmt.Sprintf("WorkerDeployment %q has no pool %q", workerDeploy.Name, wrt.Spec.Pool)
+			if wrt.Spec.Pool == "" {
+				condMessage = fmt.Sprintf("WorkerDeployment %q uses pools; set spec.pool", workerDeploy.Name)
+			}
+		case anyFailed:
 			condStatus = metav1.ConditionFalse
 			condReason = temporaliov1alpha1.ReasonWRTApplyFailed
 			// Use the first apply error as the condition message; full per-version details
@@ -659,13 +695,21 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				}
 			}
 		}
-		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionReady,
-			Status:             condStatus,
-			Reason:             condReason,
-			Message:            condMessage,
-			ObservedGeneration: wrt.Generation,
-		})
+		var condChanged bool
+		if stalePool[key] && len(results) == 0 {
+			condChanged = apimeta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionReady)
+		} else {
+			condChanged = apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+				Type:               temporaliov1alpha1.ConditionReady,
+				Status:             condStatus,
+				Reason:             condReason,
+				Message:            condMessage,
+				ObservedGeneration: wrt.Generation,
+			})
+		}
+		if onlyPoolCheck && !condChanged {
+			continue
+		}
 
 		// Sort the versions by BuildID for deterministic status output.
 		slices.SortFunc(versions, func(a, b temporaliov1alpha1.WorkerResourceTemplateVersionStatus) int {
@@ -721,7 +765,9 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	p *plan,
 ) {
 	identity := getControllerIdentity()
-	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
+	// A version's pool Deployments are pruned together, after one DeleteVersion call.
+	var buildIDs []string
+	deploymentsByBuildID := make(map[string][]*appsv1.Deployment)
 	for _, d := range p.DeleteDeployments {
 		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
 		if !ok {
@@ -732,8 +778,17 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			l.Info("deployment has no build ID label, leaving the k8s Deployment alone", "deployment", d.Name)
 			continue
 		}
+		if _, seen := deploymentsByBuildID[buildID]; !seen {
+			buildIDs = append(buildIDs, buildID)
+		}
+		deploymentsByBuildID[buildID] = append(deploymentsByBuildID[buildID], d)
+	}
+
+	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
+	for _, buildID := range buildIDs {
+		deployments := deploymentsByBuildID[buildID]
 		if isVersionNotRegistered(workerDeploy, buildID) {
-			markedForDeletion = append(markedForDeletion, d)
+			markedForDeletion = append(markedForDeletion, deployments...)
 			continue
 		}
 		backoffKey := k8s.ComputeWorkerDeploymentName(workerDeploy) + "/" + buildID
@@ -763,8 +818,8 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 		if err != nil {
 			var notFound *serviceerror.NotFound
 			if !errors.As(err, &notFound) {
-				l.Info("could not delete worker deployment version, keeping its k8s Deployment to reconcile",
-					"buildID", buildID, "deployment", d.Name, "error", err)
+				l.Info("could not delete worker deployment version, keeping its k8s Deployments to reconcile",
+					"buildID", buildID, "error", err)
 				r.noteVersionDeleteFailure(backoffKey)
 				continue
 			}
@@ -773,7 +828,7 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 			l.Info("deleted deprecated worker deployment version", "buildID", buildID)
 		}
 		r.noteVersionDeleteSuccess(backoffKey)
-		markedForDeletion = append(markedForDeletion, d)
+		markedForDeletion = append(markedForDeletion, deployments...)
 	}
 	p.DeleteDeployments = markedForDeletion
 }

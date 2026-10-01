@@ -317,7 +317,7 @@ func createWorkerDeployment(
 	twd *temporaliov1alpha1.WorkerDeployment,
 	buildId string,
 ) {
-	dep, err := k8s.NewDeploymentWithControllerRef(twd, buildId, env.Connection.Spec, env.Mgr.GetScheme())
+	dep, err := k8s.NewPoolDeploymentWithControllerRef(twd, buildId, temporaliov1alpha1.DefaultPoolName, env.Connection.Spec, env.Mgr.GetScheme())
 	if err != nil {
 		t.Fatalf("error creating Deployment spec: %v", err.Error())
 	}
