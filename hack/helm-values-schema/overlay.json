@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "required": [],
+  "properties": {
+    "image": {
+      "properties": {
+        "pullPolicy": {
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "pullSecrets": {
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the secret containing registry credentials"
+              }
+            }
+          }
+        }
+      }
+    },
+    "resources": {
+      "properties": {
+        "limits": {
+          "properties": {
+            "cpu": {
+              "pattern": "^[0-9]+(\\.[0-9]+)?([m]?)$"
+            },
+            "memory": {
+              "pattern": "^[0-9]+([kKmMgGtTpP]i?)?$"
+            }
+          }
+        },
+        "requests": {
+          "properties": {
+            "cpu": {
+              "pattern": "^[0-9]+(\\.[0-9]+)?([m]?)$"
+            },
+            "memory": {
+              "pattern": "^[0-9]+([kKmMgGtTpP]i?)?$"
+            }
+          }
+        }
+      }
+    },
+    "terminationGracePeriodSeconds": {
+      "minimum": 1
+    },
+    "metrics": {
+      "properties": {
+        "port": {
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "webhook": {
+      "properties": {
+        "port": {
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "extraEnv": {
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Environment variable name"
+          },
+          "value": {
+            "type": "string",
+            "description": "Literal environment variable value"
+          },
+          "valueFrom": {
+            "type": "object",
+            "description": "Kubernetes EnvVarSource, such as secretKeyRef or configMapKeyRef"
+          }
+        }
+      }
+    },
+    "extraVolumes": {
+      "items": {
+        "type": "object"
+      }
+    },
+    "extraVolumeMounts": {
+      "items": {
+        "type": "object"
+      }
+    },
+    "kubeRBACProxy": {
+      "properties": {
+        "image": {
+          "properties": {
+            "pullPolicy": {
+              "enum": ["Always", "IfNotPresent", "Never"]
+            }
+          }
+        },
+        "extraArgs": {
+          "items": {
+            "type": "string"
+          }
+        },
+        "volumeMounts": {
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}
