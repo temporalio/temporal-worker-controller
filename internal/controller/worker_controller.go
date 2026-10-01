@@ -794,16 +794,17 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy, //nolint:staticcheck // backward compat
 		"Connection is healthy and auth secret is resolved")
 
-	// A blocked spec owns Progressing, so the rollout state below must not flip it back
-	// and forth every reconcile.
-	if blockedReason != "" &&
-		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason) {
-		r.Recorder.Event(twd, corev1.EventTypeWarning, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
-	}
-	setProgressing := func(status metav1.ConditionStatus, reason, message string) {
-		if blockedReason == "" {
-			r.setCondition(twd, temporaliov1alpha1.ConditionProgressing, status, reason, message)
+	// A blocked spec owns Ready and Progressing, so the rollout state below must not flip
+	// them back and forth every reconcile.
+	if blockedReason != "" {
+		readyChanged := r.setCondition(twd, temporaliov1alpha1.ConditionReady,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
+		progressingChanged := r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
+		if readyChanged || progressingChanged {
+			r.Recorder.Event(twd, corev1.EventTypeWarning, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
 		}
+		return
 	}
 
 	switch twd.Status.TargetVersion.Status {
@@ -816,9 +817,7 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
 
-		if blockedReason == "" {
-			r.setConditionProgressingForCurrent(twd, temporalState)
-		}
+		r.setConditionProgressingForCurrent(twd, temporalState)
 
 		// Deprecated: set RolloutComplete=True for v1.3.x compat. This deliberately
 		// mirrors rollout completion only, not poller presence, matching its
@@ -831,7 +830,7 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping,
 			fmt.Sprintf("Target version %s is ramping", twd.Status.TargetVersion.BuildID))
-		setProgressing(
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping,
 			fmt.Sprintf("Target version %s is receiving a percentage of new workflows", twd.Status.TargetVersion.BuildID))
 	case temporaliov1alpha1.VersionStatusInactive:
@@ -840,21 +839,21 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 				twd.Status.TargetVersion.BuildID, strings.Join(pending, ", "))
 			r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 				metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers, msg)
-			setProgressing(
+			r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
 				metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers, msg)
 			break
 		}
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion,
 			fmt.Sprintf("Target version %s is registered but not yet promoted", twd.Status.TargetVersion.BuildID))
-		setProgressing(
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion,
 			fmt.Sprintf("Target version %s is waiting for promotion to current", twd.Status.TargetVersion.BuildID))
 	default: // NotRegistered or unset: workers have not started polling yet
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers,
 			fmt.Sprintf("Target version %s is not yet registered with Temporal", twd.Status.TargetVersion.BuildID))
-		setProgressing(
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers,
 			fmt.Sprintf("Waiting for workers with buildID %s to start polling", twd.Status.TargetVersion.BuildID))
 	}

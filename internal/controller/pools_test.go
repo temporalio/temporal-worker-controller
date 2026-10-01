@@ -217,3 +217,22 @@ func TestReconcile_BlockedPools_StatusAndEventsSettle(t *testing.T) {
 	assert.Zero(t, writes, "a blocked WorkerDeployment must not rewrite its status every reconcile")
 	assert.Empty(t, events)
 }
+
+func TestSyncConditions_BlockedSpecIsNotReady(t *testing.T) {
+	r, _ := newTestReconciler(nil)
+	for _, status := range []temporaliov1alpha1.VersionStatus{temporaliov1alpha1.VersionStatusCurrent, temporaliov1alpha1.VersionStatusInactive} {
+		t.Run(string(status), func(t *testing.T) {
+			twd := makePooledWD("test-worker", "default", "activities")
+			twd.Status.TargetVersion.Status = status
+
+			r.syncConditions(twd, nil, "adding pools requires a new unsafeCustomBuildID")
+
+			for _, condType := range []string{temporaliov1alpha1.ConditionReady, temporaliov1alpha1.ConditionProgressing} {
+				cond := meta.FindStatusCondition(twd.Status.Conditions, condType)
+				require.NotNil(t, cond, condType)
+				assert.Equal(t, metav1.ConditionFalse, cond.Status, condType)
+				assert.Equal(t, temporaliov1alpha1.ReasonInvalidSpec, cond.Reason, condType)
+			}
+		})
+	}
+}
