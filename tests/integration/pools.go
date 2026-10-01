@@ -246,6 +246,29 @@ func (s *poolScenario) assertSunsetTogether(ctx context.Context, v *poolVersion,
 	})
 }
 
+// cleanup deletes the scenario's objects and waits for them to be gone, so later tests on
+// the same server and namespace start clean.
+func (s *poolScenario) cleanup(ctx context.Context, objs ...client.Object) {
+	s.t.Helper()
+	for _, obj := range objs {
+		if err := s.k8sClient.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+			s.t.Errorf("failed to delete %s: %v", obj.GetName(), err)
+		}
+	}
+	eventually(s.t, 90*time.Second, time.Second, func() error {
+		for _, obj := range objs {
+			err := s.k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj.DeepCopyObject().(client.Object))
+			if err == nil {
+				return fmt.Errorf("%s still exists", obj.GetName())
+			}
+			if client.IgnoreNotFound(err) != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
 	ctx := context.Background()
 	s := &poolScenario{t: t, k8sClient: k8sClient, ts: ts, namespace: namespace, name: "pools"}
@@ -264,6 +287,8 @@ func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *tempora
 			t.Fatal(err)
 		}
 	}
+	// Deferred first so it runs after every worker is stopped.
+	defer s.cleanup(ctx, twd, wrt, connection)
 
 	t.Log("Every pool of v1 gets its own Deployment with a pool selector")
 	v1 := s.waitForVersionDeployments(ctx, k8s.ComputeBuildID(twd))
