@@ -169,10 +169,13 @@ func poolTemplate(image string) corev1.PodTemplateSpec {
 }
 
 // pooledSpec returns a spec with a default pool and the named pools, each running image.
+// pooledSpec returns a spec with the given pools, or a single deployment when there are none.
 func pooledSpec(t *testing.T, image string, replicas map[string]*int32, pools ...string) *temporaliov1alpha1.WorkerDeploymentSpec {
 	t.Helper()
 	spec := sunsetSpec(t)
-	spec.Deployment = &appsv1.DeploymentSpec{Replicas: replicas[temporaliov1alpha1.DefaultPoolName], Template: poolTemplate(image)}
+	if len(pools) == 0 {
+		spec.Deployment = &appsv1.DeploymentSpec{Replicas: replicas[temporaliov1alpha1.DefaultPoolName], Template: poolTemplate(image)}
+	}
 	for _, name := range pools {
 		spec.Pools = append(spec.Pools, temporaliov1alpha1.WorkerPool{
 			Name:       name,
@@ -180,14 +183,6 @@ func pooledSpec(t *testing.T, image string, replicas map[string]*int32, pools ..
 		})
 	}
 	return spec
-}
-
-func labelledPoolDeployment(buildID, pool string, replicas int32) *appsv1.Deployment {
-	d := poolDeployment(buildID, pool, replicas)
-	if pool == "" {
-		d.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
-	}
-	return d
 }
 
 func targetStatus(buildID string) *temporaliov1alpha1.WorkerDeploymentStatus {
@@ -206,17 +201,16 @@ func TestGetCreateDeploymentPools(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		state        *k8s.DeploymentState
-		status       *temporaliov1alpha1.WorkerDeploymentStatus
-		spec         *temporaliov1alpha1.WorkerDeploymentSpec
-		maxVersions  int32
-		wantPools    []string
-		wantLabelled bool
-		wantBlocked  bool
+		name        string
+		state       *k8s.DeploymentState
+		status      *temporaliov1alpha1.WorkerDeploymentStatus
+		spec        *temporaliov1alpha1.WorkerDeploymentSpec
+		maxVersions int32
+		wantPools   []string
+		wantBlocked bool
 	}{
 		{
-			name:        "new single-pool version",
+			name:        "new version without pools",
 			state:       k8s.NewDeploymentState(),
 			status:      targetStatus("new"),
 			spec:        pooledSpec(t, "worker:v1", nil),
@@ -224,13 +218,12 @@ func TestGetCreateDeploymentPools(t *testing.T) {
 			wantPools:   []string{temporaliov1alpha1.DefaultPoolName},
 		},
 		{
-			name:         "new multi-pool version creates every pool, labelled",
-			state:        k8s.NewDeploymentState(),
-			status:       targetStatus("new"),
-			spec:         pooledSpec(t, "worker:v1", nil, "batch", "activities"),
-			maxVersions:  75,
-			wantPools:    []string{temporaliov1alpha1.DefaultPoolName, "activities", "batch"},
-			wantLabelled: true,
+			name:        "new version creates every pool",
+			state:       k8s.NewDeploymentState(),
+			status:      targetStatus("new"),
+			spec:        pooledSpec(t, "worker:v1", nil, "batch", "activities"),
+			maxVersions: 75,
+			wantPools:   []string{"activities", "batch"},
 		},
 		{
 			name:        "new version is held back at the version cap",
@@ -240,45 +233,41 @@ func TestGetCreateDeploymentPools(t *testing.T) {
 			maxVersions: 1,
 		},
 		{
-			name:         "pool added to an existing multi-pool version ignores the version cap",
-			state:        k8s.NewDeploymentState(labelledPoolDeployment("new", "", 1), labelledPoolDeployment("new", "activities", 1)),
-			status:       cappedStatus(),
-			spec:         pooledSpec(t, "worker:v1", nil, "activities", "batch"),
-			maxVersions:  1,
-			wantPools:    []string{"batch"},
-			wantLabelled: true,
-		},
-		{
-			name:         "missing default pool is recreated labelled",
-			state:        k8s.NewDeploymentState(labelledPoolDeployment("new", "activities", 1)),
-			status:       targetStatus("new"),
-			spec:         pooledSpec(t, "worker:v1", nil, "activities"),
-			maxVersions:  75,
-			wantPools:    []string{temporaliov1alpha1.DefaultPoolName},
-			wantLabelled: true,
+			name:        "pool added to an existing version ignores the version cap",
+			state:       k8s.NewDeploymentState(poolDeployment("new", "workflows", 1), poolDeployment("new", "activities", 1)),
+			status:      cappedStatus(),
+			spec:        pooledSpec(t, "worker:v1", nil, "workflows", "activities", "batch"),
+			maxVersions: 1,
+			wantPools:   []string{"batch"},
 		},
 		{
 			name:        "complete version creates nothing",
-			state:       k8s.NewDeploymentState(labelledPoolDeployment("new", "", 1), labelledPoolDeployment("new", "activities", 1)),
+			state:       k8s.NewDeploymentState(poolDeployment("new", "workflows", 1), poolDeployment("new", "activities", 1)),
 			status:      targetStatus("new"),
-			spec:        pooledSpec(t, "worker:v1", nil, "activities"),
+			spec:        pooledSpec(t, "worker:v1", nil, "workflows", "activities"),
 			maxVersions: 75,
-			wantPools:   nil,
 		},
 		{
-			name:        "pools added to an unlabelled version are blocked",
+			name:        "pools added to a version without pools are blocked",
 			state:       k8s.NewDeploymentState(poolDeployment("new", "", 1)),
 			status:      targetStatus("new"),
 			spec:        pooledSpec(t, "worker:v1", nil, "activities"),
 			maxVersions: 75,
 			wantBlocked: true,
 		},
+		{
+			name:        "pools removed from a version with pools are blocked",
+			state:       k8s.NewDeploymentState(poolDeployment("new", "workflows", 1)),
+			status:      targetStatus("new"),
+			spec:        pooledSpec(t, "worker:v1", nil),
+			maxVersions: 75,
+			wantBlocked: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pools, labelDefault, blockedReason := getCreateDeploymentPools(tt.state, tt.status, tt.spec, tt.maxVersions)
+			pools, blockedReason := getCreateDeploymentPools(tt.state, tt.status, tt.spec, tt.maxVersions)
 			assert.Equal(t, tt.wantPools, pools)
-			assert.Equal(t, tt.wantLabelled, labelDefault)
 			assert.Equal(t, tt.wantBlocked, blockedReason != "")
 		})
 	}
@@ -287,17 +276,19 @@ func TestGetCreateDeploymentPools(t *testing.T) {
 func TestGetDeletePoolDeployments(t *testing.T) {
 	t.Run("pools removed from the spec are deleted from the target version", func(t *testing.T) {
 		state := k8s.NewDeploymentState(
-			labelledPoolDeployment("v1", "", 1),
-			labelledPoolDeployment("v1", "activities", 1),
-			labelledPoolDeployment("v1", "batch", 1),
-			labelledPoolDeployment("old", "batch", 1),
+			poolDeployment("v1", "workflows", 1),
+			poolDeployment("v1", "activities", 1),
+			poolDeployment("v1", "batch", 1),
+			poolDeployment("old", "batch", 1),
 		)
-		assert.Equal(t, []string{"wd-v1-batch"}, names(getDeletePoolDeployments(state, targetStatus("v1"), pooledSpec(t, "worker:v1", nil, "activities"))))
+		assert.Equal(t, []string{"wd-v1-batch"}, names(getDeletePoolDeployments(state, targetStatus("v1"), pooledSpec(t, "worker:v1", nil, "workflows", "activities"))))
 	})
 
-	t.Run("removing every pool keeps the default pool", func(t *testing.T) {
-		state := k8s.NewDeploymentState(labelledPoolDeployment("v1", "", 1), labelledPoolDeployment("v1", "activities", 1))
-		assert.Equal(t, []string{"wd-v1-activities"}, names(getDeletePoolDeployments(state, targetStatus("v1"), pooledSpec(t, "worker:v1", nil))))
+	t.Run("switching between pools and no pools under one build deletes nothing", func(t *testing.T) {
+		pooled := k8s.NewDeploymentState(poolDeployment("v1", "workflows", 1), poolDeployment("v1", "activities", 1))
+		assert.Empty(t, getDeletePoolDeployments(pooled, targetStatus("v1"), pooledSpec(t, "worker:v1", nil)))
+		single := k8s.NewDeploymentState(poolDeployment("v1", "", 1))
+		assert.Empty(t, getDeletePoolDeployments(single, targetStatus("v1"), pooledSpec(t, "worker:v1", nil, "activities")))
 	})
 
 	t.Run("single-pool version is left alone", func(t *testing.T) {
@@ -307,39 +298,36 @@ func TestGetDeletePoolDeployments(t *testing.T) {
 }
 
 func TestGetScaleDeployments_CurrentAndTargetPools(t *testing.T) {
-	replicas := map[string]*int32{temporaliov1alpha1.DefaultPoolName: int32Ptr(2), "activities": int32Ptr(4)}
+	replicas := map[string]*int32{"workflows": int32Ptr(2), "activities": int32Ptr(4)}
 
 	t.Run("current version scales each pool to its own replicas", func(t *testing.T) {
 		state := k8s.NewDeploymentState(
-			labelledPoolDeployment("v1", "", 1),
-			labelledPoolDeployment("v1", "activities", 1),
-			labelledPoolDeployment("v1", "retired", 1),
+			poolDeployment("v1", "workflows", 1),
+			poolDeployment("v1", "activities", 1),
+			poolDeployment("v1", "retired", 1),
 		)
 		status := targetStatus("v1")
-		status.TargetVersion.Deployment = &corev1.ObjectReference{Name: "wd-v1"}
 		status.CurrentVersion = &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: status.TargetVersion.BaseWorkerDeploymentVersion}
 
-		assert.Equal(t, map[string]uint32{"wd-v1": 2, "wd-v1-activities": 4},
-			scaleNames(getScaleDeployments(logr.Discard(), state, status, pooledSpec(t, "worker:v1", replicas, "activities"))),
+		assert.Equal(t, map[string]uint32{"wd-v1-workflows": 2, "wd-v1-activities": 4},
+			scaleNames(getScaleDeployments(logr.Discard(), state, status, pooledSpec(t, "worker:v1", replicas, "workflows", "activities"))),
 			"a pool no longer in the spec is left alone")
 	})
 
 	t.Run("target pool managed by a scaler is scaled up from zero", func(t *testing.T) {
-		state := k8s.NewDeploymentState(labelledPoolDeployment("v2", "", 2), labelledPoolDeployment("v2", "autoscaled", 0))
-		status := targetStatus("v2")
-		status.TargetVersion.Deployment = &corev1.ObjectReference{Name: "wd-v2"}
+		state := k8s.NewDeploymentState(poolDeployment("v2", "workflows", 2), poolDeployment("v2", "autoscaled", 0))
 
 		assert.Equal(t, map[string]uint32{"wd-v2-autoscaled": 1},
-			scaleNames(getScaleDeployments(logr.Discard(), state, status, pooledSpec(t, "worker:v1", replicas, "autoscaled"))))
+			scaleNames(getScaleDeployments(logr.Discard(), state, targetStatus("v2"), pooledSpec(t, "worker:v1", replicas, "workflows", "autoscaled"))))
 	})
 
 	t.Run("draining pool at zero is scaled up to its own replicas", func(t *testing.T) {
-		state := k8s.NewDeploymentState(labelledPoolDeployment("old", "", 0), labelledPoolDeployment("old", "activities", 0))
+		state := k8s.NewDeploymentState(poolDeployment("old", "workflows", 0), poolDeployment("old", "activities", 0))
 		status := targetStatus("new")
-		status.DeprecatedVersions = []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{deprecatedVersion("old", temporaliov1alpha1.VersionStatusDraining, true)}
+		status.DeprecatedVersions = []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{deprecatedVersion("old", temporaliov1alpha1.VersionStatusDraining, false)}
 
-		assert.Equal(t, map[string]uint32{"wd-old": 2, "wd-old-activities": 4},
-			scaleNames(getScaleDeployments(logr.Discard(), state, status, pooledSpec(t, "worker:v1", replicas, "activities"))))
+		assert.Equal(t, map[string]uint32{"wd-old-workflows": 2, "wd-old-activities": 4},
+			scaleNames(getScaleDeployments(logr.Discard(), state, status, pooledSpec(t, "worker:v1", replicas, "workflows", "activities"))))
 	})
 }
 
@@ -353,12 +341,12 @@ func driftPoolDeployment(buildID, pool, image string) *appsv1.Deployment {
 
 func TestGetUpdateDeployments_PodTemplateDriftPerPool(t *testing.T) {
 	state := k8s.NewDeploymentState(
-		driftPoolDeployment("custom", temporaliov1alpha1.DefaultPoolName, "worker:v1"),
+		driftPoolDeployment("custom", "workflows", "worker:v1"),
 		driftPoolDeployment("custom", "activities", "worker:v1"),
 	)
-	spec := pooledSpec(t, "worker:v1", nil, "activities")
+	spec := pooledSpec(t, "worker:v1", nil, "workflows", "activities")
 	spec.WorkerOptions.UnsafeCustomBuildID = "custom"
-	spec.Pools[0].Deployment.Template = poolTemplate("activities:v2")
+	spec.Pools[1].Deployment.Template = poolTemplate("activities:v2")
 
 	updates := getUpdateDeployments(state, targetStatus("custom"), spec, createDefaultConnectionSpec())
 
@@ -370,13 +358,13 @@ func TestGetUpdateDeployments_PodTemplateDriftPerPool(t *testing.T) {
 }
 
 func TestGetUpdateDeployments_StrategyPerPool(t *testing.T) {
-	state := k8s.NewDeploymentState(labelledPoolDeployment("v1", "", 1), labelledPoolDeployment("v1", "activities", 1), labelledPoolDeployment("v1", "retired", 1))
-	spec := pooledSpec(t, "worker:v1", nil, "activities")
-	spec.Pools[0].Deployment.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+	state := k8s.NewDeploymentState(poolDeployment("v1", "workflows", 1), poolDeployment("v1", "activities", 1), poolDeployment("v1", "retired", 1))
+	spec := pooledSpec(t, "worker:v1", nil, "workflows", "activities")
+	spec.Pools[1].Deployment.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 
 	updates := getUpdateDeployments(state, targetStatus("v1"), spec, createDefaultConnectionSpec())
 
-	require.Equal(t, []string{"wd-v1-activities"}, names(updates), "the default pool already matches and a retired pool is left alone")
+	require.Equal(t, []string{"wd-v1-activities"}, names(updates), "workflows already matches and a retired pool is left alone")
 	assert.Equal(t, appsv1.RecreateDeploymentStrategyType, updates[0].Spec.Strategy.Type)
 }
 
@@ -384,7 +372,7 @@ func TestGetTestWorkflows_MultiPoolTargetWaitsForHealth(t *testing.T) {
 	status := targetStatus("v1")
 	status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
 	status.TargetVersion.TaskQueues = []temporaliov1alpha1.TaskQueue{{Name: "orders"}}
-	status.TargetVersion.Pools = []temporaliov1alpha1.WorkerPoolStatus{{Name: temporaliov1alpha1.DefaultPoolName}, {Name: "activities"}}
+	status.TargetVersion.Pools = []temporaliov1alpha1.WorkerPoolStatus{{Name: "workflows"}, {Name: "activities"}}
 	config := &Config{RolloutStrategy: temporaliov1alpha1.RolloutStrategy{Gate: &temporaliov1alpha1.GateWorkflowConfig{WorkflowType: "Gate"}}}
 
 	assert.Empty(t, getTestWorkflows(status, config, "ns/wd", nil, false), "a pool may not be polling yet")
@@ -407,10 +395,10 @@ func renderedScaleTarget(t *testing.T, apply WorkerResourceApply) string {
 
 func TestGetWorkerResourceApplies_Pools(t *testing.T) {
 	state := k8s.NewDeploymentState(
-		labelledPoolDeployment("v1", "", 1),
-		labelledPoolDeployment("v1", "activities", 1),
-		labelledPoolDeployment("v2", "", 1),
-		labelledPoolDeployment("v2", "activities", 1),
+		poolDeployment("v1", "workflows", 1),
+		poolDeployment("v1", "activities", 1),
+		poolDeployment("v2", "workflows", 1),
+		poolDeployment("v2", "activities", 1),
 		poolDeployment("old", "", 1),
 	)
 
@@ -425,7 +413,7 @@ func TestGetWorkerResourceApplies_Pools(t *testing.T) {
 		assert.Equal(t, map[string]string{"v1": "wd-v1-activities", "v2": "wd-v2-activities"}, targets)
 	})
 
-	t.Run("WRT without a pool targets the default pool", func(t *testing.T) {
+	t.Run("WRT without a pool targets only versions without pools", func(t *testing.T) {
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{poolWRT("hpa", "", createTestWRT)}
 		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, false)
 
@@ -433,11 +421,11 @@ func TestGetWorkerResourceApplies_Pools(t *testing.T) {
 		for _, a := range applies {
 			targets[a.BuildID] = renderedScaleTarget(t, a)
 		}
-		assert.Equal(t, map[string]string{"v1": "wd-v1", "v2": "wd-v2", "old": "wd-old"}, targets)
+		assert.Equal(t, map[string]string{"old": "wd-old"}, targets)
 	})
 
 	t.Run("PDB selects only its pool's pods", func(t *testing.T) {
-		activities := labelledPoolDeployment("v1", "activities", 1)
+		activities := poolDeployment("v1", "activities", 1)
 		activities.Spec.Selector = &metav1.LabelSelector{MatchLabels: k8s.ComputePoolSelectorLabels("wd", "v1", "activities")}
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{poolWRT("pdb", "activities", createTestPDBWRT)}
 
@@ -461,9 +449,9 @@ func TestGetWorkerResourceApplies_Pools(t *testing.T) {
 
 func TestGetDeleteWorkerResources_Pools(t *testing.T) {
 	state := k8s.NewDeploymentState(
-		labelledPoolDeployment("v1", "", 1),
-		labelledPoolDeployment("v1", "activities", 1),
-		labelledPoolDeployment("v1", "batch", 1),
+		poolDeployment("v1", "workflows", 1),
+		poolDeployment("v1", "activities", 1),
+		poolDeployment("v1", "batch", 1),
 	)
 	withStatus := func(wrt temporaliov1alpha1.WorkerResourceTemplate, buildIDs ...string) temporaliov1alpha1.WorkerResourceTemplate {
 		for _, b := range buildIDs {
@@ -481,7 +469,7 @@ func TestGetDeleteWorkerResources_Pools(t *testing.T) {
 
 	t.Run("removing one pool deletes only that pool's WRT copies", func(t *testing.T) {
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
-			withStatus(poolWRT("default-hpa", "", createTestWRT), "v1"),
+			withStatus(poolWRT("workflows-hpa", "workflows", createTestWRT), "v1"),
 			withStatus(poolWRT("activities-hpa", "activities", createTestWRT), "v1"),
 			withStatus(poolWRT("batch-hpa", "batch", createTestWRT), "v1"),
 		}
@@ -501,7 +489,7 @@ func TestGetDeleteWorkerResources_Pools(t *testing.T) {
 }
 
 func TestGetWRTPoolProblems(t *testing.T) {
-	state := k8s.NewDeploymentState(labelledPoolDeployment("old", "", 1), labelledPoolDeployment("old", "retired", 1))
+	state := k8s.NewDeploymentState(poolDeployment("old", "workflows", 1), poolDeployment("old", "retired", 1))
 	spec := pooledSpec(t, "worker:v1", nil, "activities")
 	recovered := poolWRT("recovered-hpa", "activities", createTestWRT)
 	recovered.Status.Conditions = []metav1.Condition{{Type: temporaliov1alpha1.ConditionReady, Reason: temporaliov1alpha1.ReasonWRTPoolNotFound}}
@@ -514,7 +502,7 @@ func TestGetWRTPoolProblems(t *testing.T) {
 	}
 
 	missing, stale := getWRTPoolProblems(wrts, state, spec)
-	assert.Equal(t, []string{"ghost-hpa"}, missing)
+	assert.Equal(t, []string{"default-hpa", "ghost-hpa"}, missing, "a WRT without a pool has nothing to target in a pooled WorkerDeployment")
 	assert.Equal(t, []string{"recovered-hpa"}, stale)
 }
 

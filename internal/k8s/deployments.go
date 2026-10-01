@@ -32,8 +32,8 @@ const (
 	BuildIDLabel = "temporal.io/build-id"
 	// WorkerDeploymentNameLabel identifies Deployments managed for a TemporalWorkerDeployment.
 	WorkerDeploymentNameLabel = "temporal.io/deployment-name"
-	// PoolLabel names the worker pool of a Deployment in a multi-pool version.
-	// Deployments without it belong to the default pool.
+	// PoolLabel names the worker pool of a Deployment in a version that uses pools.
+	// Deployments without it belong to a WorkerDeployment without pools.
 	PoolLabel = "temporal.io/worker-pool"
 	// WorkerDeploymentNameSeparator joins the K8s namespace and the WorkerDeployment resource
 	// name to form the Temporal-server-side worker deployment name (namespace/wdName).
@@ -224,10 +224,10 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 		// Fall through to default hash-based generation if buildID is invalid after cleaning
 	}
 
-	depSpec := w.Spec.DeploymentSpec()
 	if w.Spec.HasPools() {
-		return computePoolsBuildID(w.Spec, depSpec)
+		return computePoolsBuildID(w.Spec)
 	}
+	depSpec := w.Spec.DeploymentSpec()
 
 	if img := firstImage(depSpec.Template); img != "" {
 		return imagePrefixedBuildID(img, utils.ComputeHash(&depSpec.Template, nil, true))
@@ -236,22 +236,23 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 }
 
 // computePoolsBuildID hashes every pool's name and pod template, so a change to any
-// pool starts one new version for all of them.
-func computePoolsBuildID(spec temporaliov1alpha1.WorkerDeploymentSpec, defaultSpec appsv1.DeploymentSpec) string {
+// pool starts one new version for all of them. Pools are sorted by name, so their order
+// in the spec doesn't matter.
+func computePoolsBuildID(spec temporaliov1alpha1.WorkerDeploymentSpec) string {
 	type poolTemplate struct {
 		Name     string                 `json:"name"`
 		Template corev1.PodTemplateSpec `json:"template"`
 	}
-	named := slices.Clone(spec.Pools)
-	slices.SortFunc(named, func(a, b temporaliov1alpha1.WorkerPool) int { return strings.Compare(a.Name, b.Name) })
-	pools := []poolTemplate{{Name: temporaliov1alpha1.DefaultPoolName, Template: defaultSpec.Template}}
-	for _, p := range named {
+	sorted := slices.Clone(spec.Pools)
+	slices.SortFunc(sorted, func(a, b temporaliov1alpha1.WorkerPool) int { return strings.Compare(a.Name, b.Name) })
+	pools := make([]poolTemplate, 0, len(sorted))
+	for _, p := range sorted {
 		pools = append(pools, poolTemplate{Name: p.Name, Template: p.Deployment.Template})
 	}
 	data, _ := json.Marshal(pools) // never errors for these types
 	hash := HashString(string(data))[:poolsBuildIDHashLen]
 
-	if img := firstImage(defaultSpec.Template); img != "" {
+	if img := firstImage(sorted[0].Deployment.Template); img != "" {
 		return imagePrefixedBuildID(img, hash)
 	}
 	return hash
@@ -390,12 +391,12 @@ func NewDeploymentWithOwnerRef(
 	connection temporaliov1alpha1.ConnectionSpec,
 ) *appsv1.Deployment {
 	d, _ := NewPoolDeploymentWithOwnerRef(typeMeta, objectMeta, spec, workerDeploymentName, buildID,
-		temporaliov1alpha1.DefaultPoolName, false, connection) // the default pool always exists
+		temporaliov1alpha1.DefaultPoolName, connection) // a spec without pools always has the default pool
 	return d
 }
 
-// NewPoolDeploymentWithOwnerRef creates one worker pool's deployment for a version. Named
-// pools always carry the pool label; labelDefault adds it to the default pool too.
+// NewPoolDeploymentWithOwnerRef creates one worker pool's deployment for a version. Pools
+// carry the pool label in their selector; the default pool of a spec without pools doesn't.
 func NewPoolDeploymentWithOwnerRef(
 	typeMeta *metav1.TypeMeta,
 	objectMeta *metav1.ObjectMeta,
@@ -403,7 +404,6 @@ func NewPoolDeploymentWithOwnerRef(
 	workerDeploymentName string,
 	buildID string,
 	pool string,
-	labelDefault bool,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) (*appsv1.Deployment, error) {
 	depSpec, ok := spec.PoolDeploymentSpec(pool)
@@ -411,11 +411,9 @@ func NewPoolDeploymentWithOwnerRef(
 		return nil, fmt.Errorf("worker pool %q is not in the WorkerDeployment spec", pool)
 	}
 	name := ComputeVersionedDeploymentName(objectMeta.Name, buildID)
-	if pool != temporaliov1alpha1.DefaultPoolName {
-		name = ComputePoolDeploymentName(objectMeta.Name, pool, buildID)
-	}
 	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
-	if pool != temporaliov1alpha1.DefaultPoolName || labelDefault {
+	if spec.HasPools() {
+		name = ComputePoolDeploymentName(objectMeta.Name, pool, buildID)
 		selectorLabels = ComputePoolSelectorLabels(objectMeta.GetName(), buildID, pool)
 	}
 
@@ -641,7 +639,6 @@ func NewPoolDeploymentWithControllerRef(
 	w *temporaliov1alpha1.WorkerDeployment,
 	buildID string,
 	pool string,
-	labelDefault bool,
 	connection temporaliov1alpha1.ConnectionSpec,
 	reconcilerScheme *runtime.Scheme,
 ) (*appsv1.Deployment, error) {
@@ -652,7 +649,6 @@ func NewPoolDeploymentWithControllerRef(
 		ComputeWorkerDeploymentName(w),
 		buildID,
 		pool,
-		labelDefault,
 		connection,
 	)
 	if err != nil {

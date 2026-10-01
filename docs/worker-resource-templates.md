@@ -42,7 +42,7 @@ The webhook rejects any template that hardcodes `temporal_worker_deployment_name
 
 ## Worker pools
 
-A `WorkerResourceTemplate` targets one [worker pool](worker-pools.md). Set `spec.pool` to the pool's name, or omit it to target the default pool (`spec.deployment`). The controller renders one copy per version that has that pool, pointing at that pool's Deployment:
+A `WorkerResourceTemplate` targets one [worker pool](worker-pools.md). Set `spec.pool` to the pool's name; it is required when the `WorkerDeployment` uses pools. The controller renders one copy per version that has that pool, pointing at that pool's Deployment:
 
 ```yaml
 spec:
@@ -51,7 +51,7 @@ spec:
   pool: parse
 ```
 
-Create one `WorkerResourceTemplate` per pool you want to autoscale. If no version has the pool and the `WorkerDeployment` does not declare it, the `Ready` condition is `False` with reason `PoolNotFound`. The webhook also warns when `spec.pool` is not declared by the `WorkerDeployment`.
+Create one `WorkerResourceTemplate` per pool you want to autoscale. If no version has the pool and the `WorkerDeployment` does not declare it, or `spec.pool` is missing on a `WorkerDeployment` with pools, the `Ready` condition is `False` with reason `PoolNotFound`. The webhook warns about both.
 
 Backlog metrics are tagged with the deployment name and Build ID, not the pool. Add `task_queue` to `matchLabels` so each pool scales on its own queue.
 

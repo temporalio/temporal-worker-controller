@@ -24,16 +24,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// makePooledWD returns a WorkerDeployment whose default pool uses spec.deployment, plus the named pools.
+// makePooledWD returns a WorkerDeployment with the given pools, or with a single
+// spec.deployment when there are none.
 func makePooledWD(name, namespace string, pools ...string) *temporaliov1alpha1.WorkerDeployment {
 	twd := makeExecplanTWD(name, namespace)
-	twd.Spec.Deployment = &appsv1.DeploymentSpec{Replicas: twd.Spec.Replicas, Template: *twd.Spec.Template}
+	template := *twd.Spec.Template
 	twd.Spec.Template = nil
+	if len(pools) == 0 {
+		twd.Spec.Deployment = &appsv1.DeploymentSpec{Replicas: twd.Spec.Replicas, Template: template}
+	}
 	twd.Spec.Replicas = nil
 	for _, pool := range pools {
 		twd.Spec.Pools = append(twd.Spec.Pools, temporaliov1alpha1.WorkerPool{
 			Name:       pool,
-			Deployment: appsv1.DeploymentSpec{Template: *twd.Spec.Deployment.Template.DeepCopy()},
+			Deployment: appsv1.DeploymentSpec{Template: *template.DeepCopy()},
 		})
 	}
 	return twd
@@ -52,7 +56,7 @@ func labelPool(d *appsv1.Deployment, pool string) *appsv1.Deployment {
 func TestExecutePlan_NewMultiPoolVersion_CreatesEveryPool(t *testing.T) {
 	const namespace = "default"
 	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
-	twd := makePooledWD("my-worker", namespace, "activities")
+	twd := makePooledWD("my-worker", namespace, "workflows", "activities")
 	buildID := k8s.ComputeBuildID(twd)
 	r, _ := newTestReconciler([]client.Object{twd})
 
@@ -73,8 +77,8 @@ func TestExecutePlan_NewMultiPoolVersion_CreatesEveryPool(t *testing.T) {
 		pools[d.Labels[k8s.PoolLabel]] = d.Name
 	}
 	assert.Equal(t, map[string]string{
-		temporaliov1alpha1.DefaultPoolName: k8s.ComputeVersionedDeploymentName(twd.Name, buildID),
-		"activities":                       k8s.ComputePoolDeploymentName(twd.Name, "activities", buildID),
+		"workflows":  k8s.ComputePoolDeploymentName(twd.Name, "workflows", buildID),
+		"activities": k8s.ComputePoolDeploymentName(twd.Name, "activities", buildID),
 	}, pools)
 }
 
@@ -84,20 +88,20 @@ func TestExecutePlan_PoolRemovedUnderCustomBuildID_KeepsVersion(t *testing.T) {
 		buildID   = "custom"
 	)
 	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
-	twd := makePooledWD("my-worker", namespace)
+	twd := makePooledWD("my-worker", namespace, "workflows")
 	twd.Spec.WorkerOptions.UnsafeCustomBuildID = buildID
-	def := labelPool(makeVersionedDeployment(twd, buildID, 1, connection), temporaliov1alpha1.DefaultPoolName)
+	workflows := labelPool(makeVersionedDeployment(twd, buildID, 1, connection), "workflows")
 	activities := labelPool(makeVersionedDeployment(twd, buildID, 1, connection), "activities")
-	r, _ := newTestReconciler([]client.Object{twd, def, activities})
+	r, _ := newTestReconciler([]client.Object{twd, workflows, activities})
 
 	handle := newPruneStubHandle(nil)
-	status := statusWithDeprecated(buildID, def)
+	status := statusWithDeprecated(buildID, workflows)
 	p := runPlanCycleWith(t, r, twd, connection, status, newStubTemporalClientWithHandle(handle))
 
 	assert.Empty(t, p.DeleteDeployments)
 	assert.Empty(t, handle.deletedVersions, "removing a pool must not delete the version")
 	assert.False(t, deploymentExists(t, r, namespace, activities.Name))
-	assert.True(t, deploymentExists(t, r, namespace, def.Name))
+	assert.True(t, deploymentExists(t, r, namespace, workflows.Name))
 }
 
 func TestReconcile_PoolsAddedUnderSameCustomBuildID_AreBlocked(t *testing.T) {
@@ -125,11 +129,11 @@ func TestReconcile_PoolsAddedUnderSameCustomBuildID_AreBlocked(t *testing.T) {
 
 func TestSyncConditions_MultiPoolTargetWaitingForPools(t *testing.T) {
 	r, _ := newTestReconciler(nil)
-	twd := makePooledWD("test-worker", "default", "activities", "batch")
+	twd := makePooledWD("test-worker", "default", "activities", "batch", "workflows")
 	twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
 	twd.Status.TargetVersion.Pools = []temporaliov1alpha1.WorkerPoolStatus{
 		{Name: "activities"},
-		{Name: temporaliov1alpha1.DefaultPoolName, Deployment: &corev1.ObjectReference{Name: "d"}, HealthySince: &metav1.Time{Time: time.Now()}},
+		{Name: "workflows", Deployment: &corev1.ObjectReference{Name: "d"}, HealthySince: &metav1.Time{Time: time.Now()}},
 	}
 
 	r.syncConditions(twd, nil, "")
@@ -139,15 +143,15 @@ func TestSyncConditions_MultiPoolTargetWaitingForPools(t *testing.T) {
 	assert.Equal(t, metav1.ConditionTrue, cond.Status)
 	assert.Equal(t, temporaliov1alpha1.ReasonWaitingForPollers, cond.Reason)
 	assert.Contains(t, cond.Message, "activities, batch")
-	assert.NotContains(t, cond.Message, temporaliov1alpha1.DefaultPoolName)
+	assert.NotContains(t, cond.Message, "workflows")
 }
 
 func TestHandleDeletion_DeletesEveryPool(t *testing.T) {
 	const namespace = "default"
 	conn := makeNoCredsConnection("my-conn", namespace, "localhost:7233")
-	twd := makePooledWD("del-worker", namespace, "activities")
+	twd := makePooledWD("del-worker", namespace, "workflows", "activities")
 	twd.Spec.WorkerOptions.ConnectionRef.Name = conn.Name
-	def := labelPool(makeVersionedDeployment(twd, "v1", 1, conn.Spec), temporaliov1alpha1.DefaultPoolName)
+	def := labelPool(makeVersionedDeployment(twd, "v1", 1, conn.Spec), "workflows")
 	activities := labelPool(makeVersionedDeployment(twd, "v1", 1, conn.Spec), "activities")
 	r, _ := newTestReconciler([]client.Object{twd, conn, def, activities})
 	r.TemporalClientPool.SetClientForTesting(noCredsPoolKey(conn.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace),
@@ -284,4 +288,21 @@ func TestExecutePlan_PoolNotFound_ClearedOnceThePoolIsDeclared(t *testing.T) {
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, &got))
 	assert.Nil(t, meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady),
 		"a stale PoolNotFound must not outlive the missing pool")
+}
+
+func TestExecutePlan_WRTWithoutPoolOnPooledWorkerDeployment_SaysToSetPool(t *testing.T) {
+	const namespace = "default"
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makePooledWD("my-worker", namespace, "workflows")
+	wrt := makeExecplanWRT("hpa", twd)
+	r, _ := newTestReconciler([]client.Object{twd, wrt})
+
+	runPlanCycle(t, r, twd, connection, temporaliov1alpha1.WorkerDeploymentStatus{})
+
+	var got temporaliov1alpha1.WorkerResourceTemplate
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, &got))
+	cond := meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, cond)
+	assert.Equal(t, temporaliov1alpha1.ReasonWRTPoolNotFound, cond.Reason)
+	assert.Contains(t, cond.Message, "set spec.pool")
 }

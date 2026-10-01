@@ -860,7 +860,7 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 }
 
 // pendingTargetPools returns the spec's pools that the target version does not have
-// available yet, or nil when the target is healthy or has no named pools.
+// available yet, or nil when the target is healthy or has no pools.
 func pendingTargetPools(twd *temporaliov1alpha1.WorkerDeployment) []string {
 	if !twd.Spec.HasPools() || twd.Status.TargetVersion.HealthySince != nil {
 		return nil

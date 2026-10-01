@@ -212,7 +212,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 
 	// Handle deployment creation if needed
 	for _, pool := range planResult.CreateDeploymentPools {
-		d, err := k8s.NewPoolDeploymentWithControllerRef(w, targetBuildID, pool, planResult.LabelDefaultPool, connection, r.Scheme)
+		d, err := k8s.NewPoolDeploymentWithControllerRef(w, targetBuildID, pool, connection, r.Scheme)
 		if err != nil {
 			return nil, err
 		}

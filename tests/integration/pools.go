@@ -26,7 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const activitiesPool = "activities"
+const (
+	workflowsPool  = "workflows"
+	activitiesPool = "activities"
+)
 
 func runWorkerPoolTests(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
 	t.Run("worker-pools-roll-out-and-sunset-together", func(t *testing.T) {
@@ -34,8 +37,8 @@ func runWorkerPoolTests(t *testing.T, k8sClient client.Client, ts *temporaltest.
 	})
 }
 
-// poolScenario is a WorkerDeployment whose default pool polls a workflow queue named after
-// it and whose activities pool polls <name>-activities for activities only.
+// poolScenario is a WorkerDeployment whose workflows pool polls a workflow queue named
+// after it and whose activities pool polls <name>-activities for activities only.
 type poolScenario struct {
 	t              *testing.T
 	k8sClient      client.Client
@@ -64,13 +67,14 @@ func (s *poolScenario) workerDeployment(image string) *temporaliov1alpha1.Worker
 		ScaledownDelay: &metav1.Duration{},
 		DeleteDelay:    &metav1.Duration{},
 	}
-	activities := testhelpers.SetTaskQueue(twd.Spec.Deployment.Template, s.name+"-activities")
+	workflows := *twd.Spec.Deployment
+	activities := testhelpers.SetTaskQueue(workflows.Template, s.name+"-activities")
 	activities = testhelpers.SetWorkerRole(activities, testhelpers.ActivityWorkerRole)
-	replicas := int32(1)
-	twd.Spec.Pools = []temporaliov1alpha1.WorkerPool{{
-		Name:       activitiesPool,
-		Deployment: appsv1.DeploymentSpec{Replicas: &replicas, Template: activities},
-	}}
+	twd.Spec.Pools = []temporaliov1alpha1.WorkerPool{
+		{Name: workflowsPool, Deployment: workflows},
+		{Name: activitiesPool, Deployment: appsv1.DeploymentSpec{Replicas: workflows.Replicas, Template: activities}},
+	}
+	twd.Spec.Deployment = nil
 	return twd
 }
 
@@ -87,7 +91,7 @@ func (s *poolScenario) waitForVersionDeployments(ctx context.Context, buildID st
 	s.t.Helper()
 	return &poolVersion{
 		buildID:    buildID,
-		def:        s.waitForDeployment(ctx, k8s.ComputeVersionedDeploymentName(s.name, buildID)),
+		def:        s.waitForDeployment(ctx, k8s.ComputePoolDeploymentName(s.name, workflowsPool, buildID)),
 		activities: s.waitForDeployment(ctx, k8s.ComputePoolDeploymentName(s.name, activitiesPool, buildID)),
 	}
 }
@@ -112,7 +116,7 @@ func (s *poolScenario) waitForTarget(ctx context.Context, buildID string, status
 	return wd
 }
 
-// runCrossPoolWorkflow starts a workflow pinned to buildID on the default pool's queue and
+// runCrossPoolWorkflow starts a workflow pinned to buildID on the workflows pool's queue and
 // returns the build ID of the activities pool worker that ran its activity.
 func (s *poolScenario) runCrossPoolWorkflow(ctx context.Context, buildID string) string {
 	s.t.Helper()
@@ -135,8 +139,8 @@ func (s *poolScenario) runCrossPoolWorkflow(ctx context.Context, buildID string)
 
 func (s *poolScenario) assertPoolSelectors(v *poolVersion) {
 	s.t.Helper()
-	if got := v.def.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != temporaliov1alpha1.DefaultPoolName {
-		s.t.Errorf("default pool selector has pool label %q", got)
+	if got := v.def.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != workflowsPool {
+		s.t.Errorf("workflows pool selector has pool label %q", got)
 	}
 	if got := v.activities.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != activitiesPool {
 		s.t.Errorf("activities pool selector has pool label %q", got)
@@ -195,8 +199,9 @@ func (s *poolScenario) updateImage(ctx context.Context, image string) string {
 		if err := s.k8sClient.Get(ctx, s.key, &latest); err != nil {
 			return err
 		}
-		latest.Spec.Deployment.Template.Spec.Containers[0].Image = image
-		latest.Spec.Pools[0].Deployment.Template.Spec.Containers[0].Image = image
+		for i := range latest.Spec.Pools {
+			latest.Spec.Pools[i].Deployment.Template.Spec.Containers[0].Image = image
+		}
 		buildID = k8s.ComputeBuildID(&latest)
 		return s.k8sClient.Update(ctx, &latest)
 	})
@@ -303,7 +308,7 @@ func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *tempora
 	v1.stopActs = s.startWorkers(ctx, v1.activities)
 	defer v1.stopActs()
 	if wd := s.waitForTarget(ctx, v1.buildID, temporaliov1alpha1.VersionStatusCurrent); len(wd.Status.TargetVersion.Pools) != 2 {
-		t.Errorf("target version pools = %+v, want default and activities", wd.Status.TargetVersion.Pools)
+		t.Errorf("target version pools = %+v, want workflows and activities", wd.Status.TargetVersion.Pools)
 	}
 
 	t.Log("Both pools' task queues are in one Temporal version")

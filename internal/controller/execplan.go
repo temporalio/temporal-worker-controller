@@ -680,6 +680,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			condStatus = metav1.ConditionFalse
 			condReason = temporaliov1alpha1.ReasonWRTPoolNotFound
 			condMessage = fmt.Sprintf("WorkerDeployment %q has no pool %q", workerDeploy.Name, wrt.Spec.Pool)
+			if wrt.Spec.Pool == "" {
+				condMessage = fmt.Sprintf("WorkerDeployment %q uses pools; set spec.pool", workerDeploy.Name)
+			}
 		case anyFailed:
 			condStatus = metav1.ConditionFalse
 			condReason = temporaliov1alpha1.ReasonWRTApplyFailed

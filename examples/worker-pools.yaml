@@ -1,9 +1,9 @@
 # WorkerDeployment with worker pools
 #
 # One WorkerDeployment runs three pools that release as one Worker Deployment Version:
-#   - default:  workflow workers on the "documents" task queue
-#   - parse:    GPU activity workers on "documents-parse", scaled by an autoscaler
-#   - extract:  activity workers on "documents-extract", four replicas
+#   - workflows: workflow workers on the "documents" task queue
+#   - parse:     GPU activity workers on "documents-parse", scaled by an autoscaler
+#   - extract:   activity workers on "documents-extract", four replicas
 #
 # Every pool gets its own Deployment per version and the same TEMPORAL_DEPLOYMENT_NAME
 # and TEMPORAL_WORKER_BUILD_ID, so a Pinned workflow's activities stay on its build.
@@ -22,21 +22,22 @@ kind: WorkerDeployment
 metadata:
   name: documents
 spec:
-  deployment:
-    replicas: 2
-    template:
-      spec:
-        containers:
-          - name: worker
-            image: registry.example.com/documents:v42
-            env:
-              - name: WORKER_ROLE
-                value: workflows
-            readinessProbe:
-              httpGet:
-                path: /ready
-                port: 8080
   pools:
+    - name: workflows
+      deployment:
+        replicas: 2
+        template:
+          spec:
+            containers:
+              - name: worker
+                image: registry.example.com/documents:v42
+                env:
+                  - name: WORKER_ROLE
+                    value: workflows
+                readinessProbe:
+                  httpGet:
+                    path: /ready
+                    port: 8080
     - name: parse
       deployment:
         template:

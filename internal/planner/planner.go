@@ -56,9 +56,6 @@ type Plan struct {
 
 	// CreateDeploymentPools lists the pools that need a Deployment for the target version.
 	CreateDeploymentPools []string
-	// LabelDefaultPool adds the pool label to a created default pool Deployment, as every
-	// Deployment of a multi-pool version needs.
-	LabelDefaultPool bool
 	// DeletePoolDeployments are target version Deployments of pools no longer in the spec.
 	// Unlike DeleteDeployments, deleting them never deletes the version in Temporal.
 	DeletePoolDeployments []*appsv1.Deployment
@@ -186,7 +183,7 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
 	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec)
-	plan.CreateDeploymentPools, plan.LabelDefaultPool, plan.BlockedReason =
+	plan.CreateDeploymentPools, plan.BlockedReason =
 		getCreateDeploymentPools(k8sState, status, spec, maxVersionsIneligibleForDeletion)
 	plan.DeletePoolDeployments = getDeletePoolDeployments(k8sState, status, spec)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
@@ -1148,37 +1145,31 @@ func getSunsetScaleDownBuildIDs(
 }
 
 // getCreateDeploymentPools returns the pools of the target version that need a Deployment,
-// whether to label the default pool, and why it refused, if it did.
+// and why it refused, if it did.
 func getCreateDeploymentPools(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	maxVersionsIneligibleForDeletion int32,
-) (pools []string, labelDefault bool, blockedReason string) {
+) (pools []string, blockedReason string) {
 	existing := k8sState.VersionDeployments(status.TargetVersion.BuildID)
 	if len(existing) == 0 {
 		if !shouldCreateDeployment(status, maxVersionsIneligibleForDeletion) {
-			return nil, false, ""
+			return nil, ""
 		}
-		return spec.PoolNames(), spec.HasPools(), ""
+		return spec.PoolNames(), ""
 	}
-
-	var missing []string
+	// A Deployment's selector is immutable, and pool and non-pool selectors would overlap.
+	if k8s.HasPoolLabel(existing) != spec.HasPools() {
+		return nil, fmt.Sprintf(
+			"adding or removing spec.pools requires a new unsafeCustomBuildID: build ID %q already has Deployments", status.TargetVersion.BuildID)
+	}
 	for _, pool := range spec.PoolNames() {
 		if _, ok := existing[pool]; !ok {
-			missing = append(missing, pool)
+			pools = append(pools, pool)
 		}
 	}
-	if len(missing) == 0 {
-		return nil, false, ""
-	}
-	// The default pool's selector is immutable and would overlap the new pools' pods.
-	if !k8s.HasPoolLabel(existing) {
-		return nil, false, fmt.Sprintf(
-			"adding pools requires a new unsafeCustomBuildID: the Deployment for build ID %q predates worker pools",
-			status.TargetVersion.BuildID)
-	}
-	return missing, true, ""
+	return pools, ""
 }
 
 // getDeletePoolDeployments returns the target version's Deployments of pools that are
@@ -1188,6 +1179,10 @@ func getDeletePoolDeployments(
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 ) []*appsv1.Deployment {
+	existing := k8sState.VersionDeployments(status.TargetVersion.BuildID)
+	if !spec.HasPools() || !k8s.HasPoolLabel(existing) {
+		return nil
+	}
 	var deletes []*appsv1.Deployment
 	for _, d := range k8sState.VersionDeploymentList(status.TargetVersion.BuildID) {
 		if !spec.HasPool(k8s.PoolName(d)) {
