@@ -2,7 +2,8 @@
 #
 # This example autoscales only the "parse" pool of the "documents" WorkerDeployment
 # from examples/worker-pools.yaml. The controller creates one HPA per version, each
-# targeting that version's parse Deployment. Omit spec.pool to target the default pool.
+# targeting that version's parse Deployment. spec.pool is required for a WorkerDeployment
+# with pools.
 #
 # Apply:
 #   kubectl apply -f examples/worker-pools.yaml

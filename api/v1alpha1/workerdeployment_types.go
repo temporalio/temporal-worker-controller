@@ -74,9 +74,9 @@ type WorkerOptions struct {
 }
 
 // WorkerDeploymentSpec defines the desired state of WorkerDeployment
-// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template)",message="one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template) || has(self.pools)",message="one of deployment, template or pools must be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.deployment) && has(self.template))",message="exactly one of deployment or template must be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.pools) || has(self.deployment)",message="pools require spec.deployment"
+// +kubebuilder:validation:XValidation:rule="!has(self.pools) || !(has(self.deployment) || has(self.template))",message="pools cannot be combined with deployment or template"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -130,13 +130,14 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
-	// Pools declares named worker pools that run in the same Worker Deployment
-	// Version as the default pool described by Deployment. Each pool gets its own
-	// Kubernetes Deployment in every version, with the same deployment name and
-	// build ID, so pools roll out together while each one scales on its own.
+	// Pools runs several named worker pools in one Worker Deployment Version, in
+	// place of Deployment. Each pool gets its own Kubernetes Deployment in every
+	// version, with the same deployment name and build ID, so pools roll out
+	// together while each one scales on its own.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=10
 	Pools []WorkerPool `json:"pools,omitempty"`
 
@@ -153,7 +154,7 @@ type WorkerDeploymentSpec struct {
 // WorkerPool is a named group of workers with its own Kubernetes Deployment in
 // every version of a WorkerDeployment.
 type WorkerPool struct {
-	// Name identifies the pool. "default" is reserved for spec.deployment.
+	// Name identifies the pool. "default" is reserved for WorkerDeployments without pools.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=24
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
@@ -165,35 +166,42 @@ type WorkerPool struct {
 	Deployment appsv1.DeploymentSpec `json:"deployment"`
 }
 
-// DefaultPoolName names the worker pool described by spec.deployment (or the
-// deprecated spec.template fields).
+// DefaultPoolName names the single pool of a WorkerDeployment without pools, described
+// by spec.deployment (or the deprecated spec.template fields).
 const DefaultPoolName = "default"
 
-// HasPools reports whether the spec declares named worker pools.
+// HasPools reports whether the spec declares worker pools.
 func (s WorkerDeploymentSpec) HasPools() bool {
 	return len(s.Pools) > 0
 }
 
-// HasPool reports whether the spec has a pool with the given name, the default pool included.
+// HasPool reports whether the spec has a pool with the given name.
 func (s WorkerDeploymentSpec) HasPool(name string) bool {
-	return name == DefaultPoolName || slices.ContainsFunc(s.Pools, func(p WorkerPool) bool { return p.Name == name })
+	if !s.HasPools() {
+		return name == DefaultPoolName
+	}
+	return slices.ContainsFunc(s.Pools, func(p WorkerPool) bool { return p.Name == name })
 }
 
-// PoolNames returns the default pool followed by the named pools, sorted.
+// PoolNames returns the pool names, sorted, or the default pool alone when the spec
+// has no pools.
 func (s WorkerDeploymentSpec) PoolNames() []string {
+	if !s.HasPools() {
+		return []string{DefaultPoolName}
+	}
 	names := make([]string, 0, len(s.Pools))
 	for _, p := range s.Pools {
 		names = append(names, p.Name)
 	}
 	sort.Strings(names)
-	return append([]string{DefaultPoolName}, names...)
+	return names
 }
 
 // PoolDeploymentSpec returns the DeploymentSpec of the named pool, with the
 // default rolling update strategy applied, and whether the pool exists.
 func (s WorkerDeploymentSpec) PoolDeploymentSpec(name string) (appsv1.DeploymentSpec, bool) {
-	if name == DefaultPoolName {
-		return s.DeploymentSpec(), true
+	if !s.HasPools() {
+		return s.DeploymentSpec(), name == DefaultPoolName
 	}
 	for _, p := range s.Pools {
 		if p.Name == name {
@@ -480,8 +488,7 @@ type BaseWorkerDeploymentVersion struct {
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
-	// Pools lists each worker pool's Deployment in a multi-pool version, the default
-	// pool included.
+	// Pools lists each worker pool's Deployment in a version that uses pools.
 	// +optional
 	// +listType=map
 	// +listMapKey=name

@@ -119,15 +119,12 @@ func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
 	pooled := func(pool string, availableReplicas int32) *appsv1.Deployment {
 		d := mapperPoolDeployment("v1", pool, &available, availableReplicas)
 		d.Status.AvailableReplicas = availableReplicas
-		if pool == "" {
-			d.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
-		}
 		return d
 	}
 	spec := func(activitiesReplicas *int32) *temporaliov1alpha1.WorkerDeploymentSpec {
 		return &temporaliov1alpha1.WorkerDeploymentSpec{
-			Deployment: &appsv1.DeploymentSpec{},
 			Pools: []temporaliov1alpha1.WorkerPool{
+				{Name: "workflows"},
 				{Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: activitiesReplicas}},
 			},
 		}
@@ -140,10 +137,10 @@ func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
 		spec        *temporaliov1alpha1.WorkerDeploymentSpec
 		wantHealthy bool
 	}{
-		{name: "every pool available with ready replicas", deployments: []*appsv1.Deployment{pooled("", 1), pooled("activities", 1)}, spec: spec(nil), wantHealthy: true},
-		{name: "a pool is not created yet", deployments: []*appsv1.Deployment{pooled("", 1)}, spec: spec(nil)},
-		{name: "a pool is available with no replicas", deployments: []*appsv1.Deployment{pooled("", 1), pooled("activities", 0)}, spec: spec(nil)},
-		{name: "a pool scaled to zero on purpose", deployments: []*appsv1.Deployment{pooled("", 1), pooled("activities", 0)}, spec: spec(ptr(int32(0))), wantHealthy: true},
+		{name: "every pool available with ready replicas", deployments: []*appsv1.Deployment{pooled("workflows", 1), pooled("activities", 1)}, spec: spec(nil), wantHealthy: true},
+		{name: "a pool is not created yet", deployments: []*appsv1.Deployment{pooled("workflows", 1)}, spec: spec(nil)},
+		{name: "a pool is available with no replicas", deployments: []*appsv1.Deployment{pooled("workflows", 1), pooled("activities", 0)}, spec: spec(nil)},
+		{name: "a pool scaled to zero on purpose", deployments: []*appsv1.Deployment{pooled("workflows", 1), pooled("activities", 0)}, spec: spec(ptr(int32(0))), wantHealthy: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -157,9 +154,8 @@ func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
 
 func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
 	available := metav1.NewTime(time.Now().Add(-time.Hour))
-	def := mapperPoolDeployment("v1", "", &available, 1)
+	def := mapperPoolDeployment("v1", "workflows", &available, 1)
 	def.Status.AvailableReplicas = 1
-	def.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
 	idle := mapperPoolDeployment("v1", "activities", &available, 0)
 	temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
 
@@ -173,8 +169,7 @@ func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			mapper := newStateMapper(k8s.NewDeploymentState(def, idle), temporalState, "ns/worker")
 			mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
-				Deployment: &appsv1.DeploymentSpec{},
-				Pools:      []temporaliov1alpha1.WorkerPool{{Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: tc.replicas}}},
+				Pools: []temporaliov1alpha1.WorkerPool{{Name: "workflows"}, {Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: tc.replicas}}},
 			}
 
 			target := mapper.mapTargetWorkerDeploymentVersionByBuildID("v1")
@@ -188,15 +183,13 @@ func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
 
 func TestMapTargetVersion_CurrentTargetIgnoresPoolReplicaRule(t *testing.T) {
 	available := metav1.NewTime(time.Now().Add(-time.Hour))
-	def := mapperPoolDeployment("v1", "", &available, 1)
+	def := mapperPoolDeployment("v1", "workflows", &available, 1)
 	def.Status.AvailableReplicas = 1
-	def.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
 	idle := mapperPoolDeployment("v1", "activities", &available, 0)
 	temporalState := &temporal.TemporalWorkerState{CurrentBuildID: "v1", Versions: map[string]*temporal.VersionInfo{}}
 	mapper := newStateMapper(k8s.NewDeploymentState(def, idle), temporalState, "ns/worker")
 	mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
-		Deployment: &appsv1.DeploymentSpec{},
-		Pools:      []temporaliov1alpha1.WorkerPool{{Name: "activities"}},
+		Pools: []temporaliov1alpha1.WorkerPool{{Name: "workflows"}, {Name: "activities"}},
 	}
 
 	assert.NotNil(t, mapper.mapTargetWorkerDeploymentVersionByBuildID("v1").HealthySince,

@@ -30,7 +30,7 @@ The actual Kubernetes `Deployment` resources that run worker pods. The controlle
 
 **Key characteristics:**
 - Multiple Kubernetes `Deployment` resources per `WorkerDeployment` Custom Resource (one per version, or one per [worker pool](#worker-pools) per version)
-- Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `staging/payment-processor-v1.5.1`). Named worker pools use `{worker-deployment-name}-{pool}-{build-id}-{hash}`
+- Named with the pattern: `{worker-deployment-name}-{build-id}` (e.g., `staging/payment-processor-v1.5.1`). With worker pools, `{worker-deployment-name}-{pool}-{build-id}-{hash}`
 - Each runs a specific version of your worker code
 
 ### Key Relationship
@@ -135,7 +135,7 @@ Defines how Drained versions are cleaned up:
 The pod template used for the target version of this worker deployment. Similar to the pod template used in a standar Kubernetes `Deployment`, but managed by the controller.
 
 ### Worker Pools
-Named groups of workers in one `WorkerDeployment`, set with `spec.pools`. Each pool has its own Kubernetes `Deployment` spec, so its own pod template, replicas and placement. All pools share the deployment name and Build ID, so their task queues are in one Worker Deployment Version and they roll out together. `spec.deployment` is the implicit `default` pool. See [Worker Pools](worker-pools.md).
+Named groups of workers in one `WorkerDeployment`, set with `spec.pools` in place of `spec.deployment`. Each pool has its own Kubernetes `Deployment` spec, so its own pod template, replicas and placement. All pools share the deployment name and Build ID, so their task queues are in one Worker Deployment Version and they roll out together. See [Worker Pools](worker-pools.md).
 
 ## Environment Variables
 

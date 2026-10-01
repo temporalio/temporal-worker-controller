@@ -189,16 +189,16 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 // poolWarnings warns when the WRT's pool is not declared by its WorkerDeployment. It is
 // not an error, since the pool may be added to the WorkerDeployment after the WRT.
 func (v *WorkerResourceTemplateValidator) poolWarnings(ctx context.Context, wrt *WorkerResourceTemplate) admission.Warnings {
-	if wrt.Spec.Pool == "" || v.Client == nil {
+	if v.Client == nil {
 		return nil
 	}
 	var wd WorkerDeployment
 	key := types.NamespacedName{Namespace: wrt.Namespace, Name: wrt.Spec.EffectiveWorkerDeploymentName()}
-	if err := v.Client.Get(ctx, key, &wd); err != nil {
+	if err := v.Client.Get(ctx, key, &wd); err != nil || wd.Spec.HasPool(wrt.Spec.EffectivePool()) {
 		return nil
 	}
-	if wd.Spec.HasPool(wrt.Spec.Pool) {
-		return nil
+	if wrt.Spec.Pool == "" {
+		return admission.Warnings{fmt.Sprintf("WorkerDeployment %q uses pools; set spec.pool", wd.Name)}
 	}
 	return admission.Warnings{fmt.Sprintf("spec.pool %q is not declared by WorkerDeployment %q", wrt.Spec.Pool, wd.Name)}
 }

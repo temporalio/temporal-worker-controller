@@ -546,16 +546,17 @@ spec:
 
 ### Worker pools
 
-To run roles with different pod shapes in one version, add named pools with
-`spec.pools`. Each pool takes the same `appsv1.DeploymentSpec` as
-`spec.deployment`, which stays as the `default` pool:
+To run roles with different pod shapes in one version, use `spec.pools` in place
+of `spec.deployment`. Each pool takes the same `appsv1.DeploymentSpec` as
+`spec.deployment`:
 
 ```yaml
 spec:
-  deployment:
-    replicas: 2
-    template: {...}   # workflow workers
   pools:
+    - name: workflows
+      deployment:
+        replicas: 2
+        template: {...}   # workflow workers
     - name: activities
       deployment:
         replicas: 6

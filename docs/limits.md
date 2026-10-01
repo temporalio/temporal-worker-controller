@@ -2,7 +2,7 @@
 
 - Max `WorkerDeployment.Name` length: 63 characters, since Kubernetes label values are limited to 63 characters
 - Max `BuildID` length: 63 characters, since Kubernetes label values are limited to 63 characters
-- Max worker pools per `WorkerDeployment`: 10 named pools, plus the default pool
+- Max worker pools per `WorkerDeployment`: 10
 - Max worker pool name length: 24 characters. `default` is reserved
 
 ### Note on naming of controller-generated resources:
@@ -17,4 +17,4 @@ Note that the original untruncated deployment name and build ID can always be fo
 
 For transparency, know that the controller will generate these unique short names as follows, but don't depend on this name format because it may change: `trunc(<WorkerDeployment.Name>)-trunc(<BuildID>)-hash(<WorkerDeployment.Name>-<BuildID>)`
 
-Deployments of named [worker pools](worker-pools.md) are named `<WorkerDeployment.Name>-<pool>-<BuildID>`, shortened so the name fits in 47 characters, followed by a hash of all three. Their pool is in the `temporal.io/worker-pool` label.
+Deployments of [worker pools](worker-pools.md) are named `<WorkerDeployment.Name>-<pool>-<BuildID>`, shortened so the name fits in 47 characters, followed by a hash of all three. Their pool is in the `temporal.io/worker-pool` label.

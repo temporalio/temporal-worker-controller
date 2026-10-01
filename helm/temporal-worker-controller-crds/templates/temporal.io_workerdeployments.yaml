@@ -7828,6 +7828,7 @@ spec:
                   - name
                   type: object
                 maxItems: 10
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - name
@@ -11806,12 +11807,12 @@ spec:
             - workerOptions
             type: object
             x-kubernetes-validations:
-            - message: one of deployment or template must be set
-              rule: has(self.deployment) || has(self.template)
+            - message: one of deployment, template or pools must be set
+              rule: has(self.deployment) || has(self.template) || has(self.pools)
             - message: exactly one of deployment or template must be set
               rule: '!(has(self.deployment) && has(self.template))'
-            - message: pools require spec.deployment
-              rule: '!has(self.pools) || has(self.deployment)'
+            - message: pools cannot be combined with deployment or template
+              rule: '!has(self.pools) || !(has(self.deployment) || has(self.template))'
           status:
             properties:
               conditions:

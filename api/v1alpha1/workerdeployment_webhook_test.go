@@ -201,6 +201,7 @@ func TestWorkerDeployment_PoolSelectorEmitsWarning(t *testing.T) {
 		{Name: "plain", Deployment: *dep.Spec.Deployment.DeepCopy()},
 		{Name: "selected", Deployment: *dep.Spec.Deployment.DeepCopy()},
 	}
+	dep.Spec.Deployment = nil
 	dep.Spec.Pools[1].Deployment.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "worker"}}
 
 	webhook := &temporaliov1alpha1.WorkerDeployment{}

@@ -1,12 +1,12 @@
 # Worker Pools
 
-One `WorkerDeployment` can run several worker pools. Each pool gets its own Kubernetes `Deployment` in every version, with its own pod template, replicas, ServiceAccount, resources and placement. All pools share the `WorkerDeployment`'s Temporal deployment name and Build ID. So their task queues are in one Worker Deployment Version, and they ramp, promote, roll back and sunset together. Each pool still scales on its own.
+One `WorkerDeployment` can run several named worker pools in place of a single `spec.deployment`. Each pool gets its own Kubernetes `Deployment` in every version, with its own pod template, replicas, ServiceAccount, resources and placement. All pools share the `WorkerDeployment`'s Temporal deployment name and Build ID. So their task queues are in one Worker Deployment Version, and they ramp, promote, roll back and sunset together. Each pool still scales on its own.
 
 ## When to use pools
 
 A Pinned workflow's activities and child workflows stay on its Build ID only when their task queue is in the same Worker Deployment Version. If each worker role is its own `WorkerDeployment`, each role is its own Temporal Worker Deployment. During a ramp, a workflow on the new build then often calls an activity or child on the old one (see [Worker Versioning](https://docs.temporal.io/worker-versioning)).
 
-Use pools when roles release together but need different pod shapes. For example, a workflow worker plus a memory-heavy activity worker, or a GPU worker that must run on special nodes.
+Use pools when roles release together but need different pod shapes. For example, parent workflows plus child workflows that need more memory, or activities that must run on GPU nodes. All pools are equal: any pool can run workflows, child workflows, activities, or a mix.
 
 Use separate `WorkerDeployment` resources when roles should release and roll back on their own.
 
@@ -18,18 +18,18 @@ kind: WorkerDeployment
 metadata:
   name: documents
 spec:
-  # The default pool. It polls the "documents" workflow queue.
-  deployment:
-    replicas: 2
-    template:
-      spec:
-        containers:
-          - name: worker
-            image: registry.example.com/documents:v42
-            env:
-              - name: WORKER_ROLE
-                value: workflows
   pools:
+    - name: workflows
+      deployment:
+        replicas: 2
+        template:
+          spec:
+            containers:
+              - name: worker
+                image: registry.example.com/documents:v42
+                env:
+                  - name: WORKER_ROLE
+                    value: workflows
     - name: parse
       deployment:
         # Omit replicas to let an autoscaler own this pool.
@@ -72,18 +72,15 @@ spec:
     temporalNamespace: documents
 ```
 
-`spec.deployment` is the implicit `default` pool, and `spec.pools` adds named pools. Your workers decide which task queues each pool polls, here from `WORKER_ROLE`. The controller injects the same `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` into every pool.
+A `WorkerDeployment` sets exactly one of `spec.pools` and `spec.deployment`. Your workers decide which task queues each pool polls, here from `WORKER_ROLE`. The controller injects the same `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` into every pool.
 
 A full example is in [examples/worker-pools.yaml](../examples/worker-pools.yaml).
 
 ## How it works
 
-- **One version for all pools.** The Build ID hashes every pool's name and pod template. Changing any pool's template starts one new version for all pools, and so does adding, removing or renaming a pool. Changing replicas does not.
-- **One Deployment per pool per version.**
-  - The default pool keeps the usual name, `<WorkerDeployment.Name>-<BuildID>`.
-  - Named pools are named `<WorkerDeployment.Name>-<pool>-<BuildID>-<hash>`, shortened to fit 47 characters.
-  - Every Deployment of a version with pools carries a `temporal.io/worker-pool` label in its selector, the default pool included. So selectors never overlap, and HPAs and PDBs only see one pool's pods.
-- **Status.** `status.targetVersion.pools`, `status.currentVersion.pools` and each deprecated version list each pool's Deployment and when it became available. `deployment` keeps pointing at the default pool.
+- **One version for all pools.** The Build ID hashes every pool's name and pod template, in name order. Changing any pool's template starts one new version for all pools, and so does adding, removing or renaming a pool. Changing replicas or reordering pools does not. The Build ID starts with the image tag of the first pool by name.
+- **One Deployment per pool per version.** Each is named `<WorkerDeployment.Name>-<pool>-<BuildID>-<hash>`, shortened to fit 47 characters. Each carries a `temporal.io/worker-pool` label in its selector, so selectors never overlap, and HPAs and PDBs only see one pool's pods.
+- **Status.** `status.targetVersion.pools`, `status.currentVersion.pools` and each deprecated version list each pool's Deployment and when it became available.
 
 ## Rollouts
 
@@ -97,7 +94,7 @@ Once the target version is registered with Temporal but still waiting on pools, 
 
 ### Gate workflows
 
-The gate runs one workflow on each workflow task queue in the target version. It therefore runs on the pools that poll workflow queues, and not on activity-only pools. If you use a gate, at least one pool must poll a workflow queue.
+The gate runs one workflow on each workflow task queue in the target version. It therefore runs on every pool that polls workflow queues, and not on activity-only pools. If you use a gate, at least one pool must poll a workflow queue, and every pool that polls workflows must register the gate workflow type.
 
 Turn off workflow polling in activity-only pools. In Go, set `worker.Options.DisableWorkflowWorker`. By default the SDK polls for workflow tasks even when no workflows are registered, which puts the pool's queue in the version as a workflow queue. The gate would then start a workflow there that no worker can run.
 
@@ -105,7 +102,7 @@ Turn off workflow polling in activity-only pools. In Go, set `worker.Options.Dis
 
 Set `replicas` on a pool to have the controller manage it, or omit it to let an autoscaler own that pool. This works the same as `spec.deployment.replicas`.
 
-To autoscale one pool, set `pool` on a `WorkerResourceTemplate`. The controller then renders one copy per version for that pool's Deployment only. Omit `pool` to target the default pool.
+To autoscale a pool, set `pool` on a `WorkerResourceTemplate`. The controller then renders one copy per version for that pool's Deployment only. A `WorkerResourceTemplate` for a `WorkerDeployment` with pools must set `pool`.
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
@@ -145,15 +142,16 @@ Without `unsafeCustomBuildID`, any change to the set of pools or their pod templ
 With `unsafeCustomBuildID` set and unchanged:
 
 - Changing a pool's pod template rolls that pool's Deployment in place.
-- Adding a pool creates its Deployment in the existing version. The exception is a version created before it had pools: the controller refuses, sets `Ready` and `Progressing` to `False` with reason `InvalidSpec`, and keeps reconciling everything else. Change `unsafeCustomBuildID` to roll the pools out as a new version.
+- Adding a pool creates its Deployment in the existing version.
 - Removing a pool deletes its Deployment from that version. The version itself stays.
+- Switching between `spec.deployment` and `spec.pools` is refused: the controller sets `Ready` and `Progressing` to `False` with reason `InvalidSpec` and keeps reconciling everything else. Change `unsafeCustomBuildID` to roll the change out as a new version.
 
 ## Limits
 
-- Up to 10 named pools.
+- 1 to 10 pools.
 - Pool names are DNS labels of at most 24 characters. `default` is reserved.
-- Pools require `spec.deployment`. They can't be combined with the deprecated `spec.template` fields.
+- `spec.pools` can't be combined with `spec.deployment` or the deprecated `spec.template` fields.
 
 ## Downgrading the controller
 
-A controller release without worker pools ignores `spec.pools`. It would compute a Build ID from the default pool alone and roll out a version without the named pools. Remove `spec.pools` from every `WorkerDeployment` before you roll the controller back to such a release.
+A controller release without worker pools ignores `spec.pools`, so it can't run a `WorkerDeployment` that uses them. Move every such `WorkerDeployment` back to `spec.deployment` before you roll the controller back to that release.

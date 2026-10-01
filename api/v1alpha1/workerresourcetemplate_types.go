@@ -29,7 +29,7 @@ type WorkerResourceTemplateSpec struct {
 	TemporalWorkerDeploymentRef *WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
 
 	// Pool names the worker pool whose versioned Deployments this template targets.
-	// Omit it to target the default pool described by spec.deployment.
+	// Required when the WorkerDeployment uses pools; omit it otherwise.
 	// +optional
 	// +kubebuilder:validation:MaxLength=24
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`

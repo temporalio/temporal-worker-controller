@@ -128,7 +128,7 @@ sequenceDiagram
 
 ### Kubernetes Deployment (Managed by Controller)
 - **Purpose**: Runs pods for a specific worker deployment version, or for one worker pool of that version
-- **Naming**: `{worker-deployment-name}-{build-id}`; named worker pools use `{worker-deployment-name}-{pool}-{build-id}-{hash}`
+- **Naming**: `{worker-deployment-name}-{build-id}`; with worker pools, `{worker-deployment-name}-{pool}-{build-id}-{hash}`
 - **Lifecycle**: Created when new version deployed, deleted when version drained. All pools of a version are deleted together
 
 ### Connection (Custom Resource)
