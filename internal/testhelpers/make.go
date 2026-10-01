@@ -90,18 +90,24 @@ func MakePodSpecWithImage(imageName string) corev1.PodTemplateSpec {
 
 // SetTaskQueue sets or replaces the env var taskQueueEnvKey with the given string in all containers
 func SetTaskQueue(podSpec corev1.PodTemplateSpec, taskQueue string) corev1.PodTemplateSpec {
+	return setEnv(podSpec, taskQueueEnvKey, taskQueue)
+}
+
+// setEnv returns a copy of podSpec with the env var set in every container.
+func setEnv(podSpec corev1.PodTemplateSpec, key, value string) corev1.PodTemplateSpec {
+	podSpec = *podSpec.DeepCopy()
 	for i, c := range podSpec.Spec.Containers {
 		found := false
 		for j, e := range c.Env {
-			if e.Name == taskQueueEnvKey {
+			if e.Name == key {
 				found = true
-				podSpec.Spec.Containers[i].Env[j].Value = taskQueue
+				podSpec.Spec.Containers[i].Env[j].Value = value
 			}
 		}
 		if !found {
 			podSpec.Spec.Containers[i].Env = append(podSpec.Spec.Containers[i].Env, corev1.EnvVar{
-				Name:  taskQueueEnvKey,
-				Value: taskQueue,
+				Name:  key,
+				Value: value,
 			})
 		}
 	}

@@ -21,6 +21,9 @@ func TestWorkerDeploymentSpec_Pools(t *testing.T) {
 		},
 	}
 
+	assert.True(t, spec.HasPool(DefaultPoolName))
+	assert.True(t, spec.HasPool("alpha"))
+	assert.False(t, spec.HasPool("missing"))
 	assert.True(t, spec.HasPools())
 	assert.False(t, WorkerDeploymentSpec{Deployment: spec.Deployment}.HasPools())
 	assert.Equal(t, []string{DefaultPoolName, "alpha", "zeta"}, spec.PoolNames())

@@ -35,33 +35,12 @@ func mapperPoolDeployment(buildID, pool string, availableSince *metav1.Time, rep
 	return d
 }
 
-func mapperPoolState(deployments ...*appsv1.Deployment) *k8s.DeploymentState {
-	state := &k8s.DeploymentState{
-		Deployments:     map[string]*appsv1.Deployment{},
-		DeploymentRefs:  map[string]*corev1.ObjectReference{},
-		PoolDeployments: map[string]map[string]*appsv1.Deployment{},
-	}
-	for _, d := range deployments {
-		buildID := d.Labels[k8s.BuildIDLabel]
-		pool := k8s.PoolName(d)
-		if state.PoolDeployments[buildID] == nil {
-			state.PoolDeployments[buildID] = map[string]*appsv1.Deployment{}
-		}
-		state.PoolDeployments[buildID][pool] = d
-		if pool == temporaliov1alpha1.DefaultPoolName {
-			state.Deployments[buildID] = d
-			state.DeploymentRefs[buildID] = &corev1.ObjectReference{Name: d.Name}
-		}
-	}
-	return state
-}
-
 func TestMapToStatus_PoolDeployments(t *testing.T) {
 	earlier := metav1.NewTime(time.Now().Add(-2 * time.Hour))
 	later := metav1.NewTime(time.Now().Add(-time.Hour))
 
 	t.Run("version with only named pools left is still listed", func(t *testing.T) {
-		state := mapperPoolState(mapperPoolDeployment("old", "activities", nil, 0))
+		state := k8s.NewDeploymentState(mapperPoolDeployment("old", "activities", nil, 0))
 		temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
 
 		status := newStateMapper(state, temporalState, "ns/worker").mapToStatus("new")
@@ -72,7 +51,7 @@ func TestMapToStatus_PoolDeployments(t *testing.T) {
 	})
 
 	t.Run("version is healthy once every pool is available", func(t *testing.T) {
-		state := mapperPoolState(
+		state := k8s.NewDeploymentState(
 			mapperPoolDeployment("v1", "", &earlier, 1),
 			mapperPoolDeployment("v1", "activities", &later, 1),
 		)
@@ -86,7 +65,7 @@ func TestMapToStatus_PoolDeployments(t *testing.T) {
 	})
 
 	t.Run("version is not healthy while any pool is unavailable", func(t *testing.T) {
-		state := mapperPoolState(
+		state := k8s.NewDeploymentState(
 			mapperPoolDeployment("v1", "", &earlier, 1),
 			mapperPoolDeployment("v1", "activities", nil, 1),
 		)
@@ -99,7 +78,7 @@ func TestMapToStatus_PoolDeployments(t *testing.T) {
 	})
 
 	t.Run("drained version is not eligible for deletion while any pool has pods", func(t *testing.T) {
-		state := mapperPoolState(
+		state := k8s.NewDeploymentState(
 			mapperPoolDeployment("old", "", nil, 0),
 			mapperPoolDeployment("old", "activities", nil, 2),
 		)
@@ -115,7 +94,7 @@ func TestMapToStatus_PoolStatus(t *testing.T) {
 	earlier := metav1.NewTime(time.Now().Add(-2 * time.Hour))
 	defaultPool := mapperPoolDeployment("v1", "", &earlier, 1)
 	defaultPool.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
-	state := mapperPoolState(
+	state := k8s.NewDeploymentState(
 		mapperPoolDeployment("v1", "zeta", nil, 1),
 		defaultPool,
 		mapperPoolDeployment("v1", "alpha", &earlier, 1),
@@ -168,7 +147,7 @@ func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mapper := newStateMapper(mapperPoolState(tt.deployments...), temporalState, "ns/worker")
+			mapper := newStateMapper(k8s.NewDeploymentState(tt.deployments...), temporalState, "ns/worker")
 			mapper.targetSpec = tt.spec
 
 			assert.Equal(t, tt.wantHealthy, mapper.mapTargetWorkerDeploymentVersionByBuildID("v1").HealthySince != nil)
@@ -192,7 +171,7 @@ func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
 		"scaled to zero on purpose":  {replicas: ptr(int32(0)), wantHealthy: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			mapper := newStateMapper(mapperPoolState(def, idle), temporalState, "ns/worker")
+			mapper := newStateMapper(k8s.NewDeploymentState(def, idle), temporalState, "ns/worker")
 			mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
 				Deployment: &appsv1.DeploymentSpec{},
 				Pools:      []temporaliov1alpha1.WorkerPool{{Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: tc.replicas}}},
@@ -214,7 +193,7 @@ func TestMapTargetVersion_CurrentTargetIgnoresPoolReplicaRule(t *testing.T) {
 	def.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
 	idle := mapperPoolDeployment("v1", "activities", &available, 0)
 	temporalState := &temporal.TemporalWorkerState{CurrentBuildID: "v1", Versions: map[string]*temporal.VersionInfo{}}
-	mapper := newStateMapper(mapperPoolState(def, idle), temporalState, "ns/worker")
+	mapper := newStateMapper(k8s.NewDeploymentState(def, idle), temporalState, "ns/worker")
 	mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
 		Deployment: &appsv1.DeploymentSpec{},
 		Pools:      []temporaliov1alpha1.WorkerPool{{Name: "activities"}},

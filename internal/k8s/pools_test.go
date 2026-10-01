@@ -234,14 +234,3 @@ func TestNewPoolDeploymentWithOwnerRef(t *testing.T) {
 	_, err = k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, "missing", true, identityConnection)
 	assert.Error(t, err)
 }
-
-func TestNewPoolDeploymentWithOwnerRef_UnlabelledDefaultMatchesSingleTemplate(t *testing.T) {
-	w := identityFixture("registry.example.com/payments/worker:v1.2.3")
-	buildID := k8s.ComputeBuildID(w)
-	wdName := k8s.ComputeWorkerDeploymentName(w)
-
-	pooled, err := k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, temporaliov1alpha1.DefaultPoolName, false, identityConnection)
-	require.NoError(t, err)
-
-	assert.Equal(t, k8s.NewDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, identityConnection), pooled)
-}

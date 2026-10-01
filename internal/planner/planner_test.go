@@ -2850,7 +2850,10 @@ func TestCheckAndUpdateDeploymentConnectionSpec(t *testing.T) {
 				k8sState.Deployments[buildID] = tt.existingDeployment
 			}
 
-			result := checkAndUpdateDeploymentConnectionSpec(buildID, k8sState, tt.newConnection)
+			var result *appsv1.Deployment
+			if d, ok := k8sState.Deployments[buildID]; ok && updateDeploymentConnectionIfStale(d, tt.newConnection) {
+				result = d
+			}
 
 			if !tt.expectUpdate {
 				assert.Nil(t, result, "Expected no update, but got deployment")
@@ -2957,10 +2960,8 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 	run := func(existing temporaliov1alpha1.ConnectionSpec, newConn temporaliov1alpha1.ConnectionSpec, image string) *appsv1.Deployment {
 		dep := createTestDeploymentWithConnection("test-worker", "v1", existing)
 		dep.Spec.Template.Spec.Containers[0].Image = image
-		k8sState := &k8s.DeploymentState{Deployments: map[string]*appsv1.Deployment{"v1": dep}}
-		result := checkAndUpdateDeploymentConnectionSpec("v1", k8sState, newConn)
-		require.NotNil(t, result, "connection change should trigger an update")
-		return result
+		require.True(t, updateDeploymentConnectionIfStale(dep, newConn), "connection change should trigger an update")
+		return dep
 	}
 
 	t.Run("mTLS to API key", func(t *testing.T) {

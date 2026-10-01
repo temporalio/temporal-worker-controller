@@ -64,7 +64,7 @@ func (s *poolScenario) workerDeployment(image string) *temporaliov1alpha1.Worker
 		ScaledownDelay: &metav1.Duration{},
 		DeleteDelay:    &metav1.Duration{},
 	}
-	activities := testhelpers.SetTaskQueue(*twd.Spec.Deployment.Template.DeepCopy(), s.name+"-activities")
+	activities := testhelpers.SetTaskQueue(twd.Spec.Deployment.Template, s.name+"-activities")
 	activities = testhelpers.SetWorkerRole(activities, testhelpers.ActivityWorkerRole)
 	replicas := int32(1)
 	twd.Spec.Pools = []temporaliov1alpha1.WorkerPool{{

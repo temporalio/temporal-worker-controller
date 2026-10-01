@@ -186,10 +186,8 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
 	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec)
-	create := getCreateDeploymentPools(k8sState, status, spec, maxVersionsIneligibleForDeletion)
-	plan.CreateDeploymentPools = create.pools
-	plan.LabelDefaultPool = create.labelDefault
-	plan.BlockedReason = create.blockedReason
+	plan.CreateDeploymentPools, plan.LabelDefaultPool, plan.BlockedReason =
+		getCreateDeploymentPools(k8sState, status, spec, maxVersionsIneligibleForDeletion)
 	plan.DeletePoolDeployments = getDeletePoolDeployments(k8sState, status, spec)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
@@ -243,6 +241,7 @@ func getWorkerResourceApplies(
 		deletingDeployments[d.Name] = struct{}{}
 	}
 
+	buildIDs := k8sState.BuildIDs()
 	var applies []WorkerResourceApply
 	for i := range wrts {
 		wrt := &wrts[i]
@@ -257,7 +256,7 @@ func getWorkerResourceApplies(
 		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
-		for _, buildID := range k8sState.BuildIDs() {
+		for _, buildID := range buildIDs {
 			deployment, ok := k8sState.VersionDeployments(buildID)[wrt.Spec.EffectivePool()]
 			if !ok {
 				continue
@@ -495,25 +494,6 @@ func getWRTPoolProblems(
 	return missing, stale
 }
 
-// checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
-// out-of-date with respect to the provided ConnectionSpec. If an update is required, it mutates
-// the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
-// the Deployment does not exist, it returns nil.
-func checkAndUpdateDeploymentConnectionSpec(
-	buildID string,
-	k8sState *k8s.DeploymentState,
-	connection temporaliov1alpha1.ConnectionSpec,
-) *appsv1.Deployment {
-	existingDeployment, exists := k8sState.Deployments[buildID]
-	if !exists {
-		return nil
-	}
-	if updateDeploymentConnectionIfStale(existingDeployment, connection) {
-		return existingDeployment
-	}
-	return nil
-}
-
 // updateDeploymentConnectionIfStale updates a deployment in-place when its connection
 // spec hash differs from the provided ConnectionSpec, and reports whether it did.
 func updateDeploymentConnectionIfStale(d *appsv1.Deployment, connection temporaliov1alpha1.ConnectionSpec) bool {
@@ -629,11 +609,8 @@ func setEnvVarFrom(envVars []corev1.EnvVar, name string, src *corev1.EnvVarSourc
 	return append(envVars, corev1.EnvVar{Name: name, ValueFrom: src})
 }
 
-// checkAndUpdatePoolPodTemplateSpec determines whether a pool's Deployment is out-of-date
-// with respect to that pool's user-provided pod template spec. This enables rolling updates
-// when the build ID is stable (e.g., using spec.workerOptions.unsafeCustomBuildID) but the pod
-// spec has changed. If an update is required, it rebuilds the deployment spec in-place and
-// returns true.
+// checkAndUpdatePoolPodTemplateSpec rebuilds a pool's Deployment in place when its pod template
+// drifted under a stable unsafeCustomBuildID, and reports whether it did.
 func checkAndUpdatePoolPodTemplateSpec(
 	existingDeployment *appsv1.Deployment,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
@@ -921,15 +898,10 @@ func getScaleDeployments(
 		for pool, d := range k8sState.VersionDeployments(status.CurrentVersion.BuildID) {
 			ref := poolDeploymentRef(status.CurrentVersion.Deployment, pool, d)
 			poolSpec, inSpec := spec.PoolDeploymentSpec(pool)
-			// If the pool's replicas are non-nil, the controller is managing replicas instead of a scaler resource.
-			// Scale the Current Version per the pool's replicas value.
-			if ref == nil || !inSpec || poolSpec.Replicas == nil {
+			if ref == nil || !inSpec {
 				continue
 			}
-			replicas := *poolSpec.Replicas
-			if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-				scaleDeployments[ref] = uint32(replicas)
-			}
+			scaleToSpecReplicas(scaleDeployments, d, ref, poolSpec.Replicas)
 		}
 	}
 
@@ -985,9 +957,8 @@ func poolDeploymentRef(defaultRef *corev1.ObjectReference, pool string, d *appsv
 	return k8s.NewObjectRef(d)
 }
 
-// scaleDeprecatedDeployment applies the sunset scaling rules to one pool's deployment
-// of a deprecated version. specReplicas is that pool's desired replicas, nil when a
-// scaler manages them.
+// scaleDeprecatedDeployment applies the sunset scaling rules to one pool's deployment of a
+// deprecated version. specReplicas is nil when a scaler manages the pool.
 func scaleDeprecatedDeployment(
 	l logr.Logger,
 	scaleDeployments map[*corev1.ObjectReference]uint32,
@@ -1035,9 +1006,8 @@ func scaleToSpecReplicas(
 	}
 }
 
-// scaleDrainingBackUp repairs a draining version at 0 replicas: it has no pollers, so it
-// would never finish draining and never be retired. Any other non-zero count still has
-// pollers and will drain on its own.
+// scaleDrainingBackUp scales a draining deployment up from 0 replicas: with no pollers its
+// version would never finish draining.
 func scaleDrainingBackUp(
 	l logr.Logger,
 	scaleDeployments map[*corev1.ObjectReference]uint32,
@@ -1083,33 +1053,22 @@ func getSunsetScaleDownBuildIDs(
 	return buildIDs
 }
 
-type createDeploymentPools struct {
-	pools         []string
-	labelDefault  bool
-	blockedReason string
-}
-
-// getCreateDeploymentPools determines which pools of the target version need a Deployment.
+// getCreateDeploymentPools returns the pools of the target version that need a Deployment,
+// whether to label the default pool, and why it refused, if it did.
 func getCreateDeploymentPools(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	maxVersionsIneligibleForDeletion int32,
-) createDeploymentPools {
+) (pools []string, labelDefault bool, blockedReason string) {
 	existing := k8sState.VersionDeployments(status.TargetVersion.BuildID)
 	if len(existing) == 0 {
 		if !shouldCreateDeployment(status, maxVersionsIneligibleForDeletion) {
-			return createDeploymentPools{}
+			return nil, false, ""
 		}
-		return createDeploymentPools{pools: spec.PoolNames(), labelDefault: spec.HasPools()}
+		return spec.PoolNames(), spec.HasPools(), ""
 	}
 
-	labelled := false
-	for _, d := range existing {
-		if _, ok := d.Labels[k8s.PoolLabel]; ok {
-			labelled = true
-		}
-	}
 	var missing []string
 	for _, pool := range spec.PoolNames() {
 		if _, ok := existing[pool]; !ok {
@@ -1117,15 +1076,15 @@ func getCreateDeploymentPools(
 		}
 	}
 	if len(missing) == 0 {
-		return createDeploymentPools{}
+		return nil, false, ""
 	}
 	// The default pool's selector is immutable and would overlap the new pools' pods.
-	if !labelled {
-		return createDeploymentPools{blockedReason: fmt.Sprintf(
+	if !k8s.HasPoolLabel(existing) {
+		return nil, false, fmt.Sprintf(
 			"adding pools requires a new unsafeCustomBuildID: the Deployment for build ID %q predates worker pools",
-			status.TargetVersion.BuildID)}
+			status.TargetVersion.BuildID)
 	}
-	return createDeploymentPools{pools: missing, labelDefault: labelled}
+	return missing, true, ""
 }
 
 // getDeletePoolDeployments returns the target version's Deployments of pools that are
@@ -1137,7 +1096,7 @@ func getDeletePoolDeployments(
 ) []*appsv1.Deployment {
 	var deletes []*appsv1.Deployment
 	for _, d := range k8sState.VersionDeploymentList(status.TargetVersion.BuildID) {
-		if _, inSpec := spec.PoolDeploymentSpec(k8s.PoolName(d)); !inSpec {
+		if !spec.HasPool(k8s.PoolName(d)) {
 			deletes = append(deletes, d)
 		}
 	}

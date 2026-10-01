@@ -132,13 +132,7 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 	// The stricter rule gates promotion only; a current target keeps the plain health check.
 	if m.targetSpec != nil && m.targetSpec.HasPools() && buildID != m.temporalState.CurrentBuildID {
-		deployments := m.k8sState.VersionDeployments(buildID)
-		version.HealthySince = targetPoolsHealthySince(m.targetSpec, deployments)
-		for i, pool := range version.Pools {
-			if _, inSpec := m.targetSpec.PoolDeploymentSpec(pool.Name); inSpec {
-				version.Pools[i].HealthySince = targetPoolHealthySince(m.targetSpec, pool.Name, deployments[pool.Name])
-			}
-		}
+		m.applyTargetPoolHealth(&version.BaseWorkerDeploymentVersion, buildID)
 	}
 
 	// Set version status from temporal state
@@ -224,13 +218,7 @@ func (m *stateMapper) setVersionDeployments(version *v1alpha1.BaseWorkerDeployme
 // poolStatuses reports each pool of a multi-pool version, sorted by name so status
 // doesn't churn. Versions without pool labels keep an empty list.
 func poolStatuses(deployments map[string]*appsv1.Deployment) []v1alpha1.WorkerPoolStatus {
-	labelled := false
-	for _, d := range deployments {
-		if _, ok := d.Labels[k8s.PoolLabel]; ok {
-			labelled = true
-		}
-	}
-	if !labelled {
+	if !k8s.HasPoolLabel(deployments) {
 		return nil
 	}
 	pools := make([]v1alpha1.WorkerPoolStatus, 0, len(deployments))
@@ -245,29 +233,28 @@ func poolStatuses(deployments map[string]*appsv1.Deployment) []v1alpha1.WorkerPo
 	return pools
 }
 
-// targetPoolsHealthySince returns when the last of the spec's pools became ready, or nil
-// while any pool is missing or not ready.
-func targetPoolsHealthySince(spec *v1alpha1.WorkerDeploymentSpec, deployments map[string]*appsv1.Deployment) *metav1.Time {
-	var latest *metav1.Time
-	for _, pool := range spec.PoolNames() {
-		d, ok := deployments[pool]
-		if !ok {
-			return nil
+// applyTargetPoolHealth marks each spec pool of a multi-pool target healthy only once it
+// also has an available replica, and the version once every spec pool is.
+func (m *stateMapper) applyTargetPoolHealth(version *v1alpha1.BaseWorkerDeploymentVersion, buildID string) {
+	deployments := m.k8sState.VersionDeployments(buildID)
+	var times []*metav1.Time
+	for _, pool := range m.targetSpec.PoolNames() {
+		var since *metav1.Time
+		if d, ok := deployments[pool]; ok {
+			since = targetPoolHealthySince(m.targetSpec, pool, d)
 		}
-		since := targetPoolHealthySince(spec, pool, d)
-		if since == nil {
-			return nil
-		}
-		if latest == nil || since.After(latest.Time) {
-			latest = since
+		times = append(times, since)
+		for i := range version.Pools {
+			if version.Pools[i].Name == pool {
+				version.Pools[i].HealthySince = since
+			}
 		}
 	}
-	return latest
+	version.HealthySince = latestOrNil(times)
 }
 
-// targetPoolHealthySince returns when a target pool's deployment became available, or nil
-// while it is unavailable or has no available replica. A Deployment is Available at zero
-// replicas, which would pass a pool that never polled.
+// targetPoolHealthySince also requires an available replica: a Deployment is Available at
+// zero replicas, which would pass a pool that never polled.
 func targetPoolHealthySince(spec *v1alpha1.WorkerDeploymentSpec, pool string, d *appsv1.Deployment) *metav1.Time {
 	healthy, since := k8s.IsDeploymentHealthy(d)
 	if !healthy {
@@ -284,14 +271,23 @@ func targetPoolHealthySince(spec *v1alpha1.WorkerDeploymentSpec, pool string, d 
 // versionHealthySince returns when the last of the deployments became available, or
 // nil while any of them is unavailable.
 func versionHealthySince(deployments map[string]*appsv1.Deployment) *metav1.Time {
-	var latest *metav1.Time
+	times := make([]*metav1.Time, 0, len(deployments))
 	for _, d := range deployments {
-		healthy, since := k8s.IsDeploymentHealthy(d)
-		if !healthy {
+		_, since := k8s.IsDeploymentHealthy(d)
+		times = append(times, since)
+	}
+	return latestOrNil(times)
+}
+
+// latestOrNil returns the latest of the times, or nil if any of them is nil.
+func latestOrNil(times []*metav1.Time) *metav1.Time {
+	var latest *metav1.Time
+	for _, t := range times {
+		if t == nil {
 			return nil
 		}
-		if latest == nil || since.After(latest.Time) {
-			latest = since
+		if latest == nil || t.After(latest.Time) {
+			latest = t
 		}
 	}
 	return latest

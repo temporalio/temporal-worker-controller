@@ -33,10 +33,7 @@ const (
 
 // SetWorkerRole sets the test worker role in every container of the pod template.
 func SetWorkerRole(podSpec corev1.PodTemplateSpec, role string) corev1.PodTemplateSpec {
-	for i := range podSpec.Spec.Containers {
-		podSpec.Spec.Containers[i].Env = append(podSpec.Spec.Containers[i].Env, corev1.EnvVar{Name: workerRoleEnvKey, Value: role})
-	}
-	return podSpec
+	return setEnv(podSpec, workerRoleEnvKey, role)
 }
 
 func getEnv(podTemplateSpec corev1.PodTemplateSpec, key string) (string, error) {
