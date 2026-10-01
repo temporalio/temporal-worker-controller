@@ -206,3 +206,20 @@ func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
 		})
 	}
 }
+
+func TestMapTargetVersion_CurrentTargetIgnoresPoolReplicaRule(t *testing.T) {
+	available := metav1.NewTime(time.Now().Add(-time.Hour))
+	def := mapperPoolDeployment("v1", "", &available, 1)
+	def.Status.AvailableReplicas = 1
+	def.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
+	idle := mapperPoolDeployment("v1", "activities", &available, 0)
+	temporalState := &temporal.TemporalWorkerState{CurrentBuildID: "v1", Versions: map[string]*temporal.VersionInfo{}}
+	mapper := newStateMapper(mapperPoolState(def, idle), temporalState, "ns/worker")
+	mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{},
+		Pools:      []temporaliov1alpha1.WorkerPool{{Name: "activities"}},
+	}
+
+	assert.NotNil(t, mapper.mapTargetWorkerDeploymentVersionByBuildID("v1").HealthySince,
+		"an autoscaler may scale a current pool to zero; that must not block clearing a stale ramp")
+}

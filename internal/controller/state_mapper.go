@@ -130,7 +130,8 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 	}
 
 	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
-	if m.targetSpec != nil && m.targetSpec.HasPools() {
+	// The stricter rule gates promotion only; a current target keeps the plain health check.
+	if m.targetSpec != nil && m.targetSpec.HasPools() && buildID != m.temporalState.CurrentBuildID {
 		deployments := m.k8sState.VersionDeployments(buildID)
 		version.HealthySince = targetPoolsHealthySince(m.targetSpec, deployments)
 		for i, pool := range version.Pools {
