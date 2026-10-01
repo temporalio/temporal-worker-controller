@@ -697,6 +697,10 @@ func updateDeploymentWithPodTemplateSpec(
 		}
 	}
 
+	// Hash the user's template before controller modifications, as NewDeploymentWithOwnerRef
+	// does, so the next drift check compares like with like.
+	podTemplateSpecHash := k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+
 	// Apply controller-managed environment variables and volume mounts
 	// Uses the same shared helper as NewDeploymentWithOwnerRef
 	k8s.ApplyControllerPodSpecModifications(
@@ -713,8 +717,7 @@ func updateDeploymentWithPodTemplateSpec(
 		podAnnotations[k] = v
 	}
 	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
-	// Store the new pod template spec hash
-	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = podTemplateSpecHash
 
 	// Preserve existing pod labels and add/update required labels
 	podLabels := make(map[string]string)

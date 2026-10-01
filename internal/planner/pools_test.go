@@ -533,3 +533,14 @@ func TestGetWRTsWithMissingPool(t *testing.T) {
 
 	assert.Equal(t, []string{"ghost-hpa"}, getWRTsWithMissingPool(wrts, state, spec))
 }
+
+func TestCheckAndUpdatePoolPodTemplateSpec_SettlesAfterOneUpdate(t *testing.T) {
+	d := driftPoolDeployment("custom", "activities", "worker:v1")
+	spec := pooledSpec(t, "worker:v1", nil, "activities")
+	spec.WorkerOptions.UnsafeCustomBuildID = "custom"
+	spec.Pools[0].Deployment.Template = poolTemplate("activities:v2")
+
+	require.True(t, checkAndUpdatePoolPodTemplateSpec(d, spec, createDefaultConnectionSpec()))
+	assert.False(t, checkAndUpdatePoolPodTemplateSpec(d, spec, createDefaultConnectionSpec()),
+		"an updated Deployment must not be seen as drifted again")
+}
