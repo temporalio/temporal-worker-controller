@@ -57,6 +57,8 @@ type plan struct {
 
 	// WRTsWithMissingPool names WRTs whose pool no version has and the spec does not declare.
 	WRTsWithMissingPool []string
+	// WRTsWithStalePoolNotFound names WRTs still marked PoolNotFound whose pool is known again.
+	WRTsWithStalePoolNotFound []string
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -192,6 +194,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 	plan.WRTsWithMissingPool = planResult.WRTsWithMissingPool
+	plan.WRTsWithStalePoolNotFound = planResult.WRTsWithStalePoolNotFound
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
