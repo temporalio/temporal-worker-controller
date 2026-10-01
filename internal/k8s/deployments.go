@@ -132,15 +132,17 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 		// Fall through to default hash-based generation if buildID is invalid after cleaning
 	}
 
-	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
+	depSpec := w.Spec.DeploymentSpec()
+
+	if containers := depSpec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
-			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
+			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&depSpec.Template, nil, true)
 			maxImgLen := MaxBuildIDLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
 			return cleanBuildID(imagePrefix + shortHashSuffix)
 		}
 	}
-	return utils.ComputeHash(&w.Spec.Template, nil, false)
+	return utils.ComputeHash(&depSpec.Template, nil, false)
 }
 
 // ComputeWorkerDeploymentName generates the base worker deployment name
@@ -246,30 +248,47 @@ func NewDeploymentWithOwnerRef(
 ) *appsv1.Deployment {
 	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
 
+	depSpec := spec.DeploymentSpec()
+	depSpec.Selector = &metav1.LabelSelector{
+		MatchLabels: selectorLabels,
+	}
+
 	// Set pod labels
 	podLabels := make(map[string]string)
-	for k, v := range spec.Template.Labels {
+	for k, v := range depSpec.Template.Labels {
 		podLabels[k] = v
 	}
 	for k, v := range selectorLabels {
 		podLabels[k] = v
 	}
 
-	podSpec := spec.Template.Spec.DeepCopy()
-
-	// Apply controller-managed environment variables and volume mounts
-	ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
-
-	// Build pod annotations
+	// Build pod annotations by merging any annotations set by the user in
+	// spec.deployment.template.annotations with the constructed connection and
+	// pod template spec hashes.
 	podAnnotations := make(map[string]string)
-	for k, v := range spec.Template.Annotations {
+	for k, v := range depSpec.Template.Annotations {
 		podAnnotations[k] = v
 	}
 	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
 	// Store hash of user-provided pod template spec BEFORE controller modifications
 	// This enables drift detection when build ID is stable
-	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(spec.Template)
+	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(depSpec.Template)
 	blockOwnerDeletion := true
+	depSpec.Template.ObjectMeta = metav1.ObjectMeta{
+		Labels:      podLabels,
+		Annotations: podAnnotations,
+	}
+
+	// Apply controller-managed environment variables and volume mounts
+	podSpec := depSpec.Template.Spec.DeepCopy()
+	ApplyControllerPodSpecModifications(
+		podSpec,
+		connection,
+		spec.WorkerOptions.TemporalNamespace,
+		workerDeploymentName,
+		buildID,
+	)
+	depSpec.Template.Spec = *podSpec
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -277,7 +296,7 @@ func NewDeploymentWithOwnerRef(
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
 			Labels:                     selectorLabels,
-			Annotations:                spec.Template.Annotations,
+			Annotations:                depSpec.Template.Annotations,
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         typeMeta.APIVersion,
 				Kind:               typeMeta.Kind,
@@ -289,20 +308,7 @@ func NewDeploymentWithOwnerRef(
 			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
 			//                 deleting deployments that are still reachable.
 		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: spec.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: selectorLabels,
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:      podLabels,
-					Annotations: podAnnotations,
-				},
-				Spec: *podSpec,
-			},
-			MinReadySeconds: spec.MinReadySeconds,
-		},
+		Spec: depSpec,
 	}
 }
 
@@ -318,6 +324,7 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.ConnectionSpec) str
 	// Hash connection spec fields in deterministic order
 	_, _ = hasher.Write([]byte(connection.HostPort))
 	_, _ = hasher.Write([]byte(connection.TLSServerName()))
+	_, _ = hasher.Write([]byte(connection.TLSCACertSecretName()))
 	if connection.MutualTLSSecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
 	} else if connection.APIKeySecretRef != nil {
@@ -424,6 +431,37 @@ func ApplyControllerPodSpecModifications(
 			)
 			podSpec.Containers[i] = container
 		}
+	}
+
+	// Trust a private CA for API-key or no-credentials auth. Mutually exclusive with
+	// MutualTLSSecretRef (enforced by ConnectionSpec's CEL validation) -- mTLS bundles its
+	// own CA into that secret's ca.crt key instead, see ConnectionTLSConfig.CACertSecretRef.
+	if caCertSecretName := connection.TLSCACertSecretName(); caCertSecretName != "" {
+		for i, container := range podSpec.Containers {
+			container.Env = append(container.Env,
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS",
+					Value: "true",
+				},
+				corev1.EnvVar{
+					Name:  "TEMPORAL_TLS_SERVER_CA_CERT_PATH",
+					Value: "/etc/temporal/tls-ca/ca.crt",
+				},
+			)
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+				Name:      "temporal-tls-ca",
+				MountPath: "/etc/temporal/tls-ca",
+			})
+			podSpec.Containers[i] = container
+		}
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "temporal-tls-ca",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: caCertSecretName,
+				},
+			},
+		})
 	}
 }
 

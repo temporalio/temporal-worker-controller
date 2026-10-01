@@ -1,4 +1,7 @@
-package internal
+//go:build integration
+// +build integration
+
+package integration
 
 import (
 	"context"
@@ -13,14 +16,7 @@ import (
 	"go.temporal.io/server/temporaltest"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
-
-type testCase struct {
-	name    string
-	builder *testhelpers.TestCaseBuilder
-}
 
 // TestIntegration runs integration tests for the Temporal Worker Controller
 func TestIntegration(t *testing.T) {
@@ -48,6 +44,25 @@ func TestIntegration(t *testing.T) {
 
 	// Manual strategy tests
 	manualStrategyTestCases := []testCase{
+		{
+			// NOTE(jaypipes): This simply uses the older deprecated
+			// spec.replicas and spec.template fields instead of the newer
+			// spec.deployment field and verifies that we get the same
+			// behaviour.
+			name: "manual-rollout-deprecated-fields",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewWorkerDeploymentBuilder().
+						WithManualStrategy().
+						WithGate(false).
+						WithReplicasDeprecatedField(2).
+						WithTargetTemplateDeprecatedField("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
+				),
+		},
 		{
 			name: "manual-rollout-expect-no-change",
 			builder: testhelpers.NewTestCase().
@@ -759,6 +774,9 @@ func TestIntegration(t *testing.T) {
 	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusVisibilityGracePeriod"), testDrainageVisibilityGracePeriod)
 	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.wv.VersionDrainageStatusRefreshInterval"), testDrainageRefreshInterval)
 	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("matching.maxVersionsInDeployment"), testMaxVersionsInDeployment)
+	// Keep pinned overrides Inactive so the retirement tests exercise the
+	// controller's visibility guard instead of server-side reactivation.
+	dcShortTTL.OverrideValue(dynamicconfig.MakeKey("history.enableVersionReactivationSignals"), false)
 	tsShortTTL := temporaltest.NewServer(
 		temporaltest.WithT(t),
 		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcShortTTL)),
@@ -1008,98 +1026,4 @@ func TestIntegration(t *testing.T) {
 	// Deletion cleanup tests — use short poller TTL server so active pollers expire
 	// in 1s rather than the default 5 minutes, keeping test runtime reasonable.
 	runDeletionTests(t, k8sClient, tsShortTTL, testNamespace.Name)
-}
-
-// testWorkerDeploymentCreation tests the creation of a WorkerDeployment and waits for the expected status
-func testWorkerDeploymentCreation(
-	ctx context.Context,
-	t *testing.T,
-	k8sClient client.Client,
-	mgr manager.Manager,
-	ts *temporaltest.TestServer,
-	tc testhelpers.TestCase,
-) {
-	twd := tc.GetTWD()
-	expectedStatus := tc.GetExpectedStatus()
-
-	t.Log("Creating a Connection")
-	temporalConnection := &temporaliov1alpha1.Connection{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      twd.Spec.WorkerOptions.ConnectionRef.Name,
-			Namespace: twd.Namespace,
-		},
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: ts.GetFrontendHostPort(),
-		},
-	}
-	if err := k8sClient.Create(ctx, temporalConnection); err != nil {
-		t.Fatalf("failed to create Connection: %v", err)
-	}
-
-	env := testhelpers.TestEnv{
-		K8sClient:                  k8sClient,
-		Mgr:                        mgr,
-		Ts:                         ts,
-		Connection:                 temporalConnection,
-		ExistingDeploymentReplicas: tc.GetExistingDeploymentReplicas(),
-		ExistingDeploymentImages:   tc.GetExistingDeploymentImages(),
-		ExpectedDeploymentReplicas: tc.GetExpectedDeploymentReplicas(),
-	}
-
-	makePreliminaryStatusTrue(ctx, t, env, twd, tc.GetPreviouslyCurrentImages())
-
-	// verify that temporal state matches the preliminary status, to confirm that makePreliminaryStatusTrue worked
-	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, twd.Status, 30*time.Second, 5*time.Second)
-
-	// apply post-status setup function
-	if f := tc.GetSetupFunc(); f != nil {
-		f(t, ctx, tc, env)
-	}
-
-	// Apply any test-specific mutations to the TWD before it is created.
-	if f := tc.GetTWDMutatorFunc(); f != nil {
-		f(twd)
-	}
-
-	t.Log("Creating a WorkerDeployment")
-	if err := k8sClient.Create(ctx, twd); err != nil {
-		t.Fatalf("failed to create WorkerDeployment: %v", err)
-	}
-
-	// k8sClient.Create strips the status subresource, so the TWD starts with an empty
-	// status. Not guaranteed to precede the controller's first reconcile, but seeding it
-	// here helps test cases with pre-existing target/deprecated versions converge faster
-	// and avoid flaking against the eventually timeouts below.
-	if twd.Status.TargetVersion.BuildID != "" {
-		if err := k8sClient.Status().Update(ctx, twd); err != nil {
-			t.Fatalf("failed to pre-apply TWD status: %v", err)
-		}
-	}
-
-	// Hook: runs after TWD creation but before waiting for the target Deployment.
-	// Use this to assert blocking behaviour and then unblock the rollout.
-	if f := tc.GetPostTWDCreateFunc(); f != nil {
-		f(t, ctx, tc, env)
-	}
-
-	t.Log("Waiting for the controller to reconcile")
-	expectedDeploymentName := k8s.ComputeVersionedDeploymentName(twd.Name, k8s.ComputeBuildID(twd))
-
-	// only wait for and create the deployment if it is expected
-	if expectedStatus.TargetVersion.Status != temporaliov1alpha1.VersionStatusNotRegistered {
-		waitForExpectedTargetDeployment(t, twd, env, 30*time.Second)
-		workerStopFuncs := applyDeployment(t, ctx, k8sClient, expectedDeploymentName, twd.Namespace)
-		defer handleStopFuncs(workerStopFuncs)
-	}
-
-	if wait := tc.GetWaitTime(); wait != nil {
-		time.Sleep(*wait)
-	}
-	verifyWorkerDeploymentStatusEventually(t, ctx, env, twd.Name, twd.Namespace, expectedStatus, 30*time.Second, 5*time.Second)
-	verifyTemporalStateMatchesStatusEventually(t, ctx, ts, twd, *expectedStatus, 30*time.Second, 5*time.Second)
-
-	// apply post-expected-status validation function
-	if f := tc.GetValidatorFunc(); f != nil {
-		tc.GetValidatorFunc()(t, ctx, tc, env)
-	}
 }

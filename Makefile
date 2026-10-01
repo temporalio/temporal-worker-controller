@@ -4,7 +4,7 @@ IMG ?= temporal-worker-controller:latest
 ENVTEST_K8S_VERSION = 1.29.0
 
 MAIN_BRANCH = main
-ALL_TEST_TAGS = test_dep
+ALL_TEST_TAGS = integration
 
 ##### Variables ######
 
@@ -153,6 +153,7 @@ help: ## Display this help.
 manifests: controller-gen ## Generate ClusterRole and CustomResourceDefinition objects.
 	GOWORK=off GO111MODULE=on $(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true,maxDescLen=0,generateEmbeddedObjectMeta=true paths=./api/... paths=./internal/... paths=./cmd/... \
     output:crd:artifacts:config=helm/temporal-worker-controller-crds/templates
+	python3 hack/patch-workerdeployment-crd-schema.py
 	python3 hack/sync-rbac-rules.py
 
 .PHONY: generate
@@ -220,17 +221,16 @@ start-temporal-server: ## Start an ephemeral Temporal server with versioning API
 		--dynamic-config-value system.enableDeploymentVersions=true
 
 .PHONY: test-all
-test-all: manifests generate envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags test_dep ./... -coverprofile cover.out
+test-all: test-unit test-integration ## Run all tests.
 
 .PHONY: test-unit
 test-unit: envtest ## Run unit tests and webhook integration tests (requires envtest binaries and a rendered-chart-capable helm).
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" GOWORK=off go test ./... -coverprofile cover.out
 
 .PHONY: test-integration
 test-integration: manifests generate envtest ## Run integration tests against local Temporal dev server.
 	@echo "Running integration tests..."
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -v -tags test_dep ./internal/tests/internal -run TestIntegration
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" GOWORK=off go test -v -tags integration ./tests/integration/...
 
 ##@ Build
 
@@ -348,7 +348,7 @@ lint-actions: $(ACTIONLINT)
 
 lint-code: $(GOLANGCI_LINT)
 	@printf $(COLOR) "Linting code..."
-	@$(GOLANGCI_LINT) run --verbose --build-tags $(ALL_TEST_TAGS) --timeout 10m --fix=$(GOLANGCI_LINT_FIX) --new-from-rev=$(GOLANGCI_LINT_BASE_REV) --config=.github/.golangci.yml
+	@GOWORK=off $(GOLANGCI_LINT) run --verbose --build-tags $(ALL_TEST_TAGS) --timeout 10m --fix=$(GOLANGCI_LINT_FIX) --new-from-rev=$(GOLANGCI_LINT_BASE_REV) --config=.github/.golangci.yml
 
 fmt-imports: $(GCI) # Don't get confused, there is a single linter called gci, which is a part of the mega linter we use is called golangci-lint.
 	@printf $(COLOR) "Formatting imports..."

@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	"go.temporal.io/sdk/contrib/envconfig"
@@ -31,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -535,7 +537,7 @@ func TestComputeWorkerDeploymentName_Integration_WithVersionedName(t *testing.T)
 			Namespace: "demo",
 		},
 		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
-			Template: corev1.PodTemplateSpec{
+			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
@@ -592,6 +594,31 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 
 	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
 	assert.Equal(t, "build123", deployment.Labels[k8s.BuildIDLabel])
+}
+
+func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {
+	defaultMaxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
+	defaultMaxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
+
+	t.Run("empty rollout strategy uses RollingUpdate deployment strategy and Kubernetes defaults", func(t *testing.T) {
+		deployment := k8s.NewDeploymentWithOwnerRef(
+			&metav1.TypeMeta{},
+			&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+			&temporaliov1alpha1.WorkerDeploymentSpec{},
+			"test-deployment",
+			"build123",
+			temporaliov1alpha1.ConnectionSpec{},
+		)
+
+		expected := appsv1.DeploymentStrategy{
+			Type: appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: &defaultMaxUnavailable,
+				MaxSurge:       &defaultMaxSurge,
+			},
+		}
+		assert.Equal(t, expected, deployment.Spec.Strategy)
+	})
 }
 
 func TestComputeConnectionSpecHash(t *testing.T) {
@@ -754,6 +781,164 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.Equal(t, hash1, hash2, "Same API key secret name should produce the same hash")
 	})
 
+	t.Run("different CA cert secrets produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+				Key:                  "api-key"},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-1"},
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+				Key:                  "api-key"},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-2"},
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different CA cert secrets should produce different hashes")
+	})
+
+	t.Run("empty CA cert secret vs non-empty produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+				Key:                  "api-key"},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+				Key:                  "api-key"},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty CA cert secret should produce different hashes")
+	})
+
+}
+
+func TestApplyControllerPodSpecModifications(t *testing.T) {
+	newPodSpec := func() *corev1.PodSpec {
+		return &corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "worker"}},
+		}
+	}
+	getEnv := func(c corev1.Container, name string) (corev1.EnvVar, bool) {
+		for _, e := range c.Env {
+			if e.Name == name {
+				return e, true
+			}
+		}
+		return corev1.EnvVar{}, false
+	}
+	hasMount := func(c corev1.Container, name string) bool {
+		for _, m := range c.VolumeMounts {
+			if m.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	hasVolume := func(spec *corev1.PodSpec, name string) (corev1.Volume, bool) {
+		for _, v := range spec.Volumes {
+			if v.Name == name {
+				return v, true
+			}
+		}
+		return corev1.Volume{}, false
+	}
+
+	t.Run("API key auth with CA cert mounts the CA secret and sets TLS env vars", func(t *testing.T) {
+		podSpec := newPodSpec()
+		connection := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal.internal:7233",
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "api-key",
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-ca-secret"},
+			},
+		}
+
+		k8s.ApplyControllerPodSpecModifications(podSpec, connection, "test-namespace", "test-worker", "v1")
+		c := podSpec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok, "TEMPORAL_TLS must be set when a CA cert is configured")
+		assert.Equal(t, "true", e.Value)
+
+		e, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		require.True(t, ok, "TEMPORAL_TLS_SERVER_CA_CERT_PATH must be set")
+		assert.Equal(t, "/etc/temporal/tls-ca/ca.crt", e.Value)
+
+		assert.True(t, hasMount(c, "temporal-tls-ca"), "worker pod must mount the CA secret")
+
+		vol, ok := hasVolume(podSpec, "temporal-tls-ca")
+		require.True(t, ok, "pod spec must have the CA cert volume")
+		require.NotNil(t, vol.Secret)
+		assert.Equal(t, "my-ca-secret", vol.Secret.SecretName)
+
+		// API key env var must still be present alongside the CA config.
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.True(t, ok)
+	})
+
+	t.Run("no-credentials auth with CA cert still enables TLS", func(t *testing.T) {
+		podSpec := newPodSpec()
+		connection := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal.internal:7233",
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-ca-secret"},
+			},
+		}
+
+		k8s.ApplyControllerPodSpecModifications(podSpec, connection, "test-namespace", "test-worker", "v1")
+		c := podSpec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok, "NO_CREDENTIALS mode must still get TEMPORAL_TLS=true when a CA cert is configured")
+		assert.Equal(t, "true", e.Value)
+
+		_, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		assert.True(t, ok)
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+	})
+
+	t.Run("no CA cert configured means no CA volume or mount", func(t *testing.T) {
+		podSpec := newPodSpec()
+		connection := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal.internal:7233",
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "api-key",
+			},
+		}
+
+		k8s.ApplyControllerPodSpecModifications(podSpec, connection, "test-namespace", "test-worker", "v1")
+		c := podSpec.Containers[0]
+
+		_, ok := getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasMount(c, "temporal-tls-ca"))
+		_, ok = hasVolume(podSpec, "temporal-tls-ca")
+		assert.False(t, ok)
+	})
 }
 
 func TestComputePodTemplateSpecHash(t *testing.T) {
@@ -913,7 +1098,7 @@ func TestNewDeploymentWithOwnerRef_EnvironmentVariablesAndVolumes(t *testing.T) 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
@@ -1050,7 +1235,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{

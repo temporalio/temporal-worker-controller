@@ -17,8 +17,32 @@
     "certmanager": {
       "properties": {
         "caBundle": {
-          "description": "caBundle is only used when enabled: false (i.e. you are managing webhook TLS yourself).\nSet this to the base64-encoded PEM CA certificate that signed the TLS certificate in\nthe webhook cert Secret (see webhook.certSecretName). The Kubernetes API server uses this\nto verify the webhook server's TLS certificate.\nLeave empty when enabled: true — cert-manager injects the CA bundle automatically.",
+          "description": "caBundle is only used when enabled: false (i.e. you are managing webhook TLS yourself).\nSet this to the base64-encoded PEM CA certificate that signed the TLS certificate in\nthe webhook cert Secret (see webhook.certSecretName). The Kubernetes API server uses this\nto verify the webhook server's TLS certificate.\nLeave empty when enabled: true — cert-manager injects the CA bundle automatically.\nLeave empty (and use caInjectorJob below instead) if that CA rotates and you don't want\nto keep this value in sync by hand.",
           "type": "string"
+        },
+        "caInjectorJob": {
+          "description": "caInjectorJob runs a Helm post-install/post-upgrade hook Job that patches the\ncaBundle onto both ValidatingWebhookConfigurations from a Secret, instead of\nthe static caBundle value above. Use this when your TLS cert is issued by an\nexternal PKI whose CA can rotate — every install/upgrade re-reads the CA, so\nthere's nothing to keep in sync by hand. Only relevant when enabled: false;\nignored otherwise.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string"
+            },
+            "secret": {
+              "description": "Secret holding the CA that signed the webhook server's TLS certificate.\nMust exist in the release namespace before install/upgrade.",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "enabled": {
           "description": "enabled controls creation of the cert-manager Issuer and Certificate used for\nwebhook TLS. cert-manager must be installed in the cluster independently.\nSet to false only if you are providing your own TLS certificate (see caBundle below).",
@@ -372,6 +396,10 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "hpaMatchLabelsStripTemporalPrefix": {
+          "description": "hpaMatchLabelsStripTemporalPrefix removes the \"temporal_\" prefix from\ncontroller-managed HPA external metric matchLabels. Enable this for\nself-hosted Temporal Server metrics that use worker_deployment_name,\nworker_build_id, and namespace.",
+          "type": "boolean"
         }
       },
       "type": "object"

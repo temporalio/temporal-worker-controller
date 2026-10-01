@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -657,7 +658,9 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
+			spec := tc.spec
+
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -734,7 +737,7 @@ func TestGetDeleteDeployments(t *testing.T) {
 			// EligibleForDeletion: worker pods have not fully terminated (Status.Replicas > 0),
 			// so versioned pollers may still be registered and the Temporal-side DeleteVersion
 			// would fail. Deleting the Deployment now would strand that server-side version
-			// record with no way to retry (see execplan.deleteDrainedVersions), so hold off.
+			// record with no way to retry (see execplan.deleteDeprecatedVersions), so hold off.
 			name: "drained long enough and scaled to zero in spec, but not eligible for deletion - not deleted",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
@@ -1325,6 +1328,90 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
+}
+
+func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	dep := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{}},
+		},
+	}
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &maxUnavailable,
+					MaxSurge:       &maxSurge,
+				},
+			},
+		},
+	}
+	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
+	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
+	assert.Equal(t, maxUnavailable, *dep.Spec.Strategy.RollingUpdate.MaxUnavailable)
+	assert.Equal(t, maxSurge, *dep.Spec.Strategy.RollingUpdate.MaxSurge)
+}
+
+func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	desiredDeploymentStrategy := appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &maxUnavailable,
+			MaxSurge:       &maxSurge,
+		},
+	}
+	desiredSpec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{
+			Strategy: desiredDeploymentStrategy,
+		},
+	}
+
+	currentDefault := intstr.FromString("25%")
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-v1"},
+		Spec: appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &currentDefault,
+					MaxSurge:       &currentDefault,
+				},
+			},
+		},
+	}
+
+	status := &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"v1": deployment},
+	}
+
+	t.Run("updates when strategy differs", func(t *testing.T) {
+		updates := getUpdateDeployments(k8sState, status, desiredSpec, temporaliov1alpha1.ConnectionSpec{})
+		require.Len(t, updates, 1)
+		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, updates[0].Spec.Strategy.Type)
+		require.NotNil(t, updates[0].Spec.Strategy.RollingUpdate)
+		assert.Equal(t, maxUnavailable, *updates[0].Spec.Strategy.RollingUpdate.MaxUnavailable)
+		assert.Equal(t, maxSurge, *updates[0].Spec.Strategy.RollingUpdate.MaxSurge)
+	})
+
+	t.Run("no update when strategy same", func(t *testing.T) {
+		deployment.Spec.Strategy = desiredDeploymentStrategy
+		updates := getUpdateDeployments(k8sState, status, desiredSpec, temporaliov1alpha1.ConnectionSpec{})
+		assert.Empty(t, updates)
+	})
 }
 
 func TestShouldCreateDeployment(t *testing.T) {
@@ -2913,6 +3000,89 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		assert.Equal(t, "v1-image:pinned", c.Image)
 	})
 
+	caCertConn := func(host, apiSecret, caSecret string) temporaliov1alpha1.ConnectionSpec {
+		return temporaliov1alpha1.ConnectionSpec{
+			HostPort: host,
+			APIKeySecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: apiSecret},
+				Key:                  "key",
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: caSecret},
+			},
+		}
+	}
+	caVolumeSecretName := func(d *appsv1.Deployment) string {
+		for _, v := range d.Spec.Template.Spec.Volumes {
+			if v.Name == "temporal-tls-ca" && v.Secret != nil {
+				return v.Secret.SecretName
+			}
+		}
+		return ""
+	}
+
+	t.Run("API key to API key with CA cert", func(t *testing.T) {
+		res := run(apiKeyConn(defaultHostPort(), "api-secret", "key"), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok, "TEMPORAL_TLS must be set once a CA cert is configured")
+		assert.Equal(t, "true", e.Value)
+
+		e, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		require.True(t, ok, "TEMPORAL_TLS_SERVER_CA_CERT_PATH must be set")
+		assert.Equal(t, "/etc/temporal/tls-ca/ca.crt", e.Value)
+
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+		assert.True(t, hasVolume(res, "temporal-tls-ca"))
+		assert.Equal(t, "ca-secret", caVolumeSecretName(res))
+
+		// API key must still be present alongside the CA config.
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.True(t, ok)
+	})
+
+	t.Run("API key with CA cert back to plain API key removes the CA volume and mount", func(t *testing.T) {
+		res := run(caCertConn(defaultHostPort(), "api-secret", "ca-secret"), apiKeyConn(defaultHostPort(), "api-secret", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		_, ok := getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok, "TEMPORAL_TLS must be removed once the CA cert is unset")
+		_, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasMount(c, "temporal-tls-ca"))
+		assert.False(t, hasVolume(res, "temporal-tls-ca"))
+	})
+
+	t.Run("same-mode CA cert secret rotation", func(t *testing.T) {
+		res := run(caCertConn(defaultHostPort(), "api-secret", "old-ca-secret"), caCertConn(defaultHostPort(), "api-secret", "new-ca-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		assert.True(t, hasVolume(res, "temporal-tls-ca"))
+		assert.Equal(t, "new-ca-secret", caVolumeSecretName(res))
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+	})
+
+	t.Run("mTLS to CA cert (auth mode switch)", func(t *testing.T) {
+		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		// mTLS artifacts must be fully removed.
+		_, ok := getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.False(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasMount(c, "temporal-tls"))
+		assert.False(t, hasVolume(res, "temporal-tls"))
+
+		// CA-cert artifacts must be present, and TEMPORAL_TLS stays true across the switch.
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok)
+		assert.Equal(t, "true", e.Value)
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+		assert.Equal(t, "ca-secret", caVolumeSecretName(res))
+	})
+
 }
 
 func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
@@ -2939,7 +3109,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "v1", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -2960,7 +3130,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "my-image:v1"},
@@ -2981,7 +3151,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3003,7 +3173,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(3), // Changed from 1 to 3
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							// Same image as stored - hash will match
@@ -3028,7 +3198,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				[]corev1.EnvVar{{Name: "MY_VAR", Value: "old-value"}}),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
@@ -3054,7 +3224,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentWithoutHashAnnotation(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3130,6 +3300,7 @@ func createDeploymentWithDefaultConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3149,6 +3320,7 @@ func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3200,6 +3372,7 @@ func createDeploymentForDriftTest(replicas int32, buildID string, image string) 
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3252,6 +3425,7 @@ func createDeploymentForDriftTestWithEnv(replicas int32, buildID string, image s
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3342,7 +3516,7 @@ func defaultMutualTLSSecret() string {
 // createDefaultWorkerSpec creates a default WorkerDeploymentSpec for testing
 func createDefaultWorkerSpec() *temporaliov1alpha1.WorkerDeploymentSpec {
 	return &temporaliov1alpha1.WorkerDeploymentSpec{
-		Template: corev1.PodTemplateSpec{
+		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
@@ -3362,7 +3536,7 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.WorkerDeploymentSpec {
 func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.WorkerDeploymentSpec {
 	return &temporaliov1alpha1.WorkerDeploymentSpec{
 		Replicas: int32Ptr(1),
-		Template: corev1.PodTemplateSpec{
+		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
@@ -3697,7 +3871,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil, false)
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of worker resource applies")
 		})
 	}
@@ -3714,7 +3888,7 @@ func TestGetWorkerResourceApplies_RenderError(t *testing.T) {
 		createTestWRT("my-hpa", "my-worker"),
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil)
+	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil, false)
 	require.Len(t, applies, 2)
 
 	var errEntry, okEntry *WorkerResourceApply
@@ -3746,7 +3920,7 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, false)
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -3808,6 +3982,7 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3838,7 +4013,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, false)
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -3854,6 +4029,60 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		assert.Equal(t, v, matchLabels[k], "injected matchLabels[%q]", k)
 	}
 	assert.Len(t, matchLabels, len(expected), "no extra keys should be injected")
+}
+
+func TestGetWorkerResourceApplies_StripsTemporalMetricLabelPrefix(t *testing.T) {
+	hpaSpec := map[string]interface{}{
+		"apiVersion": "autoscaling/v2",
+		"kind":       "HorizontalPodAutoscaler",
+		"spec": map[string]interface{}{
+			"metrics": []interface{}{
+				map[string]interface{}{
+					"type": "External",
+					"external": map[string]interface{}{
+						"metric": map[string]interface{}{
+							"name":     "approximate_backlog_count",
+							"selector": map[string]interface{}{"matchLabels": map[string]interface{}{}},
+						},
+					},
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(hpaSpec)
+	require.NoError(t, err)
+	wrt := temporaliov1alpha1.WorkerResourceTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-hpa", Namespace: "default"},
+		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+			Template:            runtime.RawExtension{Raw: raw},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-abc": createDeploymentWithUID("my-worker-build-abc", "uid-abc"),
+		},
+	}
+
+	applies := getWorkerResourceApplies(
+		logr.Discard(),
+		[]temporaliov1alpha1.WorkerResourceTemplate{wrt},
+		k8sState,
+		"test-temporal-ns",
+		nil,
+		nil,
+		true,
+	)
+
+	require.Len(t, applies, 1)
+	metrics := applies[0].Resource.Object["spec"].(map[string]interface{})["metrics"].([]interface{})
+	matchLabels := metrics[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
+	assert.Equal(t, "default_my-worker", matchLabels["worker_deployment_name"])
+	assert.Equal(t, "build-abc", matchLabels["worker_build_id"])
+	assert.Equal(t, "test-temporal-ns", matchLabels["namespace"])
+	assert.NotContains(t, matchLabels, "temporal_worker_deployment_name")
+	assert.NotContains(t, matchLabels, "temporal_worker_build_id")
+	assert.NotContains(t, matchLabels, "temporal_namespace")
 }
 
 // createTestWRTWithInvalidTemplate builds a WRT whose spec.template contains invalid json
@@ -4540,7 +4769,7 @@ func TestGetWorkerResourceApplies_SunsetBuildIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, false)
 			assert.ElementsMatch(t, tc.expectKeys, applyKeys(applies))
 		})
 	}
@@ -4790,6 +5019,49 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 				buildIDs = append(buildIDs, id)
 			}
 			assert.ElementsMatch(t, tc.expect, buildIDs)
+		})
+	}
+}
+
+func TestGetDeleteDeployments_Inactive(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mutate     func(*appsv1.Deployment, *temporaliov1alpha1.WorkerDeploymentStatus)
+		wantDelete bool
+	}{
+		{name: "superseded and fully scaled down", wantDelete: true},
+		{name: "scale down requested but pods remain", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { d.Status.Replicas = 1 }},
+		{name: "terminating pods remain", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) {
+			n := int32(1)
+			d.Status.TerminatingReplicas = &n
+		}},
+		{name: "scale down not observed", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { d.Generation = 1 }},
+		{name: "replicas unspecified", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { d.Spec.Replicas = nil }},
+		{name: "replicas positive", mutate: func(d *appsv1.Deployment, _ *temporaliov1alpha1.WorkerDeploymentStatus) { *d.Spec.Replicas = 1 }},
+		{name: "target retained", mutate: func(_ *appsv1.Deployment, s *temporaliov1alpha1.WorkerDeploymentStatus) {
+			s.TargetVersion.BuildID = "old"
+		}},
+		{name: "current retained", mutate: func(_ *appsv1.Deployment, s *temporaliov1alpha1.WorkerDeploymentStatus) {
+			s.CurrentVersion = &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "old"}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := createDeploymentWithDefaultConnectionSpecHash(0)
+			s := &temporaliov1alpha1.WorkerDeploymentStatus{
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "old", Status: temporaliov1alpha1.VersionStatusInactive,
+						Deployment: &corev1.ObjectReference{Name: "old"},
+					},
+				}},
+			}
+			if tc.mutate != nil {
+				tc.mutate(d, s)
+			}
+			state := &k8s.DeploymentState{Deployments: map[string]*appsv1.Deployment{"old": d}}
+			deleted := getDeleteDeployments(state, s, &temporaliov1alpha1.WorkerDeploymentSpec{}, true)
+			assert.Equal(t, tc.wantDelete, len(deleted) == 1)
+			assert.Empty(t, getDeleteDeployments(state, s, &temporaliov1alpha1.WorkerDeploymentSpec{}, false))
 		})
 	}
 }

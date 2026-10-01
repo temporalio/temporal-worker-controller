@@ -18,6 +18,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -133,6 +134,9 @@ type WorkflowConfig struct {
 type Config struct {
 	// RolloutStrategy to use
 	RolloutStrategy temporaliov1alpha1.RolloutStrategy
+	// WRTHPAMatchLabelsStripTemporalPrefix removes the "temporal_" prefix from
+	// controller-managed external metric matchLabels.
+	WRTHPAMatchLabelsStripTemporalPrefix bool
 }
 
 // GeneratePlan creates a plan for updating the worker deployment
@@ -180,7 +184,15 @@ func GeneratePlan(
 	// not exist while that's true
 	sunsetBuildIDs := getSunsetScaleDownBuildIDs(status, spec)
 
-	plan.ApplyWorkerResources = getWorkerResourceApplies(l, wrts, k8sState, spec.WorkerOptions.TemporalNamespace, plan.DeleteDeployments, sunsetBuildIDs)
+	plan.ApplyWorkerResources = getWorkerResourceApplies(
+		l,
+		wrts,
+		k8sState,
+		spec.WorkerOptions.TemporalNamespace,
+		plan.DeleteDeployments,
+		sunsetBuildIDs,
+		config.WRTHPAMatchLabelsStripTemporalPrefix,
+	)
 	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
@@ -197,6 +209,7 @@ func getWorkerResourceApplies(
 	temporalNamespace string,
 	deleteDeployments []*appsv1.Deployment,
 	sunsetBuildIDs map[string]struct{},
+	stripTemporalMetricLabelPrefix bool,
 ) []WorkerResourceApply {
 	// Build a set of deployment names that are scheduled for deletion so we can
 	// skip rendering WRTs for them. Their rendered resources are deleted explicitly
@@ -232,7 +245,13 @@ func getWorkerResourceApplies(
 					continue
 				}
 			}
-			rendered, renderErr := k8s.RenderWorkerResourceTemplate(wrt, deployment, buildID, temporalNamespace)
+			rendered, renderErr := k8s.RenderWorkerResourceTemplate(
+				wrt,
+				deployment,
+				buildID,
+				temporalNamespace,
+				stripTemporalMetricLabelPrefix,
+			)
 			if renderErr != nil {
 				l.Error(renderErr, "failed to render WorkerResourceTemplate",
 					"wrt", wrt.Name,
@@ -449,6 +468,10 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 	tlsServerName := connection.TLSServerName()
 	mtls := connection.MutualTLSSecretRef != nil
 	apiKey := !mtls && connection.APIKeySecretRef != nil
+	// TLSCACertSecretName is mutually exclusive with MutualTLSSecretRef (enforced by
+	// ConnectionSpec's CEL validation) -- mTLS bundles its own CA into that secret's ca.crt
+	// key instead, see ConnectionTLSConfig.CACertSecretRef.
+	caCertSecretName := connection.TLSCACertSecretName()
 
 	for i := range deployment.Spec.Template.Spec.Containers {
 		container := &deployment.Spec.Template.Spec.Containers[i]
@@ -461,16 +484,28 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_SERVER_NAME")
 		}
 
-		if mtls {
+		if mtls || caCertSecretName != "" {
 			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS", "true")
+		} else {
+			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS")
+		}
+
+		if mtls {
 			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH", "/etc/temporal/tls/tls.key")
 			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH", "/etc/temporal/tls/tls.crt")
 			container.VolumeMounts = ensureTLSVolumeMount(container.VolumeMounts)
 		} else {
-			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS")
 			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_KEY_PATH")
 			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_CLIENT_CERT_PATH")
 			container.VolumeMounts = removeTLSVolumeMount(container.VolumeMounts)
+		}
+
+		if caCertSecretName != "" {
+			container.Env = setEnvVar(container.Env, "TEMPORAL_TLS_SERVER_CA_CERT_PATH", "/etc/temporal/tls-ca/ca.crt")
+			container.VolumeMounts = ensureTLSCAVolumeMount(container.VolumeMounts)
+		} else {
+			container.Env = removeEnvVar(container.Env, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+			container.VolumeMounts = removeTLSCAVolumeMount(container.VolumeMounts)
 		}
 
 		if apiKey {
@@ -485,6 +520,12 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 			connection.MutualTLSSecretRef.Name)
 	} else {
 		deployment.Spec.Template.Spec.Volumes = removeTLSVolume(deployment.Spec.Template.Spec.Volumes)
+	}
+
+	if caCertSecretName != "" {
+		deployment.Spec.Template.Spec.Volumes = ensureTLSCAVolume(deployment.Spec.Template.Spec.Volumes, caCertSecretName)
+	} else {
+		deployment.Spec.Template.Spec.Volumes = removeTLSCAVolume(deployment.Spec.Template.Spec.Volumes)
 	}
 }
 
@@ -568,6 +609,53 @@ func removeTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 	return mounts
 }
 
+// ensureTLSCAVolume adds the temporal-tls-ca secret volume or updates its secret name if present.
+func ensureTLSCAVolume(volumes []corev1.Volume, secretName string) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == "temporal-tls-ca" {
+			volumes[i].VolumeSource = corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
+			}
+			return volumes
+		}
+	}
+	return append(volumes, corev1.Volume{
+		Name:         "temporal-tls-ca",
+		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secretName}},
+	})
+}
+
+// removeTLSCAVolume removes the temporal-tls-ca volume if present.
+func removeTLSCAVolume(volumes []corev1.Volume) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == "temporal-tls-ca" {
+			return slices.Delete(volumes, i, i+1)
+		}
+	}
+	return volumes
+}
+
+// ensureTLSCAVolumeMount adds the temporal-tls-ca mount to a container, or fixes its path if present.
+func ensureTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == "temporal-tls-ca" {
+			mounts[i].MountPath = "/etc/temporal/tls-ca"
+			return mounts
+		}
+	}
+	return append(mounts, corev1.VolumeMount{Name: "temporal-tls-ca", MountPath: "/etc/temporal/tls-ca"})
+}
+
+// removeTLSCAVolumeMount removes the temporal-tls-ca mount from a container if present.
+func removeTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == "temporal-tls-ca" {
+			return slices.Delete(mounts, i, i+1)
+		}
+	}
+	return mounts
+}
+
 // checkAndUpdateDeploymentPodTemplateSpec determines whether the Deployment for the given buildID is
 // out-of-date with respect to the user-provided pod template spec. This enables rolling updates when
 // the build ID is stable (e.g., using spec.workerOptions.buildID) but the pod spec has changed.
@@ -603,7 +691,8 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 	}
 
 	// Compute the hash of the current user-provided pod template spec
-	currentHash := k8s.ComputePodTemplateSpecHash(spec.Template)
+	depSpec := spec.DeploymentSpec()
+	currentHash := k8s.ComputePodTemplateSpecHash(depSpec.Template)
 
 	// If hashes match, no drift detected
 	if storedHash == currentHash {
@@ -617,15 +706,16 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 	return existingDeployment
 }
 
-// updateDeploymentWithPodTemplateSpec updates an existing deployment with a new pod template spec
-// from the TWD spec. This applies all the controller modifications that NewDeploymentWithOwnerRef does.
+// updateDeploymentWithPodTemplateSpec updates an existing Kubernetes
+// Deployment with a new pod template spec from the WorkerDeploymentSpec. This
+// applies all the controller modifications that NewDeploymentWithOwnerRef
+// does.
 func updateDeploymentWithPodTemplateSpec(
 	deployment *appsv1.Deployment,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) {
-	// Deep copy the user-provided pod spec to avoid mutating the original
-	podSpec := spec.Template.Spec.DeepCopy()
+	wdDepSpec := spec.DeploymentSpec()
 
 	// Extract the build ID from the deployment's labels (with nil safety)
 	var buildID string
@@ -649,39 +739,67 @@ func updateDeploymentWithPodTemplateSpec(
 
 	// Apply controller-managed environment variables and volume mounts
 	// Uses the same shared helper as NewDeploymentWithOwnerRef
-	k8s.ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
+	k8s.ApplyControllerPodSpecModifications(
+		&wdDepSpec.Template.Spec,
+		connection,
+		spec.WorkerOptions.TemporalNamespace,
+		workerDeploymentName,
+		buildID,
+	)
 
 	// Build new pod annotations
 	podAnnotations := make(map[string]string)
-	for k, v := range spec.Template.Annotations {
+	for k, v := range wdDepSpec.Template.Annotations {
 		podAnnotations[k] = v
 	}
 	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
 	// Store the new pod template spec hash
-	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(spec.Template)
+	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
 
 	// Preserve existing pod labels and add/update required labels
 	podLabels := make(map[string]string)
-	for k, v := range spec.Template.Labels {
+	for k, v := range wdDepSpec.Template.Labels {
 		podLabels[k] = v
 	}
 	// Copy selector labels from existing deployment
+	wdDepSpec.Selector = deployment.Spec.Selector
 	for k, v := range deployment.Spec.Selector.MatchLabels {
 		podLabels[k] = v
 	}
 
-	// Update the deployment's pod template
-	deployment.Spec.Template.ObjectMeta.Labels = podLabels
-	deployment.Spec.Template.ObjectMeta.Annotations = podAnnotations
-	deployment.Spec.Template.Spec = *podSpec
-
 	// Only set replicas when the controller is managing them (spec.Replicas non-nil).
 	// When nil, an external autoscaler owns replicas; preserving the current value
 	// avoids competing with it on every Update.
-	if spec.Replicas != nil {
-		deployment.Spec.Replicas = spec.Replicas
+	origReplicas := deployment.Spec.Replicas
+	deployment.Spec = wdDepSpec
+	deployment.Spec.Replicas = origReplicas
+
+	// Update the deployment's pod template
+	deployment.Spec.Template.ObjectMeta.Labels = podLabels
+	deployment.Spec.Template.ObjectMeta.Annotations = podAnnotations
+}
+
+// checkAndUpdateDeploymentStrategy updates an owned Deployment when its
+// rolling update strategy differs from the WorkerDeployment spec.
+func checkAndUpdateDeploymentStrategy(
+	buildID string,
+	k8sState *k8s.DeploymentState,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[buildID]
+	if !exists {
+		return nil
 	}
-	deployment.Spec.MinReadySeconds = spec.MinReadySeconds
+
+	wdDepSpec := spec.DeploymentSpec()
+	desired := wdDepSpec.Strategy
+	actual := existingDeployment.Spec.Strategy
+	if apiequality.Semantic.DeepEqual(desired, actual) {
+		return nil
+	}
+
+	existingDeployment.Spec.Strategy = desired
+	return existingDeployment
 }
 
 func getUpdateDeployments(
@@ -720,7 +838,46 @@ func getUpdateDeployments(
 		}
 	}
 
+	// Sync Deployment rolling-update strategy on all Kubernetes Deployments
+	// associated with WorkerDeploymentVersions managed by Temporal Worker
+	// Controller for this Temporal Worker Deployment. Do this after the
+	// pod-template / connection checks so a Kubernetes Deployment already
+	// queued for update also picks up strategy changes in the same write.
+	for _, buildID := range ownedBuildIDs(status) {
+		if updatedBuildIDs[buildID] {
+			if deployment, exists := k8sState.Deployments[buildID]; exists {
+				wdDepSpec := spec.DeploymentSpec()
+				deployment.Spec.Strategy = wdDepSpec.Strategy
+			}
+			continue
+		}
+		if deployment := checkAndUpdateDeploymentStrategy(buildID, k8sState, spec); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[buildID] = true
+		}
+	}
+
 	return updateDeployments
+}
+
+func ownedBuildIDs(status *temporaliov1alpha1.WorkerDeploymentStatus) []string {
+	var buildIDs []string
+	seen := make(map[string]bool)
+	add := func(buildID string) {
+		if buildID == "" || seen[buildID] {
+			return
+		}
+		seen[buildID] = true
+		buildIDs = append(buildIDs, buildID)
+	}
+	add(status.TargetVersion.BuildID)
+	if status.CurrentVersion != nil {
+		add(status.CurrentVersion.BuildID)
+	}
+	for _, version := range status.DeprecatedVersions {
+		add(version.BuildID)
+	}
+	return buildIDs
 }
 
 // getDeleteDeployments determines which deployments should be deleted
@@ -744,6 +901,16 @@ func getDeleteDeployments(
 		}
 
 		switch version.Status {
+		case temporaliov1alpha1.VersionStatusInactive:
+			// Superseded versions that never received routed traffic never become Drained.
+			// Wait for scale-down to finish; execution checks pinned workflows before pruning.
+			if foundDeploymentInTemporal && status.TargetVersion.BuildID != version.BuildID &&
+				(status.CurrentVersion == nil || status.CurrentVersion.BuildID != version.BuildID) &&
+				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == 0 &&
+				(d.Status.TerminatingReplicas == nil || *d.Status.TerminatingReplicas == 0) {
+				deleteDeployments = append(deleteDeployments, d)
+			}
 		case temporaliov1alpha1.VersionStatusDrained:
 			// Deleting a deployment is only possible when:
 			// 1. The deployment has been drained for deleteDelay + scaledownDelay.
@@ -754,7 +921,7 @@ func getDeleteDeployments(
 			//    reconcile as the Deployment delete: EligibleForDeletion is only
 			//    computable while the Deployment (and thus this DeprecatedVersions
 			//    entry) still exists, so this is the only point that can reliably
-			//    prune it. See execplan.deleteDrainedVersions.
+			//    prune it. See execplan.deleteDeprecatedVersions.
 			if version.DrainedSince != nil &&
 				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
 				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
@@ -786,13 +953,14 @@ func getScaleDeployments(
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
+	wdDepSpec := spec.DeploymentSpec()
 
 	// Scale the current version if needed
 	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
 		// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
 		// Scale the Current Version per the WorkerDeploymentSpec.Replicas value.
-		if spec.Replicas != nil {
-			replicas := *spec.Replicas
+		if wdDepSpec.Replicas != nil {
+			replicas := *wdDepSpec.Replicas
 			ref := status.CurrentVersion.Deployment
 			if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
@@ -811,10 +979,10 @@ func getScaleDeployments(
 			// due to Sunset Policy, and the TWD has nil replicas because a scaler is managing the replicas, then
 			// no one will scale the Target Version back up, so we need to scale it back to 1 replica, which is what
 			// would happen if the Deployment was being created from scratch with nil replicas.
-			if spec.Replicas != nil || (spec.Replicas == nil && d.Spec.Replicas != nil && *d.Spec.Replicas == 0) {
+			if wdDepSpec.Replicas != nil || (wdDepSpec.Replicas == nil && d.Spec.Replicas != nil && *d.Spec.Replicas == 0) {
 				replicas := int32(1) // just scale up to 1 if we are in the spec.Replicas == nil && d.Spec.Replicas == 0 case.
-				if spec.Replicas != nil {
-					replicas = *spec.Replicas
+				if wdDepSpec.Replicas != nil {
+					replicas = *wdDepSpec.Replicas
 				}
 				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
 					scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
@@ -839,8 +1007,8 @@ func getScaleDeployments(
 			// Scale down inactive versions that are not the target
 			if status.TargetVersion.BuildID == version.BuildID {
 				// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-				if spec.Replicas != nil {
-					replicas := *spec.Replicas
+				if wdDepSpec.Replicas != nil {
+					replicas := *wdDepSpec.Replicas
 					if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 						scaleDeployments[version.Deployment] = uint32(replicas)
 					}
@@ -851,8 +1019,8 @@ func getScaleDeployments(
 		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
 			// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
 			// Scale up these deployments
-			if spec.Replicas != nil {
-				replicas := *spec.Replicas
+			if wdDepSpec.Replicas != nil {
+				replicas := *wdDepSpec.Replicas
 				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
 					scaleDeployments[version.Deployment] = uint32(replicas)
 				}
@@ -1078,6 +1246,11 @@ func isRollbackScenario(
 
 	// No versions yet to rollback to
 	if temporalState == nil {
+		return false
+	}
+
+	// The target version is already current, so there is nothing to roll back to
+	if status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID {
 		return false
 	}
 

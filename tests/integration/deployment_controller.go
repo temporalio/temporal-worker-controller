@@ -1,4 +1,7 @@
-package internal
+//go:build integration
+// +build integration
+
+package integration
 
 import (
 	"context"
@@ -177,6 +180,7 @@ func scaleDeploymentToZero(t *testing.T, ctx context.Context, k8sClient client.C
 		dep.Status.ReadyReplicas = 0
 		dep.Status.AvailableReplicas = 0
 		dep.Status.UpdatedReplicas = 0
+		dep.Status.ObservedGeneration = dep.Generation
 		return k8sClient.Status().Update(ctx, &dep)
 	}); err != nil {
 		t.Fatalf("failed to zero status of deployment %s: %v", name, err)
@@ -301,8 +305,8 @@ func createStatus(
 // Panics if the twd spec is nil, or if it has no containers, but that should never be true for these integration tests.
 func recreateTWD(twd *temporaliov1alpha1.WorkerDeployment, imageName string, replicas int32) *temporaliov1alpha1.WorkerDeployment {
 	ret := twd.DeepCopy()
-	ret.Spec.Template.Spec.Containers[0].Image = imageName
-	ret.Spec.Replicas = &replicas
+	ret.Spec.Deployment.Template.Spec.Containers[0].Image = imageName
+	ret.Spec.Deployment.Replicas = &replicas
 	return ret
 }
 

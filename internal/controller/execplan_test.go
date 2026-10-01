@@ -14,9 +14,11 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
+	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	appsv1 "k8s.io/api/apps/v1"
@@ -27,6 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/flowcontrol"
+	testingclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
@@ -79,6 +83,7 @@ func makeVersionedDeployment(twd *temporaliov1alpha1.WorkerDeployment, buildID s
 					Containers: []corev1.Container{{Name: "worker", Image: "temporal/worker:v1"}},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -124,7 +129,7 @@ func makeExecplanWRT(name string, twd *temporaliov1alpha1.WorkerDeployment) *tem
 // returning the rendered object and its hash.
 func renderWRT(t *testing.T, wrt *temporaliov1alpha1.WorkerResourceTemplate, dep *appsv1.Deployment, buildID, temporalNamespace string) (*unstructured.Unstructured, string) {
 	t.Helper()
-	rendered, err := k8s.RenderWorkerResourceTemplate(wrt, dep, buildID, temporalNamespace)
+	rendered, err := k8s.RenderWorkerResourceTemplate(wrt, dep, buildID, temporalNamespace, false)
 	require.NoError(t, err)
 	hash := k8s.ComputeRenderedObjectHash(rendered)
 	require.NotEmpty(t, hash)
@@ -416,9 +421,11 @@ func newPruneStubHandle(deleteErr error) *stubWDHandle {
 	}
 }
 
-// TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesNextCycle checks that when the
-// server refuses to delete a version, its Deployment stays put.
-func TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesNextCycle(t *testing.T) {
+// TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesAfterBackoff checks that when the
+// server refuses to delete a version, its k8s Deployment stays put, the next reconcile inside
+// the backoff window does not call DeleteVersion, and a later cycle past the window retries
+// and deletes both the version and the k8s Deployment.
+func TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesAfterBackoff(t *testing.T) {
 	const (
 		namespace = "default"
 		buildA    = "build-a"
@@ -429,6 +436,8 @@ func TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesNextCycle(t *
 	depA := makeVersionedDeployment(twd, buildA, 0, connection) // drained, scaled to zero
 	depB := makeVersionedDeployment(twd, buildB, 1, connection) // current
 	r, _ := newTestReconciler([]client.Object{twd, depA, depB})
+	clk := testingclock.NewFakeClock(time.Now())
+	r.deleteBackoff = newFakeVersionDeleteBackoff(clk)
 
 	handle := newPruneStubHandle(errors.New("version cannot be deleted since it has active pollers"))
 	tc := newStubTemporalClientWithHandle(handle)
@@ -436,18 +445,66 @@ func TestExecutePlan_VersionDeletionFails_KeepsDeploymentAndRetriesNextCycle(t *
 	drainedSince := metav1.NewTime(time.Now().Add(-time.Hour))
 	status := statusWithDeprecated(buildB, depB, drainedVersion(buildA, depA, drainedSince))
 
-	// ── Cycle 1: the prune fails, so the Deployment must be held back ──
+	// Cycle 1: the prune fails, so the Deployment must be held back
 	p1 := runPlanCycleWith(t, r, twd, connection, status, tc)
 	require.Equal(t, []string{buildA}, handle.deletedVersions)
 	require.Empty(t, p1.DeleteDeployments)
 	require.True(t, deploymentExists(t, r, namespace, depA.Name))
 
-	// ── Cycle 2: the prune succeeds, so version and Deployment both go ──
+	// Cycle 2: still inside the backoff window, so no RPC call is made
 	handle.deleteVersionErr = nil
 	p2 := runPlanCycleWith(t, r, twd, connection, status, tc)
+	require.Equal(t, []string{buildA}, handle.deletedVersions)
+	require.Empty(t, p2.DeleteDeployments)
+	require.True(t, deploymentExists(t, r, namespace, depA.Name))
+
+	// Cycle 3: past the backoff, the prune is retried and succeeds
+	clk.Step(defaults.VersionDeleteBaseInterval)
+	p3 := runPlanCycleWith(t, r, twd, connection, status, tc)
 	require.Equal(t, []string{buildA, buildA}, handle.deletedVersions)
-	require.Len(t, p2.DeleteDeployments, 1)
+	require.Len(t, p3.DeleteDeployments, 1)
 	require.False(t, deploymentExists(t, r, namespace, depA.Name))
+}
+
+// newFakeVersionDeleteBackoff builds a version delete backoff on a fake clock.
+func newFakeVersionDeleteBackoff(clk *testingclock.FakeClock) *flowcontrol.Backoff {
+	return flowcontrol.NewFakeBackOff(
+		defaults.VersionDeleteBaseInterval,
+		defaults.VersionDeleteMaxInterval,
+		clk,
+	)
+}
+
+// TestVersionDeleteBackoffSchedule validates the retry backoff ladder.
+func TestVersionDeleteBackoffSchedule(t *testing.T) {
+	const key = "default/my-worker/build-a"
+	clk := testingclock.NewFakeClock(time.Now())
+	r := &WorkerDeploymentReconciler{deleteBackoff: newFakeVersionDeleteBackoff(clk)}
+
+	require.False(t, r.skipVersionDelete(key))
+
+	var intervals []time.Duration
+	// The 9th failure reaches the 30m cap and the rest show it holds there.
+	for range 12 {
+		r.noteVersionDeleteFailure(key)
+		delay := r.deleteBackoff.Get(key)
+		intervals = append(intervals, delay)
+
+		clk.Step(delay - time.Nanosecond)
+		require.True(t, r.skipVersionDelete(key))
+		clk.Step(time.Nanosecond)
+		require.False(t, r.skipVersionDelete(key))
+	}
+
+	require.Equal(t, []time.Duration{
+		10 * time.Second, 20 * time.Second, 40 * time.Second, 80 * time.Second,
+		160 * time.Second, 320 * time.Second, 640 * time.Second, 1280 * time.Second,
+		30 * time.Minute, 30 * time.Minute, 30 * time.Minute, 30 * time.Minute,
+	}, intervals)
+
+	r.noteVersionDeleteSuccess(key)
+	r.noteVersionDeleteFailure(key)
+	require.Equal(t, defaults.VersionDeleteBaseInterval, r.deleteBackoff.Get(key))
 }
 
 // TestExecutePlan_VersionAlreadyDeletedOnServer_DeletesDeployment checks that when the server
@@ -607,4 +664,63 @@ func TestGeneratePlan_CarriesEncodingAndMessageType(t *testing.T) {
 	require.Equal(t, string(temporaliov1alpha1.PayloadMetadataEncodingTypeProtoJSON), wf.encoding)
 	require.Equal(t, "my.package.DeployRequest", wf.messageType)
 	require.Equal(t, []byte(`{"service":"checkout"}`), wf.input)
+}
+
+// A visibility failure must retain the Deployment so the next reconciliation can retry.
+type inactivePruneClient struct {
+	*stubTemporalClient
+	response *workflowservice.CountWorkflowExecutionsResponse
+	err      error
+	query    string
+}
+
+func (c *inactivePruneClient) CountWorkflow(_ context.Context, request *workflowservice.CountWorkflowExecutionsRequest) (*workflowservice.CountWorkflowExecutionsResponse, error) {
+	c.query = request.Query
+	return c.response, c.err
+}
+
+func TestExecutePlan_InactiveVersionDeletion(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		response    *workflowservice.CountWorkflowExecutionsResponse
+		countErr    error
+		deleteErr   error
+		wantAttempt bool
+		wantDelete  bool
+	}{
+		{name: "unused version", response: &workflowservice.CountWorkflowExecutionsResponse{}, wantAttempt: true, wantDelete: true},
+		{name: "running pinned workflow", response: &workflowservice.CountWorkflowExecutionsResponse{Count: 1}},
+		{name: "visibility failure", countErr: errors.New("visibility unavailable")},
+		{name: "missing response"},
+		{name: "server rejects deletion", response: &workflowservice.CountWorkflowExecutionsResponse{}, deleteErr: serviceerror.NewFailedPrecondition("active pollers"), wantAttempt: true},
+		{name: "Temporal version already deleted", response: &workflowservice.CountWorkflowExecutionsResponse{}, deleteErr: serviceerror.NewNotFound("version"), wantAttempt: true, wantDelete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+			twd := makeExecplanTWD("my-worker", "default")
+			old := makeVersionedDeployment(twd, "old", 0, connection)
+			current := makeVersionedDeployment(twd, "current", 1, connection)
+			r, _ := newTestReconciler([]client.Object{twd, old, current})
+			handle := newPruneStubHandle(tc.deleteErr)
+			c := &inactivePruneClient{stubTemporalClient: newStubTemporalClientWithHandle(handle), response: tc.response, err: tc.countErr}
+			status := statusWithDeprecated("current", current, &temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+				BaseWorkerDeploymentVersion: baseVersion("old", old, temporaliov1alpha1.VersionStatusInactive),
+			})
+			twd.Status = status
+			state := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{
+				"old":     {Status: temporaliov1alpha1.VersionStatusInactive},
+				"current": {Status: temporaliov1alpha1.VersionStatusCurrent},
+			}}
+			p, err := r.generatePlan(context.Background(), logr.Discard(), twd, connection, state)
+			require.NoError(t, err)
+			require.NoError(t, r.executePlan(context.Background(), logr.Discard(), twd, c, p))
+			require.Equal(t, tc.wantAttempt, len(handle.deletedVersions) == 1)
+			require.Equal(t, tc.wantDelete, len(p.DeleteDeployments) == 1)
+			require.Equal(t, !tc.wantDelete, deploymentExists(t, r, "default", old.Name))
+			require.True(t, deploymentExists(t, r, "default", current.Name))
+			require.Contains(t, c.query, "TemporalWorkerDeploymentVersion IN ('default/my-worker.old', 'default/my-worker:old')")
+			require.Contains(t, c.query, "TemporalWorkflowVersioningBehavior = 'Pinned'")
+			require.Contains(t, c.query, "ExecutionStatus = 'Running'")
+		})
+	}
 }
