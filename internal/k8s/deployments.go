@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -43,6 +44,35 @@ const (
 	MaxDeploymentNameLen                           = 47
 	ConnectionSpecHashAnnotation                   = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation                  = "temporal.io/pod-template-spec-hash"
+
+	// Environment variable names read by the Temporal Go SDK's envconfig package
+	// (go.temporal.io/sdk/contrib/envconfig) to configure a worker's connection. Shared
+	// between ApplyControllerPodSpecModifications (fresh pod specs) and
+	// planner.updateDeploymentWithConnection (the connection-drift-only update path), which
+	// otherwise independently duplicate this env-var wiring.
+	EnvTemporalAddress             = "TEMPORAL_ADDRESS"
+	EnvTemporalNamespace           = "TEMPORAL_NAMESPACE"
+	EnvTemporalDeploymentName      = "TEMPORAL_DEPLOYMENT_NAME"
+	EnvTemporalWorkerBuildID       = "TEMPORAL_WORKER_BUILD_ID"
+	EnvTemporalTLS                 = "TEMPORAL_TLS"
+	EnvTemporalTLSServerName       = "TEMPORAL_TLS_SERVER_NAME"
+	EnvTemporalTLSClientKeyPath    = "TEMPORAL_TLS_CLIENT_KEY_PATH"
+	EnvTemporalTLSClientCertPath   = "TEMPORAL_TLS_CLIENT_CERT_PATH"
+	EnvTemporalTLSServerCACertPath = "TEMPORAL_TLS_SERVER_CA_CERT_PATH"
+	EnvTemporalAPIKey              = "TEMPORAL_API_KEY"
+
+	// TemporalTLSVolumeName is the mTLS client cert/key secret volume mounted into worker
+	// pods when Connection.mutualTLSSecretRef is set.
+	TemporalTLSVolumeName     = "temporal-tls"
+	TemporalTLSMountPath      = "/etc/temporal/tls"
+	TemporalTLSClientKeyPath  = TemporalTLSMountPath + "/tls.key"
+	TemporalTLSClientCertPath = TemporalTLSMountPath + "/tls.crt"
+
+	// TemporalTLSCAVolumeName is the private-CA secret volume mounted into worker pods when
+	// Connection.tls.caCertSecretRef is set. See ConnectionTLSConfig.CACertSecretRef.
+	TemporalTLSCAVolumeName = "temporal-tls-ca"
+	TemporalTLSCAMountPath  = "/etc/temporal/tls-ca"
+	TemporalTLSCACertPath   = TemporalTLSCAMountPath + "/ca.crt"
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -359,19 +389,19 @@ func ApplyControllerPodSpecModifications(
 	for i, container := range podSpec.Containers {
 		container.Env = append(container.Env,
 			corev1.EnvVar{
-				Name:  "TEMPORAL_ADDRESS",
+				Name:  EnvTemporalAddress,
 				Value: connection.HostPort,
 			},
 			corev1.EnvVar{
-				Name:  "TEMPORAL_NAMESPACE",
+				Name:  EnvTemporalNamespace,
 				Value: temporalNamespace,
 			},
 			corev1.EnvVar{
-				Name:  "TEMPORAL_DEPLOYMENT_NAME",
+				Name:  EnvTemporalDeploymentName,
 				Value: workerDeploymentName,
 			},
 			corev1.EnvVar{
-				Name:  "TEMPORAL_WORKER_BUILD_ID",
+				Name:  EnvTemporalWorkerBuildID,
 				Value: buildID,
 			},
 		)
@@ -381,7 +411,7 @@ func ApplyControllerPodSpecModifications(
 	if tlsServerName := connection.TLSServerName(); tlsServerName != "" {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env, corev1.EnvVar{
-				Name:  "TEMPORAL_TLS_SERVER_NAME",
+				Name:  EnvTemporalTLSServerName,
 				Value: tlsServerName,
 			})
 			podSpec.Containers[i] = container
@@ -393,26 +423,26 @@ func ApplyControllerPodSpecModifications(
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS",
+					Name:  EnvTemporalTLS,
 					Value: "true",
 				},
 				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_CLIENT_KEY_PATH",
-					Value: "/etc/temporal/tls/tls.key",
+					Name:  EnvTemporalTLSClientKeyPath,
+					Value: TemporalTLSClientKeyPath,
 				},
 				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_CLIENT_CERT_PATH",
-					Value: "/etc/temporal/tls/tls.crt",
+					Name:  EnvTemporalTLSClientCertPath,
+					Value: TemporalTLSClientCertPath,
 				},
 			)
 			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      "temporal-tls",
-				MountPath: "/etc/temporal/tls",
+				Name:      TemporalTLSVolumeName,
+				MountPath: TemporalTLSMountPath,
 			})
 			podSpec.Containers[i] = container
 		}
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-			Name: "temporal-tls",
+			Name: TemporalTLSVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: connection.MutualTLSSecretRef.Name,
@@ -423,7 +453,7 @@ func ApplyControllerPodSpecModifications(
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
-					Name: "TEMPORAL_API_KEY",
+					Name: EnvTemporalAPIKey,
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: connection.APIKeySecretRef,
 					},
@@ -440,22 +470,22 @@ func ApplyControllerPodSpecModifications(
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS",
+					Name:  EnvTemporalTLS,
 					Value: "true",
 				},
 				corev1.EnvVar{
-					Name:  "TEMPORAL_TLS_SERVER_CA_CERT_PATH",
-					Value: "/etc/temporal/tls-ca/ca.crt",
+					Name:  EnvTemporalTLSServerCACertPath,
+					Value: TemporalTLSCACertPath,
 				},
 			)
 			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      "temporal-tls-ca",
-				MountPath: "/etc/temporal/tls-ca",
+				Name:      TemporalTLSCAVolumeName,
+				MountPath: TemporalTLSCAMountPath,
 			})
 			podSpec.Containers[i] = container
 		}
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-			Name: "temporal-tls-ca",
+			Name: TemporalTLSCAVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: caCertSecretName,
@@ -463,6 +493,103 @@ func ApplyControllerPodSpecModifications(
 			},
 		})
 	}
+}
+
+// EnsureTLSVolume adds the mTLS client cert/key secret volume or updates its secret name if
+// present.
+func EnsureTLSVolume(volumes []corev1.Volume, secretName string) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == TemporalTLSVolumeName {
+			volumes[i].VolumeSource = corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
+			}
+			return volumes
+		}
+	}
+	return append(volumes, corev1.Volume{
+		Name:         TemporalTLSVolumeName,
+		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secretName}},
+	})
+}
+
+// RemoveTLSVolume removes the mTLS client cert/key secret volume if present.
+func RemoveTLSVolume(volumes []corev1.Volume) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == TemporalTLSVolumeName {
+			return slices.Delete(volumes, i, i+1)
+		}
+	}
+	return volumes
+}
+
+// EnsureTLSVolumeMount adds the mTLS client cert/key mount to a container, or fixes its path
+// if present.
+func EnsureTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == TemporalTLSVolumeName {
+			mounts[i].MountPath = TemporalTLSMountPath
+			return mounts
+		}
+	}
+	return append(mounts, corev1.VolumeMount{Name: TemporalTLSVolumeName, MountPath: TemporalTLSMountPath})
+}
+
+// RemoveTLSVolumeMount removes the mTLS client cert/key mount from a container if present.
+func RemoveTLSVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == TemporalTLSVolumeName {
+			return slices.Delete(mounts, i, i+1)
+		}
+	}
+	return mounts
+}
+
+// EnsureTLSCAVolume adds the private-CA secret volume or updates its secret name if present.
+func EnsureTLSCAVolume(volumes []corev1.Volume, secretName string) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == TemporalTLSCAVolumeName {
+			volumes[i].VolumeSource = corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
+			}
+			return volumes
+		}
+	}
+	return append(volumes, corev1.Volume{
+		Name:         TemporalTLSCAVolumeName,
+		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secretName}},
+	})
+}
+
+// RemoveTLSCAVolume removes the private-CA secret volume if present.
+func RemoveTLSCAVolume(volumes []corev1.Volume) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == TemporalTLSCAVolumeName {
+			return slices.Delete(volumes, i, i+1)
+		}
+	}
+	return volumes
+}
+
+// EnsureTLSCAVolumeMount adds the private-CA mount to a container, or fixes its path if
+// present.
+func EnsureTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == TemporalTLSCAVolumeName {
+			mounts[i].MountPath = TemporalTLSCAMountPath
+			return mounts
+		}
+	}
+	return append(mounts, corev1.VolumeMount{Name: TemporalTLSCAVolumeName, MountPath: TemporalTLSCAMountPath})
+}
+
+// RemoveTLSCAVolumeMount removes the private-CA mount from a container if present.
+func RemoveTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == TemporalTLSCAVolumeName {
+			return slices.Delete(mounts, i, i+1)
+		}
+	}
+	return mounts
 }
 
 func NewDeploymentWithControllerRef(
