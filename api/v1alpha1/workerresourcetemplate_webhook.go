@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -198,7 +197,7 @@ func (v *WorkerResourceTemplateValidator) poolWarnings(ctx context.Context, wrt 
 	if err := v.Client.Get(ctx, key, &wd); err != nil {
 		return nil
 	}
-	if slices.Contains(wd.Spec.PoolNames(), wrt.Spec.Pool) {
+	if wd.Spec.HasPool(wrt.Spec.Pool) {
 		return nil
 	}
 	return admission.Warnings{fmt.Sprintf("spec.pool %q is not declared by WorkerDeployment %q", wrt.Spec.Pool, wd.Name)}

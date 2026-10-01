@@ -581,16 +581,14 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	// WRTs with a missing or recovered pool get no applies, so nothing else rewrites their Ready condition.
 	missingPool := make(map[wrtKey]bool, len(p.WRTsWithMissingPool))
 	for _, name := range p.WRTsWithMissingPool {
-		missingPool[wrtKey{workerDeploy.Namespace, name}] = true
+		key := wrtKey{workerDeploy.Namespace, name}
+		missingPool[key] = true
+		statusKeys[key] = struct{}{}
 	}
 	stalePool := make(map[wrtKey]bool, len(p.WRTsWithStalePoolNotFound))
 	for _, name := range p.WRTsWithStalePoolNotFound {
-		stalePool[wrtKey{workerDeploy.Namespace, name}] = true
-	}
-	for key := range missingPool {
-		statusKeys[key] = struct{}{}
-	}
-	for key := range stalePool {
+		key := wrtKey{workerDeploy.Namespace, name}
+		stalePool[key] = true
 		statusKeys[key] = struct{}{}
 	}
 

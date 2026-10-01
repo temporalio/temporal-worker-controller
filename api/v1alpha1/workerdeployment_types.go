@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
@@ -171,6 +172,11 @@ const DefaultPoolName = "default"
 // HasPools reports whether the spec declares named worker pools.
 func (s WorkerDeploymentSpec) HasPools() bool {
 	return len(s.Pools) > 0
+}
+
+// HasPool reports whether the spec has a pool with the given name, the default pool included.
+func (s WorkerDeploymentSpec) HasPool(name string) bool {
+	return name == DefaultPoolName || slices.ContainsFunc(s.Pools, func(p WorkerPool) bool { return p.Name == name })
 }
 
 // PoolNames returns the default pool followed by the named pools, sorted.
@@ -468,9 +474,8 @@ type BaseWorkerDeploymentVersion struct {
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
-	// Pools lists the Deployment of every worker pool in a multi-pool version,
-	// including the default pool. Deployment and HealthySince above cover the
-	// default pool and the whole version respectively.
+	// Pools lists each worker pool's Deployment in a multi-pool version, the default
+	// pool included.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
