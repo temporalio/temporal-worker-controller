@@ -132,7 +132,7 @@ func testDeletionSetsCurrentToUnversioned(
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &wdForUpdate); err != nil {
 		t.Fatalf("failed to get WD for v2.0 update: %v", err)
 	}
-	wdForUpdate.Spec.Template.Spec.Containers[0].Image = "v2.0"
+	wdForUpdate.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 	buildIDv2 := k8s.ComputeBuildID(&wdForUpdate)
 	deploymentNameV2 := k8s.ComputeVersionedDeploymentName(wd.Name, buildIDv2)
 	if err := k8sClient.Update(ctx, &wdForUpdate); err != nil {
@@ -430,7 +430,7 @@ func testDrainedVersionPrunedOnSunset(
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdV2); err != nil {
 		t.Fatalf("failed to get TWD for v2.0 update: %v", err)
 	}
-	twdV2.Spec.Template.Spec.Containers[0].Image = "v2.0"
+	twdV2.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 	buildIDv2 := k8s.ComputeBuildID(&twdV2)
 	depNameV2 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv2)
 	if err := k8sClient.Update(ctx, &twdV2); err != nil {

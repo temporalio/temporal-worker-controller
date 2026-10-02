@@ -45,6 +45,25 @@ func TestIntegration(t *testing.T) {
 	// Manual strategy tests
 	manualStrategyTestCases := []testCase{
 		{
+			// NOTE(jaypipes): This simply uses the older deprecated
+			// spec.replicas and spec.template fields instead of the newer
+			// spec.deployment field and verifies that we get the same
+			// behaviour.
+			name: "manual-rollout-deprecated-fields",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewWorkerDeploymentBuilder().
+						WithManualStrategy().
+						WithGate(false).
+						WithReplicasDeprecatedField(2).
+						WithTargetTemplateDeprecatedField("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusInactive, -1, true, false),
+				),
+		},
+		{
 			name: "manual-rollout-expect-no-change",
 			builder: testhelpers.NewTestCase().
 				WithInput(

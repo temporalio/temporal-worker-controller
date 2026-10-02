@@ -132,15 +132,17 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 		// Fall through to default hash-based generation if buildID is invalid after cleaning
 	}
 
-	if containers := w.Spec.Template.Spec.Containers; len(containers) > 0 {
+	depSpec := w.Spec.DeploymentSpec()
+
+	if containers := depSpec.Template.Spec.Containers; len(containers) > 0 {
 		if img := containers[0].Image; img != "" {
-			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&w.Spec.Template, nil, true)
+			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&depSpec.Template, nil, true)
 			maxImgLen := MaxBuildIDLen - len(shortHashSuffix)
 			imagePrefix := computeImagePrefix(img, maxImgLen)
 			return cleanBuildID(imagePrefix + shortHashSuffix)
 		}
 	}
-	return utils.ComputeHash(&w.Spec.Template, nil, false)
+	return utils.ComputeHash(&depSpec.Template, nil, false)
 }
 
 // ComputeWorkerDeploymentName generates the base worker deployment name
@@ -246,30 +248,47 @@ func NewDeploymentWithOwnerRef(
 ) *appsv1.Deployment {
 	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
 
+	depSpec := spec.DeploymentSpec()
+	depSpec.Selector = &metav1.LabelSelector{
+		MatchLabels: selectorLabels,
+	}
+
 	// Set pod labels
 	podLabels := make(map[string]string)
-	for k, v := range spec.Template.Labels {
+	for k, v := range depSpec.Template.Labels {
 		podLabels[k] = v
 	}
 	for k, v := range selectorLabels {
 		podLabels[k] = v
 	}
 
-	podSpec := spec.Template.Spec.DeepCopy()
-
-	// Apply controller-managed environment variables and volume mounts
-	ApplyControllerPodSpecModifications(podSpec, connection, spec.WorkerOptions.TemporalNamespace, workerDeploymentName, buildID)
-
-	// Build pod annotations
+	// Build pod annotations by merging any annotations set by the user in
+	// spec.deployment.template.annotations with the constructed connection and
+	// pod template spec hashes.
 	podAnnotations := make(map[string]string)
-	for k, v := range spec.Template.Annotations {
+	for k, v := range depSpec.Template.Annotations {
 		podAnnotations[k] = v
 	}
 	podAnnotations[ConnectionSpecHashAnnotation] = ComputeConnectionSpecHash(connection)
 	// Store hash of user-provided pod template spec BEFORE controller modifications
 	// This enables drift detection when build ID is stable
-	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(spec.Template)
+	podAnnotations[PodTemplateSpecHashAnnotation] = ComputePodTemplateSpecHash(depSpec.Template)
 	blockOwnerDeletion := true
+	depSpec.Template.ObjectMeta = metav1.ObjectMeta{
+		Labels:      podLabels,
+		Annotations: podAnnotations,
+	}
+
+	// Apply controller-managed environment variables and volume mounts
+	podSpec := depSpec.Template.Spec.DeepCopy()
+	ApplyControllerPodSpecModifications(
+		podSpec,
+		connection,
+		spec.WorkerOptions.TemporalNamespace,
+		workerDeploymentName,
+		buildID,
+	)
+	depSpec.Template.Spec = *podSpec
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -277,7 +296,7 @@ func NewDeploymentWithOwnerRef(
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
 			Labels:                     selectorLabels,
-			Annotations:                spec.Template.Annotations,
+			Annotations:                depSpec.Template.Annotations,
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         typeMeta.APIVersion,
 				Kind:               typeMeta.Kind,
@@ -289,20 +308,7 @@ func NewDeploymentWithOwnerRef(
 			// TODO(jlegrone): Add finalizer managed by the controller in order to prevent
 			//                 deleting deployments that are still reachable.
 		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: spec.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: selectorLabels,
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:      podLabels,
-					Annotations: podAnnotations,
-				},
-				Spec: *podSpec,
-			},
-			MinReadySeconds: spec.MinReadySeconds,
-		},
+		Spec: depSpec,
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func TestGeneratePlan(t *testing.T) {
@@ -657,7 +658,9 @@ func TestGeneratePlan(t *testing.T) {
 				maxV = *tc.maxVersionsIneligibleForDeletion
 			}
 
-			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, tc.spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
+			spec := tc.spec
+
+			plan, err := GeneratePlan(logr.Discard(), tc.k8sState, tc.status, spec, tc.state, createDefaultConnectionSpec(), tc.config, "test/namespace", maxV, nil, false, tc.wrts, "test-twd", types.UID("test-twd-uid"))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
@@ -1325,6 +1328,90 @@ func TestUpdateDeploymentWithPodTemplateSpec_ReplicasNilPreserved(t *testing.T) 
 	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(5), *dep.Spec.Replicas, "replicas must be preserved when spec.Replicas is nil")
+}
+
+func TestUpdateDeploymentWithPodTemplateSpec_StrategyApplied(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	dep := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{}},
+		},
+	}
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &maxUnavailable,
+					MaxSurge:       &maxSurge,
+				},
+			},
+		},
+	}
+	updateDeploymentWithPodTemplateSpec(dep, spec, temporaliov1alpha1.ConnectionSpec{})
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
+	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
+	assert.Equal(t, maxUnavailable, *dep.Spec.Strategy.RollingUpdate.MaxUnavailable)
+	assert.Equal(t, maxSurge, *dep.Spec.Strategy.RollingUpdate.MaxSurge)
+}
+
+func TestGetUpdateDeployments_StrategyReconcile(t *testing.T) {
+	maxUnavailable := intstr.FromString("5%")
+	maxSurge := intstr.FromInt32(0)
+	desiredDeploymentStrategy := appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &maxUnavailable,
+			MaxSurge:       &maxSurge,
+		},
+	}
+	desiredSpec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		Deployment: &appsv1.DeploymentSpec{
+			Strategy: desiredDeploymentStrategy,
+		},
+	}
+
+	currentDefault := intstr.FromString("25%")
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-v1"},
+		Spec: appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &currentDefault,
+					MaxSurge:       &currentDefault,
+				},
+			},
+		},
+	}
+
+	status := &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"v1": deployment},
+	}
+
+	t.Run("updates when strategy differs", func(t *testing.T) {
+		updates := getUpdateDeployments(k8sState, status, desiredSpec, temporaliov1alpha1.ConnectionSpec{})
+		require.Len(t, updates, 1)
+		assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, updates[0].Spec.Strategy.Type)
+		require.NotNil(t, updates[0].Spec.Strategy.RollingUpdate)
+		assert.Equal(t, maxUnavailable, *updates[0].Spec.Strategy.RollingUpdate.MaxUnavailable)
+		assert.Equal(t, maxSurge, *updates[0].Spec.Strategy.RollingUpdate.MaxSurge)
+	})
+
+	t.Run("no update when strategy same", func(t *testing.T) {
+		deployment.Spec.Strategy = desiredDeploymentStrategy
+		updates := getUpdateDeployments(k8sState, status, desiredSpec, temporaliov1alpha1.ConnectionSpec{})
+		assert.Empty(t, updates)
+	})
 }
 
 func TestShouldCreateDeployment(t *testing.T) {
@@ -3022,7 +3109,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "v1", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3043,7 +3130,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "my-image:v1"},
@@ -3064,7 +3151,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3086,7 +3173,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentForDriftTest(1, "stable-build-id", "my-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(3), // Changed from 1 to 3
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							// Same image as stored - hash will match
@@ -3111,7 +3198,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				[]corev1.EnvVar{{Name: "MY_VAR", Value: "old-value"}}),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
@@ -3137,7 +3224,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			existingDeployment: createDeploymentWithoutHashAnnotation(1, "stable-build-id", "old-image:v1"),
 			newSpec: &temporaliov1alpha1.WorkerDeploymentSpec{
 				Replicas: int32Ptr(1),
-				Template: corev1.PodTemplateSpec{
+				Template: &corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{Name: "worker", Image: "new-image:v2"},
@@ -3213,6 +3300,7 @@ func createDeploymentWithDefaultConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3232,6 +3320,7 @@ func createDeploymentWithExpiredConnectionSpecHash(replicas int32) *appsv1.Deplo
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3283,6 +3372,7 @@ func createDeploymentForDriftTest(replicas int32, buildID string, image string) 
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3335,6 +3425,7 @@ func createDeploymentForDriftTestWithEnv(replicas int32, buildID string, image s
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
@@ -3425,7 +3516,7 @@ func defaultMutualTLSSecret() string {
 // createDefaultWorkerSpec creates a default WorkerDeploymentSpec for testing
 func createDefaultWorkerSpec() *temporaliov1alpha1.WorkerDeploymentSpec {
 	return &temporaliov1alpha1.WorkerDeploymentSpec{
-		Template: corev1.PodTemplateSpec{
+		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
@@ -3445,7 +3536,7 @@ func createDefaultWorkerSpec() *temporaliov1alpha1.WorkerDeploymentSpec {
 func createWorkerSpecWithBuildID(buildID string) *temporaliov1alpha1.WorkerDeploymentSpec {
 	return &temporaliov1alpha1.WorkerDeploymentSpec{
 		Replicas: int32Ptr(1),
-		Template: corev1.PodTemplateSpec{
+		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
@@ -3891,6 +3982,7 @@ func createDeploymentWithUID(name, uid string) *appsv1.Deployment {
 					},
 				},
 			},
+			Strategy: temporaliov1alpha1.DefaultDeploymentStrategy(),
 		},
 	}
 }
