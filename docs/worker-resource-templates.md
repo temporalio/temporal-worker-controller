@@ -33,7 +33,7 @@ The controller auto-injects the fields below when you set them to `{}` (empty ob
 
 `scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
 
-`spec.targetRef` covers VerticalPodAutoscalers, which name their target in `spec.targetRef` instead of `scaleTargetRef`. It is injected only at this exact path, because `targetRef` is a common field name in other CRDs.
+`spec.targetRef` covers VerticalPodAutoscalers, which name their target in `spec.targetRef` instead of `scaleTargetRef`.
 
 `spec.selector.matchLabels` uses `{}` as the opt-in sentinel — absent means no injection; `{}` means inject pod selector labels.
 
@@ -167,6 +167,8 @@ spec:
 ```
 
 ## Example: VerticalPodAutoscaler per worker version
+
+> **Note:** VerticalPodAutoscaler must be installed in the cluster separately before you add it to `allowedResources`. The Temporal Worker Controller does not install it. See the [VPA installation guide](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/docs/installation.md).
 
 VerticalPodAutoscaler is not in the default allowed list. Add it to `workerResourceTemplate.allowedResources` first:
 

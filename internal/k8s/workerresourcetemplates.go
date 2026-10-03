@@ -173,7 +173,7 @@ func RenderWorkerResourceTemplate(
 //   - scaleTargetRef: injected anywhere in the spec tree when {} (empty), via
 //     injectScaleTargetRefRecursive. Unambiguous across all supported resource types.
 //
-//   - spec.targetRef (VerticalPodAutoscaler): injected ONLY at this exact path when {} (empty),
+//   - spec.targetRef: injected ONLY at this exact path when {} (empty),
 //     with the same value as scaleTargetRef. Unlike scaleTargetRef, "targetRef" is a common key
 //     in other CRDs, so it is not injected recursively.
 func autoInjectFields(spec map[string]interface{}, deploymentName, serverWDName, buildID, temporalNamespace string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {

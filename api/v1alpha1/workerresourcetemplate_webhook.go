@@ -324,7 +324,7 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		// reject any other value.
 		checkKEDATriggerMetadata(innerSpec, innerSpecPath, &allErrs)
 
-		// 9. spec.targetRef (VerticalPodAutoscaler): the controller owns this exact path, as it
+		// 9. spec.targetRef: the controller owns this exact path, as it
 		// owns scaleTargetRef. If absent or {}, the controller injects the versioned Deployment;
 		// if non-empty, reject, because every rendered copy would point at the same Deployment.
 		if tr, exists := innerSpec["targetRef"]; exists && tr != nil && !isEmptyMap(tr) {
