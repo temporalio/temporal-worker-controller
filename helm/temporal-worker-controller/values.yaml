@@ -44,8 +44,8 @@ rbac:
   # namespaces its RBAC grants access to in sync. Empty (the default) watches all
   # namespaces with cluster-wide RBAC (ClusterRole + ClusterRoleBinding). When set,
   # the manager role is emitted as a namespaced Role (one per listed namespace) bound
-  # via a RoleBinding, plus a minimal cluster-scoped role for the two grants that
-  # cannot be namespaced (namespaces get, subjectaccessreviews create).
+  # via a RoleBinding, plus a temporary cluster-scoped role retaining namespaces get
+  # for namespace-UID fallback and subjectaccessreviews for the one-release migration.
   restrictWatchNamespaces: []
   # createEndUserRoles controls whether the chart creates the optional ClusterRoles
   # that grant end users permission to edit/view temporal.io custom resources
