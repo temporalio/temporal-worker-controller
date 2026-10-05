@@ -41,8 +41,8 @@ import (
 // actually returns into unstructured, and runs the real kstatus decision tree over
 // it until the verdict matches want, or fatals on timeout.
 func waitForKstatus(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	k8sClient client.Client,
 	name, namespace string,
 	want kstatus.Status,
@@ -89,7 +89,12 @@ func conditionSummary(conds []metav1.Condition) []string {
 // requireObservedGenerationCurrent fails if status.observedGeneration has not caught
 // up with metadata.generation. kstatus checks this before it looks at any condition,
 // so a lagging value masks every condition the controller wrote.
-func requireObservedGenerationCurrent(t *testing.T, ctx context.Context, k8sClient client.Client, name, namespace string) {
+func requireObservedGenerationCurrent(
+	ctx context.Context,
+	t *testing.T,
+	k8sClient client.Client,
+	name, namespace string,
+) {
 	t.Helper()
 	var wd temporaliov1alpha1.WorkerDeployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &wd); err != nil {
@@ -101,6 +106,7 @@ func requireObservedGenerationCurrent(t *testing.T, ctx context.Context, k8sClie
 	}
 }
 
+//nolint:revive // not much to be done about the complexity of this test case.
 func runKstatusTests(
 	t *testing.T,
 	k8sClient client.Client,
@@ -125,9 +131,9 @@ func runKstatusTests(
 				).
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
-					waitForKstatus(t, ctx, env.K8sClient, twd.Name, twd.Namespace,
+					waitForKstatus(ctx, t, env.K8sClient, twd.Name, twd.Namespace,
 						kstatus.CurrentStatus, 30*time.Second, time.Second)
-					requireObservedGenerationCurrent(t, ctx, env.K8sClient, twd.Name, twd.Namespace)
+					requireObservedGenerationCurrent(ctx, t, env.K8sClient, twd.Name, twd.Namespace)
 				}),
 		},
 		{
@@ -151,7 +157,7 @@ func runKstatusTests(
 						metav1.ConditionTrue,
 						temporaliov1alpha1.ReasonWaitingForPromotion,
 						30*time.Second, time.Second)
-					waitForKstatus(t, ctx, env.K8sClient, twd.Name, twd.Namespace,
+					waitForKstatus(ctx, t, env.K8sClient, twd.Name, twd.Namespace,
 						kstatus.InProgressStatus, 30*time.Second, time.Second)
 				}),
 		},
@@ -207,11 +213,11 @@ func runKstatusTests(
 			metav1.ConditionTrue,
 			temporaliov1alpha1.ReasonInvalidSpec,
 			30*time.Second, time.Second)
-		waitForKstatus(t, ctx, k8sClient, twd.Name, twd.Namespace,
+		waitForKstats(ctx, t, k8sClient, twd.Name, twd.Namespace,
 			kstatus.FailedStatus, 30*time.Second, time.Second)
 		// The blocked path must still advance observedGeneration, or kstatus returns
 		// InProgress from its generation check and never reads Stalled at all.
-		requireObservedGenerationCurrent(t, ctx, k8sClient, twd.Name, twd.Namespace)
+		requireObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace)
 	})
 
 	t.Run("kstatus-inprogress-on-missing-connection", func(t *testing.T) {
@@ -239,7 +245,7 @@ func runKstatusTests(
 			metav1.ConditionTrue,
 			temporaliov1alpha1.ReasonConnectionNotFound,
 			30*time.Second, time.Second)
-		waitForKstatus(t, ctx, k8sClient, twd.Name, twd.Namespace,
+		waitForKstats(ctx, t, k8sClient, twd.Name, twd.Namespace,
 			kstatus.InProgressStatus, 30*time.Second, time.Second)
 
 		var got temporaliov1alpha1.WorkerDeployment
@@ -286,7 +292,7 @@ func runKstatusTests(
 			metav1.ConditionTrue,
 			temporaliov1alpha1.ReasonTemporalStateFetchFailed,
 			30*time.Second, time.Second)
-		waitForKstatus(t, ctx, k8sClient, twd.Name, twd.Namespace,
+		waitForKstats(ctx, t, k8sClient, twd.Name, twd.Namespace,
 			kstatus.InProgressStatus, 30*time.Second, time.Second)
 
 		var got temporaliov1alpha1.WorkerDeployment
