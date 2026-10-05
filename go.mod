@@ -6,13 +6,13 @@ require (
 	github.com/distribution/reference v0.6.0
 	github.com/fatih/color v1.19.0
 	github.com/go-logr/logr v1.4.4
-	github.com/onsi/ginkgo/v2 v2.32.1
+	github.com/onsi/ginkgo/v2 v2.32.2
 	github.com/onsi/gomega v1.43.0
 	github.com/pborman/uuid v1.2.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.46.0
-	go.opentelemetry.io/otel/exporters/prometheus v0.67.0
+	go.opentelemetry.io/otel/exporters/prometheus v0.68.0
 	go.opentelemetry.io/otel/sdk/metric v1.46.0
 	go.temporal.io/api v1.63.5
 	go.temporal.io/sdk v1.46.0
