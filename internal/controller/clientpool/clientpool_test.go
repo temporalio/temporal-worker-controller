@@ -38,7 +38,7 @@ func (noopLogger) Warn(string, ...interface{})  {}
 func (noopLogger) Error(string, ...interface{}) {}
 
 func newTestPool() *ClientPool {
-	cp := New(noopLogger{}, nil)
+	cp := New(noopLogger{}, nil, nil)
 	cp.dialFn = sdkclient.Dial
 	return cp
 }
@@ -296,7 +296,7 @@ func newTestPoolWithFakeClient(objects ...runtime.Object) *ClientPool {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()
-	cp := New(noopLogger{}, k8sClient)
+	cp := New(noopLogger{}, k8sClient, nil)
 	cp.dialFn = sdkclient.Dial
 	return cp
 }

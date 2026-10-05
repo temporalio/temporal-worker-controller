@@ -22,13 +22,16 @@ import (
 type WorkerDeploymentController = internalcontroller.WorkerDeploymentReconciler
 
 // CachedClient is a Temporal SDK client paired with a validity check. IsValid is called on every
-// cache hit to a false result triggers eviction and re-dial. It is not consulted at creation
-// time — creation success is the error return of CreateClientFunc.
+// cache hit. A false result triggers eviction and re-dial.
 type CachedClient = clientpool.CachedClient
 
 // CreateClientFunc creates a Temporal SDK client for a connection spec: secret parsing, options,
 // dialing, and health check. The pool caches the returned CachedClient.
 type CreateClientFunc = clientpool.CreateClientFunc
+
+// CustomizeClientOptionsFunc mutates SDK client options before dialing. It only applies to
+// the default client-creation path (WithDefaultClient).
+type CustomizeClientOptionsFunc func(sdkclient.Options) sdkclient.Options
 
 // ControllerOption configures a controller built by NewController.
 type ControllerOption func(*controllerConfig)
@@ -37,7 +40,8 @@ type ControllerOption func(*controllerConfig)
 // options can only be set via the With* constructors.
 type controllerConfig struct {
 	createClient                               CreateClientFunc
-	customizeClientOptions                     func(sdkclient.Options) sdkclient.Options
+	customClientOptions                        CustomizeClientOptionsFunc
+	defaultClient                              bool
 	poolLogger                                 log.Logger
 	maxDeploymentVersionsIneligibleForDeletion int32
 	disableDeprecatedTWD                       bool
@@ -48,8 +52,7 @@ type controllerConfig struct {
 
 // NewController returns a WorkerDeploymentController wired with the given manager. The manager
 // supplies the Kubernetes client, scheme, and event recorder; the Temporal client pool is built
-// internally from the manager's client. Pass options to customize client construction or
-// override the defaults.
+// internally from the manager's client.
 func NewController(mgr ctrl.Manager, opts ...ControllerOption) *WorkerDeploymentController {
 	cfg := controllerConfig{
 		poolLogger: defaultPoolLogger(),
@@ -58,9 +61,13 @@ func NewController(mgr ctrl.Manager, opts ...ControllerOption) *WorkerDeployment
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	pool := clientpool.New(cfg.poolLogger, mgr.GetClient())
-	pool.CustomizeClientOptions = cfg.customizeClientOptions
-	pool.CreateClientFn = cfg.createClient
+	if cfg.createClient != nil && cfg.defaultClient {
+		panic("twc.WithCreateClient and twc.WithDefaultClient are mutually exclusive")
+	}
+	pool := clientpool.New(cfg.poolLogger, mgr.GetClient(), cfg.customClientOptions)
+	if cfg.createClient != nil {
+		pool.CreateClientFn = cfg.createClient
+	}
 	return &WorkerDeploymentController{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
@@ -88,20 +95,22 @@ func WithLogger(l log.Logger) ControllerOption {
 }
 
 // WithCreateClient overrides the default client-creation path. The function owns the full
-// construction: secret parsing, options, dialing, and health check. When unset, the pool's
-// built-in DefaultCreateClient is used.
+// construction: secret parsing, options, dialing, and health check.
 func WithCreateClient(fn CreateClientFunc) ControllerOption {
 	return func(c *controllerConfig) {
 		c.createClient = fn
 	}
 }
 
-// WithCustomizeClientOptions sets the pool's CustomizeClientOptions hook, which lets a wrapper
-// binary mutate the SDK client options before dialing. It is consumed by the default
-// client-creation path; a wrapper using WithCreateClient owns construction entirely.
-func WithCustomizeClientOptions(fn func(sdkclient.Options) sdkclient.Options) ControllerOption {
+// WithDefaultClient uses the built-in client-creation path (parse Secret, build options,
+// dial, health-check). Accepts optional CustomizeClientOptions to mutate SDK options
+// before dialing.
+func WithDefaultClient(customize ...CustomizeClientOptionsFunc) ControllerOption {
 	return func(c *controllerConfig) {
-		c.customizeClientOptions = fn
+		c.defaultClient = true
+		if len(customize) > 0 {
+			c.customClientOptions = customize[0]
+		}
 	}
 }
 

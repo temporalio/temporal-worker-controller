@@ -89,7 +89,7 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 	r := &WorkerDeploymentReconciler{
 		Client:              fakeClient,
 		Scheme:              scheme,
-		TemporalClientPool:  clientpool.New(nil, fakeClient),
+		TemporalClientPool:  clientpool.New(nil, fakeClient, nil),
 		Recorder:            recorder,
 		DisableRecoverPanic: true,
 		MaxDeploymentVersionsIneligibleForDeletion: 75,

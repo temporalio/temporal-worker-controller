@@ -254,7 +254,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		AddSource:   false,
 		Level:       nil,
 		ReplaceAttr: nil,
-	}))), k8sClient)
+	}))), k8sClient, nil)
 
 	// Set up controller
 	reconciler := &controller.WorkerDeploymentReconciler{
