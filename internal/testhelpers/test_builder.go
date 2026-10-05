@@ -115,8 +115,6 @@ func (b *WorkerDeploymentBuilder) WithTargetTemplateDeprecatedField(
 
 // WithTargetTemplate sets the template of the worker deployment to a pod spec with the given image name, thus defining the target version.
 func (b *WorkerDeploymentBuilder) WithTargetTemplate(imageName string) *WorkerDeploymentBuilder {
-	// TODO: I think we need to still run all these tests with the deprecated fields to confirm that this is not a breaking change. We should run it in the old way and the new way
-	// b.twd.Spec.Template = MakePodSpecWithImage(imageName)
 	if b.twd.Spec.Deployment == nil {
 		b.twd.Spec.Deployment = &appsv1.DeploymentSpec{}
 	}

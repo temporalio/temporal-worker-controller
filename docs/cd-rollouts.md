@@ -49,13 +49,11 @@ Once the underlying problem is fixed, the next successful reconcile will restore
 
 ### `Stalled` and `Reconciling`
 
-`Reconciling=True` means the controller is still working toward the spec. kstatus-based tools report the resource as **in progress** and keep waiting. `Stalled=True` means reconciliation cannot proceed and waiting will not help. The kstatus tools report **failed** and stop. Both are absent once a rollout is complete, and only one is ever set at a time.
-
-`Stalled` is set to `True` only for failures that are decidable from information already in hand, where nothing arriving later could change the answer. The `Reason` field is used to describe why that decision cannot change.
+`Stalled` is set to `True` only for failures that are decidable from information already in hand, where nothing arriving later could change the answer. The `Reason` field is used to describe why that decision cannot change. [`kstatus`-based tools][kstatus] report **failed** and stop.
 * `InvalidSpec` is used when the spec you just applied is not valid.
 * `ClusterConnectionUnsupported` is used when the type of Connection is not supported by the controller.
 
-`Reconciling` is set to `True` when the controller is still working to make the observed state of the resource match the desired state of the resource, with the `Reason` field used to provide more detail about why `Reconciling=True`.
+`Reconciling` is set to `True` when the controller is still working to make the observed state of the resource match the desired state of the resource, with the `Reason` field used to provide more detail about why `Reconciling=True`. `kstatus`-based tools report the resource as **in progress** and keep waiting.
 
 * `ConnectionNotFound` is used when the `Connection` may not exist *yet* or is simply absent.
 * `AuthSecretInvalid` a credential Secret may not exist *yet* or is simply absent.
@@ -71,9 +69,11 @@ The trade-off is that an incorrect `connectionRef` or a `Connection` that was ne
 
 ### `Connection` and `ClusterConnection`
 
-`Connection` and `ClusterConnection` are configuration-only resources. They have no controller of their own and expose no conditions, so tools that assess health from conditions like Helm `--wait`, Flux, and anything else built on [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus) treat them as healthy as soon as they exist. This is intentional as there is no reconcile loop behind them and therefore nothing to wait for. Kubernetes treats `ConfigMap` and `Secret` the same way.
+`Connection` and `ClusterConnection` are configuration-only resources. They have no controller of their own and expose no conditions, so tools that assess health from conditions like Helm `--wait`, Flux, and anything else built on [kstatus][kstatus] treat them as healthy as soon as they exist. This is intentional as there is no reconcile loop behind them and therefore nothing to wait for. Kubernetes treats `ConfigMap` and `Secret` the same way.
 
 A broken connection is still reported, just on the `WorkerDeployment` that references it rather than on the connection itself (see the `ConnectionNotFound` and `AuthSecretInvalid` reasons above). Your rollouts should wait on the `WorkerDeployment` as waiting on a `Connection` does not necessarily tell you that the credentials in it work.
+
+[kstatus]: https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus
 
 ## Triggering a rollout
 

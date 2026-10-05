@@ -69,6 +69,7 @@ func waitForKstatus(
 		if err != nil {
 			return fmt.Errorf("kstatus.Compute: %w", err)
 		}
+
 		if res.Status != want {
 			return fmt.Errorf("kstatus verdict: want %s, got %s (message: %q, conditions: %v)",
 				want, res.Status, res.Message, conditionSummary(wd.Status.Conditions))
@@ -86,24 +87,60 @@ func conditionSummary(conds []metav1.Condition) []string {
 	return out
 }
 
-// requireObservedGenerationCurrent fails if status.observedGeneration has not caught
-// up with metadata.generation. kstatus checks this before it looks at any condition,
-// so a lagging value masks every condition the controller wrote.
-func requireObservedGenerationCurrent(
+// waitForObservedGenerationCurrent waits for status.observedGeneration to
+// catch up with metadata.generation.
+func waitForObservedGenerationCurrent(
 	ctx context.Context,
 	t *testing.T,
 	k8sClient client.Client,
 	name, namespace string,
+	timeout, interval time.Duration,
 ) {
 	t.Helper()
-	var wd temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &wd); err != nil {
-		t.Fatalf("get WorkerDeployment: %v", err)
-	}
-	if wd.Status.ObservedGeneration != wd.Generation {
-		t.Fatalf("status.observedGeneration = %d, want %d (metadata.generation)",
-			wd.Status.ObservedGeneration, wd.Generation)
-	}
+	eventually(t, timeout, interval, func() error {
+		var wd temporaliov1alpha1.WorkerDeployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &wd); err != nil {
+			return fmt.Errorf("get WorkerDeployment: %w", err)
+		}
+		if wd.Status.ObservedGeneration != wd.Generation {
+			return fmt.Errorf("status.observedGeneration != metadata.generation")
+		}
+		return nil
+	})
+}
+
+// waitForObservedConnectionRef waits for status.observedConnectionRef to point
+// to the supplied named connection.
+func waitForObservedConnectionRef(
+	ctx context.Context,
+	t *testing.T,
+	k8sClient client.Client,
+	name, namespace string,
+	wantConnectionName string,
+	timeout, interval time.Duration,
+) {
+	t.Helper()
+	eventually(t, timeout, interval, func() error {
+		var wd temporaliov1alpha1.WorkerDeployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &wd); err != nil {
+			return fmt.Errorf("get WorkerDeployment: %w", err)
+		}
+
+		ocr := wd.Status.ObservedConnectionRef
+		if ocr == nil {
+			return fmt.Errorf(
+				"status.observedConnectionRef is nil, expected non-nil pointing at connection with name %s",
+				wantConnectionName,
+			)
+		}
+		if ocr.Name != wantConnectionName {
+			return fmt.Errorf(
+				"status.observedConnectionRef.Name = %s, want %s",
+				ocr.Name, wantConnectionName,
+			)
+		}
+		return nil
+	})
 }
 
 //nolint:revive // not much to be done about the complexity of this test case.
@@ -131,9 +168,9 @@ func runKstatusTests(
 				).
 				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
 					twd := tc.GetTWD()
+					waitForObservedGenerationCurrent(ctx, t, env.K8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
 					waitForKstatus(ctx, t, env.K8sClient, twd.Name, twd.Namespace,
 						kstatus.CurrentStatus, 30*time.Second, time.Second)
-					requireObservedGenerationCurrent(ctx, t, env.K8sClient, twd.Name, twd.Namespace)
 				}),
 		},
 		{
@@ -157,6 +194,7 @@ func runKstatusTests(
 						metav1.ConditionTrue,
 						temporaliov1alpha1.ReasonWaitingForPromotion,
 						30*time.Second, time.Second)
+					waitForObservedGenerationCurrent(ctx, t, env.K8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
 					waitForKstatus(ctx, t, env.K8sClient, twd.Name, twd.Namespace,
 						kstatus.InProgressStatus, 30*time.Second, time.Second)
 				}),
@@ -213,11 +251,11 @@ func runKstatusTests(
 			metav1.ConditionTrue,
 			temporaliov1alpha1.ReasonInvalidSpec,
 			30*time.Second, time.Second)
-		waitForKstats(ctx, t, k8sClient, twd.Name, twd.Namespace,
-			kstatus.FailedStatus, 30*time.Second, time.Second)
 		// The blocked path must still advance observedGeneration, or kstatus returns
 		// InProgress from its generation check and never reads Stalled at all.
-		requireObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace)
+		waitForObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
+		waitForKstatus(ctx, t, k8sClient, twd.Name, twd.Namespace,
+			kstatus.FailedStatus, 30*time.Second, time.Second)
 	})
 
 	t.Run("kstatus-inprogress-on-missing-connection", func(t *testing.T) {
@@ -245,7 +283,8 @@ func runKstatusTests(
 			metav1.ConditionTrue,
 			temporaliov1alpha1.ReasonConnectionNotFound,
 			30*time.Second, time.Second)
-		waitForKstats(ctx, t, k8sClient, twd.Name, twd.Namespace,
+		waitForObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
+		waitForKstatus(ctx, t, k8sClient, twd.Name, twd.Namespace,
 			kstatus.InProgressStatus, 30*time.Second, time.Second)
 
 		var got temporaliov1alpha1.WorkerDeployment
@@ -292,7 +331,8 @@ func runKstatusTests(
 			metav1.ConditionTrue,
 			temporaliov1alpha1.ReasonTemporalStateFetchFailed,
 			30*time.Second, time.Second)
-		waitForKstats(ctx, t, k8sClient, twd.Name, twd.Namespace,
+		waitForObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
+		waitForKstatus(ctx, t, k8sClient, twd.Name, twd.Namespace,
 			kstatus.InProgressStatus, 30*time.Second, time.Second)
 
 		var got temporaliov1alpha1.WorkerDeployment
@@ -304,5 +344,86 @@ func runKstatusTests(
 				t.Fatalf("a transient failure must not set Stalled=True (reason %q)", c.Reason)
 			}
 		}
+	})
+
+	t.Run("kstatus-change-conn", func(t *testing.T) {
+		// We test the following scenario: reconcile a WD with connection A (so
+		// ObservedConnectionRef = A), then edit the spec to connection B and
+		// makes the first reconcile block, create connection B and reconcile
+		// again, and finally assert the finalizer is removed from connection
+		// A.
+		wdName := "kstatus-change-conn"
+		ctx := context.Background()
+		tc := testhelpers.NewTestCase().
+			WithInput(
+				testhelpers.NewWorkerDeploymentBuilder().
+					WithAllAtOnceStrategy().
+					WithGate(true).
+					WithReplicas(2).
+					WithTargetTemplate("v1.0"),
+			).
+			WithExpectedStatus(
+				testhelpers.NewStatusBuilder().
+					WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+					WithCurrentVersion("v1.0", true, false),
+			).BuildWithValues(wdName, testNamespace, ts.GetDefaultNamespace())
+
+		testWorkerDeploymentCreation(ctx, t, k8sClient, mgr, ts, tc)
+
+		connAName := wdName
+		connBName := wdName + "-other"
+
+		var twd temporaliov1alpha1.WorkerDeployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: wdName, Namespace: testNamespace}, &twd); err != nil {
+			t.Fatalf("get WorkerDeployment: %v", err)
+		}
+
+		waitForObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
+		waitForKstatus(ctx, t, k8sClient, twd.Name, twd.Namespace,
+			kstatus.CurrentStatus, 30*time.Second, time.Second)
+		waitForObservedConnectionRef(ctx, t, k8sClient, twd.Name, twd.Namespace, connAName, 30*time.Second, time.Second)
+
+		// Now we change the WD's connection to point to a yet-to-exist
+		// connection B, check that the WD goes to Reconciling=True state and
+		// that the observed connection ref continues to point to connection A.
+		twd.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{Name: connBName}
+		if err := k8sClient.Update(ctx, &twd); err != nil {
+			t.Fatalf("failed to update WD to Connection B: %v", err)
+		}
+
+		waitForCondition(t, ctx, k8sClient, twd.Name, twd.Namespace,
+			temporaliov1alpha1.ConditionReconciling,
+			metav1.ConditionTrue,
+			temporaliov1alpha1.ReasonConnectionNotFound,
+			30*time.Second, time.Second)
+		waitForObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
+		waitForKstatus(ctx, t, k8sClient, twd.Name, twd.Namespace,
+			kstatus.InProgressStatus, 30*time.Second, time.Second)
+		// observed connection should still point to connection A until connection
+		// B actually exists.
+		waitForObservedConnectionRef(ctx, t, k8sClient, twd.Name, twd.Namespace, connAName, 30*time.Second, time.Second)
+
+		var got temporaliov1alpha1.WorkerDeployment
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, &got); err != nil {
+			t.Fatalf("get WorkerDeployment: %v", err)
+		}
+		for _, c := range got.Status.Conditions {
+			if c.Type == temporaliov1alpha1.ConditionStalled && c.Status == metav1.ConditionTrue {
+				t.Fatalf("a missing Connection must not set Stalled=True (reason %q)", c.Reason)
+			}
+		}
+
+		// Now create connection B and wait for the WD to get to Current.
+		connB := &temporaliov1alpha1.Connection{
+			ObjectMeta: metav1.ObjectMeta{Name: connBName, Namespace: testNamespace},
+			Spec:       temporaliov1alpha1.ConnectionSpec{HostPort: ts.GetFrontendHostPort()},
+		}
+		if err := k8sClient.Create(ctx, connB); err != nil {
+			t.Fatalf("failed to create Connection B: %v", err)
+		}
+		waitForObservedGenerationCurrent(ctx, t, k8sClient, twd.Name, twd.Namespace, 30*time.Second, time.Second)
+		waitForKstatus(ctx, t, k8sClient, twd.Name, twd.Namespace,
+			kstatus.CurrentStatus, 30*time.Second, time.Second)
+		waitForObservedConnectionRef(ctx, t, k8sClient, twd.Name, twd.Namespace, connBName, 30*time.Second, time.Second)
 	})
 }
