@@ -18,15 +18,15 @@ issues:
     - ^proto
     - ^.git
   exclude-rules:
-    - path-except: _test\.go|internal/tests/.+\.go
+    - path-except: _test\.go|tests/integration/.+\.go
       text: "time.Sleep"
       linters:
         - forbidigo
-    - path: _test\.go|internal/tests/.+\.go
+    - path: _test\.go|tests/integration/.+\.go
       text: "(cyclomatic|cognitive)"  # false positives when using subtests
       linters:
         - revive
-    - path: _test\.go|internal/tests/.+\.go
+    - path: _test\.go|tests/integration/.+\.go
       text: "(dot-imports|unchecked-type-assertion)"  # helpful in tests
       linters:
         - revive
@@ -116,6 +116,8 @@ linters-settings:
       - name: unused-receiver
         disabled: true
       - name: use-any
+        disabled: true
+      - name: use-errors-new
         disabled: true
       - name: var-naming
         disabled: true
