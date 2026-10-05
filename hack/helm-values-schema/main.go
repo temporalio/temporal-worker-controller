@@ -102,7 +102,9 @@ func schemaFromNode(n *yaml.Node) map[string]any {
 				prop["description"] = desc
 			}
 			if ann := schemaDirectives(key.HeadComment, key.LineComment, val.HeadComment, val.LineComment); len(ann) > 0 {
-				prop = deepMerge(prop, ann).(map[string]any)
+				if merged, ok := asMap(deepMerge(prop, ann)); ok {
+					prop = merged
+				}
 			}
 			props[key.Value] = prop
 		}
