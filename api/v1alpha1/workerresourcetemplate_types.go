@@ -48,6 +48,13 @@ type WorkerResourceTemplateSpec struct {
 	//     User labels (e.g. task_type: "Activity") coexist alongside the injected keys.
 	//     Do not set temporal_worker_deployment_name, temporal_worker_build_id, or
 	//     temporal_namespace manually — the webhook will reject them.
+	//
+	// Any string in the template may contain {{temporal_worker_deployment_name}},
+	// {{temporal_worker_build_id}}, and {{temporal_namespace}}. The controller
+	// replaces that exact token per Build ID with the same values appended to
+	// External metric matchLabels. When HPA match-label prefix stripping is
+	// enabled, the tokens are {{worker_deployment_name}}, {{worker_build_id}},
+	// and {{namespace}}.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Template runtime.RawExtension `json:"template"`
