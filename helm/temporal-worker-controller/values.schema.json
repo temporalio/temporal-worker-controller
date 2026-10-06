@@ -235,9 +235,15 @@
       "type": "object"
     },
     "podAnnotations": {
+      "additionalProperties": {
+        "type": "string"
+      },
       "type": "object"
     },
     "podLabels": {
+      "additionalProperties": {
+        "type": "string"
+      },
       "type": "object"
     },
     "podSecurityContext": {
@@ -270,6 +276,9 @@
         },
         "restrictWatchNamespaces": {
           "description": "restrictWatchNamespaces keeps the namespaces the controller watches and the\nnamespaces its RBAC grants access to in sync. Empty (the default) watches all\nnamespaces with cluster-wide RBAC (ClusterRole + ClusterRoleBinding). When set,\nthe manager role is emitted as a namespaced Role (one per listed namespace) bound\nvia a RoleBinding, plus a minimal cluster-scoped role for the two grants that\ncannot be namespaced (namespaces get, subjectaccessreviews create).",
+          "items": {
+            "type": "string"
+          },
           "type": "array"
         }
       },

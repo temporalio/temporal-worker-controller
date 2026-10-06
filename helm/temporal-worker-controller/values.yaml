@@ -4,12 +4,12 @@ image:
   pullPolicy: IfNotPresent # @schema enum:[Always, IfNotPresent, Never]
   pullSecrets: [] # @schema items.type:object; items.required:[name]; items.properties.name.type:string; items.properties.name.description:Name of the secret containing registry credentials
 
-podAnnotations: {}
+podAnnotations: {} # @schema additionalProperties.type:string
   # Additional pod annotations can be added here
 # example:
 #   custom.annotation: value
 
-podLabels: {}
+podLabels: {} # @schema additionalProperties.type:string
   # Additional pod labels can be added here
   # example:
 #   custom.label: value
@@ -46,7 +46,7 @@ rbac:
   # the manager role is emitted as a namespaced Role (one per listed namespace) bound
   # via a RoleBinding, plus a minimal cluster-scoped role for the two grants that
   # cannot be namespaced (namespaces get, subjectaccessreviews create).
-  restrictWatchNamespaces: []
+  restrictWatchNamespaces: [] # @schema items.type:string
   # createEndUserRoles controls whether the chart creates the optional ClusterRoles
   # that grant end users permission to edit/view temporal.io custom resources
   # (connections, workerdeployments, workerresourcetemplates). These roles have no
