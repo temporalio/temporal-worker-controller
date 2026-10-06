@@ -45,11 +45,8 @@ const (
 	ConnectionSpecHashAnnotation                   = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation                  = "temporal.io/pod-template-spec-hash"
 
-	// Environment variable names read by the Temporal Go SDK's envconfig package
-	// (go.temporal.io/sdk/contrib/envconfig) to configure a worker's connection. Shared
-	// between ApplyControllerPodSpecModifications (fresh pod specs) and
-	// planner.updateDeploymentWithConnection (the connection-drift-only update path), which
-	// otherwise independently duplicate this env-var wiring.
+	// Environment variables read by the Temporal Go SDK's envconfig package
+	// (go.temporal.io/sdk/contrib/envconfig) to configure the worker's connection.
 	EnvTemporalAddress             = "TEMPORAL_ADDRESS"
 	EnvTemporalNamespace           = "TEMPORAL_NAMESPACE"
 	EnvTemporalDeploymentName      = "TEMPORAL_DEPLOYMENT_NAME"
