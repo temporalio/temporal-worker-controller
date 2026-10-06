@@ -580,6 +580,59 @@ func TestWorkerResourceTemplate_ValidateCreate_TemporalTriggerMetadata(t *testin
 	}
 }
 
+func TestWorkerResourceTemplate_ValidateCreate_TargetRef(t *testing.T) {
+	vpaTemplate := func(targetRef interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"apiVersion": "autoscaling.k8s.io/v1",
+			"kind":       "VerticalPodAutoscaler",
+			"spec": map[string]interface{}{
+				"targetRef":    targetRef,
+				"updatePolicy": map[string]interface{}{"updateMode": "Initial"},
+			},
+		}
+	}
+
+	tests := map[string]struct {
+		obj      runtime.Object
+		errorMsg string
+	}{
+		"empty targetRef is valid (opt-in)": {
+			obj: newWRT("vpa-opt-in", "my-worker", vpaTemplate(map[string]interface{}{})),
+		},
+		"non-empty targetRef is rejected": {
+			obj: newWRT("vpa-hardcoded", "my-worker", vpaTemplate(map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"name":       "some-other-deployment",
+			})),
+			errorMsg: "if targetRef is present, the controller owns it",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			v := &temporaliov1alpha1.WorkerResourceTemplateValidator{
+				Client: fake.NewClientBuilder().Build(),
+				RESTMapper: newFakeRESTMapper(
+					schema.GroupVersionKind{Group: "autoscaling.k8s.io", Version: "v1", Kind: "VerticalPodAutoscaler"},
+				),
+				AllowedKinds: []string{"VerticalPodAutoscaler"},
+			}
+
+			warnings, err := v.ValidateCreate(ctx, tc.obj)
+
+			if tc.errorMsg != "" {
+				require.Error(t, err, "expected an error containing %q", tc.errorMsg)
+				assert.Contains(t, err.Error(), tc.errorMsg)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Nil(t, warnings)
+		})
+	}
+}
+
 func TestWorkerResourceTemplate_ValidateUpdate_Immutability(t *testing.T) {
 	tests := map[string]struct {
 		oldWorkerDeploymentRef string

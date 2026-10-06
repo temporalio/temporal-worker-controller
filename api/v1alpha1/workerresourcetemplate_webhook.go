@@ -323,6 +323,18 @@ func validateWorkerResourceTemplateSpec(spec WorkerResourceTemplateSpec, allowed
 		// (workerDeploymentName + workerDeploymentBuildId). Allow empty-string opt-in ("") and
 		// reject any other value.
 		checkKEDATriggerMetadata(innerSpec, innerSpecPath, &allErrs)
+
+		// 9. spec.targetRef: the controller owns this exact path. If {}, the controller injects
+		// the versioned Deployment; if non-empty, reject, because every rendered copy would point
+		// at the same Deployment.
+		if tr, exists := innerSpec["targetRef"]; exists && tr != nil && !isEmptyMap(tr) {
+			allErrs = append(allErrs, field.Forbidden(
+				innerSpecPath.Child("targetRef"),
+				"if targetRef is present, the controller owns it and will set it to point at the "+
+					"versioned Deployment; set it to {} to opt in to auto-injection, "+
+					"or remove it entirely if you do not need the targetRef field",
+			))
+		}
 	}
 
 	return warnings, allErrs

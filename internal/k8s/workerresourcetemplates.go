@@ -215,6 +215,10 @@ func substituteMetricTemplateString(s string, vars map[string]string) string {
 //
 //   - scaleTargetRef: injected anywhere in the spec tree when {} (empty), via
 //     injectScaleTargetRefRecursive. Unambiguous across all supported resource types.
+//
+//   - spec.targetRef: injected ONLY at this exact path when {} (empty),
+//     with the same value as scaleTargetRef. Unlike scaleTargetRef, "targetRef" is a common key
+//     in other CRDs, so it is not injected recursively.
 func autoInjectFields(spec map[string]interface{}, deploymentName, serverWDName, buildID, temporalNamespace string, podSelectorLabels map[string]string, metricSelectorLabels map[string]string) {
 	// spec.selector.matchLabels: {} opt-in sentinel.
 	if sel, ok := spec["selector"].(map[string]interface{}); ok {
@@ -233,6 +237,11 @@ func autoInjectFields(spec map[string]interface{}, deploymentName, serverWDName,
 
 	// scaleTargetRef: inject anywhere in the spec tree.
 	injectScaleTargetRefRecursive(spec, deploymentName)
+
+	// spec.targetRef: {} opt-in sentinel, this exact path only.
+	if isEmptyMap(spec["targetRef"]) {
+		_ = unstructured.SetNestedMap(spec, buildScaleTargetRef(deploymentName), "targetRef")
+	}
 }
 
 func stripMetricLabelPrefix(labels map[string]string, prefix string) map[string]string {
