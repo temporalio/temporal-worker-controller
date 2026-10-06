@@ -1,15 +1,15 @@
 image:
   repository: temporalio/temporal-worker-controller
   tag: "" # Defaults to Chart.appVersion if not specified
-  pullPolicy: IfNotPresent
-  pullSecrets: []
+  pullPolicy: IfNotPresent # @schema enum:[Always, IfNotPresent, Never]
+  pullSecrets: [] # @schema items.type:object; items.required:[name]; items.properties.name.type:string; items.properties.name.description:Name of the secret containing registry credentials
 
-podAnnotations: {}
+podAnnotations: {} # @schema additionalProperties.type:string
   # Additional pod annotations can be added here
 # example:
 #   custom.annotation: value
 
-podLabels: {}
+podLabels: {} # @schema additionalProperties.type:string
   # Additional pod labels can be added here
   # example:
 #   custom.label: value
@@ -18,13 +18,13 @@ podLabels: {}
 # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 resources:
   limits:
-    cpu: 500m
-    memory: 128Mi
+    cpu: 500m # @schema pattern:^[0-9]+(\.[0-9]+)?([m]?)$
+    memory: 128Mi # @schema pattern:^[0-9]+([kKmMgGtTpP]i?)?$
   requests:
-    cpu: 10m
-    memory: 64Mi
+    cpu: 10m # @schema pattern:^[0-9]+(\.[0-9]+)?([m]?)$
+    memory: 64Mi # @schema pattern:^[0-9]+([kKmMgGtTpP]i?)?$
 
-terminationGracePeriodSeconds: 10
+terminationGracePeriodSeconds: 10 # @schema minimum:1
 
 # Optional Pod priority scheduling. Prefer priorityClassName (references a
 # cluster PriorityClass). Set priority only when you need an explicit integer;
@@ -46,7 +46,7 @@ rbac:
   # the manager role is emitted as a namespaced Role (one per listed namespace) bound
   # via a RoleBinding, plus a minimal cluster-scoped role for the two grants that
   # cannot be namespaced (namespaces get, subjectaccessreviews create).
-  restrictWatchNamespaces: []
+  restrictWatchNamespaces: [] # @schema items.type:string
   # createEndUserRoles controls whether the chart creates the optional ClusterRoles
   # that grant end users permission to edit/view temporal.io custom resources
   # (connections, workerdeployments, workerresourcetemplates). These roles have no
@@ -112,7 +112,7 @@ authProxy:
 
 metrics:
   enabled: true
-  port: 8080
+  port: 8080 # @schema minimum:1; maximum:65535
   # Set to true if you want your controller-manager to expose the /metrics
   # endpoint w/o any authn/z.
   #
@@ -137,7 +137,7 @@ webhook:
   # The WorkerResourceTemplate validating webhook is always enabled and does
   # not require this flag.
   enabled: false
-  port: 9443
+  port: 9443 # @schema minimum:1; maximum:65535
   certDir: /tmp/k8s-webhook-server/serving-certs
   certSecretName: webhook-server-cert
 
@@ -226,6 +226,7 @@ tolerations: []
 #       secretKeyRef:
 #         name: controller-secrets
 #         key: api-token
+# @schema items.type:object; items.required:[name]; items.properties.name.type:string; items.properties.name.minLength:1; items.properties.name.description:Environment variable name; items.properties.value.type:string; items.properties.value.description:Literal environment variable value; items.properties.valueFrom.type:object; items.properties.valueFrom.description:Kubernetes EnvVarSource, such as secretKeyRef or configMapKeyRef
 extraEnv: []
 
 # extraVolumes adds volumes to the manager pod, alongside the webhook certificate
@@ -235,7 +236,7 @@ extraEnv: []
 #   - name: custom-ca
 #     secret:
 #       secretName: custom-ca
-extraVolumes: []
+extraVolumes: [] # @schema items.type:object
 
 # extraVolumeMounts adds volume mounts to the manager container. Volumes must be
 # supplied via extraVolumes above.
@@ -244,7 +245,7 @@ extraVolumes: []
 #   - name: custom-ca
 #     mountPath: /etc/ssl/custom-ca
 #     readOnly: true
-extraVolumeMounts: []
+extraVolumeMounts: [] # @schema items.type:object
 
 # Configure the kube-rbac-proxy sidecar that protects the controller metrics
 # endpoint. The sidecar is enabled unless metrics.disableAuth is true.
@@ -254,9 +255,9 @@ kubeRBACProxy:
     repository: kubebuilder/kube-rbac-proxy
     tag: v0.14.1
     sha: ""
-    pullPolicy: IfNotPresent
+    pullPolicy: IfNotPresent # @schema enum:[Always, IfNotPresent, Never]
   # Additional arguments for kube-rbac-proxy.
-  extraArgs: []
+  extraArgs: [] # @schema items.type:string
   # Overrides the global containerSecurityContext for this sidecar only.
   # When empty, the global containerSecurityContext remains the fallback.
   containerSecurityContext: {}
@@ -269,4 +270,4 @@ kubeRBACProxy:
       memory: 64Mi
   # Additional volume mounts for kube-rbac-proxy. Volumes must be supplied by
   # the chart or another supported configuration option.
-  volumeMounts: []
+  volumeMounts: [] # @schema items.type:object
