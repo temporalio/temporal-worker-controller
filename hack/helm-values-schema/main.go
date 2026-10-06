@@ -1,6 +1,11 @@
-// Command helm-values-schema generates helm/temporal-worker-controller/values.schema.json
-// from values.yaml. Constraints that cannot be inferred (enums, patterns, item
-// shape) are read from "# @schema" comments on the keys in that file.
+// Command helm-values-schema generates values.schema.json from values.yaml.
+// By default, each key's type comes from its default value and its description
+// from the comment above it. Constraints that cannot be inferred (enums,
+// patterns, item shape) are added with "# @schema" comments on the key, e.g.:
+//
+//	pullPolicy: IfNotPresent # @schema enum:[Always, IfNotPresent, Never]
+//	port: 8080               # @schema minimum:1; maximum:65535
+//	extraEnv: []             # @schema items.type:object; items.required:[name]
 package main
 
 import (
