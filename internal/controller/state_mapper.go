@@ -20,7 +20,7 @@ type stateMapper struct {
 	k8sState             *k8s.DeploymentState
 	temporalState        *temporal.TemporalWorkerState
 	workerDeploymentName string
-	// targetSpec, when set, lists the pools the target version must run before it is healthy.
+	// targetSpec, when set, lists the groups the target version must run before it is healthy.
 	targetSpec *v1alpha1.WorkerDeploymentSpec
 }
 
@@ -131,8 +131,8 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 
 	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 	// The stricter rule gates promotion only; a current target keeps the plain health check.
-	if m.targetSpec != nil && m.targetSpec.HasPools() && buildID != m.temporalState.CurrentBuildID {
-		m.applyTargetPoolHealth(&version.BaseWorkerDeploymentVersion, buildID)
+	if m.targetSpec != nil && m.targetSpec.HasWorkerGroups() && buildID != m.temporalState.CurrentBuildID {
+		m.applyTargetGroupHealth(&version.BaseWorkerDeploymentVersion, buildID)
 	}
 
 	// Set version status from temporal state
@@ -203,8 +203,8 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 	return version
 }
 
-// setVersionDeployments points a version at its default pool's deployment and marks
-// it healthy once every pool's deployment is available.
+// setVersionDeployments points a version at its default group's deployment and marks
+// it healthy once every group's deployment is available.
 func (m *stateMapper) setVersionDeployments(version *v1alpha1.BaseWorkerDeploymentVersion, buildID string) {
 	deployments := m.k8sState.VersionDeployments(buildID)
 	if len(deployments) == 0 {
@@ -212,56 +212,56 @@ func (m *stateMapper) setVersionDeployments(version *v1alpha1.BaseWorkerDeployme
 	}
 	version.Deployment = m.k8sState.DeploymentRefs[buildID]
 	version.HealthySince = versionHealthySince(deployments)
-	version.Pools = poolStatuses(deployments)
+	version.WorkerGroups = groupStatuses(deployments)
 }
 
-// poolStatuses reports each pool of a multi-pool version, sorted by name so status
-// doesn't churn. Versions without pool labels keep an empty list.
-func poolStatuses(deployments map[string]*appsv1.Deployment) []v1alpha1.WorkerPoolStatus {
-	if !k8s.HasPoolLabel(deployments) {
+// groupStatuses reports each group of a multi-group version, sorted by name so status
+// doesn't churn. Versions without group labels keep an empty list.
+func groupStatuses(deployments map[string]*appsv1.Deployment) []v1alpha1.WorkerGroupStatus {
+	if !k8s.HasWorkerGroupLabel(deployments) {
 		return nil
 	}
-	pools := make([]v1alpha1.WorkerPoolStatus, 0, len(deployments))
+	groups := make([]v1alpha1.WorkerGroupStatus, 0, len(deployments))
 	for name, d := range deployments {
-		pool := v1alpha1.WorkerPoolStatus{Name: name, Deployment: k8s.NewObjectRef(d)}
+		group := v1alpha1.WorkerGroupStatus{Name: name, Deployment: k8s.NewObjectRef(d)}
 		if healthy, since := k8s.IsDeploymentHealthy(d); healthy {
-			pool.HealthySince = since
+			group.HealthySince = since
 		}
-		pools = append(pools, pool)
+		groups = append(groups, group)
 	}
-	slices.SortFunc(pools, func(a, b v1alpha1.WorkerPoolStatus) int { return cmp.Compare(a.Name, b.Name) })
-	return pools
+	slices.SortFunc(groups, func(a, b v1alpha1.WorkerGroupStatus) int { return cmp.Compare(a.Name, b.Name) })
+	return groups
 }
 
-// applyTargetPoolHealth marks each spec pool of a multi-pool target healthy only once it
-// also has an available replica, and the version once every spec pool is.
-func (m *stateMapper) applyTargetPoolHealth(version *v1alpha1.BaseWorkerDeploymentVersion, buildID string) {
+// applyTargetGroupHealth marks each spec group of a multi-group target healthy only once it
+// also has an available replica, and the version once every spec group is.
+func (m *stateMapper) applyTargetGroupHealth(version *v1alpha1.BaseWorkerDeploymentVersion, buildID string) {
 	deployments := m.k8sState.VersionDeployments(buildID)
 	var times []*metav1.Time
-	for _, pool := range m.targetSpec.PoolNames() {
+	for _, group := range m.targetSpec.WorkerGroupNames() {
 		var since *metav1.Time
-		if d, ok := deployments[pool]; ok {
-			since = targetPoolHealthySince(m.targetSpec, pool, d)
+		if d, ok := deployments[group]; ok {
+			since = targetGroupHealthySince(m.targetSpec, group, d)
 		}
 		times = append(times, since)
-		for i := range version.Pools {
-			if version.Pools[i].Name == pool {
-				version.Pools[i].HealthySince = since
+		for i := range version.WorkerGroups {
+			if version.WorkerGroups[i].Name == group {
+				version.WorkerGroups[i].HealthySince = since
 			}
 		}
 	}
 	version.HealthySince = latestOrNil(times)
 }
 
-// targetPoolHealthySince also requires an available replica: a Deployment is Available at
-// zero replicas, which would pass a pool that never polled.
-func targetPoolHealthySince(spec *v1alpha1.WorkerDeploymentSpec, pool string, d *appsv1.Deployment) *metav1.Time {
+// targetGroupHealthySince also requires an available replica: a Deployment is Available at
+// zero replicas, which would pass a group that never polled.
+func targetGroupHealthySince(spec *v1alpha1.WorkerDeploymentSpec, group string, d *appsv1.Deployment) *metav1.Time {
 	healthy, since := k8s.IsDeploymentHealthy(d)
 	if !healthy {
 		return nil
 	}
-	poolSpec, _ := spec.PoolDeploymentSpec(pool)
-	scaledToZero := poolSpec.Replicas != nil && *poolSpec.Replicas == 0
+	groupSpec, _ := spec.WorkerGroupDeploymentSpec(group)
+	scaledToZero := groupSpec.Replicas != nil && *groupSpec.Replicas == 0
 	if d.Status.AvailableReplicas < 1 && !scaledToZero {
 		return nil
 	}

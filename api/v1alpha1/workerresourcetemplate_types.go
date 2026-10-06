@@ -28,12 +28,12 @@ type WorkerResourceTemplateSpec struct {
 	// +optional
 	TemporalWorkerDeploymentRef *WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
 
-	// Pool names the worker pool whose versioned Deployments this template targets.
-	// Required when the WorkerDeployment uses pools; omit it otherwise.
+	// WorkerGroup names the worker group whose versioned Deployments this template targets.
+	// Required when the WorkerDeployment uses groups; omit it otherwise.
 	// +optional
 	// +kubebuilder:validation:MaxLength=24
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Pool string `json:"pool,omitempty"`
+	WorkerGroup string `json:"workerGroup,omitempty"`
 
 	// Template is the Kubernetes resource template applied per active Build ID.
 	// Must include apiVersion, kind, and spec. metadata.name and metadata.namespace
@@ -74,9 +74,9 @@ const (
 	ReasonWRTApplyFailed = "ApplyFailed"
 	// ReasonWRTWDNotFound is the condition reason when the referenced WorkerDeployment does not exist.
 	ReasonWRTWDNotFound = "WorkerDeploymentNotFound"
-	// ReasonWRTPoolNotFound is the condition reason when no version of the WorkerDeployment has
-	// the referenced pool and its spec does not declare it.
-	ReasonWRTPoolNotFound = "PoolNotFound"
+	// ReasonWRTWorkerGroupNotFound is the condition reason when no version of the WorkerDeployment has
+	// the referenced group and its spec does not declare it.
+	ReasonWRTWorkerGroupNotFound = "WorkerGroupNotFound"
 )
 
 // WorkerResourceTemplateVersionStatus describes the per-Build-ID apply status of a WorkerResourceTemplate.
@@ -181,12 +181,12 @@ func (s *WorkerResourceTemplateSpec) EffectiveWorkerDeploymentName() string {
 	return ""
 }
 
-// EffectivePool returns the worker pool this template targets.
-func (s *WorkerResourceTemplateSpec) EffectivePool() string {
-	if s.Pool != "" {
-		return s.Pool
+// EffectiveWorkerGroup returns the worker group this template targets.
+func (s *WorkerResourceTemplateSpec) EffectiveWorkerGroup() string {
+	if s.WorkerGroup != "" {
+		return s.WorkerGroup
 	}
-	return DefaultPoolName
+	return DefaultWorkerGroupName
 }
 
 func init() {

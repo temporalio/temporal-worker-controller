@@ -93,8 +93,8 @@ func RenderWorkerResourceTemplate(
 
 	selectorLabels := ComputeSelectorLabels(wdName, buildID)
 	if deployment.Spec.Selector != nil {
-		if pool, ok := deployment.Spec.Selector.MatchLabels[PoolLabel]; ok {
-			selectorLabels = ComputePoolSelectorLabels(wdName, buildID, pool)
+		if group, ok := deployment.Spec.Selector.MatchLabels[WorkerGroupLabel]; ok {
+			selectorLabels = ComputeWorkerGroupSelectorLabels(wdName, buildID, group)
 		}
 	}
 

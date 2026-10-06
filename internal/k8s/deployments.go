@@ -32,9 +32,9 @@ const (
 	BuildIDLabel = "temporal.io/build-id"
 	// WorkerDeploymentNameLabel identifies Deployments managed for a TemporalWorkerDeployment.
 	WorkerDeploymentNameLabel = "temporal.io/deployment-name"
-	// PoolLabel names the worker pool of a Deployment in a version that uses pools.
-	// Deployments without it belong to a WorkerDeployment without pools.
-	PoolLabel = "temporal.io/worker-pool"
+	// WorkerGroupLabel names the worker group of a Deployment in a version that uses groups.
+	// Deployments without it belong to a WorkerDeployment without groups.
+	WorkerGroupLabel = "temporal.io/worker-group"
 	// WorkerDeploymentNameSeparator joins the K8s namespace and the WorkerDeployment resource
 	// name to form the Temporal-server-side worker deployment name (namespace/wdName).
 	WorkerDeploymentNameSeparator = "/"
@@ -47,7 +47,7 @@ const (
 	MaxDeploymentNameLen                           = 47
 	ConnectionSpecHashAnnotation                   = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation                  = "temporal.io/pod-template-spec-hash"
-	poolsBuildIDHashLen                            = 10
+	groupsBuildIDHashLen                           = 10
 
 	// Environment variables read by the Temporal Go SDK's envconfig package
 	// (go.temporal.io/sdk/contrib/envconfig) to configure the worker's connection.
@@ -78,45 +78,45 @@ const (
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
 type DeploymentState struct {
-	// Map of buildID to the default pool's deployment. Use VersionDeployments to
+	// Map of buildID to the default group's deployment. Use VersionDeployments to
 	// decide whether a version has any deployment.
 	Deployments map[string]*appsv1.Deployment
 	// Sorted deployments by creation time
 	DeploymentsByTime []*appsv1.Deployment
-	// Map of buildID to the default pool's deployment reference
+	// Map of buildID to the default group's deployment reference
 	DeploymentRefs map[string]*corev1.ObjectReference
-	// Map of buildID to pool name to deployment, for every pool including the default
-	PoolDeployments map[string]map[string]*appsv1.Deployment
+	// Map of buildID to group name to deployment, for every group including the default
+	WorkerGroupDeployments map[string]map[string]*appsv1.Deployment
 }
 
-// VersionDeployments returns every pool's deployment for a build ID, keyed by pool name.
+// VersionDeployments returns every group's deployment for a build ID, keyed by group name.
 func (s *DeploymentState) VersionDeployments(buildID string) map[string]*appsv1.Deployment {
-	if s.PoolDeployments != nil {
-		return s.PoolDeployments[buildID]
+	if s.WorkerGroupDeployments != nil {
+		return s.WorkerGroupDeployments[buildID]
 	}
-	// States built without PoolDeployments (e.g. in tests) only have default pools.
+	// States built without WorkerGroupDeployments (e.g. in tests) only have default groups.
 	if d, ok := s.Deployments[buildID]; ok {
-		return map[string]*appsv1.Deployment{temporaliov1alpha1.DefaultPoolName: d}
+		return map[string]*appsv1.Deployment{temporaliov1alpha1.DefaultWorkerGroupName: d}
 	}
 	return nil
 }
 
-// VersionDeploymentList returns every pool's deployment for a build ID: named
-// pools sorted by name, then the default pool.
+// VersionDeploymentList returns every group's deployment for a build ID: named
+// groups sorted by name, then the default group.
 func (s *DeploymentState) VersionDeploymentList(buildID string) []*appsv1.Deployment {
-	pools := s.VersionDeployments(buildID)
-	names := make([]string, 0, len(pools))
-	for name := range pools {
-		if name != temporaliov1alpha1.DefaultPoolName {
+	groups := s.VersionDeployments(buildID)
+	names := make([]string, 0, len(groups))
+	for name := range groups {
+		if name != temporaliov1alpha1.DefaultWorkerGroupName {
 			names = append(names, name)
 		}
 	}
 	sort.Strings(names)
-	list := make([]*appsv1.Deployment, 0, len(pools))
+	list := make([]*appsv1.Deployment, 0, len(groups))
 	for _, name := range names {
-		list = append(list, pools[name])
+		list = append(list, groups[name])
 	}
-	if d, ok := pools[temporaliov1alpha1.DefaultPoolName]; ok {
+	if d, ok := groups[temporaliov1alpha1.DefaultWorkerGroupName]; ok {
 		list = append(list, d)
 	}
 	return list
@@ -124,11 +124,11 @@ func (s *DeploymentState) VersionDeploymentList(buildID string) []*appsv1.Deploy
 
 // BuildIDs returns the sorted build IDs that have at least one deployment.
 func (s *DeploymentState) BuildIDs() []string {
-	seen := make(map[string]struct{}, len(s.Deployments)+len(s.PoolDeployments))
+	seen := make(map[string]struct{}, len(s.Deployments)+len(s.WorkerGroupDeployments))
 	for buildID := range s.Deployments {
 		seen[buildID] = struct{}{}
 	}
-	for buildID := range s.PoolDeployments {
+	for buildID := range s.WorkerGroupDeployments {
 		seen[buildID] = struct{}{}
 	}
 	buildIDs := make([]string, 0, len(seen))
@@ -139,23 +139,23 @@ func (s *DeploymentState) BuildIDs() []string {
 	return buildIDs
 }
 
-// HasPoolLabel reports whether any of a version's deployments carries the pool label,
-// which marks a multi-pool version.
-func HasPoolLabel(deployments map[string]*appsv1.Deployment) bool {
+// HasWorkerGroupLabel reports whether any of a version's deployments carries the group label,
+// which marks a multi-group version.
+func HasWorkerGroupLabel(deployments map[string]*appsv1.Deployment) bool {
 	for _, d := range deployments {
-		if _, ok := d.Labels[PoolLabel]; ok {
+		if _, ok := d.Labels[WorkerGroupLabel]; ok {
 			return true
 		}
 	}
 	return false
 }
 
-// PoolName returns the worker pool a deployment belongs to.
-func PoolName(d *appsv1.Deployment) string {
-	if pool := d.GetLabels()[PoolLabel]; pool != "" {
-		return pool
+// WorkerGroupName returns the worker group a deployment belongs to.
+func WorkerGroupName(d *appsv1.Deployment) string {
+	if group := d.GetLabels()[WorkerGroupLabel]; group != "" {
+		return group
 	}
-	return temporaliov1alpha1.DefaultPoolName
+	return temporaliov1alpha1.DefaultWorkerGroupName
 }
 
 // GetDeploymentState queries Kubernetes to get the state of all deployments
@@ -190,27 +190,27 @@ func GetDeploymentState(
 	return NewDeploymentState(deploys...), nil
 }
 
-// NewDeploymentState indexes deployments by build ID and pool, keeping their order.
+// NewDeploymentState indexes deployments by build ID and group, keeping their order.
 // Deployments without the build ID label are ignored.
 func NewDeploymentState(deploys ...*appsv1.Deployment) *DeploymentState {
 	state := &DeploymentState{
-		Deployments:       make(map[string]*appsv1.Deployment),
-		DeploymentsByTime: []*appsv1.Deployment{},
-		DeploymentRefs:    make(map[string]*corev1.ObjectReference),
-		PoolDeployments:   make(map[string]map[string]*appsv1.Deployment),
+		Deployments:            make(map[string]*appsv1.Deployment),
+		DeploymentsByTime:      []*appsv1.Deployment{},
+		DeploymentRefs:         make(map[string]*corev1.ObjectReference),
+		WorkerGroupDeployments: make(map[string]map[string]*appsv1.Deployment),
 	}
 	for _, deploy := range deploys {
 		buildID, ok := deploy.GetLabels()[BuildIDLabel]
 		if !ok {
 			continue
 		}
-		pool := PoolName(deploy)
-		if state.PoolDeployments[buildID] == nil {
-			state.PoolDeployments[buildID] = make(map[string]*appsv1.Deployment)
+		group := WorkerGroupName(deploy)
+		if state.WorkerGroupDeployments[buildID] == nil {
+			state.WorkerGroupDeployments[buildID] = make(map[string]*appsv1.Deployment)
 		}
-		state.PoolDeployments[buildID][pool] = deploy
+		state.WorkerGroupDeployments[buildID][group] = deploy
 		state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
-		if pool == temporaliov1alpha1.DefaultPoolName {
+		if group == temporaliov1alpha1.DefaultWorkerGroupName {
 			state.Deployments[buildID] = deploy
 			state.DeploymentRefs[buildID] = NewObjectRef(deploy)
 		}
@@ -250,8 +250,8 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 		// Fall through to default hash-based generation if buildID is invalid after cleaning
 	}
 
-	if w.Spec.HasPools() {
-		return computePoolsBuildID(w.Spec)
+	if w.Spec.HasWorkerGroups() {
+		return computeGroupsBuildID(w.Spec)
 	}
 	depSpec := w.Spec.DeploymentSpec()
 
@@ -261,22 +261,22 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 	return utils.ComputeHash(&depSpec.Template, nil, false)
 }
 
-// computePoolsBuildID hashes every pool's name and pod template, so a change to any
-// pool starts one new version for all of them. Pools are sorted by name, so their order
+// computeGroupsBuildID hashes every group's name and pod template, so a change to any
+// group starts one new version for all of them. Groups are sorted by name, so their order
 // in the spec doesn't matter.
-func computePoolsBuildID(spec temporaliov1alpha1.WorkerDeploymentSpec) string {
-	type poolTemplate struct {
+func computeGroupsBuildID(spec temporaliov1alpha1.WorkerDeploymentSpec) string {
+	type groupTemplate struct {
 		Name     string                 `json:"name"`
 		Template corev1.PodTemplateSpec `json:"template"`
 	}
-	sorted := slices.Clone(spec.Pools)
-	slices.SortFunc(sorted, func(a, b temporaliov1alpha1.WorkerPool) int { return strings.Compare(a.Name, b.Name) })
-	pools := make([]poolTemplate, 0, len(sorted))
+	sorted := slices.Clone(spec.WorkerGroups)
+	slices.SortFunc(sorted, func(a, b temporaliov1alpha1.WorkerGroup) int { return strings.Compare(a.Name, b.Name) })
+	groups := make([]groupTemplate, 0, len(sorted))
 	for _, p := range sorted {
-		pools = append(pools, poolTemplate{Name: p.Name, Template: p.Deployment.Template})
+		groups = append(groups, groupTemplate{Name: p.Name, Template: p.Deployment.Template})
 	}
-	data, _ := json.Marshal(pools) // never errors for these types
-	hash := HashString(string(data))[:poolsBuildIDHashLen]
+	data, _ := json.Marshal(groups) // never errors for these types
+	hash := HashString(string(data))[:groupsBuildIDHashLen]
 
 	if img := firstImage(sorted[0].Deployment.Template); img != "" {
 		return imagePrefixedBuildID(img, hash)
@@ -319,12 +319,12 @@ func ComputeVersionedDeploymentName(baseName, buildID string) string {
 	return CleanStringForDNS(fullName)
 }
 
-// ComputePoolDeploymentName names a named pool's versioned Deployment. The hash of the
-// full triple keeps it from ever taking another pool's or a default pool's name.
-func ComputePoolDeploymentName(baseName, pool, buildID string) string {
+// ComputeWorkerGroupDeploymentName names a named group's versioned Deployment. The hash of the
+// full triple keeps it from ever taking another group's or a default group's name.
+func ComputeWorkerGroupDeploymentName(baseName, group, buildID string) string {
 	return hashSuffixedName(
-		baseName+WorkerDeploymentNameSeparator+pool+WorkerDeploymentNameSeparator+buildID,
-		baseName+ResourceNameSeparator+pool+ResourceNameSeparator+buildID,
+		baseName+WorkerDeploymentNameSeparator+group+WorkerDeploymentNameSeparator+buildID,
+		baseName+ResourceNameSeparator+group+ResourceNameSeparator+buildID,
 	)
 }
 
@@ -399,11 +399,11 @@ func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 	}
 }
 
-// ComputePoolSelectorLabels returns the selector labels of a pool's Deployment in a
-// multi-pool version.
-func ComputePoolSelectorLabels(twdName, buildID, pool string) map[string]string {
+// ComputeWorkerGroupSelectorLabels returns the selector labels of a group's Deployment in a
+// multi-group version.
+func ComputeWorkerGroupSelectorLabels(twdName, buildID, group string) map[string]string {
 	labels := ComputeSelectorLabels(twdName, buildID)
-	labels[PoolLabel] = pool
+	labels[WorkerGroupLabel] = group
 	return labels
 }
 
@@ -416,31 +416,31 @@ func NewDeploymentWithOwnerRef(
 	buildID string,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) *appsv1.Deployment {
-	d, _ := NewPoolDeploymentWithOwnerRef(typeMeta, objectMeta, spec, workerDeploymentName, buildID,
-		temporaliov1alpha1.DefaultPoolName, connection) // a spec without pools always has the default pool
+	d, _ := NewWorkerGroupDeploymentWithOwnerRef(typeMeta, objectMeta, spec, workerDeploymentName, buildID,
+		temporaliov1alpha1.DefaultWorkerGroupName, connection) // a spec without groups always has the default group
 	return d
 }
 
-// NewPoolDeploymentWithOwnerRef creates one worker pool's deployment for a version. Pools
-// carry the pool label in their selector; the default pool of a spec without pools doesn't.
-func NewPoolDeploymentWithOwnerRef(
+// NewWorkerGroupDeploymentWithOwnerRef creates one worker group's deployment for a version. Groups
+// carry the group label in their selector; the default group of a spec without groups doesn't.
+func NewWorkerGroupDeploymentWithOwnerRef(
 	typeMeta *metav1.TypeMeta,
 	objectMeta *metav1.ObjectMeta,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	workerDeploymentName string,
 	buildID string,
-	pool string,
+	group string,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) (*appsv1.Deployment, error) {
-	depSpec, ok := spec.PoolDeploymentSpec(pool)
+	depSpec, ok := spec.WorkerGroupDeploymentSpec(group)
 	if !ok {
-		return nil, fmt.Errorf("worker pool %q is not in the WorkerDeployment spec", pool)
+		return nil, fmt.Errorf("worker group %q is not in the WorkerDeployment spec", group)
 	}
 	name := ComputeVersionedDeploymentName(objectMeta.Name, buildID)
 	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
-	if spec.HasPools() {
-		name = ComputePoolDeploymentName(objectMeta.Name, pool, buildID)
-		selectorLabels = ComputePoolSelectorLabels(objectMeta.GetName(), buildID, pool)
+	if spec.HasWorkerGroups() {
+		name = ComputeWorkerGroupDeploymentName(objectMeta.Name, group, buildID)
+		selectorLabels = ComputeWorkerGroupSelectorLabels(objectMeta.GetName(), buildID, group)
 	}
 
 	depSpec.Selector = &metav1.LabelSelector{
@@ -756,22 +756,22 @@ func RemoveTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 	return mounts
 }
 
-// NewPoolDeploymentWithControllerRef creates one worker pool's deployment for a version,
+// NewWorkerGroupDeploymentWithControllerRef creates one worker group's deployment for a version,
 // with the WorkerDeployment as its controller.
-func NewPoolDeploymentWithControllerRef(
+func NewWorkerGroupDeploymentWithControllerRef(
 	w *temporaliov1alpha1.WorkerDeployment,
 	buildID string,
-	pool string,
+	group string,
 	connection temporaliov1alpha1.ConnectionSpec,
 	reconcilerScheme *runtime.Scheme,
 ) (*appsv1.Deployment, error) {
-	d, err := NewPoolDeploymentWithOwnerRef(
+	d, err := NewWorkerGroupDeploymentWithOwnerRef(
 		&w.TypeMeta,
 		&w.ObjectMeta,
 		&w.Spec,
 		ComputeWorkerDeploymentName(w),
 		buildID,
-		pool,
+		group,
 		connection,
 	)
 	if err != nil {

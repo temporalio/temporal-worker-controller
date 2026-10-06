@@ -27,19 +27,19 @@ import (
 )
 
 const (
-	workflowsPool  = "workflows"
-	activitiesPool = "activities"
+	workflowsGroup  = "workflows"
+	activitiesGroup = "activities"
 )
 
-func runWorkerPoolTests(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
-	t.Run("worker-pools-roll-out-and-sunset-together", func(t *testing.T) {
-		testWorkerPoolsLifecycle(t, k8sClient, ts, namespace)
+func runWorkerGroupTests(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
+	t.Run("worker-groups-roll-out-and-sunset-together", func(t *testing.T) {
+		testWorkerGroupsLifecycle(t, k8sClient, ts, namespace)
 	})
 }
 
-// poolScenario is a WorkerDeployment whose workflows pool polls a workflow queue named
-// after it and whose activities pool polls <name>-activities for activities only.
-type poolScenario struct {
+// groupScenario is a WorkerDeployment whose workflows group polls a workflow queue named
+// after it and whose activities group polls <name>-activities for activities only.
+type groupScenario struct {
 	t              *testing.T
 	k8sClient      client.Client
 	ts             *temporaltest.TestServer
@@ -49,8 +49,8 @@ type poolScenario struct {
 	deploymentName string
 }
 
-// poolVersion holds the Deployments of one version and the stop functions of their workers.
-type poolVersion struct {
+// groupVersion holds the Deployments of one version and the stop functions of their workers.
+type groupVersion struct {
 	buildID    string
 	def        appsv1.Deployment
 	activities appsv1.Deployment
@@ -58,7 +58,7 @@ type poolVersion struct {
 	stopActs   func()
 }
 
-func (s *poolScenario) workerDeployment(image string) *temporaliov1alpha1.WorkerDeployment {
+func (s *groupScenario) workerDeployment(image string) *temporaliov1alpha1.WorkerDeployment {
 	tc := testhelpers.NewTestCase().WithInput(testhelpers.NewWorkerDeploymentBuilder().
 		WithAllAtOnceStrategy().WithReplicas(1).WithTargetTemplate(image)).
 		BuildWithValues(s.name, s.namespace, s.ts.GetDefaultNamespace())
@@ -70,15 +70,15 @@ func (s *poolScenario) workerDeployment(image string) *temporaliov1alpha1.Worker
 	workflows := *twd.Spec.Deployment
 	activities := testhelpers.SetTaskQueue(workflows.Template, s.name+"-activities")
 	activities = testhelpers.SetWorkerRole(activities, testhelpers.ActivityWorkerRole)
-	twd.Spec.Pools = []temporaliov1alpha1.WorkerPool{
-		{Name: workflowsPool, Deployment: workflows},
-		{Name: activitiesPool, Deployment: appsv1.DeploymentSpec{Replicas: workflows.Replicas, Template: activities}},
+	twd.Spec.WorkerGroups = []temporaliov1alpha1.WorkerGroup{
+		{Name: workflowsGroup, Deployment: workflows},
+		{Name: activitiesGroup, Deployment: appsv1.DeploymentSpec{Replicas: workflows.Replicas, Template: activities}},
 	}
 	twd.Spec.Deployment = nil
 	return twd
 }
 
-func (s *poolScenario) waitForDeployment(ctx context.Context, name string) appsv1.Deployment {
+func (s *groupScenario) waitForDeployment(ctx context.Context, name string) appsv1.Deployment {
 	s.t.Helper()
 	var d appsv1.Deployment
 	eventually(s.t, 30*time.Second, time.Second, func() error {
@@ -87,21 +87,21 @@ func (s *poolScenario) waitForDeployment(ctx context.Context, name string) appsv
 	return d
 }
 
-func (s *poolScenario) waitForVersionDeployments(ctx context.Context, buildID string) *poolVersion {
+func (s *groupScenario) waitForVersionDeployments(ctx context.Context, buildID string) *groupVersion {
 	s.t.Helper()
-	return &poolVersion{
+	return &groupVersion{
 		buildID:    buildID,
-		def:        s.waitForDeployment(ctx, k8s.ComputePoolDeploymentName(s.name, workflowsPool, buildID)),
-		activities: s.waitForDeployment(ctx, k8s.ComputePoolDeploymentName(s.name, activitiesPool, buildID)),
+		def:        s.waitForDeployment(ctx, k8s.ComputeWorkerGroupDeploymentName(s.name, workflowsGroup, buildID)),
+		activities: s.waitForDeployment(ctx, k8s.ComputeWorkerGroupDeploymentName(s.name, activitiesGroup, buildID)),
 	}
 }
 
-func (s *poolScenario) startWorkers(ctx context.Context, d appsv1.Deployment) func() {
+func (s *groupScenario) startWorkers(ctx context.Context, d appsv1.Deployment) func() {
 	stops := applyDeployment(s.t, ctx, s.k8sClient, d.Name, s.namespace)
 	return sync.OnceFunc(func() { handleStopFuncs(stops) })
 }
 
-func (s *poolScenario) waitForTarget(ctx context.Context, buildID string, status temporaliov1alpha1.VersionStatus) temporaliov1alpha1.WorkerDeployment {
+func (s *groupScenario) waitForTarget(ctx context.Context, buildID string, status temporaliov1alpha1.VersionStatus) temporaliov1alpha1.WorkerDeployment {
 	s.t.Helper()
 	var wd temporaliov1alpha1.WorkerDeployment
 	eventually(s.t, 60*time.Second, time.Second, func() error {
@@ -116,38 +116,38 @@ func (s *poolScenario) waitForTarget(ctx context.Context, buildID string, status
 	return wd
 }
 
-// runCrossPoolWorkflow starts a workflow pinned to buildID on the workflows pool's queue and
-// returns the build ID of the activities pool worker that ran its activity.
-func (s *poolScenario) runCrossPoolWorkflow(ctx context.Context, buildID string) string {
+// runCrossGroupWorkflow starts a workflow pinned to buildID on the workflows group's queue and
+// returns the build ID of the activities group worker that ran its activity.
+func (s *groupScenario) runCrossGroupWorkflow(ctx context.Context, buildID string) string {
 	s.t.Helper()
 	run, err := s.ts.GetDefaultClient().ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
-		ID:        fmt.Sprintf("%s-cross-pool-%s", s.name, buildID),
+		ID:        fmt.Sprintf("%s-cross-group-%s", s.name, buildID),
 		TaskQueue: s.name,
 		VersioningOverride: &sdkclient.PinnedVersioningOverride{
 			Version: sdkworker.WorkerDeploymentVersion{DeploymentName: s.deploymentName, BuildID: buildID},
 		},
-	}, testhelpers.CrossPoolWorkflowType, s.name+"-activities")
+	}, testhelpers.CrossGroupWorkflowType, s.name+"-activities")
 	if err != nil {
-		s.t.Fatalf("failed to start cross-pool workflow: %v", err)
+		s.t.Fatalf("failed to start cross-group workflow: %v", err)
 	}
 	var got string
 	if err := run.Get(ctx, &got); err != nil {
-		s.t.Fatalf("cross-pool workflow failed: %v", err)
+		s.t.Fatalf("cross-group workflow failed: %v", err)
 	}
 	return got
 }
 
-func (s *poolScenario) assertPoolSelectors(v *poolVersion) {
+func (s *groupScenario) assertGroupSelectors(v *groupVersion) {
 	s.t.Helper()
-	if got := v.def.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != workflowsPool {
-		s.t.Errorf("workflows pool selector has pool label %q", got)
+	if got := v.def.Spec.Selector.MatchLabels[k8s.WorkerGroupLabel]; got != workflowsGroup {
+		s.t.Errorf("workflows group selector has group label %q", got)
 	}
-	if got := v.activities.Spec.Selector.MatchLabels[k8s.PoolLabel]; got != activitiesPool {
-		s.t.Errorf("activities pool selector has pool label %q", got)
+	if got := v.activities.Spec.Selector.MatchLabels[k8s.WorkerGroupLabel]; got != activitiesGroup {
+		s.t.Errorf("activities group selector has group label %q", got)
 	}
 }
 
-func (s *poolScenario) assertWaitingForActivitiesPool(ctx context.Context, buildID string) {
+func (s *groupScenario) assertWaitingForActivitiesGroup(ctx context.Context, buildID string) {
 	s.t.Helper()
 	s.waitForTarget(ctx, buildID, temporaliov1alpha1.VersionStatusInactive)
 	eventually(s.t, 30*time.Second, time.Second, func() error {
@@ -156,18 +156,18 @@ func (s *poolScenario) assertWaitingForActivitiesPool(ctx context.Context, build
 			return err
 		}
 		cond := meta.FindStatusCondition(wd.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
-		if cond == nil || cond.Reason != temporaliov1alpha1.ReasonWaitingForPollers || !strings.Contains(cond.Message, activitiesPool) {
-			return fmt.Errorf("progressing condition does not name the activities pool: %+v", cond)
+		if cond == nil || cond.Reason != temporaliov1alpha1.ReasonWaitingForPollers || !strings.Contains(cond.Message, activitiesGroup) {
+			return fmt.Errorf("progressing condition does not name the activities group: %+v", cond)
 		}
 		return nil
 	})
 	time.Sleep(3 * time.Second)
 	if wd := s.waitForTarget(ctx, buildID, temporaliov1alpha1.VersionStatusInactive); wd.Status.CurrentVersion != nil {
-		s.t.Fatalf("version %s was promoted before every pool was available", buildID)
+		s.t.Fatalf("version %s was promoted before every group was available", buildID)
 	}
 }
 
-func (s *poolScenario) assertTaskQueuesInOneVersion(ctx context.Context, buildID string) {
+func (s *groupScenario) assertTaskQueuesInOneVersion(ctx context.Context, buildID string) {
 	s.t.Helper()
 	desc, err := s.ts.GetDefaultClient().WorkerDeploymentClient().GetHandle(s.deploymentName).
 		DescribeVersion(ctx, sdkclient.WorkerDeploymentDescribeVersionOptions{BuildID: buildID})
@@ -187,11 +187,11 @@ func (s *poolScenario) assertTaskQueuesInOneVersion(ctx context.Context, buildID
 		s.t.Errorf("version task queues = %+v, want %s (workflow) and %s (activity)", queues, s.name, activities)
 	}
 	if queues[queue{activities, sdkclient.TaskQueueTypeWorkflow}] {
-		s.t.Errorf("activity-only pool registered %s as a workflow queue, so the gate would run there", activities)
+		s.t.Errorf("activity-only group registered %s as a workflow queue, so the gate would run there", activities)
 	}
 }
 
-func (s *poolScenario) updateImage(ctx context.Context, image string) string {
+func (s *groupScenario) updateImage(ctx context.Context, image string) string {
 	s.t.Helper()
 	var buildID string
 	eventually(s.t, 10*time.Second, time.Second, func() error {
@@ -199,8 +199,8 @@ func (s *poolScenario) updateImage(ctx context.Context, image string) string {
 		if err := s.k8sClient.Get(ctx, s.key, &latest); err != nil {
 			return err
 		}
-		for i := range latest.Spec.Pools {
-			latest.Spec.Pools[i].Deployment.Template.Spec.Containers[0].Image = image
+		for i := range latest.Spec.WorkerGroups {
+			latest.Spec.WorkerGroups[i].Deployment.Template.Spec.Containers[0].Image = image
 		}
 		buildID = k8s.ComputeBuildID(&latest)
 		return s.k8sClient.Update(ctx, &latest)
@@ -208,7 +208,7 @@ func (s *poolScenario) updateImage(ctx context.Context, image string) string {
 	return buildID
 }
 
-func (s *poolScenario) waitForDrained(ctx context.Context, buildID string) {
+func (s *groupScenario) waitForDrained(ctx context.Context, buildID string) {
 	s.t.Helper()
 	eventually(s.t, 60*time.Second, time.Second, func() error {
 		var wd temporaliov1alpha1.WorkerDeployment
@@ -224,7 +224,7 @@ func (s *poolScenario) waitForDrained(ctx context.Context, buildID string) {
 	})
 }
 
-func (s *poolScenario) assertSunsetTogether(ctx context.Context, v *poolVersion, hpaName string) {
+func (s *groupScenario) assertSunsetTogether(ctx context.Context, v *groupVersion, hpaName string) {
 	s.t.Helper()
 	eventually(s.t, 90*time.Second, time.Second, func() error {
 		for _, d := range []string{v.def.Name, v.activities.Name} {
@@ -253,7 +253,7 @@ func (s *poolScenario) assertSunsetTogether(ctx context.Context, v *poolVersion,
 
 // cleanup deletes the scenario's objects and waits for them to be gone, so later tests on
 // the same server and namespace start clean.
-func (s *poolScenario) cleanup(ctx context.Context, objs ...client.Object) {
+func (s *groupScenario) cleanup(ctx context.Context, objs ...client.Object) {
 	s.t.Helper()
 	for _, obj := range objs {
 		if err := s.k8sClient.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
@@ -274,9 +274,9 @@ func (s *poolScenario) cleanup(ctx context.Context, objs ...client.Object) {
 	})
 }
 
-func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
+func testWorkerGroupsLifecycle(t *testing.T, k8sClient client.Client, ts *temporaltest.TestServer, namespace string) {
 	ctx := context.Background()
-	s := &poolScenario{t: t, k8sClient: k8sClient, ts: ts, namespace: namespace, name: "pools"}
+	s := &groupScenario{t: t, k8sClient: k8sClient, ts: ts, namespace: namespace, name: "groups"}
 	s.key = types.NamespacedName{Namespace: namespace, Name: s.name}
 	twd := s.workerDeployment("v1.0")
 	s.deploymentName = k8s.ComputeWorkerDeploymentName(twd)
@@ -286,7 +286,7 @@ func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *tempora
 		Spec:       temporaliov1alpha1.ConnectionSpec{HostPort: ts.GetFrontendHostPort()},
 	}
 	wrt := makeHPAWRT(s.name+"-activities-hpa", namespace, s.name)
-	wrt.Spec.Pool = activitiesPool
+	wrt.Spec.WorkerGroup = activitiesGroup
 	for _, obj := range []client.Object{connection, wrt, twd} {
 		if err := k8sClient.Create(ctx, obj); err != nil {
 			t.Fatal(err)
@@ -295,30 +295,30 @@ func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *tempora
 	// Deferred first so it runs after every worker is stopped.
 	defer s.cleanup(ctx, twd, wrt, connection)
 
-	t.Log("Every pool of v1 gets its own Deployment with a pool selector")
+	t.Log("Every group of v1 gets its own Deployment with a group selector")
 	v1 := s.waitForVersionDeployments(ctx, k8s.ComputeBuildID(twd))
-	s.assertPoolSelectors(v1)
+	s.assertGroupSelectors(v1)
 
-	t.Log("v1 is not promoted while its activities pool is unavailable")
+	t.Log("v1 is not promoted while its activities group is unavailable")
 	v1.stopDef = s.startWorkers(ctx, v1.def)
 	defer v1.stopDef()
-	s.assertWaitingForActivitiesPool(ctx, v1.buildID)
+	s.assertWaitingForActivitiesGroup(ctx, v1.buildID)
 
-	t.Log("v1 is promoted once every pool is available")
+	t.Log("v1 is promoted once every group is available")
 	v1.stopActs = s.startWorkers(ctx, v1.activities)
 	defer v1.stopActs()
-	if wd := s.waitForTarget(ctx, v1.buildID, temporaliov1alpha1.VersionStatusCurrent); len(wd.Status.TargetVersion.Pools) != 2 {
-		t.Errorf("target version pools = %+v, want workflows and activities", wd.Status.TargetVersion.Pools)
+	if wd := s.waitForTarget(ctx, v1.buildID, temporaliov1alpha1.VersionStatusCurrent); len(wd.Status.TargetVersion.WorkerGroups) != 2 {
+		t.Errorf("target version groups = %+v, want workflows and activities", wd.Status.TargetVersion.WorkerGroups)
 	}
 
-	t.Log("Both pools' task queues are in one Temporal version")
+	t.Log("Both groups' task queues are in one Temporal version")
 	s.assertTaskQueuesInOneVersion(ctx, v1.buildID)
 
-	t.Log("The activities WRT targets only the activities pool's Deployment")
+	t.Log("The activities WRT targets only the activities group's Deployment")
 	v1HPA := k8s.ComputeWorkerResourceTemplateName(s.name, wrt.Name, v1.buildID)
 	waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, namespace, v1HPA, v1.activities.Name, 30*time.Second)
 
-	t.Log("A new image rolls out as v2 across both pools")
+	t.Log("A new image rolls out as v2 across both groups")
 	v2 := s.waitForVersionDeployments(ctx, s.updateImage(ctx, "v2.0"))
 	v2.stopDef = s.startWorkers(ctx, v2.def)
 	defer v2.stopDef()
@@ -326,14 +326,14 @@ func testWorkerPoolsLifecycle(t *testing.T, k8sClient client.Client, ts *tempora
 	defer v2.stopActs()
 	s.waitForTarget(ctx, v2.buildID, temporaliov1alpha1.VersionStatusCurrent)
 
-	t.Log("Activities on the activities pool run on the calling workflow's build")
-	for _, v := range []*poolVersion{v1, v2} {
-		if got := s.runCrossPoolWorkflow(ctx, v.buildID); got != v.buildID {
+	t.Log("Activities on the activities group run on the calling workflow's build")
+	for _, v := range []*groupVersion{v1, v2} {
+		if got := s.runCrossGroupWorkflow(ctx, v.buildID); got != v.buildID {
 			t.Errorf("activity for a workflow pinned to %s ran on %s", v.buildID, got)
 		}
 	}
 
-	t.Log("v1 sunsets every pool together")
+	t.Log("v1 sunsets every group together")
 	s.waitForDrained(ctx, v1.buildID)
 	v1.stopDef()
 	v1.stopActs()

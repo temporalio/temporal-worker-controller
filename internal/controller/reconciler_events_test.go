@@ -815,7 +815,7 @@ func TestReconcile_DescribeWorkerDeploymentNotFound(t *testing.T) {
 	assertNoEventEmitted(t, drainEvents(recorder), ReasonPlanGenerationFailed)
 }
 
-func TestReconcile_DescribesBuildsWithOnlyNamedPoolDeployments(t *testing.T) {
+func TestReconcile_DescribesBuildsWithOnlyNamedWorkerGroupDeployments(t *testing.T) {
 	k8sNamespace := "default"
 	tc := makeNoCredsConnection("my-conn", k8sNamespace, "localhost:7233")
 	twd := makeWD("test-worker", k8sNamespace, tc.Name)
@@ -827,7 +827,7 @@ func TestReconcile_DescribesBuildsWithOnlyNamedPoolDeployments(t *testing.T) {
 			Labels: map[string]string{
 				k8s.WorkerDeploymentNameLabel: "test-worker",
 				k8s.BuildIDLabel:              "old",
-				k8s.PoolLabel:                 "activities",
+				k8s.WorkerGroupLabel:          "activities",
 			},
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: temporaliov1alpha1.GroupVersion.String(),

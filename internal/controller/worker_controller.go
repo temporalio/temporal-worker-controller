@@ -833,8 +833,8 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping,
 			fmt.Sprintf("Target version %s is receiving a percentage of new workflows", twd.Status.TargetVersion.BuildID))
 	case temporaliov1alpha1.VersionStatusInactive:
-		if pending := pendingTargetPools(twd); len(pending) > 0 {
-			msg := fmt.Sprintf("Target version %s is registered but these pools are not available yet: %s",
+		if pending := pendingTargetGroups(twd); len(pending) > 0 {
+			msg := fmt.Sprintf("Target version %s is registered but these groups are not available yet: %s",
 				twd.Status.TargetVersion.BuildID, strings.Join(pending, ", "))
 			r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 				metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers, msg)
@@ -903,20 +903,20 @@ var stalledReasons = map[string]bool{
 	temporaliov1alpha1.ReasonClusterConnectionUnsupported: true,
 }
 
-// pendingTargetPools returns the spec's pools that the target version does not have
-// available yet, or nil when the target is healthy or has no pools.
-func pendingTargetPools(twd *temporaliov1alpha1.WorkerDeployment) []string {
-	if !twd.Spec.HasPools() || twd.Status.TargetVersion.HealthySince != nil {
+// pendingTargetGroups returns the spec's groups that the target version does not have
+// available yet, or nil when the target is healthy or has no groups.
+func pendingTargetGroups(twd *temporaliov1alpha1.WorkerDeployment) []string {
+	if !twd.Spec.HasWorkerGroups() || twd.Status.TargetVersion.HealthySince != nil {
 		return nil
 	}
-	available := make(map[string]bool, len(twd.Status.TargetVersion.Pools))
-	for _, pool := range twd.Status.TargetVersion.Pools {
-		available[pool.Name] = pool.HealthySince != nil
+	available := make(map[string]bool, len(twd.Status.TargetVersion.WorkerGroups))
+	for _, group := range twd.Status.TargetVersion.WorkerGroups {
+		available[group.Name] = group.HealthySince != nil
 	}
 	var pending []string
-	for _, pool := range twd.Spec.PoolNames() {
-		if !available[pool] {
-			pending = append(pending, pool)
+	for _, group := range twd.Spec.WorkerGroupNames() {
+		if !available[group] {
+			pending = append(pending, group)
 		}
 	}
 	return pending

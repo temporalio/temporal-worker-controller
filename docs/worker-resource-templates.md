@@ -28,7 +28,7 @@ The controller auto-injects the fields below when you set them to `{}` (empty ob
 |-------|-------|-----------------------------------------------------------------------------------------------------------------------------|
 | `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
 | `spec.targetRef` | Only at this exact path | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
-| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`, plus `temporal.io/worker-pool: <pool>` for versions with worker pools |
+| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`, plus `temporal.io/worker-group: <group>` for versions with worker groups |
 | `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{temporal_worker_deployment_name: <ns>_<wd-name>, temporal_worker_build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
 
 `scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
@@ -59,20 +59,20 @@ When `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix` is enabled, the 
 
 Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `datadog`, `dynatrace`, and others) so each ScaledObject filters metrics to one worker version. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
 
-## Worker pools
+## Worker groups
 
-A `WorkerResourceTemplate` targets one [worker pool](worker-pools.md). Set `spec.pool` to the pool's name; it is required when the `WorkerDeployment` uses pools. The controller renders one copy per version that has that pool, pointing at that pool's Deployment:
+A `WorkerResourceTemplate` targets one [worker group](worker-groups.md). Set `spec.workerGroup` to the group's name; it is required when the `WorkerDeployment` uses groups. The controller renders one copy per version that has that group, pointing at that group's Deployment:
 
 ```yaml
 spec:
   workerDeploymentRef:
     name: documents
-  pool: parse
+  workerGroup: parse
 ```
 
-Create one `WorkerResourceTemplate` per pool you want to autoscale. If no version has the pool and the `WorkerDeployment` does not declare it, or `spec.pool` is missing on a `WorkerDeployment` with pools, the `Ready` condition is `False` with reason `PoolNotFound`. The webhook warns about both.
+Create one `WorkerResourceTemplate` per group you want to autoscale. If no version has the group and the `WorkerDeployment` does not declare it, or `spec.workerGroup` is missing on a `WorkerDeployment` with groups, the `Ready` condition is `False` with reason `WorkerGroupNotFound`. The webhook warns about both.
 
-Backlog metrics are tagged with the deployment name and Build ID, not the pool. Add `task_queue` to `matchLabels` so each pool scales on its own queue.
+Backlog metrics are tagged with the deployment name and Build ID, not the group. Add `task_queue` to `matchLabels` so each group scales on its own queue.
 
 ## Resource naming
 

@@ -23,10 +23,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func ownedDeployment(name, buildID, pool string, age time.Duration) *appsv1.Deployment {
+func ownedDeployment(name, buildID, group string, age time.Duration) *appsv1.Deployment {
 	labels := map[string]string{k8s.BuildIDLabel: buildID}
-	if pool != "" {
-		labels[k8s.PoolLabel] = pool
+	if group != "" {
+		labels[k8s.WorkerGroupLabel] = group
 	}
 	controller := true
 	return &appsv1.Deployment{
@@ -75,44 +75,44 @@ func deploymentNames(ds []*appsv1.Deployment) []string {
 	return names
 }
 
-func TestGetDeploymentState_Pools(t *testing.T) {
+func TestGetDeploymentState_Groups(t *testing.T) {
 	state := deploymentStateFor(t,
 		ownedDeployment("w-v1", "v1", "", 3*time.Hour),
-		ownedDeployment("w-v2", "v2", temporaliov1alpha1.DefaultPoolName, 2*time.Hour),
+		ownedDeployment("w-v2", "v2", temporaliov1alpha1.DefaultWorkerGroupName, 2*time.Hour),
 		ownedDeployment("w-v2-activities", "v2", "activities", 2*time.Hour),
 		ownedDeployment("w-v2-batch", "v2", "batch", 2*time.Hour),
 		ownedDeployment("w-v3-activities", "v3", "activities", time.Hour),
 	)
 
 	assert.Equal(t, "w-v1", state.Deployments["v1"].Name)
-	assert.Equal(t, "w-v2", state.Deployments["v2"].Name, "named pools must not replace the default pool")
-	assert.NotContains(t, state.Deployments, "v3", "a build with only named pools has no default Deployment")
+	assert.Equal(t, "w-v2", state.Deployments["v2"].Name, "named groups must not replace the default group")
+	assert.NotContains(t, state.Deployments, "v3", "a build with only named groups has no default Deployment")
 	assert.Equal(t, "w-v2", state.DeploymentRefs["v2"].Name)
 	assert.Len(t, state.DeploymentsByTime, 5)
 
 	assert.Equal(t, []string{"v1", "v2", "v3"}, state.BuildIDs())
 	assert.Equal(t, []string{"w-v1"}, deploymentNames(state.VersionDeploymentList("v1")))
 	assert.Equal(t, []string{"w-v2-activities", "w-v2-batch", "w-v2"}, deploymentNames(state.VersionDeploymentList("v2")),
-		"named pools come first, sorted, and the default pool last")
+		"named groups come first, sorted, and the default group last")
 	assert.Equal(t, []string{"w-v3-activities"}, deploymentNames(state.VersionDeploymentList("v3")))
 	assert.Empty(t, state.VersionDeploymentList("missing"))
 
-	assert.Equal(t, temporaliov1alpha1.DefaultPoolName, k8s.PoolName(state.Deployments["v1"]))
-	assert.Equal(t, "activities", k8s.PoolName(state.VersionDeployments("v2")["activities"]))
+	assert.Equal(t, temporaliov1alpha1.DefaultWorkerGroupName, k8s.WorkerGroupName(state.Deployments["v1"]))
+	assert.Equal(t, "activities", k8s.WorkerGroupName(state.VersionDeployments("v2")["activities"]))
 }
 
 func TestDeploymentState_VersionDeploymentsFallsBackToDefaultMap(t *testing.T) {
 	d := ownedDeployment("w-v1", "v1", "", time.Hour)
 	state := &k8s.DeploymentState{Deployments: map[string]*appsv1.Deployment{"v1": d}}
 
-	assert.Equal(t, map[string]*appsv1.Deployment{temporaliov1alpha1.DefaultPoolName: d}, state.VersionDeployments("v1"))
+	assert.Equal(t, map[string]*appsv1.Deployment{temporaliov1alpha1.DefaultWorkerGroupName: d}, state.VersionDeployments("v1"))
 	assert.Equal(t, []string{"v1"}, state.BuildIDs())
 }
 
-func poolsFixture() *temporaliov1alpha1.WorkerDeployment {
+func groupsFixture() *temporaliov1alpha1.WorkerDeployment {
 	w := identityFixture("")
 	w.Spec.Deployment = nil
-	w.Spec.Pools = []temporaliov1alpha1.WorkerPool{
+	w.Spec.WorkerGroups = []temporaliov1alpha1.WorkerGroup{
 		{Name: "workflows", Deployment: appsv1.DeploymentSpec{
 			Replicas: ptr.To[int32](2),
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
@@ -130,34 +130,34 @@ func poolsFixture() *temporaliov1alpha1.WorkerDeployment {
 	return w
 }
 
-func TestComputeBuildID_Pools(t *testing.T) {
-	base := k8s.ComputeBuildID(poolsFixture())
-	assert.Regexp(t, `^v1\.2\.4-[0-9a-f]{10}$`, base, "the image prefix comes from the first pool by name")
+func TestComputeBuildID_Groups(t *testing.T) {
+	base := k8s.ComputeBuildID(groupsFixture())
+	assert.Regexp(t, `^v1\.2\.4-[0-9a-f]{10}$`, base, "the image prefix comes from the first group by name")
 
 	tests := []struct {
 		name   string
 		mutate func(*temporaliov1alpha1.WorkerDeployment)
 		same   bool
 	}{
-		{name: "reordered pools", same: true, mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
-			w.Spec.Pools[0], w.Spec.Pools[1] = w.Spec.Pools[1], w.Spec.Pools[0]
+		{name: "reordered groups", same: true, mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.WorkerGroups[0], w.Spec.WorkerGroups[1] = w.Spec.WorkerGroups[1], w.Spec.WorkerGroups[0]
 		}},
-		{name: "pool replicas changed", same: true, mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
-			w.Spec.Pools[0].Deployment.Replicas = ptr.To[int32](9)
+		{name: "group replicas changed", same: true, mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.WorkerGroups[0].Deployment.Replicas = ptr.To[int32](9)
 		}},
-		{name: "pool template changed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
-			w.Spec.Pools[0].Deployment.Template.Spec.Containers[0].Image = "registry.example.com/payments/worker:v1.2.5"
+		{name: "group template changed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.WorkerGroups[0].Deployment.Template.Spec.Containers[0].Image = "registry.example.com/payments/worker:v1.2.5"
 		}},
-		{name: "pool renamed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
-			w.Spec.Pools[1].Name = "jobs"
+		{name: "group renamed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.WorkerGroups[1].Name = "jobs"
 		}},
-		{name: "pool removed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
-			w.Spec.Pools = w.Spec.Pools[:1]
+		{name: "group removed", mutate: func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.WorkerGroups = w.Spec.WorkerGroups[:1]
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := poolsFixture()
+			w := groupsFixture()
 			tt.mutate(w)
 			if tt.same {
 				assert.Equal(t, base, k8s.ComputeBuildID(w))
@@ -167,63 +167,63 @@ func TestComputeBuildID_Pools(t *testing.T) {
 		})
 	}
 
-	t.Run("one pool differs from the same template without pools", func(t *testing.T) {
+	t.Run("one group differs from the same template without groups", func(t *testing.T) {
 		single := identityFixture("registry.example.com/payments/worker:v1.2.3")
-		pooled := identityFixture("registry.example.com/payments/worker:v1.2.3")
-		pooled.Spec.Pools = []temporaliov1alpha1.WorkerPool{{Name: "workflows", Deployment: *pooled.Spec.Deployment}}
-		pooled.Spec.Deployment = nil
-		assert.NotEqual(t, k8s.ComputeBuildID(single), k8s.ComputeBuildID(pooled))
+		grouped := identityFixture("registry.example.com/payments/worker:v1.2.3")
+		grouped.Spec.WorkerGroups = []temporaliov1alpha1.WorkerGroup{{Name: "workflows", Deployment: *grouped.Spec.Deployment}}
+		grouped.Spec.Deployment = nil
+		assert.NotEqual(t, k8s.ComputeBuildID(single), k8s.ComputeBuildID(grouped))
 	})
 
 	t.Run("custom build ID wins", func(t *testing.T) {
-		w := poolsFixture()
+		w := groupsFixture()
 		w.Spec.WorkerOptions.UnsafeCustomBuildID = "release-7"
 		assert.Equal(t, "release-7", k8s.ComputeBuildID(w))
 	})
 
 	t.Run("long image tag fits in a label", func(t *testing.T) {
-		w := poolsFixture()
-		w.Spec.Pools[1].Deployment.Template.Spec.Containers[0].Image = "worker:" + strings.Repeat("t", 100)
+		w := groupsFixture()
+		w.Spec.WorkerGroups[1].Deployment.Template.Spec.Containers[0].Image = "worker:" + strings.Repeat("t", 100)
 		id := k8s.ComputeBuildID(w)
 		assert.LessOrEqual(t, len(id), k8s.MaxBuildIDLen)
 		assert.Regexp(t, `-[0-9a-f]{10}$`, id)
 	})
 }
 
-func TestComputePoolDeploymentName(t *testing.T) {
-	name := k8s.ComputePoolDeploymentName("payments", "activities", "v1.2.3-abcd")
+func TestComputeWorkerGroupDeploymentName(t *testing.T) {
+	name := k8s.ComputeWorkerGroupDeploymentName("payments", "activities", "v1.2.3-abcd")
 	assert.Regexp(t, `^payments-activities-v1-2-3-abcd-[0-9a-f]{8}$`, name)
 
-	long := k8s.ComputePoolDeploymentName("a-very-long-worker-deployment-name", "document-extraction", "release-2024-01-15-abcdef")
+	long := k8s.ComputeWorkerGroupDeploymentName("a-very-long-worker-deployment-name", "document-extraction", "release-2024-01-15-abcdef")
 	assert.LessOrEqual(t, len(long), k8s.MaxDeploymentNameLen)
 	assert.Regexp(t, `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, long)
 
-	assert.NotEqual(t, k8s.ComputeVersionedDeploymentName("wd", "activities-v2"), k8s.ComputePoolDeploymentName("wd", "activities", "v2"),
-		"a named pool never takes a default pool's name")
-	assert.NotEqual(t, k8s.ComputePoolDeploymentName("wd", "a", "b-c"), k8s.ComputePoolDeploymentName("wd", "a-b", "c"))
+	assert.NotEqual(t, k8s.ComputeVersionedDeploymentName("wd", "activities-v2"), k8s.ComputeWorkerGroupDeploymentName("wd", "activities", "v2"),
+		"a named group never takes a default group's name")
+	assert.NotEqual(t, k8s.ComputeWorkerGroupDeploymentName("wd", "a", "b-c"), k8s.ComputeWorkerGroupDeploymentName("wd", "a-b", "c"))
 }
 
-func TestNewPoolDeploymentWithOwnerRef(t *testing.T) {
-	w := poolsFixture()
+func TestNewWorkerGroupDeploymentWithOwnerRef(t *testing.T) {
+	w := groupsFixture()
 	buildID := k8s.ComputeBuildID(w)
 	wdName := k8s.ComputeWorkerDeploymentName(w)
 
-	activities, err := k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, "activities", identityConnection)
+	activities, err := k8s.NewWorkerGroupDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, "activities", identityConnection)
 	require.NoError(t, err)
-	workflows, err := k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, "workflows", identityConnection)
+	workflows, err := k8s.NewWorkerGroupDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, "workflows", identityConnection)
 	require.NoError(t, err)
 
-	assert.Equal(t, k8s.ComputePoolDeploymentName(w.Name, "activities", buildID), activities.Name)
-	assert.Equal(t, k8s.ComputePoolDeploymentName(w.Name, "workflows", buildID), workflows.Name)
+	assert.Equal(t, k8s.ComputeWorkerGroupDeploymentName(w.Name, "activities", buildID), activities.Name)
+	assert.Equal(t, k8s.ComputeWorkerGroupDeploymentName(w.Name, "workflows", buildID), workflows.Name)
 
 	wantSelector := map[string]string{
 		k8s.WorkerDeploymentNameLabel: "payment-processor",
 		k8s.BuildIDLabel:              buildID,
-		k8s.PoolLabel:                 "activities",
+		k8s.WorkerGroupLabel:          "activities",
 	}
 	assert.Equal(t, wantSelector, activities.Spec.Selector.MatchLabels)
 	assert.Equal(t, wantSelector, activities.Labels)
-	assert.Equal(t, "workflows", workflows.Spec.Selector.MatchLabels[k8s.PoolLabel], "every pool selects only its own pods")
+	assert.Equal(t, "workflows", workflows.Spec.Selector.MatchLabels[k8s.WorkerGroupLabel], "every group selects only its own pods")
 	for k, v := range activities.Spec.Selector.MatchLabels {
 		assert.Equal(t, v, activities.Spec.Template.Labels[k])
 	}
@@ -233,10 +233,10 @@ func TestNewPoolDeploymentWithOwnerRef(t *testing.T) {
 	assert.Equal(t, "registry.example.com/payments/activities:v1.2.4", activities.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, temporaliov1alpha1.DefaultDeploymentStrategy(), activities.Spec.Strategy)
 	assert.Equal(t, workflows.Spec.Template.Spec.Containers[0].Env, activities.Spec.Template.Spec.Containers[0].Env,
-		"every pool gets the same controller-injected env")
+		"every group gets the same controller-injected env")
 
-	for _, missing := range []string{"missing", temporaliov1alpha1.DefaultPoolName} {
-		_, err = k8s.NewPoolDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, missing, identityConnection)
+	for _, missing := range []string{"missing", temporaliov1alpha1.DefaultWorkerGroupName} {
+		_, err = k8s.NewWorkerGroupDeploymentWithOwnerRef(&w.TypeMeta, &w.ObjectMeta, &w.Spec, wdName, buildID, missing, identityConnection)
 		assert.Error(t, err, missing)
 	}
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Make controller-owned DeploymentSpec.selector optional in the generated CRD.
 
-Both spec.deployment and spec.pools[].deployment embed appsv1.DeploymentSpec,
+Both spec.deployment and spec.workerGroups[].deployment embed appsv1.DeploymentSpec,
 whose selector the controller computes for each versioned Deployment.
 """
 

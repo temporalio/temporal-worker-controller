@@ -872,13 +872,13 @@ func TestWorkerResourceTemplate_MultipleErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "minReplicas must not be 0")
 }
 
-func TestWorkerResourceTemplate_ValidateCreate_PoolNotDeclaredWarns(t *testing.T) {
+func TestWorkerResourceTemplate_ValidateCreate_GroupNotDeclaredWarns(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, temporaliov1alpha1.AddToScheme(scheme))
-	pooled := &temporaliov1alpha1.WorkerDeployment{
+	grouped := &temporaliov1alpha1.WorkerDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-worker", Namespace: "default"},
 		Spec: temporaliov1alpha1.WorkerDeploymentSpec{
-			Pools: []temporaliov1alpha1.WorkerPool{{Name: "activities"}},
+			WorkerGroups: []temporaliov1alpha1.WorkerGroup{{Name: "activities"}},
 		},
 	}
 	single := &temporaliov1alpha1.WorkerDeployment{
@@ -886,23 +886,23 @@ func TestWorkerResourceTemplate_ValidateCreate_PoolNotDeclaredWarns(t *testing.T
 		Spec:       temporaliov1alpha1.WorkerDeploymentSpec{Deployment: &appsv1.DeploymentSpec{}},
 	}
 	v := newValidatorNoAPI()
-	v.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(pooled, single).Build()
+	v.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(grouped, single).Build()
 
 	for name, tc := range map[string]struct {
 		wdName   string
-		pool     string
+		group    string
 		wantWarn string
 	}{
-		"declared pool":              {wdName: "my-worker", pool: "activities"},
-		"no pool on a pooled WD":     {wdName: "my-worker", wantWarn: `WorkerDeployment "my-worker" uses pools; set spec.pool`},
-		"undeclared pool":            {wdName: "my-worker", pool: "batch", wantWarn: `spec.pool "batch" is not declared by WorkerDeployment "my-worker"`},
-		"no pool on a WD w/o pools":  {wdName: "single"},
-		"pool on a WD without pools": {wdName: "single", pool: "batch", wantWarn: `spec.pool "batch" is not declared by WorkerDeployment "single"`},
-		"WorkerDeployment not found": {wdName: "missing", pool: "batch"},
+		"declared group":               {wdName: "my-worker", group: "activities"},
+		"no group on a grouped WD":     {wdName: "my-worker", wantWarn: `WorkerDeployment "my-worker" uses worker groups; set spec.workerGroup`},
+		"undeclared group":             {wdName: "my-worker", group: "batch", wantWarn: `spec.workerGroup "batch" is not declared by WorkerDeployment "my-worker"`},
+		"no group on a WD w/o groups":  {wdName: "single"},
+		"group on a WD without groups": {wdName: "single", group: "batch", wantWarn: `spec.workerGroup "batch" is not declared by WorkerDeployment "single"`},
+		"WorkerDeployment not found":   {wdName: "missing", group: "batch"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			wrt := newWRT("hpa", tc.wdName, validHPAObject())
-			wrt.Spec.Pool = tc.pool
+			wrt.Spec.WorkerGroup = tc.group
 
 			warnings, err := v.ValidateCreate(context.Background(), wrt)
 			require.NoError(t, err)

@@ -59,7 +59,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 	}
 
 	// Delete deployments
-	for _, d := range slices.Concat(p.DeleteDeployments, p.DeletePoolDeployments) {
+	for _, d := range slices.Concat(p.DeleteDeployments, p.DeleteWorkerGroupDeployments) {
 		l.Info("deleting deployment", "deployment", d.Name)
 		if err := r.Delete(ctx, d); err != nil {
 			l.Error(err, "unable to delete deployment", "deployment", d.Name)
@@ -133,7 +133,7 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 	// Update deployments
 	for _, d := range p.UpdateDeployments {
 		// No point in updating a deleted Deployment...
-		if containsDeployment(d, p.DeleteDeployments) || containsDeployment(d, p.DeletePoolDeployments) {
+		if containsDeployment(d, p.DeleteDeployments) || containsDeployment(d, p.DeleteWorkerGroupDeployments) {
 			continue
 		}
 		l.Info("updating deployment", "deployment", d.Name, "namespace", d.Namespace)
@@ -160,8 +160,8 @@ func buildIDForDeployment(workerDeploy *temporaliov1alpha1.WorkerDeployment, dep
 		if matches(v.Deployment) {
 			return true
 		}
-		for _, pool := range v.Pools {
-			if matches(pool.Deployment) {
+		for _, group := range v.WorkerGroups {
+			if matches(group.Deployment) {
 				return true
 			}
 		}
@@ -584,17 +584,17 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	for key := range deletedBuildIDs {
 		statusKeys[key] = struct{}{}
 	}
-	// WRTs with a missing or recovered pool get no applies, so nothing else rewrites their Ready condition.
-	missingPool := make(map[wrtKey]bool, len(p.WRTsWithMissingPool))
-	for _, name := range p.WRTsWithMissingPool {
+	// WRTs with a missing or recovered group get no applies, so nothing else rewrites their Ready condition.
+	missingGroup := make(map[wrtKey]bool, len(p.WRTsWithMissingWorkerGroup))
+	for _, name := range p.WRTsWithMissingWorkerGroup {
 		key := wrtKey{workerDeploy.Namespace, name}
-		missingPool[key] = true
+		missingGroup[key] = true
 		statusKeys[key] = struct{}{}
 	}
-	stalePool := make(map[wrtKey]bool, len(p.WRTsWithStalePoolNotFound))
-	for _, name := range p.WRTsWithStalePoolNotFound {
+	staleGroup := make(map[wrtKey]bool, len(p.WRTsWithStaleWorkerGroupNotFound))
+	for _, name := range p.WRTsWithStaleWorkerGroupNotFound {
 		key := wrtKey{workerDeploy.Namespace, name}
-		stalePool[key] = true
+		staleGroup[key] = true
 		statusKeys[key] = struct{}{}
 	}
 
@@ -618,8 +618,8 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				break
 			}
 		}
-		onlyPoolCheck := allSkipped && len(deleted) == 0
-		if onlyPoolCheck && !missingPool[key] && !stalePool[key] {
+		onlyGroupCheck := allSkipped && len(deleted) == 0
+		if onlyGroupCheck && !missingGroup[key] && !staleGroup[key] {
 			// Every apply was a no-op and nothing was deleted, so the per-Build-ID
 			// status and conditions are already correct. The one thing that can still
 			// be stale is status.observedGeneration.
@@ -703,17 +703,17 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		// Compute the top-level Ready condition.
 		// True:  all active Build IDs applied at the current generation (or already current —
 		//        skipped ones carry a non-zero LastAppliedGeneration from their last successful apply).
-		// False: one or more apply calls failed this cycle, or the WRT's pool is missing.
+		// False: one or more apply calls failed this cycle, or the WRT's group is missing.
 		condStatus := metav1.ConditionTrue
 		condReason := temporaliov1alpha1.ReasonWRTAllVersionsApplied
 		condMessage := ""
 		switch {
-		case missingPool[key]:
+		case missingGroup[key]:
 			condStatus = metav1.ConditionFalse
-			condReason = temporaliov1alpha1.ReasonWRTPoolNotFound
-			condMessage = fmt.Sprintf("WorkerDeployment %q has no pool %q", workerDeploy.Name, wrt.Spec.Pool)
-			if wrt.Spec.Pool == "" {
-				condMessage = fmt.Sprintf("WorkerDeployment %q uses pools; set spec.pool", workerDeploy.Name)
+			condReason = temporaliov1alpha1.ReasonWRTWorkerGroupNotFound
+			condMessage = fmt.Sprintf("WorkerDeployment %q has no group %q", workerDeploy.Name, wrt.Spec.WorkerGroup)
+			if wrt.Spec.WorkerGroup == "" {
+				condMessage = fmt.Sprintf("WorkerDeployment %q uses worker groups; set spec.workerGroup", workerDeploy.Name)
 			}
 		case anyFailed:
 			condStatus = metav1.ConditionFalse
@@ -728,7 +728,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			}
 		}
 		var condChanged bool
-		if stalePool[key] && len(results) == 0 {
+		if staleGroup[key] && len(results) == 0 {
 			condChanged = apimeta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionReady)
 		} else {
 			condChanged = apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
@@ -751,13 +751,13 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		// Writing the inactive one as False rather than removing it keeps every
 		// condition this controller owns present on every object.
 		//
-		// A missing pool is Reconciling, not Stalled, for the same reason a missing
-		// WorkerDeployment is: the pool may be added to the WorkerDeployment later.
+		// A missing group is Reconciling, not Stalled, for the same reason a missing
+		// WorkerDeployment is: the group may be added to the WorkerDeployment later.
 		stalledStatus, reconcilingStatus := metav1.ConditionFalse, metav1.ConditionFalse
 		switch {
 		case anyTerminal:
 			stalledStatus = metav1.ConditionTrue
-		case anyFailed, missingPool[key]:
+		case anyFailed, missingGroup[key]:
 			reconcilingStatus = metav1.ConditionTrue
 		}
 		if apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
@@ -786,7 +786,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			wrt.Status.ObservedGeneration = wrt.Generation
 			condChanged = true
 		}
-		if onlyPoolCheck && !condChanged {
+		if onlyGroupCheck && !condChanged {
 			continue
 		}
 
@@ -873,7 +873,7 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	p *plan,
 ) {
 	identity := getControllerIdentity()
-	// A version's pool Deployments are pruned together, after one DeleteVersion call.
+	// A version's group Deployments are pruned together, after one DeleteVersion call.
 	var buildIDs []string
 	deploymentsByBuildID := make(map[string][]*appsv1.Deployment)
 	for _, d := range p.DeleteDeployments {

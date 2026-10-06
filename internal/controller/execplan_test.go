@@ -533,7 +533,7 @@ func TestExecutePlan_VersionAlreadyDeletedOnServer_DeletesDeployment(t *testing.
 	require.False(t, deploymentExists(t, r, namespace, depA.Name))
 }
 
-func TestExecutePlan_DrainedMultiPoolVersion_DeletesVersionOnceAndEveryPool(t *testing.T) {
+func TestExecutePlan_DrainedMultiGroupVersion_DeletesVersionOnceAndEveryGroup(t *testing.T) {
 	const (
 		namespace = "default"
 		buildA    = "build-a"
@@ -542,10 +542,10 @@ func TestExecutePlan_DrainedMultiPoolVersion_DeletesVersionOnceAndEveryPool(t *t
 	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
 	twd := makeExecplanTWD("my-worker", namespace)
 	depA := makeVersionedDeployment(twd, buildA, 0, connection)
-	depA.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
+	depA.Labels[k8s.WorkerGroupLabel] = temporaliov1alpha1.DefaultWorkerGroupName
 	depAActivities := makeVersionedDeployment(twd, buildA, 0, connection)
 	depAActivities.Name += "-activities"
-	depAActivities.Labels[k8s.PoolLabel] = "activities"
+	depAActivities.Labels[k8s.WorkerGroupLabel] = "activities"
 	depB := makeVersionedDeployment(twd, buildB, 1, connection)
 	r, _ := newTestReconciler([]client.Object{twd, depA, depAActivities, depB})
 

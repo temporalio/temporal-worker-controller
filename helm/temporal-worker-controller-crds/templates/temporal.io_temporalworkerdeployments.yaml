@@ -4072,7 +4072,18 @@ spec:
                     type: string
                   managedBy:
                     type: string
-                  pools:
+                  status:
+                    type: string
+                  taskQueues:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  workerGroups:
                     items:
                       properties:
                         deployment:
@@ -4105,17 +4116,6 @@ spec:
                     x-kubernetes-list-map-keys:
                     - name
                     x-kubernetes-list-type: map
-                  status:
-                    type: string
-                  taskQueues:
-                    items:
-                      properties:
-                        name:
-                          type: string
-                      required:
-                      - name
-                      type: object
-                    type: array
                 required:
                 - buildID
                 - status
@@ -4153,7 +4153,18 @@ spec:
                       type: string
                     managedBy:
                       type: string
-                    pools:
+                    status:
+                      type: string
+                    taskQueues:
+                      items:
+                        properties:
+                          name:
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      type: array
+                    workerGroups:
                       items:
                         properties:
                           deployment:
@@ -4186,17 +4197,6 @@ spec:
                       x-kubernetes-list-map-keys:
                       - name
                       x-kubernetes-list-type: map
-                    status:
-                      type: string
-                    taskQueues:
-                      items:
-                        properties:
-                          name:
-                            type: string
-                        required:
-                        - name
-                        type: object
-                      type: array
                   required:
                   - buildID
                   - status
@@ -4233,39 +4233,6 @@ spec:
                     type: string
                   managedBy:
                     type: string
-                  pools:
-                    items:
-                      properties:
-                        deployment:
-                          properties:
-                            apiVersion:
-                              type: string
-                            fieldPath:
-                              type: string
-                            kind:
-                              type: string
-                            name:
-                              type: string
-                            namespace:
-                              type: string
-                            resourceVersion:
-                              type: string
-                            uid:
-                              type: string
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        healthySince:
-                          format: date-time
-                          type: string
-                        name:
-                          type: string
-                      required:
-                      - name
-                      type: object
-                    type: array
-                    x-kubernetes-list-map-keys:
-                    - name
-                    x-kubernetes-list-type: map
                   rampLastModifiedAt:
                     format: date-time
                     type: string
@@ -4305,6 +4272,39 @@ spec:
                       - workflowID
                       type: object
                     type: array
+                  workerGroups:
+                    items:
+                      properties:
+                        deployment:
+                          properties:
+                            apiVersion:
+                              type: string
+                            fieldPath:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                            resourceVersion:
+                              type: string
+                            uid:
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        healthySince:
+                          format: date-time
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                 required:
                 - buildID
                 - status

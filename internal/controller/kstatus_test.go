@@ -269,7 +269,7 @@ func TestKstatus_BlockedSpecFailsUntilFixed(t *testing.T) {
 	wd.Status.ObservedGeneration = wd.Generation
 	wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
 
-	r.syncConditions(wd, nil, "adding or removing spec.pools requires a new unsafeCustomBuildID")
+	r.syncConditions(wd, nil, "adding or removing spec.workerGroups requires a new unsafeCustomBuildID")
 	assert.Equal(t, kstatus.FailedStatus, computeKstatus(t, wd).Status, "only a spec change can unblock it")
 
 	r.syncConditions(wd, nil, "")

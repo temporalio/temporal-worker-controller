@@ -1,28 +1,28 @@
-# WorkerDeployment with worker pools
+# WorkerDeployment with worker groups
 #
-# One WorkerDeployment runs three pools that release as one Worker Deployment Version:
+# One WorkerDeployment runs three groups that release as one Worker Deployment Version:
 #   - workflows: workflow workers on the "documents" task queue
 #   - parse:     GPU activity workers on "documents-parse", scaled by an autoscaler
 #   - extract:   activity workers on "documents-extract", four replicas
 #
-# Every pool gets its own Deployment per version and the same TEMPORAL_DEPLOYMENT_NAME
+# Every group gets its own Deployment per version and the same TEMPORAL_DEPLOYMENT_NAME
 # and TEMPORAL_WORKER_BUILD_ID, so a Pinned workflow's activities stay on its build.
 # Your worker picks its task queues; here it reads WORKER_ROLE.
 #
 # Apply:
-#   kubectl apply -f examples/worker-pools.yaml
+#   kubectl apply -f examples/worker-groups.yaml
 #
 # Verify:
-#   kubectl get deploy -l temporal.io/deployment-name=documents -L temporal.io/worker-pool
-#   kubectl get wd documents -o jsonpath='{.status.targetVersion.pools}'
+#   kubectl get deploy -l temporal.io/deployment-name=documents -L temporal.io/worker-group
+#   kubectl get wd documents -o jsonpath='{.status.targetVersion.workerGroups}'
 #
-# See docs/worker-pools.md for full documentation.
+# See docs/worker-groups.md for full documentation.
 apiVersion: temporal.io/v1alpha1
 kind: WorkerDeployment
 metadata:
   name: documents
 spec:
-  pools:
+  workerGroups:
     - name: workflows
       deployment:
         replicas: 2
@@ -53,7 +53,7 @@ spec:
                     value: parse
                 resources:
                   requests:
-                    # The CPU utilization HPA in wrt-hpa-pool.yaml needs a CPU request.
+                    # The CPU utilization HPA in wrt-hpa-group.yaml needs a CPU request.
                     cpu: "1"
                   limits:
                     nvidia.com/gpu: 1

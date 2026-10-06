@@ -665,7 +665,7 @@ func TestGeneratePlan(t *testing.T) {
 
 			assert.Equal(t, tc.expectDelete, len(plan.DeleteDeployments), "unexpected number of deletions")
 			assert.Equal(t, tc.expectScale, len(plan.ScaleDeployments), "unexpected number of scales")
-			assert.Equal(t, tc.expectCreate, len(plan.CreateDeploymentPools) > 0, "unexpected create flag")
+			assert.Equal(t, tc.expectCreate, len(plan.CreateDeploymentWorkerGroups) > 0, "unexpected create flag")
 			assert.Equal(t, tc.expectUpdate, len(plan.UpdateDeployments), "unexpected number of updates")
 			assert.Equal(t, tc.expectWorkflow, len(plan.TestWorkflows), "unexpected number of test workflows")
 			assert.Equal(t, tc.expectConfig, plan.VersionConfig != nil, "unexpected version config presence")
@@ -3286,7 +3286,7 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 			}
 
 			var result *appsv1.Deployment
-			if d, ok := k8sState.Deployments[buildID]; ok && checkAndUpdatePoolPodTemplateSpec(d, tt.newSpec, tt.connection) {
+			if d, ok := k8sState.Deployments[buildID]; ok && checkAndUpdateGroupPodTemplateSpec(d, tt.newSpec, tt.connection) {
 				result = d
 			}
 

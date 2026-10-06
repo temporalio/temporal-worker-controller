@@ -18,14 +18,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func mapperPoolDeployment(buildID, pool string, availableSince *metav1.Time, replicas int32) *appsv1.Deployment {
+func mapperGroupDeployment(buildID, group string, availableSince *metav1.Time, replicas int32) *appsv1.Deployment {
 	d := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "worker-" + buildID, Labels: map[string]string{k8s.BuildIDLabel: buildID}},
 		Status:     appsv1.DeploymentStatus{Replicas: replicas},
 	}
-	if pool != "" {
-		d.Name += "-" + pool
-		d.Labels[k8s.PoolLabel] = pool
+	if group != "" {
+		d.Name += "-" + group
+		d.Labels[k8s.WorkerGroupLabel] = group
 	}
 	if availableSince != nil {
 		d.Status.Conditions = []appsv1.DeploymentCondition{{
@@ -35,39 +35,39 @@ func mapperPoolDeployment(buildID, pool string, availableSince *metav1.Time, rep
 	return d
 }
 
-func TestMapToStatus_PoolDeployments(t *testing.T) {
+func TestMapToStatus_WorkerGroupDeployments(t *testing.T) {
 	earlier := metav1.NewTime(time.Now().Add(-2 * time.Hour))
 	later := metav1.NewTime(time.Now().Add(-time.Hour))
 
-	t.Run("version with only named pools left is still listed", func(t *testing.T) {
-		state := k8s.NewDeploymentState(mapperPoolDeployment("old", "activities", nil, 0))
+	t.Run("version with only named groups left is still listed", func(t *testing.T) {
+		state := k8s.NewDeploymentState(mapperGroupDeployment("old", "activities", nil, 0))
 		temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
 
 		status := newStateMapper(state, temporalState, "ns/worker").mapToStatus("new")
 
 		require.Len(t, status.DeprecatedVersions, 1)
 		assert.Equal(t, "old", status.DeprecatedVersions[0].BuildID)
-		assert.Nil(t, status.DeprecatedVersions[0].Deployment, "the default pool's reference stays empty")
+		assert.Nil(t, status.DeprecatedVersions[0].Deployment, "the default group's reference stays empty")
 	})
 
-	t.Run("version is healthy once every pool is available", func(t *testing.T) {
+	t.Run("version is healthy once every group is available", func(t *testing.T) {
 		state := k8s.NewDeploymentState(
-			mapperPoolDeployment("v1", "", &earlier, 1),
-			mapperPoolDeployment("v1", "activities", &later, 1),
+			mapperGroupDeployment("v1", "", &earlier, 1),
+			mapperGroupDeployment("v1", "activities", &later, 1),
 		)
 		temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
 
 		target := newStateMapper(state, temporalState, "ns/worker").mapTargetWorkerDeploymentVersionByBuildID("v1")
 
 		require.NotNil(t, target.HealthySince)
-		assert.Equal(t, later.Unix(), target.HealthySince.Unix(), "healthy since the last pool became available")
+		assert.Equal(t, later.Unix(), target.HealthySince.Unix(), "healthy since the last group became available")
 		assert.Equal(t, "worker-v1", target.Deployment.Name)
 	})
 
-	t.Run("version is not healthy while any pool is unavailable", func(t *testing.T) {
+	t.Run("version is not healthy while any group is unavailable", func(t *testing.T) {
 		state := k8s.NewDeploymentState(
-			mapperPoolDeployment("v1", "", &earlier, 1),
-			mapperPoolDeployment("v1", "activities", nil, 1),
+			mapperGroupDeployment("v1", "", &earlier, 1),
+			mapperGroupDeployment("v1", "activities", nil, 1),
 		)
 		temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
 		mapper := newStateMapper(state, temporalState, "ns/worker")
@@ -77,10 +77,10 @@ func TestMapToStatus_PoolDeployments(t *testing.T) {
 		assert.Nil(t, mapper.mapDeprecatedWorkerDeploymentVersionByBuildID("v1").HealthySince)
 	})
 
-	t.Run("drained version is not eligible for deletion while any pool has pods", func(t *testing.T) {
+	t.Run("drained version is not eligible for deletion while any group has pods", func(t *testing.T) {
 		state := k8s.NewDeploymentState(
-			mapperPoolDeployment("old", "", nil, 0),
-			mapperPoolDeployment("old", "activities", nil, 2),
+			mapperGroupDeployment("old", "", nil, 0),
+			mapperGroupDeployment("old", "activities", nil, 2),
 		)
 		temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{
 			"old": {BuildID: "old", Status: temporaliov1alpha1.VersionStatusDrained},
@@ -90,40 +90,40 @@ func TestMapToStatus_PoolDeployments(t *testing.T) {
 	})
 }
 
-func TestMapToStatus_PoolStatus(t *testing.T) {
+func TestMapToStatus_GroupStatus(t *testing.T) {
 	earlier := metav1.NewTime(time.Now().Add(-2 * time.Hour))
-	defaultPool := mapperPoolDeployment("v1", "", &earlier, 1)
-	defaultPool.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
+	defaultGroup := mapperGroupDeployment("v1", "", &earlier, 1)
+	defaultGroup.Labels[k8s.WorkerGroupLabel] = temporaliov1alpha1.DefaultWorkerGroupName
 	state := k8s.NewDeploymentState(
-		mapperPoolDeployment("v1", "zeta", nil, 1),
-		defaultPool,
-		mapperPoolDeployment("v1", "alpha", &earlier, 1),
-		mapperPoolDeployment("single", "", &earlier, 1),
+		mapperGroupDeployment("v1", "zeta", nil, 1),
+		defaultGroup,
+		mapperGroupDeployment("v1", "alpha", &earlier, 1),
+		mapperGroupDeployment("single", "", &earlier, 1),
 	)
 	temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
 	mapper := newStateMapper(state, temporalState, "ns/worker")
 
 	target := mapper.mapTargetWorkerDeploymentVersionByBuildID("v1")
-	require.Len(t, target.Pools, 3)
-	assert.Equal(t, []string{"alpha", temporaliov1alpha1.DefaultPoolName, "zeta"},
-		[]string{target.Pools[0].Name, target.Pools[1].Name, target.Pools[2].Name}, "sorted so status doesn't churn")
-	assert.Equal(t, "worker-v1-alpha", target.Pools[0].Deployment.Name)
-	assert.Equal(t, earlier.Unix(), target.Pools[0].HealthySince.Unix())
-	assert.Nil(t, target.Pools[2].HealthySince)
+	require.Len(t, target.WorkerGroups, 3)
+	assert.Equal(t, []string{"alpha", temporaliov1alpha1.DefaultWorkerGroupName, "zeta"},
+		[]string{target.WorkerGroups[0].Name, target.WorkerGroups[1].Name, target.WorkerGroups[2].Name}, "sorted so status doesn't churn")
+	assert.Equal(t, "worker-v1-alpha", target.WorkerGroups[0].Deployment.Name)
+	assert.Equal(t, earlier.Unix(), target.WorkerGroups[0].HealthySince.Unix())
+	assert.Nil(t, target.WorkerGroups[2].HealthySince)
 
-	assert.Empty(t, mapper.mapTargetWorkerDeploymentVersionByBuildID("single").Pools, "single-pool versions keep their status shape")
+	assert.Empty(t, mapper.mapTargetWorkerDeploymentVersionByBuildID("single").WorkerGroups, "single-group versions keep their status shape")
 }
 
-func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
+func TestMapTargetVersion_MultiGroupHealth(t *testing.T) {
 	available := metav1.NewTime(time.Now().Add(-time.Hour))
-	pooled := func(pool string, availableReplicas int32) *appsv1.Deployment {
-		d := mapperPoolDeployment("v1", pool, &available, availableReplicas)
+	grouped := func(group string, availableReplicas int32) *appsv1.Deployment {
+		d := mapperGroupDeployment("v1", group, &available, availableReplicas)
 		d.Status.AvailableReplicas = availableReplicas
 		return d
 	}
 	spec := func(activitiesReplicas *int32) *temporaliov1alpha1.WorkerDeploymentSpec {
 		return &temporaliov1alpha1.WorkerDeploymentSpec{
-			Pools: []temporaliov1alpha1.WorkerPool{
+			WorkerGroups: []temporaliov1alpha1.WorkerGroup{
 				{Name: "workflows"},
 				{Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: activitiesReplicas}},
 			},
@@ -137,10 +137,10 @@ func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
 		spec        *temporaliov1alpha1.WorkerDeploymentSpec
 		wantHealthy bool
 	}{
-		{name: "every pool available with ready replicas", deployments: []*appsv1.Deployment{pooled("workflows", 1), pooled("activities", 1)}, spec: spec(nil), wantHealthy: true},
-		{name: "a pool is not created yet", deployments: []*appsv1.Deployment{pooled("workflows", 1)}, spec: spec(nil)},
-		{name: "a pool is available with no replicas", deployments: []*appsv1.Deployment{pooled("workflows", 1), pooled("activities", 0)}, spec: spec(nil)},
-		{name: "a pool scaled to zero on purpose", deployments: []*appsv1.Deployment{pooled("workflows", 1), pooled("activities", 0)}, spec: spec(ptr(int32(0))), wantHealthy: true},
+		{name: "every group available with ready replicas", deployments: []*appsv1.Deployment{grouped("workflows", 1), grouped("activities", 1)}, spec: spec(nil), wantHealthy: true},
+		{name: "a group is not created yet", deployments: []*appsv1.Deployment{grouped("workflows", 1)}, spec: spec(nil)},
+		{name: "a group is available with no replicas", deployments: []*appsv1.Deployment{grouped("workflows", 1), grouped("activities", 0)}, spec: spec(nil)},
+		{name: "a group scaled to zero on purpose", deployments: []*appsv1.Deployment{grouped("workflows", 1), grouped("activities", 0)}, spec: spec(ptr(int32(0))), wantHealthy: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,11 +152,11 @@ func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
 	}
 }
 
-func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
+func TestMapTargetVersion_GroupHealthMatchesVersionHealth(t *testing.T) {
 	available := metav1.NewTime(time.Now().Add(-time.Hour))
-	def := mapperPoolDeployment("v1", "workflows", &available, 1)
+	def := mapperGroupDeployment("v1", "workflows", &available, 1)
 	def.Status.AvailableReplicas = 1
-	idle := mapperPoolDeployment("v1", "activities", &available, 0)
+	idle := mapperGroupDeployment("v1", "activities", &available, 0)
 	temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
 
 	for name, tc := range map[string]struct {
@@ -169,29 +169,29 @@ func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			mapper := newStateMapper(k8s.NewDeploymentState(def, idle), temporalState, "ns/worker")
 			mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
-				Pools: []temporaliov1alpha1.WorkerPool{{Name: "workflows"}, {Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: tc.replicas}}},
+				WorkerGroups: []temporaliov1alpha1.WorkerGroup{{Name: "workflows"}, {Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: tc.replicas}}},
 			}
 
 			target := mapper.mapTargetWorkerDeploymentVersionByBuildID("v1")
-			require.Len(t, target.Pools, 2)
-			assert.Equal(t, "activities", target.Pools[0].Name)
-			assert.Equal(t, tc.wantHealthy, target.Pools[0].HealthySince != nil)
+			require.Len(t, target.WorkerGroups, 2)
+			assert.Equal(t, "activities", target.WorkerGroups[0].Name)
+			assert.Equal(t, tc.wantHealthy, target.WorkerGroups[0].HealthySince != nil)
 			assert.Equal(t, tc.wantHealthy, target.HealthySince != nil)
 		})
 	}
 }
 
-func TestMapTargetVersion_CurrentTargetIgnoresPoolReplicaRule(t *testing.T) {
+func TestMapTargetVersion_CurrentTargetIgnoresGroupReplicaRule(t *testing.T) {
 	available := metav1.NewTime(time.Now().Add(-time.Hour))
-	def := mapperPoolDeployment("v1", "workflows", &available, 1)
+	def := mapperGroupDeployment("v1", "workflows", &available, 1)
 	def.Status.AvailableReplicas = 1
-	idle := mapperPoolDeployment("v1", "activities", &available, 0)
+	idle := mapperGroupDeployment("v1", "activities", &available, 0)
 	temporalState := &temporal.TemporalWorkerState{CurrentBuildID: "v1", Versions: map[string]*temporal.VersionInfo{}}
 	mapper := newStateMapper(k8s.NewDeploymentState(def, idle), temporalState, "ns/worker")
 	mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
-		Pools: []temporaliov1alpha1.WorkerPool{{Name: "workflows"}, {Name: "activities"}},
+		WorkerGroups: []temporaliov1alpha1.WorkerGroup{{Name: "workflows"}, {Name: "activities"}},
 	}
 
 	assert.NotNil(t, mapper.mapTargetWorkerDeploymentVersionByBuildID("v1").HealthySince,
-		"an autoscaler may scale a current pool to zero; that must not block clearing a stale ramp")
+		"an autoscaler may scale a current group to zero; that must not block clearing a stale ramp")
 }

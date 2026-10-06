@@ -159,7 +159,7 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 // validateDeploymentSpec examines the supplied WorkerDeploymentSpec structs
 // and returns any warnings about using the deprecated replicas,
 // minReadySeconds and ProgressDeadlineSeconds fields instead of the
-// WorkerDeploymentSpec.Deployment struct field, or about pool selectors the
+// WorkerDeploymentSpec.Deployment struct field, or about group selectors the
 // controller ignores.
 func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
 	var warns admission.Warnings
@@ -174,9 +174,9 @@ func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
 			warns = append(warns, "spec.replicas is deprecated; use spec.deployment.replicas instead")
 		}
 	}
-	for i, pool := range spec.Pools {
-		if pool.Deployment.Selector != nil {
-			warns = append(warns, fmt.Sprintf("spec.pools[%d].deployment.selector is ignored; the controller computes each pool's selector", i))
+	for i, group := range spec.WorkerGroups {
+		if group.Deployment.Selector != nil {
+			warns = append(warns, fmt.Sprintf("spec.workerGroups[%d].deployment.selector is ignored; the controller computes each group's selector", i))
 		}
 	}
 	return warns

@@ -20,9 +20,9 @@ import (
 const (
 	successTestWorkflowType = "successTestWorkflow"
 	failTestWorkflowType    = "failTestWorkflow"
-	// CrossPoolWorkflowType runs reportBuildID on the task queue passed as its argument and
+	// CrossGroupWorkflowType runs reportBuildID on the task queue passed as its argument and
 	// returns the build ID of the worker that ran it.
-	CrossPoolWorkflowType     = "crossPoolWorkflow"
+	CrossGroupWorkflowType    = "crossGroupWorkflow"
 	reportBuildIDActivityType = "reportBuildID"
 
 	workerRoleEnvKey = "TEMPORAL_TEST_WORKER_ROLE"
@@ -173,7 +173,7 @@ func RunHelloWorldWorker(ctx context.Context, podTemplateSpec corev1.PodTemplate
 		// Register activities and workflows
 		w.RegisterWorkflowWithOptions(successTestWorkflow, workflow.RegisterOptions{Name: successTestWorkflowType})
 		w.RegisterWorkflowWithOptions(failTestWorkflow, workflow.RegisterOptions{Name: failTestWorkflowType})
-		w.RegisterWorkflowWithOptions(crossPoolWorkflow, workflow.RegisterOptions{Name: CrossPoolWorkflowType})
+		w.RegisterWorkflowWithOptions(crossGroupWorkflow, workflow.RegisterOptions{Name: CrossGroupWorkflowType})
 		w.RegisterActivity(getSubjectTestActivity)
 		w.RegisterActivity(sleepTestActivity)
 	}
@@ -233,7 +233,7 @@ func failTestWorkflow(ctx workflow.Context) (string, error) {
 	return "", errors.New("this is a manufactured error to make the test fail")
 }
 
-func crossPoolWorkflow(ctx workflow.Context, activityTaskQueue string) (string, error) {
+func crossGroupWorkflow(ctx workflow.Context, activityTaskQueue string) (string, error) {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		TaskQueue:           activityTaskQueue,
 		StartToCloseTimeout: time.Minute,

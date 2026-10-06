@@ -544,15 +544,15 @@ spec:
     strategy: Progressive
 ```
 
-### Worker pools
+### Worker groups
 
-To run roles with different pod shapes in one version, use `spec.pools` in place
-of `spec.deployment`. Each pool takes the same `appsv1.DeploymentSpec` as
+To run roles with different pod shapes in one version, use `spec.workerGroups` in place
+of `spec.deployment`. Each group takes the same `appsv1.DeploymentSpec` as
 `spec.deployment`:
 
 ```yaml
 spec:
-  pools:
+  workerGroups:
     - name: workflows
       deployment:
         replicas: 2
@@ -563,9 +563,9 @@ spec:
         template: {...}   # activity workers, different resources
 ```
 
-All pools share the Build ID and roll out together. See
-[Worker Pools](worker-pools.md) for how rollouts, scaling and custom Build IDs
-work with pools.
+All groups share the Build ID and roll out together. See
+[Worker Groups](worker-groups.md) for how rollouts, scaling and custom Build IDs
+work with groups.
 
 ### Environment-Specific Configurations
 
