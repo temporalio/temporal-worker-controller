@@ -60,8 +60,8 @@ subjects:
 ---
 {{- if .Values.rbac.restrictWatchNamespaces }}
 # Namespace-scoped mode: the manager role is emitted as a namespaced Role in each
-# watched namespace. Cluster-scoped rules (namespaces get, subjectaccessreviews
-# create) are handled by the separate manager-cluster-role below.
+# watched namespace. The cluster-scoped SubjectAccessReview grant needed during the
+# one-release webhook migration is handled by manager-cluster-role below.
 {{- range .Values.rbac.restrictWatchNamespaces }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -107,6 +107,12 @@ rules:
       - deployments/scale
     verbs:
       - update
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - localsubjectaccessreviews
+    verbs:
+      - create
   - apiGroups:
       - temporal.io
     resources:
@@ -222,6 +228,7 @@ rules:
   - apiGroups:
       - authorization.k8s.io
     resources:
+      - localsubjectaccessreviews
       - subjectaccessreviews
     verbs:
       - create
@@ -294,11 +301,9 @@ rules:
 {{- end }}
 ---
 {{- if .Values.rbac.restrictWatchNamespaces }}
-# Namespace-scoped mode: the manager role is bound only within the watched
-# namespaces (RoleBindings below). The two grants that must stay cluster-wide are
-# split into a minimal ClusterRole: namespaces "get" (restricted to the release
-# namespace, for the controller identity-suffix lookup) and subjectaccessreviews
-# "create" (the always-on validating webhook).
+# Namespace-scoped mode: the manager role is bound only within the watched namespaces
+# (RoleBindings below). Temporary cluster-scoped grants preserve namespace-UID fallback
+# and admission during the one-release webhook migration.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

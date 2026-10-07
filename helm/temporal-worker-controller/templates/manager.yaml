@@ -1,3 +1,4 @@
+{{- $releaseNamespace := lookup "v1" "Namespace" "" .Release.Namespace -}}
 {{- if .Values.namespace.create -}}
 apiVersion: v1
 kind: Namespace
@@ -77,6 +78,13 @@ spec:
         env:
         - name: CONTROLLER_IDENTITY
           value: "{{ .Release.Name }}/{{ .Release.Namespace }}"
+        # Helm supplies the namespace UID when rendering against a cluster.
+        # If lookup is unavailable (for example, client-side rendering), the
+        # controller reads the namespace UID at startup.
+        {{ if $releaseNamespace }}
+        - name: CONTROLLER_IDENTITY_SUFFIX
+          value: {{ $releaseNamespace.metadata.uid | quote }}
+        {{ end }}
         - name: CONTROLLER_VERSION
           value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
         # POD_NAMESPACE and SERVICE_ACCOUNT_NAME are populated automatically by
