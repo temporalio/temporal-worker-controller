@@ -17,6 +17,9 @@ How to integrate the controller into Helm, kubectl, ArgoCD, and Flux pipelines f
 ### [Architecture](architecture.md)
 High-level overview of the Temporal Worker Controller architecture.
 
+### [ClusterConnection](cluster-connection.md)
+How to share one cluster-scoped connection definition across namespaces, where its secrets are looked up, and its current limitations.
+
 ### [Concepts](concepts.md)
 Conceptual guides for the Temporal Worker Controller system.
 
