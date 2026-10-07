@@ -162,7 +162,7 @@ func main() {
 		setupLog.Info("skipping deprecated TemporalConnection watches")
 	}
 
-	if err = (twc.NewController(mgr,
+	workerDeploymentController, err := twc.NewController(mgr,
 		twc.WithLogger(log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 			AddSource:   false,
 			Level:       nil,
@@ -171,7 +171,12 @@ func main() {
 		twc.WithDisableDeprecatedTWD(!deprecatedCRDWatches.TemporalWorkerDeployments),
 		twc.WithDisableClusterConnections(namespaceScoped),
 		twc.WithWRTHPAMatchLabelsStripTemporalPrefix(wrtHPAMatchLabelsStripTemporalPrefix),
-	)).SetupWithManager(mgr); err != nil {
+	)
+	if err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
+		os.Exit(1)
+	}
+	if err = workerDeploymentController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
 		os.Exit(1)
 	}

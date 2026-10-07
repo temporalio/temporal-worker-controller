@@ -7,6 +7,7 @@
 package twc
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 
@@ -50,10 +51,11 @@ type controllerConfig struct {
 	wrtHPAMatchLabelsStripTemporalPrefix       bool
 }
 
-// NewController returns a WorkerDeploymentController wired with the given manager. The manager
-// supplies the Kubernetes client, scheme, and event recorder; the Temporal client pool is built
-// internally from the manager's client.
-func NewController(mgr ctrl.Manager, opts ...ControllerOption) *WorkerDeploymentController {
+// NewController returns a WorkerDeploymentController wired with the given manager, or an
+// error if the options are misconfigured (e.g. both WithCreateClient and WithDefaultClient).
+// The manager supplies the Kubernetes client, scheme, and event recorder; the Temporal
+// client pool is built internally from the manager's client.
+func NewController(mgr ctrl.Manager, opts ...ControllerOption) (*WorkerDeploymentController, error) {
 	cfg := controllerConfig{
 		poolLogger: defaultPoolLogger(),
 		maxDeploymentVersionsIneligibleForDeletion: internalcontroller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
@@ -62,7 +64,7 @@ func NewController(mgr ctrl.Manager, opts ...ControllerOption) *WorkerDeployment
 		opt(&cfg)
 	}
 	if cfg.createClient != nil && cfg.defaultClient {
-		panic("twc.WithCreateClient and twc.WithDefaultClient are mutually exclusive")
+		return nil, errors.New("twc.WithCreateClient and twc.WithDefaultClient are mutually exclusive")
 	}
 	pool := clientpool.New(cfg.poolLogger, mgr.GetClient(), cfg.customClientOptions)
 	if cfg.createClient != nil {
@@ -78,7 +80,7 @@ func NewController(mgr ctrl.Manager, opts ...ControllerOption) *WorkerDeployment
 		DisableClusterConnections:                  cfg.disableClusterConnections,
 		DisableRecoverPanic:                        cfg.disableRecoverPanic,
 		WRTHPAMatchLabelsStripTemporalPrefix:       cfg.wrtHPAMatchLabelsStripTemporalPrefix,
-	}
+	}, nil
 }
 
 // defaultPoolLogger returns the Temporal SDK logger used for the internally-built client pool
