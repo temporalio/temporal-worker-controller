@@ -167,7 +167,7 @@ workerOptions:
 
 ### Connection Configuration
 
-Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname.
+Reference a `Connection` resource that defines server details. To share one connection definition across namespaces, use a [`ClusterConnection`](cluster-connection.md) instead; it takes the same `spec`. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` is different from the hostname on the server certificate, set `tls.serverName` to the certificate hostname.
 
 **Using mTLS Authentication:**
 
