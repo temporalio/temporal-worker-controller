@@ -2,9 +2,9 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-// Package twc lets a wrapper binary embed the worker-deployment controller and run it with
+// Package controller lets a wrapper binary embed the worker-deployment controller and run it with
 // custom Temporal client configuration.
-package twc
+package controller
 
 import (
 	"errors"
@@ -19,8 +19,8 @@ import (
 	"go.temporal.io/sdk/log"
 )
 
-// WorkerDeploymentController reconciles WorkerDeployment resources.
-type WorkerDeploymentController = internalcontroller.WorkerDeploymentReconciler
+// Controller reconciles WorkerDeployment resources.
+type Controller = internalcontroller.WorkerDeploymentReconciler
 
 // CachedClient is a Temporal SDK client paired with a validity check. IsValid is called on every
 // cache hit. A false result triggers eviction and re-dial.
@@ -34,12 +34,12 @@ type CreateClientFunc = clientpool.CreateClientFunc
 // the default client-creation path (WithDefaultClient).
 type CustomizeClientOptionsFunc func(sdkclient.Options) sdkclient.Options
 
-// ControllerOption configures a controller built by NewController.
-type ControllerOption func(*controllerConfig)
+// Option configures a controller built by New.
+type Option func(*config)
 
-// controllerConfig holds the options for a controller under construction; private so
+// config holds the options for a controller under construction; private so
 // options can only be set via the With* constructors.
-type controllerConfig struct {
+type config struct {
 	createClient                               CreateClientFunc
 	customClientOptions                        CustomizeClientOptionsFunc
 	defaultClient                              bool
@@ -51,12 +51,12 @@ type controllerConfig struct {
 	wrtHPAMatchLabelsStripTemporalPrefix       bool
 }
 
-// NewController returns a WorkerDeploymentController wired with the given manager, or an
+// New returns a Controller wired with the given manager, or an
 // error if the options are misconfigured (e.g. both WithCreateClient and WithDefaultClient).
 // The manager supplies the Kubernetes client, scheme, and event recorder; the Temporal
 // client pool is built internally from the manager's client.
-func NewController(mgr ctrl.Manager, opts ...ControllerOption) (*WorkerDeploymentController, error) {
-	cfg := controllerConfig{
+func New(mgr ctrl.Manager, opts ...Option) (*Controller, error) {
+	cfg := config{
 		poolLogger: defaultPoolLogger(),
 		maxDeploymentVersionsIneligibleForDeletion: internalcontroller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
 	}
@@ -64,13 +64,13 @@ func NewController(mgr ctrl.Manager, opts ...ControllerOption) (*WorkerDeploymen
 		opt(&cfg)
 	}
 	if cfg.createClient != nil && cfg.defaultClient {
-		return nil, errors.New("twc.WithCreateClient and twc.WithDefaultClient are mutually exclusive")
+		return nil, errors.New("controller.WithCreateClient and controller.WithDefaultClient are mutually exclusive")
 	}
 	pool := clientpool.New(cfg.poolLogger, mgr.GetClient(), cfg.customClientOptions)
 	if cfg.createClient != nil {
 		pool.CreateClientFn = cfg.createClient
 	}
-	return &WorkerDeploymentController{
+	return &Controller{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
 		TemporalClientPool: pool,
@@ -90,16 +90,16 @@ func defaultPoolLogger() log.Logger {
 }
 
 // WithLogger sets the logger used by the internally-built client pool.
-func WithLogger(l log.Logger) ControllerOption {
-	return func(c *controllerConfig) {
+func WithLogger(l log.Logger) Option {
+	return func(c *config) {
 		c.poolLogger = l
 	}
 }
 
 // WithCreateClient overrides the default client-creation path. The function owns the full
 // construction: secret parsing, options, dialing, and health check.
-func WithCreateClient(fn CreateClientFunc) ControllerOption {
-	return func(c *controllerConfig) {
+func WithCreateClient(fn CreateClientFunc) Option {
+	return func(c *config) {
 		c.createClient = fn
 	}
 }
@@ -107,8 +107,8 @@ func WithCreateClient(fn CreateClientFunc) ControllerOption {
 // WithDefaultClient uses the built-in client-creation path (parse Secret, build options,
 // dial, health-check). Accepts optional CustomizeClientOptions to mutate SDK options
 // before dialing.
-func WithDefaultClient(customize ...CustomizeClientOptionsFunc) ControllerOption {
-	return func(c *controllerConfig) {
+func WithDefaultClient(customize ...CustomizeClientOptionsFunc) Option {
+	return func(c *config) {
 		c.defaultClient = true
 		if len(customize) > 0 {
 			c.customClientOptions = customize[0]
@@ -119,39 +119,39 @@ func WithDefaultClient(customize ...CustomizeClientOptionsFunc) ControllerOption
 // WithMaxDeploymentVersionsIneligibleForDeletion sets the cap on how many worker deployment versions
 // may be ineligible for deletion before the controller stops deploying new versions. When unset,
 // the built-in default is used.
-func WithMaxDeploymentVersionsIneligibleForDeletion(n int32) ControllerOption {
-	return func(c *controllerConfig) {
+func WithMaxDeploymentVersionsIneligibleForDeletion(n int32) Option {
+	return func(c *config) {
 		c.maxDeploymentVersionsIneligibleForDeletion = n
 	}
 }
 
 // WithDisableDeprecatedTWD disables watching the deprecated TemporalWorkerDeployment CRD. Set when
 // the CRD is not installed.
-func WithDisableDeprecatedTWD(disable bool) ControllerOption {
-	return func(c *controllerConfig) {
+func WithDisableDeprecatedTWD(disable bool) Option {
+	return func(c *config) {
 		c.disableDeprecatedTWD = disable
 	}
 }
 
 // WithDisableClusterConnections drops ClusterConnection support. Set when the manager is
 // namespace-scoped (a namespaced Role cannot list the cluster-scoped ClusterConnection CRD).
-func WithDisableClusterConnections(disable bool) ControllerOption {
-	return func(c *controllerConfig) {
+func WithDisableClusterConnections(disable bool) Option {
+	return func(c *config) {
 		c.disableClusterConnections = disable
 	}
 }
 
 // WithDisableRecoverPanic disables panic recovery in the reconciler.
-func WithDisableRecoverPanic(disable bool) ControllerOption {
-	return func(c *controllerConfig) {
+func WithDisableRecoverPanic(disable bool) Option {
+	return func(c *config) {
 		c.disableRecoverPanic = disable
 	}
 }
 
 // WithWRTHPAMatchLabelsStripTemporalPrefix sets whether to strip the "temporal_" prefix from
 // auto-injected WorkerResourceTemplate HPA external metric matchLabels.
-func WithWRTHPAMatchLabelsStripTemporalPrefix(strip bool) ControllerOption {
-	return func(c *controllerConfig) {
+func WithWRTHPAMatchLabelsStripTemporalPrefix(strip bool) Option {
+	return func(c *config) {
 		c.wrtHPAMatchLabelsStripTemporalPrefix = strip
 	}
 }

@@ -327,8 +327,8 @@ Wrapper binaries that embed the controller can customize Temporal client constru
 **Default path (add an interceptor):**
 
 ```go
-r := twc.NewController(mgr,
-    twc.WithDefaultClient(twc.WithCustomizeClientOptions(func(opts sdkclient.Options) sdkclient.Options {
+r := controller.New(mgr,
+    controller.WithDefaultClient(controller.WithCustomizeClientOptions(func(opts sdkclient.Options) sdkclient.Options {
         opts.Interceptors = append(opts.Interceptors, myInterceptor)
         return opts
     })),
@@ -338,13 +338,13 @@ r := twc.NewController(mgr,
 **Full control (reuse a custom client constructor):**
 
 ```go
-r := twc.NewController(mgr,
-    twc.WithCreateClient(func(ctx context.Context, spec v1alpha1.ConnectionSpec, ns, k8sNs, identity string) (twc.CachedClient, error) {
+r := controller.New(mgr,
+    controller.WithCreateClient(func(ctx context.Context, spec v1alpha1.ConnectionSpec, ns, k8sNs, identity string) (controller.CachedClient, error) {
         client, err := myClientConstructor(spec, ns, identity)
         if err != nil {
-            return twc.CachedClient{}, err
+            return controller.CachedClient{}, err
         }
-        return twc.CachedClient{
+        return controller.CachedClient{
             Client:  client,
             IsValid: func() bool { return true }, // e.g. check cert/token expiry, not a readiness probe
         }, nil
