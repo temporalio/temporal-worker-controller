@@ -176,7 +176,7 @@ We welcome all contributions! This includes:
 
 - 🔧 **Code contributions** - Please start by [opening an issue](https://github.com/temporalio/temporal-worker-controller/issues/new) to discuss your idea
 - 🐛 **Bug reports** - [File an issue](https://github.com/temporalio/temporal-worker-controller/issues/new)
-- 💡 **Feature requests** - Tell us what you'd like to see [on the Temporal feature request board](https://github.com/temporalio/temporal/discussions)
+- 💡 **Feature requests** - Tell us what you'd like to see
 - 💬 **Feedback** - Join [#safe-deploys](https://temporalio.slack.com/archives/C07MDJ6S3HP) on [Temporal Slack](https://t.mp/slack)
 
 ## 🛠️ Development
