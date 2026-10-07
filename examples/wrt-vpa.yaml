@@ -1,0 +1,75 @@
+# WorkerResourceTemplate — VPA example
+#
+# This example attaches a VerticalPodAutoscaler to each active versioned Deployment
+# of the "helloworld" WorkerDeployment (from the local demo). VPA sets each pod's
+# CPU and memory requests from observed usage. It does not change the replica count,
+# so pair it with one of the HPA or KEDA examples for that.
+#
+# Prerequisites:
+#   - The helloworld demo is running (skaffold run --profile helloworld-worker)
+#   - VPA is installed (recommender, updater, and admission controller). The
+#     controller does not install it.
+#   - VerticalPodAutoscaler is in workerResourceTemplate.allowedResources
+#   - The worker container sets CPU and memory requests. The helloworld demo
+#     sets none: its pods are BestEffort, and adding requests changes the QoS
+#     class, which an in-place resize cannot do, so VPA would evict the pod.
+#   - For updateMode InPlaceOrRecreate: Kubernetes 1.33+ and VPA 1.4.0+
+#     (on 1.4.x, enable the VPA InPlaceOrRecreate feature gate)
+#
+# Apply:
+#   kubectl apply -f examples/wrt-vpa.yaml
+#
+# Verify:
+#   kubectl get wrt              # shows Applied status per Build ID
+#   kubectl get vpa              # shows one VPA per active Build ID, with its recommendation
+#
+# See docs/scaling-recommendations.md for update modes and which HPA and KEDA
+# combinations are safe with VPA.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: helloworld-vpa
+  # Deploy into the same namespace as the helloworld WorkerDeployment.
+  namespace: default
+spec:
+  # Must match the name of the WorkerDeployment.
+  workerDeploymentRef:
+    name: helloworld
+
+  # The resource template. The controller creates one copy per active Build ID.
+  # Each copy is a separate VPA with its own history, so a new version starts
+  # without a recommendation.
+  template:
+    apiVersion: autoscaling.k8s.io/v1
+    kind: VerticalPodAutoscaler
+    spec:
+      # Setting targetRef to {} tells the controller to auto-inject the versioned
+      # Deployment reference for each Build ID. Do not set this to a real value:
+      # every copy would point at the same Deployment, so the webhook rejects it.
+      targetRef: {}
+
+      updatePolicy:
+        # Resize running pods in place, and evict only when that is not possible.
+        # Use "Initial" instead if running workers must never be touched.
+        updateMode: InPlaceOrRecreate
+
+        # The VPA updater skips Deployments with fewer than 2 replicas by default.
+        # 1 lets it resize a version that runs one pod, such as a draining version
+        # kept up for pinned workflows. If a resize falls back to an eviction,
+        # that pod is down until it is replaced.
+        minReplicas: 1
+
+      resourcePolicy:
+        containerPolicies:
+          - containerName: "*"
+            # Bounds for the recommendation. A new version's first recommendations
+            # are based on little data. Adjust these to your workers.
+            minAllowed:
+              cpu: 100m
+              memory: 128Mi
+            maxAllowed:
+              cpu: "2"
+              memory: 2Gi
+            # If an HPA or KEDA trigger scales this worker on CPU, set ["memory"] so
+            # VPA does not act on the same resource.
+            controlledResources: ["cpu", "memory"]
