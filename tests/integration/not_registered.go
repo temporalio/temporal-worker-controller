@@ -250,8 +250,8 @@ func testMissingSummaryVersionIsDescribedBeforeDeletion(
 		Namespace: twd.Spec.WorkerOptions.TemporalNamespace,
 		AuthMode:  temporaliov1alpha1.AuthModeNoCredentials,
 	}
-	originalClient, ok := clientPool.GetSDKClient(poolKey)
-	if !ok {
+	originalClient := clientPool.Clients()[poolKey]
+	if originalClient == nil {
 		t.Fatal("controller Temporal client was not present in the client pool")
 	}
 	filteringService := &versionSummaryFilteringWorkflowService{

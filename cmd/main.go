@@ -13,8 +13,8 @@ import (
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
-	"github.com/temporalio/temporal-worker-controller/internal/controller"
-	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
+	internalcontroller "github.com/temporalio/temporal-worker-controller/internal/controller"
+	"github.com/temporalio/temporal-worker-controller/pkg/controller"
 	"go.temporal.io/sdk/log"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -52,7 +52,7 @@ func main() {
 	var webhookCertDir string
 	var webhookCertName string
 	var webhookKeyName string
-	wrtHPAMatchLabelsStripTemporalPrefix := controller.GetWRTHPAMatchLabelsStripTemporalPrefix()
+	wrtHPAMatchLabelsStripTemporalPrefix := internalcontroller.GetWRTHPAMatchLabelsStripTemporalPrefix()
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -84,7 +84,7 @@ func main() {
 	if watchNamespaces == "" {
 		watchNamespaces = os.Getenv("WATCH_NAMESPACES")
 	}
-	namespaces := controller.ParseWatchNamespaces(watchNamespaces)
+	namespaces := internalcontroller.ParseWatchNamespaces(watchNamespaces)
 
 	if webhookCertDir == "" {
 		webhookCertDir = os.Getenv("WEBHOOK_CERT_DIR")
@@ -99,7 +99,7 @@ func main() {
 		setupLog.Info("skipping ClusterConnection watches")
 	}
 
-	cacheOptions, err := controller.NewCacheOptions(namespaces)
+	cacheOptions, err := internalcontroller.NewCacheOptions(namespaces)
 	if err != nil {
 		setupLog.Error(err, "unable to build manager cache options")
 		os.Exit(1)
@@ -149,7 +149,7 @@ func main() {
 		os.Exit(1)
 	}
 	detectionCtx, cancelDetection := context.WithTimeout(context.Background(), 10*time.Second)
-	deprecatedCRDWatches, err := controller.DetectDeprecatedCRDWatches(detectionCtx, detectionClient, namespaces)
+	deprecatedCRDWatches, err := internalcontroller.DetectDeprecatedCRDWatches(detectionCtx, detectionClient, namespaces)
 	cancelDetection()
 	if err != nil {
 		setupLog.Error(err, "unable to detect deprecated CRD watches")
@@ -162,28 +162,26 @@ func main() {
 		setupLog.Info("skipping deprecated TemporalConnection watches")
 	}
 
-	if err = (&controller.WorkerDeploymentReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		TemporalClientPool: clientpool.New(
-			log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-				AddSource:   false,
-				Level:       nil,
-				ReplaceAttr: nil,
-			}))),
-			mgr.GetClient(),
-		),
-		Recorder: mgr.GetEventRecorderFor("temporal-worker-controller"),
-		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
-		DisableDeprecatedTWD:                       !deprecatedCRDWatches.TemporalWorkerDeployments,
-		DisableClusterConnections:                  namespaceScoped,
-		WRTHPAMatchLabelsStripTemporalPrefix:       wrtHPAMatchLabelsStripTemporalPrefix,
-	}).SetupWithManager(mgr); err != nil {
+	c, err := controller.New(mgr,
+		controller.WithLogger(log.NewStructuredLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			AddSource:   false,
+			Level:       nil,
+			ReplaceAttr: nil,
+		})))),
+		controller.WithDisableDeprecatedTWD(!deprecatedCRDWatches.TemporalWorkerDeployments),
+		controller.WithDisableClusterConnections(namespaceScoped),
+		controller.WithWRTHPAMatchLabelsStripTemporalPrefix(wrtHPAMatchLabelsStripTemporalPrefix),
+	)
+	if err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
+		os.Exit(1)
+	}
+	if err = c.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")
 		os.Exit(1)
 	}
 	if deprecatedCRDWatches.TemporalWorkerDeployments {
-		if err = (&controller.DeprecatedTWDReconciler{
+		if err = (&internalcontroller.DeprecatedTWDReconciler{
 			Client: mgr.GetClient(),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "TemporalWorkerDeployment")
@@ -191,7 +189,7 @@ func main() {
 		}
 	}
 	if deprecatedCRDWatches.TemporalConnections {
-		if err = (&controller.DeprecatedTCReconciler{
+		if err = (&internalcontroller.DeprecatedTCReconciler{
 			Client: mgr.GetClient(),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "TemporalConnection")
@@ -225,7 +223,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if os.Getenv(controller.IdentityEnvKey) == "" {
+	if os.Getenv(internalcontroller.IdentityEnvKey) == "" {
 		setupLog.Error(nil, "CONTROLLER_IDENTITY environment variable must be set")
 		os.Exit(1)
 	}
@@ -235,8 +233,8 @@ func main() {
 		setupLog.Error(err, "unable to fetch namespace UID for controller identity suffix")
 		os.Exit(1)
 	}
-	if err := os.Setenv(controller.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
-		setupLog.Error(err, fmt.Sprintf("unable to set %s", controller.IdentitySuffixEnvKey))
+	if err := os.Setenv(internalcontroller.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
+		setupLog.Error(err, fmt.Sprintf("unable to set %s", internalcontroller.IdentitySuffixEnvKey))
 		os.Exit(1)
 	}
 

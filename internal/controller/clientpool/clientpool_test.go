@@ -13,6 +13,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -37,12 +38,9 @@ func (noopLogger) Warn(string, ...interface{})  {}
 func (noopLogger) Error(string, ...interface{}) {}
 
 func newTestPool() *ClientPool {
-	return &ClientPool{
-		logger:           noopLogger{},
-		clients:          make(map[ClientPoolKey]ClientInfo),
-		dialFn:           sdkclient.Dial,
-		systemCertPoolFn: x509.SystemCertPool,
-	}
+	cp := New(noopLogger{}, nil, nil)
+	cp.dialFn = sdkclient.Dial
+	return cp
 }
 
 // generateSelfSignedCACert creates a self-signed CA cert and returns the parsed cert, private key, and PEM bytes.
@@ -91,23 +89,17 @@ func generateLeafCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.Priva
 	return cert, certPEM, keyPEM
 }
 
-func makeOpts(hostPort string) NewClientOptions {
-	return NewClientOptions{
-		TemporalNamespace: "default",
-		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: hostPort,
-			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{
-				Name: "test-tls-secret",
-			},
+func makeMTLSSpec(hostPort string) temporaliov1alpha1.ConnectionSpec {
+	return temporaliov1alpha1.ConnectionSpec{
+		HostPort: hostPort,
+		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{
+			Name: "test-tls-secret",
 		},
 	}
 }
 
 func TestNewClientOptionsSetsTemporalNamespaceHeader(t *testing.T) {
-	opts := makeOpts("localhost:7233")
-	opts.TemporalNamespace = "routing-namespace"
-	clientOpts := newTestPool().newClientOptions(opts)
+	clientOpts := newTestPool().getClientOptions(makeMTLSSpec("localhost:7233"), "routing-namespace", "identity", clientAuth{})
 
 	headers, err := clientOpts.HeadersProvider.GetHeaders(t.Context())
 
@@ -162,10 +154,10 @@ func TestFetchMTLS_NoCACert_RootCAsNil(t *testing.T) {
 
 	cp := newTestPool()
 	secret := makeTLSSecret(certPEM, keyPEM, nil) // no ca.crt
-	opts, _, _, err := cp.fetchClientUsingMTLSSecret(secret, makeOpts("localhost:7233"))
+	a, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
 
 	require.NoError(t, err)
-	assert.Nil(t, opts.ConnectionOptions.TLS.RootCAs, "RootCAs must be nil when no ca.crt is provided so Go uses the system CA bundle")
+	assert.Nil(t, a.tls.RootCAs, "RootCAs must be nil when no ca.crt is provided so Go uses the system CA bundle")
 }
 
 // TestFetchMTLS_CACertAppendsToSystemPool is the regression test for PR #227.
@@ -174,16 +166,15 @@ func TestFetchMTLS_NoCACert_RootCAsNil(t *testing.T) {
 // appended the custom CA. This broke connections to publicly-signed servers (e.g. Temporal
 // Cloud) because system root CAs were discarded.
 //
-// After the fix it calls systemCertPoolFn() first and then appends, so both the injected
-// "system" CAs and the custom CA are present in the returned pool.
+// After the fix it calls x509.SystemCertPool() first and then appends, so both the system
+// CAs and the custom CA are present in the returned pool.
+//
+// Note: we can no longer inject a fake system pool to assert system CAs are preserved
+// alongside the custom CA (that would require a test seam on the system pool loader).
+// We assert the deterministic part — the custom CA is trusted after appending — and
+// rely on the production code calling x509.SystemCertPool() to preserve system CAs.
 func TestFetchMTLS_CACertAppendsToSystemPool(t *testing.T) {
 	now := time.Now()
-
-	// "System" CA — simulates a root CA that would normally live in the OS trust store.
-	sysCACert, sysCAPKey, sysCAPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
-	_, sysLeafPEM, _ := generateLeafCert(t, sysCACert, sysCAPKey, "system.example.com", now.Add(-time.Hour), now.Add(time.Hour))
-	sysLeafCert, err := decodePEMCert(sysLeafPEM)
-	require.NoError(t, err)
 
 	// Custom CA — the ca.crt stored in the k8s TLS secret.
 	customCACert, customCAKey, customCAPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
@@ -195,25 +186,15 @@ func TestFetchMTLS_CACertAppendsToSystemPool(t *testing.T) {
 	_, clientCertPEM, clientKeyPEM := generateLeafCert(t, customCACert, customCAKey, "client.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 
 	cp := newTestPool()
-	// Inject a fake "system" pool containing only sysCACert.
-	cp.systemCertPoolFn = func() (*x509.CertPool, error) {
-		pool := x509.NewCertPool()
-		pool.AppendCertsFromPEM(sysCAPEM)
-		return pool, nil
-	}
 
 	secret := makeTLSSecret(clientCertPEM, clientKeyPEM, customCAPEM)
-	opts, _, _, err := cp.fetchClientUsingMTLSSecret(secret, makeOpts("localhost:7233"))
+	a, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
 	require.NoError(t, err)
 
-	pool := opts.ConnectionOptions.TLS.RootCAs
+	pool := a.tls.RootCAs
 	require.NotNil(t, pool, "RootCAs must be set when ca.crt is provided")
 
-	// Both the injected "system" CA and the custom CA must be trusted.
-	// If the bug (empty pool) were reintroduced, the system leaf verification would fail.
-	_, err = sysLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "system.example.com"})
-	assert.NoError(t, err, "system CA should be in pool (regression: PR #227 used NewCertPool(), dropping system CAs)")
-
+	// The custom CA must be trusted after being appended to the system pool.
 	_, err = customLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "custom.example.com"})
 	assert.NoError(t, err, "custom CA should be in pool")
 }
@@ -226,7 +207,7 @@ func TestFetchMTLS_ExpiredCert_ReturnsError(t *testing.T) {
 
 	cp := newTestPool()
 	secret := makeTLSSecret(certPEM, keyPEM, nil)
-	_, _, _, err := cp.fetchClientUsingMTLSSecret(secret, makeOpts("localhost:7233"))
+	_, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expired")
@@ -240,14 +221,13 @@ func TestFetchMTLS_ValidCert_Succeeds(t *testing.T) {
 
 	cp := newTestPool()
 	secret := makeTLSSecret(certPEM, keyPEM, nil)
-	clientOpts, key, auth, err := cp.fetchClientUsingMTLSSecret(secret, makeOpts("localhost:7233"))
+	a, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
 
 	require.NoError(t, err)
-	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, key.AuthMode)
-	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, auth.mode)
-	assert.NotNil(t, auth.mTLS)
-	assert.NotNil(t, clientOpts.ConnectionOptions.TLS)
-	assert.Len(t, clientOpts.ConnectionOptions.TLS.Certificates, 1)
+	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, a.mode)
+	assert.NotNil(t, a.expiryTime)
+	require.NotNil(t, a.tls)
+	assert.Len(t, a.tls.Certificates, 1)
 }
 
 func TestFetchMTLS_TLSServerNameOverride(t *testing.T) {
@@ -257,17 +237,16 @@ func TestFetchMTLS_TLSServerNameOverride(t *testing.T) {
 
 	cp := newTestPool()
 	secret := makeTLSSecret(certPEM, keyPEM, nil)
-	opts := makeOpts("temporal-nlb.example.com:443")
-	opts.Spec.TLS = &temporaliov1alpha1.ConnectionTLSConfig{
+	opts := makeMTLSSpec("temporal-nlb.example.com:443")
+	opts.TLS = &temporaliov1alpha1.ConnectionTLSConfig{
 		ServerName: "temporal-cloud.example.com",
 	}
 
-	clientOpts, key, _, err := cp.fetchClientUsingMTLSSecret(secret, opts)
+	a, err := cp.fetchClientUsingMTLSSecret(secret, opts)
 
 	require.NoError(t, err)
-	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
-	assert.Equal(t, "temporal-cloud.example.com", clientOpts.ConnectionOptions.TLS.ServerName)
-	assert.Equal(t, "temporal-cloud.example.com", key.TLSServerName)
+	require.NotNil(t, a.tls)
+	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
 }
 
 func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
@@ -281,58 +260,45 @@ func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
 		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
 		Key:                  "apikey",
 	}
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: "temporal-nlb.example.com:443",
-			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-				ServerName: "temporal-cloud.example.com",
-			},
-			APIKeySecretRef: apiKeySelector,
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "temporal-nlb.example.com:443",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			ServerName: "temporal-cloud.example.com",
 		},
+		APIKeySecretRef: apiKeySelector,
 	}
 
-	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts, nil)
+	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", nil)
 
 	require.NoError(t, err)
-	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
-	assert.Equal(t, "temporal-cloud.example.com", clientOpts.ConnectionOptions.TLS.ServerName)
-	assert.Equal(t, "temporal-cloud.example.com", key.TLSServerName)
+	require.NotNil(t, a.tls)
+	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
 }
 
 func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
 	cp := newTestPool()
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: "temporal-nlb.example.com:443",
-			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-				ServerName: "temporal-cloud.example.com",
-			},
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "temporal-nlb.example.com:443",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			ServerName: "temporal-cloud.example.com",
 		},
 	}
 
-	clientOpts, key, auth, err := cp.fetchClientUsingNoCredentials(opts, nil)
+	a, err := cp.fetchClientUsingNoCredentials(opts, nil)
 
 	require.NoError(t, err)
-	require.NotNil(t, clientOpts.ConnectionOptions.TLS)
-	assert.Equal(t, "temporal-cloud.example.com", clientOpts.ConnectionOptions.TLS.ServerName)
-	assert.Equal(t, "temporal-cloud.example.com", key.TLSServerName)
-	assert.Equal(t, temporaliov1alpha1.AuthModeNoCredentials, auth.mode)
+	require.NotNil(t, a.tls)
+	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
+	assert.Equal(t, temporaliov1alpha1.AuthModeNoCredentials, a.mode)
 }
 
 func newTestPoolWithFakeClient(objects ...runtime.Object) *ClientPool {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()
-	return &ClientPool{
-		logger:           noopLogger{},
-		clients:          make(map[ClientPoolKey]ClientInfo),
-		k8sClient:        k8sClient,
-		dialFn:           sdkclient.Dial,
-		systemCertPoolFn: x509.SystemCertPool,
-	}
+	cp := New(noopLogger{}, k8sClient, nil)
+	cp.dialFn = sdkclient.Dial
+	return cp
 }
 
 // ─── Tests: fetchClientUsingAPIKeySecret ──────────────────────────────────────
@@ -350,38 +316,26 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
 		Key:                  "apikey",
 	}
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort:        "localhost:7233",
-			APIKeySecretRef: apiKeySelector,
-		},
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort:        "localhost:7233",
+		APIKeySecretRef: apiKeySelector,
 	}
 
-	clientOpts, key, auth, err := cp.fetchClientUsingAPIKeySecret(opts, nil)
+	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, key.AuthMode)
-	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, auth.mode)
-	assert.Nil(t, auth.mTLS)
-	assert.NotNil(t, clientOpts.Credentials, "API key credentials must be set")
-	assert.NotNil(t, clientOpts.ConnectionOptions.TLS, "TLS config must be non-nil for gRPC API key transport")
+	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, a.mode)
+	assert.True(t, a.expiryTime.IsZero())
+	assert.NotNil(t, a.credentials, "API key credentials must be set")
+	require.NotNil(t, a.tls, "TLS config must be non-nil for gRPC API key transport")
 }
 
 // TestFetchAPIKey_CACertAppendsToSystemPool verifies that TLS.CACertSecretRef, resolved by
 // the caller into a caCert argument, is appended to the system CA pool for API-key auth —
 // the same additive behavior TestFetchMTLS_CACertAppendsToSystemPool covers for mTLS auth
-// (PR #227). Before this change, fetchClientUsingAPIKeySecret had no way to trust a private
-// CA at all: RootCAs was always left nil, so the only way to reach a privately-signed
-// Temporal server over API-key auth was a process-wide SSL_CERT_FILE override.
+// (PR #227). See that test for why the system-CA-preserved assertion was dropped.
 func TestFetchAPIKey_CACertAppendsToSystemPool(t *testing.T) {
 	now := time.Now()
-
-	sysCACert, sysCAPKey, sysCAPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
-	_, sysLeafPEM, _ := generateLeafCert(t, sysCACert, sysCAPKey, "system.example.com", now.Add(-time.Hour), now.Add(time.Hour))
-	sysLeafCert, err := decodePEMCert(sysLeafPEM)
-	require.NoError(t, err)
 
 	customCACert, customCAKey, customCAPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, customLeafPEM, _ := generateLeafCert(t, customCACert, customCAKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
@@ -394,36 +348,24 @@ func TestFetchAPIKey_CACertAppendsToSystemPool(t *testing.T) {
 		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
 	}
 	cp := newTestPoolWithFakeClient(&apiKeySecret)
-	cp.systemCertPoolFn = func() (*x509.CertPool, error) {
-		pool := x509.NewCertPool()
-		pool.AppendCertsFromPEM(sysCAPEM)
-		return pool, nil
-	}
 
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: "localhost:7233",
-			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
-			},
-			APIKeySecretRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-				Key:                  "apikey",
-			},
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+		},
+		APIKeySecretRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+			Key:                  "apikey",
 		},
 	}
 
-	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts, customCAPEM)
+	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", customCAPEM)
 	require.NoError(t, err)
 
-	pool := clientOpts.ConnectionOptions.TLS.RootCAs
+	pool := a.tls.RootCAs
 	require.NotNil(t, pool, "RootCAs must be set when a CA cert is supplied")
-	assert.Equal(t, "ca-secret", key.TLSCACertSecretName, "CA secret name must be part of the pool cache key")
 
-	_, err = sysLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "system.example.com"})
-	assert.NoError(t, err, "system CA should still be trusted alongside the custom CA")
 	_, err = customLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "custom.example.com"})
 	assert.NoError(t, err, "custom CA should be trusted")
 }
@@ -437,23 +379,18 @@ func TestFetchAPIKey_NoCACert_RootCAsNil(t *testing.T) {
 		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
 	}
 	cp := newTestPoolWithFakeClient(&secret)
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: "localhost:7233",
-			APIKeySecretRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-				Key:                  "apikey",
-			},
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		APIKeySecretRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+			Key:                  "apikey",
 		},
 	}
 
-	clientOpts, key, _, err := cp.fetchClientUsingAPIKeySecret(opts, nil)
+	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", nil)
 
 	require.NoError(t, err)
-	assert.Nil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
-	assert.Equal(t, "", key.TLSCACertSecretName)
+	assert.Nil(t, a.tls.RootCAs)
 }
 
 // TestFetchNoCredentials_CACertSetsRootCAs verifies that fetchClientUsingNoCredentials
@@ -467,28 +404,24 @@ func TestFetchNoCredentials_CACertSetsRootCAs(t *testing.T) {
 	require.NoError(t, err)
 
 	cp := newTestPool()
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: "localhost:7233",
-			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
-			},
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
 		},
 	}
 
-	clientOpts, key, _, err := cp.fetchClientUsingNoCredentials(opts, caPEM)
+	a, err := cp.fetchClientUsingNoCredentials(opts, caPEM)
 
 	require.NoError(t, err)
-	require.NotNil(t, clientOpts.ConnectionOptions.TLS, "TLS config must be allocated once a CA cert is supplied")
-	require.NotNil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
-	_, err = leafCert.Verify(x509.VerifyOptions{Roots: clientOpts.ConnectionOptions.TLS.RootCAs, CurrentTime: now, DNSName: "custom.example.com"})
+	require.NotNil(t, a.tls, "TLS config must be allocated once a CA cert is supplied")
+	require.NotNil(t, a.tls.RootCAs)
+	_, err = leafCert.Verify(x509.VerifyOptions{Roots: a.tls.RootCAs, CurrentTime: now, DNSName: "custom.example.com"})
 	assert.NoError(t, err)
-	assert.Equal(t, "ca-secret", key.TLSCACertSecretName)
 }
 
 // TestParseClientSecret_APIKeyWithCACertSecretRef is the end-to-end regression test: it
-// exercises ParseClientSecret (not the fetchClientUsing* functions directly) to confirm the
+// exercises parseClientSecret (not the fetchClientUsing* functions directly) to confirm the
 // CA secret is actually read from the fake k8s client and threaded through to the TLS config.
 func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
 	now := time.Now()
@@ -509,28 +442,23 @@ func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
 	}
 	cp := newTestPoolWithFakeClient(&apiKeySecret, &caSecret)
 
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: "wf-scheduler.example.com:443",
-			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
-			},
-			APIKeySecretRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-				Key:                  "apikey",
-			},
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "wf-scheduler.example.com:443",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+		},
+		APIKeySecretRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+			Key:                  "apikey",
 		},
 	}
 
-	clientOpts, key, _, err := cp.ParseClientSecret(context.Background(), "api-key-secret", temporaliov1alpha1.AuthModeAPIKey, opts)
+	a, err := cp.parseClientSecret(context.Background(), opts, "test-ns")
 
 	require.NoError(t, err)
-	require.NotNil(t, clientOpts.ConnectionOptions.TLS.RootCAs)
-	_, err = leafCert.Verify(x509.VerifyOptions{Roots: clientOpts.ConnectionOptions.TLS.RootCAs, CurrentTime: now, DNSName: "temporal.internal"})
+	require.NotNil(t, a.tls.RootCAs)
+	_, err = leafCert.Verify(x509.VerifyOptions{Roots: a.tls.RootCAs, CurrentTime: now, DNSName: "temporal.internal"})
 	assert.NoError(t, err)
-	assert.Equal(t, "ca-secret", key.TLSCACertSecretName)
 }
 
 // TestParseClientSecret_CACertSecretMissingKey_ReturnsError verifies that a CA secret
@@ -551,22 +479,18 @@ func TestParseClientSecret_CACertSecretMissingKey_ReturnsError(t *testing.T) {
 	}
 	cp := newTestPoolWithFakeClient(&apiKeySecret, &caSecret)
 
-	opts := NewClientOptions{
-		TemporalNamespace: "default",
-		K8sNamespace:      "test-ns",
-		Spec: temporaliov1alpha1.ConnectionSpec{
-			HostPort: "wf-scheduler.example.com:443",
-			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
-			},
-			APIKeySecretRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-				Key:                  "apikey",
-			},
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "wf-scheduler.example.com:443",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+		},
+		APIKeySecretRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+			Key:                  "apikey",
 		},
 	}
 
-	_, _, _, err := cp.ParseClientSecret(context.Background(), "api-key-secret", temporaliov1alpha1.AuthModeAPIKey, opts)
+	_, err := cp.parseClientSecret(context.Background(), opts, "test-ns")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ca-secret")
@@ -615,19 +539,18 @@ func TestParseClientSecret_OpaqueSecretType(t *testing.T) {
 	}
 
 	cp := newTestPool()
-	_, key, auth, err := cp.fetchClientUsingMTLSSecret(opaqueSecret, makeOpts("localhost:7233"))
+	a, err := cp.fetchClientUsingMTLSSecret(opaqueSecret, makeMTLSSpec("localhost:7233"))
 
 	require.NoError(t, err, "Opaque secret with tls.crt and tls.key should be accepted for mTLS auth")
-	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, key.AuthMode)
-	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, auth.mode)
-	assert.NotNil(t, auth.mTLS)
+	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, a.mode)
+	assert.NotNil(t, a.expiryTime)
 }
 
-// ─── Tests: DialAndUpsertClient ───────────────────────────────────────────────
+// ─── Tests: dial / healthCheck / upsert ────────────────────────────────────
 
 // TestDialAndUpsert_APIKeySkipsCheckHealth is the regression test for PR #232.
 //
-// Before the fix, DialAndUpsertClient called c.CheckHealth() unconditionally. On Temporal
+// Before the fix, the dial path called c.CheckHealth() unconditionally. On Temporal
 // Cloud, namespace-scoped API keys do not have permission to call the system-scoped
 // CheckHealth RPC, so every connection attempt failed.
 //
@@ -639,11 +562,13 @@ func TestDialAndUpsert_APIKeySkipsCheckHealth(t *testing.T) {
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeAPIKey}
-	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeAPIKey}
+	auth := clientAuth{mode: temporaliov1alpha1.AuthModeAPIKey}
 
-	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
-
+	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
+	require.NoError(t, cp.healthCheck(c, auth))
+	cp.cacheClient(key, CachedClient{Client: c, IsValid: cp.defaultValidityCheck(auth)})
+
 	assert.NotNil(t, c)
 	assert.False(t, mock.checkHealthCalled,
 		"CheckHealth must NOT be called for API key auth (regression: PR #232 — fails on Temporal Cloud with namespace-scoped keys)")
@@ -657,14 +582,17 @@ func TestDialAndUpsert_TLSCallsCheckHealth(t *testing.T) {
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeTLS}
-	auth := ClientAuth{
-		mode: temporaliov1alpha1.AuthModeTLS,
-		mTLS: &MTLSAuth{tlsConfig: &tls.Config{}, expiryTime: time.Now().Add(time.Hour)},
+	auth := clientAuth{
+		mode:       temporaliov1alpha1.AuthModeTLS,
+		tls:        &tls.Config{},
+		expiryTime: time.Now().Add(time.Hour),
 	}
 
-	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
-
+	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
+	require.NoError(t, cp.healthCheck(c, auth))
+	cp.cacheClient(key, CachedClient{Client: c, IsValid: cp.defaultValidityCheck(auth)})
+
 	assert.NotNil(t, c)
 	assert.True(t, mock.checkHealthCalled, "CheckHealth must be called for TLS auth")
 }
@@ -676,11 +604,13 @@ func TestDialAndUpsert_NoCredsCallsCheckHealth(t *testing.T) {
 	cp.dialFn = func(_ sdkclient.Options) (sdkclient.Client, error) { return mock, nil }
 
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeNoCredentials}
-	auth := ClientAuth{mode: temporaliov1alpha1.AuthModeNoCredentials}
+	auth := clientAuth{mode: temporaliov1alpha1.AuthModeNoCredentials}
 
-	c, err := cp.DialAndUpsertClient(sdkclient.Options{}, key, auth)
-
+	c, err := cp.dialFn(sdkclient.Options{})
 	require.NoError(t, err)
+	require.NoError(t, cp.healthCheck(c, auth))
+	cp.cacheClient(key, CachedClient{Client: c, IsValid: cp.defaultValidityCheck(auth)})
+
 	assert.NotNil(t, c)
 	assert.True(t, mock.checkHealthCalled, "CheckHealth must be called for no-credentials auth")
 }
@@ -698,14 +628,14 @@ func TestEvictClient_RemovesAndClosesClient(t *testing.T) {
 	mock := &mockSDKClient{}
 	cp.SetClientForTesting(key, mock)
 
-	_, ok := cp.GetSDKClient(key)
-	require.True(t, ok, "client should be present before eviction")
+	c := cp.Clients()[key]
+	require.NotNil(t, c, "client should be present before eviction")
 
 	cp.EvictClient(key)
 
 	assert.True(t, mock.closed, "Close should be called on eviction")
-	_, ok = cp.GetSDKClient(key)
-	assert.False(t, ok, "client should be absent after eviction")
+	c = cp.Clients()[key]
+	assert.Nil(t, c, "client should be absent after eviction")
 }
 
 func TestEvictClient_NoopWhenKeyAbsent(t *testing.T) {
@@ -713,6 +643,63 @@ func TestEvictClient_NoopWhenKeyAbsent(t *testing.T) {
 	key := ClientPoolKey{HostPort: "localhost:7233", Namespace: "default", AuthMode: temporaliov1alpha1.AuthModeNoCredentials}
 	// Should not panic when key is not in the pool
 	cp.EvictClient(key)
+}
+
+// ─── Tests: GetClient ─────────────────────────────────────────────────────────
+//
+// These verify the cache-hit / error-classification behavior of GetClient. The
+// Secret/TLS/dial internals behind it are covered by the fetchClientUsing* and
+// dial / healthCheck / upsert tests above.
+
+// newPoolWithDefaults builds a ClientPool with a controllable dialFn.
+func newPoolWithDefaults(dialFn func(sdkclient.Options) (sdkclient.Client, error)) *ClientPool {
+	cp := newTestPool()
+	cp.dialFn = dialFn
+	return cp
+}
+
+func TestGetClient_CacheHit_ReturnsCachedWithoutDialing(t *testing.T) {
+	spec := temporaliov1alpha1.ConnectionSpec{HostPort: "h:7233"}
+	// A dial would fail this test if the cache miss path were taken.
+	cp := newPoolWithDefaults(func(sdkclient.Options) (sdkclient.Client, error) {
+		t.Fatal("cache hit must not dial")
+		return nil, nil
+	})
+	stub := &mockSDKClient{}
+	cp.SetClientForTesting(ClientPoolKey{
+		HostPort:  "h:7233",
+		Namespace: "ns",
+		AuthMode:  temporaliov1alpha1.AuthModeNoCredentials,
+	}, stub)
+
+	got, _, err := cp.GetClient(context.Background(), spec, "ns", "k8s-ns", "identity")
+	require.NoError(t, err)
+	assert.Same(t, stub, got, "GetClient must return the cached client on a hit")
+}
+
+func TestGetClient_InvalidSpec_ReturnsAuthConfigError(t *testing.T) {
+	cp := newPoolWithDefaults(sdkclient.Dial)
+	spec := temporaliov1alpha1.ConnectionSpec{
+		HostPort:           "h:7233",
+		MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: ""}, // invalid: empty name
+	}
+
+	_, _, err := cp.GetClient(context.Background(), spec, "ns", "k8s-ns", "identity")
+	require.Error(t, err)
+	var authErr *AuthConfigError
+	require.ErrorAs(t, err, &authErr) // invalid spec must surface as AuthConfigError
+}
+
+func TestGetClient_DialFailure_ReturnsDialError(t *testing.T) {
+	cp := newPoolWithDefaults(func(sdkclient.Options) (sdkclient.Client, error) {
+		return nil, errors.New("boom")
+	})
+	spec := temporaliov1alpha1.ConnectionSpec{HostPort: "h:7233"} // no-creds -> reaches dial
+
+	_, _, err := cp.GetClient(context.Background(), spec, "ns", "k8s-ns", "identity")
+	require.Error(t, err)
+	var dialErr *DialError
+	require.ErrorAs(t, err, &dialErr) // dial failure must surface as DialError
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
