@@ -596,6 +596,31 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 	assert.Equal(t, "build123", deployment.Labels[k8s.BuildIDLabel])
 }
 
+func TestNewDeploymentWithOwnerRef_DeploymentLabels(t *testing.T) {
+	deployment := k8s.NewDeploymentWithOwnerRef(
+		&metav1.TypeMeta{},
+		&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+		&temporaliov1alpha1.WorkerDeploymentSpec{
+			DeploymentLabels: map[string]string{
+				"team":           "payments",
+				k8s.BuildIDLabel: "user-supplied",
+			},
+		},
+		"test-deployment",
+		"build123",
+		temporaliov1alpha1.ConnectionSpec{},
+	)
+
+	assert.Equal(t, "payments", deployment.Labels["team"])
+	assert.Equal(t, "build123", deployment.Labels[k8s.BuildIDLabel], "selector labels must win over user labels")
+	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
+	assert.NotContains(t, deployment.Spec.Template.Labels, "team", "deployment labels must not leak into pod labels")
+	assert.Equal(t, map[string]string{
+		k8s.WorkerDeploymentNameLabel: "test-worker",
+		k8s.BuildIDLabel:              "build123",
+	}, deployment.Spec.Selector.MatchLabels)
+}
+
 func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {
 	defaultMaxUnavailable := intstr.FromString(defaults.DeploymentMaxUnavailable)
 	defaultMaxSurge := intstr.FromString(defaults.DeploymentMaxSurge)
