@@ -767,33 +767,34 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		metav1.ConditionTrue, temporaliov1alpha1.ReasonConnectionHealthy, //nolint:staticcheck // backward compat
 		"Connection is healthy and auth secret is resolved")
 
+	// A blocked spec owns Ready, Progressing and the kstatus conditions, so the rollout
+	// state below must not flip them back and forth every reconcile. InvalidSpec is in
+	// stalledReasons: only a spec change can clear it.
 	if blockedReason != "" {
-		// A blocked spec is settled by the spec the user applied, as InvalidSpec is in
-		// stalledReasons. It owns Progressing, Stalled and Reconciling, so the rollout
-		// state below must not flip them back and forth every reconcile.
-		if r.setCondition(twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason) {
+		readyChanged := r.setCondition(twd, temporaliov1alpha1.ConditionReady,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
+		progressingChanged := r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
+		r.setCondition(twd, temporaliov1alpha1.ConditionStalled,
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
+		if readyChanged || progressingChanged {
 			r.Recorder.Event(twd, corev1.EventTypeWarning, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
 		}
-		r.setCondition(twd, temporaliov1alpha1.ConditionStalled, metav1.ConditionTrue, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
-		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling, metav1.ConditionFalse, temporaliov1alpha1.ReasonInvalidSpec, blockedReason)
-	} else {
-		// Otherwise the reconcile completed without a blocking error, so nothing is
-		// stalled whatever stage the rollout is at. Set above the switch rather than in
-		// each arm for the same reason ConnectionHealthy is: the value does not vary by
-		// rollout state, and repeating it per arm invites one arm to drift.
-		//
-		// SetStatusCondition only upserts, so a Stalled=True from an earlier blocked
-		// reconcile stays until something sets it False.
-		r.setCondition(twd, temporaliov1alpha1.ConditionStalled,
-			metav1.ConditionFalse, temporaliov1alpha1.ReasonReconcileSucceeded,
-			"Reconcile succeeded")
+		return
 	}
-	setProgress := func(status metav1.ConditionStatus, reason, message string) {
-		if blockedReason == "" {
-			r.setCondition(twd, temporaliov1alpha1.ConditionProgressing, status, reason, message)
-			r.setCondition(twd, temporaliov1alpha1.ConditionReconciling, status, reason, message)
-		}
-	}
+
+	// Reaching this point means the reconcile completed without a blocking error,
+	// so nothing is stalled whatever stage the rollout is at. Set above the switch
+	// rather than in each arm for the same reason ConnectionHealthy is: the value does
+	// not vary by rollout state, and repeating it per arm invites one arm to drift.
+	//
+	// SetStatusCondition only upserts, so a Stalled=True from an earlier blocked reconcile
+	// stays until something sets it False.
+	r.setCondition(twd, temporaliov1alpha1.ConditionStalled,
+		metav1.ConditionFalse, temporaliov1alpha1.ReasonReconcileSucceeded,
+		"Reconcile succeeded")
 
 	switch twd.Status.TargetVersion.Status {
 	case temporaliov1alpha1.VersionStatusCurrent:
@@ -805,13 +806,14 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Rollout complete for buildID %s", twd.Status.TargetVersion.BuildID))
 
-		setProgress(
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
+			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonRolloutComplete,
 			fmt.Sprintf("Target version %s is current", twd.Status.TargetVersion.BuildID))
 
-		if blockedReason == "" {
-			r.setConditionProgressingForCurrent(twd, temporalState)
-		}
+		r.setConditionProgressingForCurrent(twd, temporalState)
 
 		// Deprecated: set RolloutComplete=True for v1.3.x compat. This deliberately
 		// mirrors rollout completion only, not poller presence, matching its
@@ -824,7 +826,10 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping,
 			fmt.Sprintf("Target version %s is ramping", twd.Status.TargetVersion.BuildID))
-		setProgress(
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping,
+			fmt.Sprintf("Target version %s is receiving a percentage of new workflows", twd.Status.TargetVersion.BuildID))
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping,
 			fmt.Sprintf("Target version %s is receiving a percentage of new workflows", twd.Status.TargetVersion.BuildID))
 	case temporaliov1alpha1.VersionStatusInactive:
@@ -833,20 +838,29 @@ func (r *WorkerDeploymentReconciler) syncConditions(
 				twd.Status.TargetVersion.BuildID, strings.Join(pending, ", "))
 			r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 				metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers, msg)
-			setProgress(metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers, msg)
+			r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+				metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers, msg)
+			r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
+				metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers, msg)
 			break
 		}
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion,
 			fmt.Sprintf("Target version %s is registered but not yet promoted", twd.Status.TargetVersion.BuildID))
-		setProgress(
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion,
+			fmt.Sprintf("Target version %s is waiting for promotion to current", twd.Status.TargetVersion.BuildID))
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion,
 			fmt.Sprintf("Target version %s is waiting for promotion to current", twd.Status.TargetVersion.BuildID))
 	default: // NotRegistered or unset: workers have not started polling yet
 		r.setCondition(twd, temporaliov1alpha1.ConditionReady,
 			metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers,
 			fmt.Sprintf("Target version %s is not yet registered with Temporal", twd.Status.TargetVersion.BuildID))
-		setProgress(
+		r.setCondition(twd, temporaliov1alpha1.ConditionProgressing,
+			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers,
+			fmt.Sprintf("Waiting for workers with buildID %s to start polling", twd.Status.TargetVersion.BuildID))
+		r.setCondition(twd, temporaliov1alpha1.ConditionReconciling,
 			metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers,
 			fmt.Sprintf("Waiting for workers with buildID %s to start polling", twd.Status.TargetVersion.BuildID))
 	}

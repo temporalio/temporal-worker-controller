@@ -145,7 +145,7 @@ Without `unsafeCustomBuildID`, any change to the set of pools or their pod templ
 With `unsafeCustomBuildID` set and unchanged:
 
 - Changing a pool's pod template rolls that pool's Deployment in place.
-- Adding a pool creates its Deployment in the existing version. The exception is a version created before it had pools: the controller refuses, sets `Progressing=False` with reason `InvalidSpec`, and keeps reconciling everything else. Change `unsafeCustomBuildID` to roll the pools out as a new version.
+- Adding a pool creates its Deployment in the existing version. The exception is a version created before it had pools: the controller refuses, sets `Ready` and `Progressing` to `False` with reason `InvalidSpec`, and keeps reconciling everything else. Change `unsafeCustomBuildID` to roll the pools out as a new version.
 - Removing a pool deletes its Deployment from that version. The version itself stays.
 
 ## Limits
