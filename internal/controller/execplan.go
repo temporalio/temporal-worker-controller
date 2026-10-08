@@ -584,6 +584,21 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	for key := range deletedBuildIDs {
 		statusKeys[key] = struct{}{}
 	}
+	// WRTs with a missing or recovered pool get no applies, so nothing else rewrites their Ready condition.
+	missingPool := make(map[wrtKey]bool, len(p.WRTsWithMissingPool))
+	for _, name := range p.WRTsWithMissingPool {
+		missingPool[wrtKey{workerDeploy.Namespace, name}] = true
+	}
+	stalePool := make(map[wrtKey]bool, len(p.WRTsWithStalePoolNotFound))
+	for _, name := range p.WRTsWithStalePoolNotFound {
+		stalePool[wrtKey{workerDeploy.Namespace, name}] = true
+	}
+	for key := range missingPool {
+		statusKeys[key] = struct{}{}
+	}
+	for key := range stalePool {
+		statusKeys[key] = struct{}{}
+	}
 
 	var applyErrs, statusErrs []error
 	for key := range statusKeys {
@@ -592,7 +607,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 
 		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
-			statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
+			if client.IgnoreNotFound(err) != nil {
+				statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
+			}
 			continue
 		}
 
@@ -603,7 +620,8 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				break
 			}
 		}
-		if allSkipped && len(deleted) == 0 {
+		onlyPoolCheck := allSkipped && len(deleted) == 0
+		if onlyPoolCheck && !missingPool[key] && !stalePool[key] {
 			// Every apply was a no-op and nothing was deleted, so the per-Build-ID
 			// status and conditions are already correct. The one thing that can still
 			// be stale is status.observedGeneration.
@@ -687,11 +705,16 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		// Compute the top-level Ready condition.
 		// True:  all active Build IDs applied at the current generation (or already current —
 		//        skipped ones carry a non-zero LastAppliedGeneration from their last successful apply).
-		// False: one or more apply calls failed this cycle.
+		// False: one or more apply calls failed this cycle, or the WRT's pool is missing.
 		condStatus := metav1.ConditionTrue
 		condReason := temporaliov1alpha1.ReasonWRTAllVersionsApplied
 		condMessage := ""
-		if anyFailed {
+		switch {
+		case missingPool[key]:
+			condStatus = metav1.ConditionFalse
+			condReason = temporaliov1alpha1.ReasonWRTPoolNotFound
+			condMessage = fmt.Sprintf("WorkerDeployment %q has no pool %q", workerDeploy.Name, wrt.Spec.Pool)
+		case anyFailed:
 			condStatus = metav1.ConditionFalse
 			condReason = temporaliov1alpha1.ReasonWRTApplyFailed
 			// Use the first apply error as the condition message; full per-version details
@@ -703,13 +726,18 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				}
 			}
 		}
-		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionReady,
-			Status:             condStatus,
-			Reason:             condReason,
-			Message:            condMessage,
-			ObservedGeneration: wrt.Generation,
-		})
+		var condChanged bool
+		if stalePool[key] && len(results) == 0 {
+			condChanged = apimeta.RemoveStatusCondition(&wrt.Status.Conditions, temporaliov1alpha1.ConditionReady)
+		} else {
+			condChanged = apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+				Type:               temporaliov1alpha1.ConditionReady,
+				Status:             condStatus,
+				Reason:             condReason,
+				Message:            condMessage,
+				ObservedGeneration: wrt.Generation,
+			})
+		}
 
 		// Translate the same outcome into the kstatus abnormal-true conditions, so
 		// Argo Rollouts and Helm --wait can tell a template that will never apply from
@@ -721,32 +749,45 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		// carrying both as True would get a verdict decided by insertion order.
 		// Writing the inactive one as False rather than removing it keeps every
 		// condition this controller owns present on every object.
+		//
+		// A missing pool is Reconciling, not Stalled, for the same reason a missing
+		// WorkerDeployment is: the pool may be added to the WorkerDeployment later.
 		stalledStatus, reconcilingStatus := metav1.ConditionFalse, metav1.ConditionFalse
 		switch {
 		case anyTerminal:
 			stalledStatus = metav1.ConditionTrue
-		case anyFailed:
+		case anyFailed, missingPool[key]:
 			reconcilingStatus = metav1.ConditionTrue
 		}
-		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+		if apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
 			Type:               temporaliov1alpha1.ConditionStalled,
 			Status:             stalledStatus,
 			Reason:             condReason,
 			Message:            condMessage,
 			ObservedGeneration: wrt.Generation,
-		})
-		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+		}) {
+			condChanged = true
+		}
+		if apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
 			Type:               temporaliov1alpha1.ConditionReconciling,
 			Status:             reconcilingStatus,
 			Reason:             condReason,
 			Message:            condMessage,
 			ObservedGeneration: wrt.Generation,
-		})
+		}) {
+			condChanged = true
+		}
 
 		// Record that this generation was processed, whatever the outcome. kstatus
 		// checks this before it looks at any condition, so leaving it behind would
 		// mask both of the conditions set above.
-		wrt.Status.ObservedGeneration = wrt.Generation
+		if wrt.Status.ObservedGeneration != wrt.Generation {
+			wrt.Status.ObservedGeneration = wrt.Generation
+			condChanged = true
+		}
+		if onlyPoolCheck && !condChanged {
+			continue
+		}
 
 		// Sort the versions by BuildID for deterministic status output.
 		slices.SortFunc(versions, func(a, b temporaliov1alpha1.WorkerResourceTemplateVersionStatus) int {
@@ -1001,43 +1042,7 @@ func (r *WorkerDeploymentReconciler) executePlan(
 
 	r.ensureWRTOwnerRefs(ctx, l, p)
 
-	if err := r.executeWRTOperations(
+	return r.executeWRTOperations(
 		ctx, l, workerDeploy, temporalClient, p, deletedWorkerResources,
-	); err != nil {
-		return err
-	}
-	return r.markWRTsPoolNotFound(ctx, l, workerDeploy, p.WRTsWithMissingPool)
-}
-
-// markWRTsPoolNotFound sets Ready=False on WRTs whose pool no version has and the spec
-// does not declare. They get no applies or deletes, so nothing else writes their status.
-func (r *WorkerDeploymentReconciler) markWRTsPoolNotFound(
-	ctx context.Context,
-	l logr.Logger,
-	workerDeploy *temporaliov1alpha1.WorkerDeployment,
-	names []string,
-) error {
-	var errs []error
-	for _, name := range names {
-		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: workerDeploy.Namespace, Name: name}, wrt); err != nil {
-			errs = append(errs, fmt.Errorf("get WRT %s/%s for status update: %w", workerDeploy.Namespace, name, err))
-			continue
-		}
-		changed := apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionReady,
-			Status:             metav1.ConditionFalse,
-			Reason:             temporaliov1alpha1.ReasonWRTPoolNotFound,
-			Message:            fmt.Sprintf("WorkerDeployment %q has no pool %q", workerDeploy.Name, wrt.Spec.Pool),
-			ObservedGeneration: wrt.Generation,
-		})
-		if !changed {
-			continue
-		}
-		if err := r.Status().Update(ctx, wrt); err != nil {
-			l.Error(err, "unable to update WorkerResourceTemplate status for missing pool", "WorkerResourceTemplate", name)
-			errs = append(errs, fmt.Errorf("update status for WorkerResourceTemplate %s/%s: %w", workerDeploy.Namespace, name, err))
-		}
-	}
-	return errors.Join(errs...)
+	)
 }

@@ -521,17 +521,22 @@ func TestGetDeleteWorkerResources_Pools(t *testing.T) {
 	})
 }
 
-func TestGetWRTsWithMissingPool(t *testing.T) {
+func TestGetWRTPoolProblems(t *testing.T) {
 	state := poolState(labelledPoolDeployment("old", "", 1), labelledPoolDeployment("old", "retired", 1))
 	spec := pooledSpec(t, "worker:v1", nil, "activities")
+	recovered := poolWRT("recovered-hpa", "activities", createTestWRT)
+	recovered.Status.Conditions = []metav1.Condition{{Type: temporaliov1alpha1.ConditionReady, Reason: temporaliov1alpha1.ReasonWRTPoolNotFound}}
 	wrts := []temporaliov1alpha1.WorkerResourceTemplate{
 		poolWRT("default-hpa", "", createTestWRT),
 		poolWRT("activities-hpa", "activities", createTestWRT),
 		poolWRT("retired-hpa", "retired", createTestWRT),
 		poolWRT("ghost-hpa", "ghost", createTestWRT),
+		recovered,
 	}
 
-	assert.Equal(t, []string{"ghost-hpa"}, getWRTsWithMissingPool(wrts, state, spec))
+	missing, stale := getWRTPoolProblems(wrts, state, spec)
+	assert.Equal(t, []string{"ghost-hpa"}, missing)
+	assert.Equal(t, []string{"recovered-hpa"}, stale)
 }
 
 func TestCheckAndUpdatePoolPodTemplateSpec_SettlesAfterOneUpdate(t *testing.T) {

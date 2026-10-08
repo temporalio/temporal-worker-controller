@@ -14,11 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/internal/temporal"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	kstatus "sigs.k8s.io/cli-utils/pkg/kstatus/status"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -183,6 +185,8 @@ func TestExecutePlan_WRTWithMissingPool_SetsPoolNotFound(t *testing.T) {
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	assert.Equal(t, temporaliov1alpha1.ReasonWRTPoolNotFound, cond.Reason)
 	assert.Contains(t, cond.Message, `"ghost"`)
+	assert.Equal(t, kstatus.InProgressStatus, computeKstatus(t, &got).Status,
+		"the pool may still be added, so kstatus must not report Failed")
 
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: activities.Name}, &got))
 	assert.Nil(t, meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady),
@@ -235,4 +239,52 @@ func TestSyncConditions_BlockedSpecIsNotReady(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExecutePlan_PoolNotFound_SetDespiteOtherApplyFailure(t *testing.T) {
+	const namespace = "default"
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makePooledWD("my-worker", namespace)
+	buildID := k8s.ComputeBuildID(twd)
+	def := makeVersionedDeployment(twd, buildID, 1, connection)
+	ghost := makeExecplanWRT("ghost-hpa", twd)
+	ghost.Spec.Pool = "ghost"
+	broken := makeExecplanWRT("broken", twd)
+	broken.Spec.Template.Raw = []byte(`{"apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler", "spec": "not an object"}`)
+	r, _ := newTestReconciler([]client.Object{twd, def, ghost, broken})
+
+	w := twd.DeepCopy()
+	w.Status = statusWithDeprecated(buildID, def)
+	p, err := r.generatePlan(context.Background(), logr.Discard(), w, connection, &temporal.TemporalWorkerState{})
+	require.NoError(t, err)
+	require.Error(t, r.executePlan(context.Background(), logr.Discard(), w, newStubTemporalClient(nil), p), "the broken WRT fails")
+
+	var got temporaliov1alpha1.WorkerResourceTemplate
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: ghost.Name}, &got))
+	cond := meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, cond)
+	assert.Equal(t, temporaliov1alpha1.ReasonWRTPoolNotFound, cond.Reason)
+}
+
+func TestExecutePlan_PoolNotFound_ClearedOnceThePoolIsDeclared(t *testing.T) {
+	const namespace = "default"
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makePooledWD("my-worker", namespace, "activities")
+	wrt := makeExecplanWRT("activities-hpa", twd)
+	wrt.Spec.Pool = "activities"
+	wrt.Status.Conditions = []metav1.Condition{{
+		Type: temporaliov1alpha1.ConditionReady, Status: metav1.ConditionFalse,
+		Reason: temporaliov1alpha1.ReasonWRTPoolNotFound, LastTransitionTime: metav1.Now(),
+	}}
+	r, _ := newTestReconciler([]client.Object{twd, wrt})
+	require.NoError(t, r.Status().Update(context.Background(), wrt))
+
+	// The version cap holds back the new version, so the declared pool has no Deployment yet.
+	r.MaxDeploymentVersionsIneligibleForDeletion = 0
+	runPlanCycle(t, r, twd, connection, temporaliov1alpha1.WorkerDeploymentStatus{})
+
+	var got temporaliov1alpha1.WorkerResourceTemplate
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, &got))
+	assert.Nil(t, meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady),
+		"a stale PoolNotFound must not outlive the missing pool")
 }

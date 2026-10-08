@@ -19,6 +19,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -83,6 +84,9 @@ type Plan struct {
 	// WRTsWithMissingPool names the WRTs whose pool no version has and the spec does
 	// not declare.
 	WRTsWithMissingPool []string
+	// WRTsWithStalePoolNotFound names the WRTs still marked PoolNotFound whose pool is
+	// known again.
+	WRTsWithStalePoolNotFound []string
 }
 
 // WorkerResourceRef identifies a single rendered WRT resource copy to delete.
@@ -214,7 +218,7 @@ func GeneratePlan(
 	)
 	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, deletingDeployments, k8sState, sunsetBuildIDs)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
-	plan.WRTsWithMissingPool = getWRTsWithMissingPool(wrts, k8sState, spec)
+	plan.WRTsWithMissingPool, plan.WRTsWithStalePoolNotFound = getWRTPoolProblems(wrts, k8sState, spec)
 
 	return plan, nil
 }
@@ -463,13 +467,13 @@ func getDeleteWorkerResources(
 	return refs
 }
 
-// getWRTsWithMissingPool returns the names of WRTs whose pool no version has and the
-// spec does not declare.
-func getWRTsWithMissingPool(
+// getWRTPoolProblems returns the names of WRTs whose pool no version has and the spec
+// does not declare, and of WRTs still marked PoolNotFound whose pool is known again.
+func getWRTPoolProblems(
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	k8sState *k8s.DeploymentState,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-) []string {
+) (missing, stale []string) {
 	known := make(map[string]bool)
 	for _, pool := range spec.PoolNames() {
 		known[pool] = true
@@ -479,13 +483,16 @@ func getWRTsWithMissingPool(
 			known[pool] = true
 		}
 	}
-	var missing []string
 	for i := range wrts {
-		if !known[wrts[i].Spec.EffectivePool()] {
-			missing = append(missing, wrts[i].Name)
+		wrt := &wrts[i]
+		if !known[wrt.Spec.EffectivePool()] {
+			missing = append(missing, wrt.Name)
+		} else if cond := apimeta.FindStatusCondition(wrt.Status.Conditions, temporaliov1alpha1.ConditionReady); cond != nil &&
+			cond.Reason == temporaliov1alpha1.ReasonWRTPoolNotFound {
+			stale = append(stale, wrt.Name)
 		}
 	}
-	return missing
+	return missing, stale
 }
 
 // checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
