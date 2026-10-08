@@ -69,7 +69,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusNotRegistered
-				r.syncConditions(wd, nil)
+				r.syncConditions(wd, nil, "")
 				return wd
 			},
 			today:   kstatus.InProgressStatus,
@@ -83,7 +83,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
-				r.syncConditions(wd, nil)
+				r.syncConditions(wd, nil, "")
 				return wd
 			},
 			today:   kstatus.InProgressStatus,
@@ -97,7 +97,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
-				r.syncConditions(wd, nil)
+				r.syncConditions(wd, nil, "")
 				return wd
 			},
 			today:   kstatus.InProgressStatus,
@@ -112,7 +112,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd := makeWD("wd", "default", "conn")
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-				r.syncConditions(wd, nil)
+				r.syncConditions(wd, nil, "")
 				return wd
 			},
 			today:   kstatus.CurrentStatus,
@@ -212,7 +212,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				// The user creates the Connection; the next reconcile succeeds.
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-				r.syncConditions(wd, nil)
+				r.syncConditions(wd, nil, "")
 				return wd
 			},
 			today:   kstatus.CurrentStatus,
@@ -231,7 +231,7 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 				wd.Finalizers = []string{finalizerName}
 				wd.Status.ObservedGeneration = wd.Generation
 				wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-				r.syncConditions(wd, nil)
+				r.syncConditions(wd, nil, "")
 				return wd
 			},
 			today:   kstatus.TerminatingStatus,
@@ -263,6 +263,19 @@ func TestKstatusBaseline_WorkerDeployment(t *testing.T) {
 // from the verdict: reaching InProgress via Reconciling=True and via the Ready=False
 // fallback produce a byte-identical kstatus.Result, so the assertion has to be made
 // against the object's own conditions.
+func TestKstatus_BlockedSpecFailsUntilFixed(t *testing.T) {
+	r, _ := newTestReconciler(nil)
+	wd := makeWD("wd", "default", "conn")
+	wd.Status.ObservedGeneration = wd.Generation
+	wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
+
+	r.syncConditions(wd, nil, "adding or removing spec.pools requires a new unsafeCustomBuildID")
+	assert.Equal(t, kstatus.FailedStatus, computeKstatus(t, wd).Status, "only a spec change can unblock it")
+
+	r.syncConditions(wd, nil, "")
+	assert.Equal(t, kstatus.CurrentStatus, computeKstatus(t, wd).Status)
+}
+
 func TestConditionsAreKstatusCompatible(t *testing.T) {
 	ctx := context.Background()
 
@@ -281,7 +294,7 @@ func TestConditionsAreKstatusCompatible(t *testing.T) {
 			wd := makeWD("wd", "default", "conn")
 			wd.Status.ObservedGeneration = wd.Generation
 			wd.Status.TargetVersion.Status = st
-			r.syncConditions(wd, nil)
+			r.syncConditions(wd, nil, "")
 
 			assert.False(t, isTrue(wd, temporaliov1alpha1.ConditionStalled),
 				"a successful reconcile must never leave Stalled=True")
@@ -343,7 +356,7 @@ func TestConditionsAreKstatusCompatible(t *testing.T) {
 		// The user fixes the spec; the next reconcile succeeds and completes.
 		wd.Status.ObservedGeneration = wd.Generation
 		wd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusCurrent
-		r.syncConditions(wd, nil)
+		r.syncConditions(wd, nil, "")
 
 		// Both are set to False rather than removed, matching how every other
 		// condition syncConditions writes is handled. kstatus only ever tests for

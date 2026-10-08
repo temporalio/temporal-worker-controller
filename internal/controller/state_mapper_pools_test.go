@@ -175,3 +175,34 @@ func TestMapTargetVersion_MultiPoolHealth(t *testing.T) {
 		})
 	}
 }
+
+func TestMapTargetVersion_PoolHealthMatchesVersionHealth(t *testing.T) {
+	available := metav1.NewTime(time.Now().Add(-time.Hour))
+	def := mapperPoolDeployment("v1", "", &available, 1)
+	def.Status.AvailableReplicas = 1
+	def.Labels[k8s.PoolLabel] = temporaliov1alpha1.DefaultPoolName
+	idle := mapperPoolDeployment("v1", "activities", &available, 0)
+	temporalState := &temporal.TemporalWorkerState{Versions: map[string]*temporal.VersionInfo{}}
+
+	for name, tc := range map[string]struct {
+		replicas    *int32
+		wantHealthy bool
+	}{
+		"available with no replicas": {},
+		"scaled to zero on purpose":  {replicas: ptr(int32(0)), wantHealthy: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mapper := newStateMapper(mapperPoolState(def, idle), temporalState, "ns/worker")
+			mapper.targetSpec = &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment: &appsv1.DeploymentSpec{},
+				Pools:      []temporaliov1alpha1.WorkerPool{{Name: "activities", Deployment: appsv1.DeploymentSpec{Replicas: tc.replicas}}},
+			}
+
+			target := mapper.mapTargetWorkerDeploymentVersionByBuildID("v1")
+			require.Len(t, target.Pools, 2)
+			assert.Equal(t, "activities", target.Pools[0].Name)
+			assert.Equal(t, tc.wantHealthy, target.Pools[0].HealthySince != nil)
+			assert.Equal(t, tc.wantHealthy, target.HealthySince != nil)
+		})
+	}
+}

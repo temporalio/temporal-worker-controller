@@ -131,7 +131,7 @@ func TestSyncConditions_MultiPoolTargetWaitingForPools(t *testing.T) {
 		{Name: temporaliov1alpha1.DefaultPoolName, Deployment: &corev1.ObjectReference{Name: "d"}, HealthySince: &metav1.Time{Time: time.Now()}},
 	}
 
-	r.syncConditions(twd, nil)
+	r.syncConditions(twd, nil, "")
 
 	cond := meta.FindStatusCondition(twd.Status.Conditions, temporaliov1alpha1.ConditionProgressing)
 	require.NotNil(t, cond)
@@ -187,4 +187,33 @@ func TestExecutePlan_WRTWithMissingPool_SetsPoolNotFound(t *testing.T) {
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: activities.Name}, &got))
 	assert.Nil(t, meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady),
 		"a declared pool without a Deployment yet is not missing")
+}
+
+func TestReconcile_BlockedPools_StatusAndEventsSettle(t *testing.T) {
+	const namespace = "default"
+	tc := makeNoCredsConnection("my-conn", namespace, "localhost:7233")
+	twd := makePooledWD("my-worker", namespace, "activities")
+	twd.Spec.WorkerOptions.ConnectionRef.Name = tc.Name
+	twd.Spec.WorkerOptions.UnsafeCustomBuildID = "custom"
+	existing := makeVersionedDeployment(twd, "custom", 1, tc.Spec)
+	writes := 0
+	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc, existing}, countWDStatusWrites(&writes))
+	r.TemporalClientPool.SetClientForTesting(noCredsPoolKey(tc.Spec.HostPort, twd.Spec.WorkerOptions.TemporalNamespace), newStubTemporalClient(nil))
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: twd.Name, Namespace: namespace}}
+
+	for range 3 {
+		_, err := r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		drainEvents(recorder)
+	}
+	writes = 0
+	var events []string
+	for range 3 {
+		_, err := r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		events = append(events, drainEvents(recorder)...)
+	}
+
+	assert.Zero(t, writes, "a blocked WorkerDeployment must not rewrite its status every reconcile")
+	assert.Empty(t, events)
 }

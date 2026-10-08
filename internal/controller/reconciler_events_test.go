@@ -411,7 +411,7 @@ func TestSyncConditions(t *testing.T) {
 				twd.Status.TargetVersion.BuildID: {TaskQueuesWithoutPollers: []string{}},
 			},
 		}
-		r.syncConditions(twd, temporalState)
+		r.syncConditions(twd, temporalState, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonActivePollers)
@@ -428,7 +428,7 @@ func TestSyncConditions(t *testing.T) {
 				twd.Status.TargetVersion.BuildID: {TaskQueuesWithoutPollers: []string{"tq-1"}},
 			},
 		}
-		r.syncConditions(twd, temporalState)
+		r.syncConditions(twd, temporalState, "")
 
 		// Ready stays about rollout completion; poller presence is surfaced on Progressing.
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
@@ -441,7 +441,7 @@ func TestSyncConditions(t *testing.T) {
 		temporalState := &temporal.TemporalWorkerState{
 			Versions: map[string]*temporal.VersionInfo{},
 		}
-		r.syncConditions(twd, temporalState)
+		r.syncConditions(twd, temporalState, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionTrue, temporaliov1alpha1.ReasonRolloutComplete)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionFalse, temporaliov1alpha1.ReasonPollerStatusUnknown)
@@ -450,7 +450,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsRamping", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusRamping
-		r.syncConditions(twd, nil)
+		r.syncConditions(twd, nil, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonRamping)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonRamping)
@@ -461,7 +461,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsInactive", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusInactive
-		r.syncConditions(twd, nil)
+		r.syncConditions(twd, nil, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPromotion)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPromotion)
@@ -472,7 +472,7 @@ func TestSyncConditions(t *testing.T) {
 	t.Run("ProgressingWhenVersionIsNotRegistered", func(t *testing.T) {
 		twd := makeWD("test-worker", "default", "my-connection")
 		twd.Status.TargetVersion.Status = temporaliov1alpha1.VersionStatusNotRegistered
-		r.syncConditions(twd, nil)
+		r.syncConditions(twd, nil, "")
 
 		assertCondition(t, twd, temporaliov1alpha1.ConditionReady, metav1.ConditionFalse, temporaliov1alpha1.ReasonWaitingForPollers)
 		assertCondition(t, twd, temporaliov1alpha1.ConditionProgressing, metav1.ConditionTrue, temporaliov1alpha1.ReasonWaitingForPollers)

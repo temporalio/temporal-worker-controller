@@ -131,7 +131,13 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 
 	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 	if m.targetSpec != nil && m.targetSpec.HasPools() {
-		version.HealthySince = targetPoolsHealthySince(m.targetSpec, m.k8sState.VersionDeployments(buildID))
+		deployments := m.k8sState.VersionDeployments(buildID)
+		version.HealthySince = targetPoolsHealthySince(m.targetSpec, deployments)
+		for i, pool := range version.Pools {
+			if _, inSpec := m.targetSpec.PoolDeploymentSpec(pool.Name); inSpec {
+				version.Pools[i].HealthySince = targetPoolHealthySince(m.targetSpec, pool.Name, deployments[pool.Name])
+			}
+		}
 	}
 
 	// Set version status from temporal state
@@ -238,9 +244,8 @@ func poolStatuses(deployments map[string]*appsv1.Deployment) []v1alpha1.WorkerPo
 	return pools
 }
 
-// targetPoolsHealthySince returns when the last of the spec's pools became available, or
-// nil while any pool is missing, unavailable, or has no available replica. A Deployment
-// is Available at zero replicas, which would pass a pool that never polled.
+// targetPoolsHealthySince returns when the last of the spec's pools became ready, or nil
+// while any pool is missing or not ready.
 func targetPoolsHealthySince(spec *v1alpha1.WorkerDeploymentSpec, deployments map[string]*appsv1.Deployment) *metav1.Time {
 	var latest *metav1.Time
 	for _, pool := range spec.PoolNames() {
@@ -248,13 +253,8 @@ func targetPoolsHealthySince(spec *v1alpha1.WorkerDeploymentSpec, deployments ma
 		if !ok {
 			return nil
 		}
-		healthy, since := k8s.IsDeploymentHealthy(d)
-		if !healthy {
-			return nil
-		}
-		poolSpec, _ := spec.PoolDeploymentSpec(pool)
-		scaledToZero := poolSpec.Replicas != nil && *poolSpec.Replicas == 0
-		if d.Status.AvailableReplicas < 1 && !scaledToZero {
+		since := targetPoolHealthySince(spec, pool, d)
+		if since == nil {
 			return nil
 		}
 		if latest == nil || since.After(latest.Time) {
@@ -262,6 +262,22 @@ func targetPoolsHealthySince(spec *v1alpha1.WorkerDeploymentSpec, deployments ma
 		}
 	}
 	return latest
+}
+
+// targetPoolHealthySince returns when a target pool's deployment became available, or nil
+// while it is unavailable or has no available replica. A Deployment is Available at zero
+// replicas, which would pass a pool that never polled.
+func targetPoolHealthySince(spec *v1alpha1.WorkerDeploymentSpec, pool string, d *appsv1.Deployment) *metav1.Time {
+	healthy, since := k8s.IsDeploymentHealthy(d)
+	if !healthy {
+		return nil
+	}
+	poolSpec, _ := spec.PoolDeploymentSpec(pool)
+	scaledToZero := poolSpec.Replicas != nil && *poolSpec.Replicas == 0
+	if d.Status.AvailableReplicas < 1 && !scaledToZero {
+		return nil
+	}
+	return since
 }
 
 // versionHealthySince returns when the last of the deployments became available, or
