@@ -1,0 +1,23 @@
+# Created after the upgrade to confirm the upgraded webhook still admits
+# valid WorkerDeployments. Same shape as basic-wd.yaml with a different name.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerDeployment
+metadata:
+  name: test-worker-new
+  namespace: temporal-system
+spec:
+  rollout:
+    strategy: AllAtOnce
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 2h
+  template:
+    spec:
+      containers:
+        - name: main
+          image: busybox:latest
+          command: ["sleep", "infinity"]
+  workerOptions:
+    connectionRef:
+      name: test-connection
+    temporalNamespace: default

@@ -1,0 +1,29 @@
+# Must be rejected by the WorkerDeployment validating webhook. Decreasing
+# rampPercentage is enforced only by the webhook (validateRolloutStrategy),
+# not by the CRD schema, so a rejection proves the webhook is serving.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerDeployment
+metadata:
+  name: test-worker-invalid
+  namespace: temporal-system
+spec:
+  rollout:
+    strategy: Progressive
+    steps:
+      - rampPercentage: 50
+        pauseDuration: 1m
+      - rampPercentage: 25
+        pauseDuration: 1m
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 2h
+  template:
+    spec:
+      containers:
+        - name: main
+          image: busybox:latest
+          command: ["sleep", "infinity"]
+  workerOptions:
+    connectionRef:
+      name: test-connection
+    temporalNamespace: default

@@ -1,0 +1,360 @@
+name: E2E Upgrade
+
+# Installs the previously published TWC release from OCI, creates a
+# WorkerDeployment, then upgrades CRDs and controller to this branch's charts
+# and image and verifies nothing broke. Reports only; not a required check.
+
+on:
+  pull_request:
+    paths:
+      - 'helm/**'
+      - 'api/**'
+      - '.github/workflows/e2e-upgrade.yml'
+  push:
+    branches:
+      - 'release/**'
+  workflow_dispatch:
+    inputs:
+      from-version:
+        description: 'Published chart version to upgrade from (default: version in helm/temporal-worker-controller/Chart.yaml)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NAMESPACE: temporal-system
+  CONTROLLER_RELEASE: temporal-worker-controller
+  CRDS_RELEASE: temporal-worker-controller-crds
+  OCI_REPO: oci://docker.io/temporalio
+  # Matches the "Connection not found" errors the controller logs for every
+  # WorkerDeployment, since the test has no Connection or Temporal server.
+  # Applied to raw JSON log lines, where the quote is escaped as \".
+  ALLOWED_ERROR_PATTERN: 'test-connection\\" not found'
+
+jobs:
+  e2e-upgrade:
+    name: e2e-upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2
+        with:
+          cluster_name: twc-e2e
+
+      - name: Resolve previous release version
+        env:
+          FROM_VERSION_INPUT: ${{ inputs.from-version }}
+        run: |
+          FROM_VERSION="${FROM_VERSION_INPUT}"
+          if [ -z "$FROM_VERSION" ]; then
+            # release.yml bumps Chart.yaml and publishes that version, so on
+            # main and release branches it names the latest published chart.
+            FROM_VERSION=$(awk '/^version:/{print $2}' helm/temporal-worker-controller/Chart.yaml)
+          fi
+          echo "Upgrading from chart version ${FROM_VERSION}"
+          helm show chart "${OCI_REPO}/temporal-worker-controller" --version "$FROM_VERSION"
+          helm show chart "${OCI_REPO}/temporal-worker-controller-crds" --version "$FROM_VERSION"
+          echo "FROM_VERSION=${FROM_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Add Helm repos
+        run: helm repo add jetstack https://charts.jetstack.io
+
+      - name: Install cert-manager
+        run: |
+          helm install cert-manager jetstack/cert-manager \
+            --namespace cert-manager \
+            --create-namespace \
+            --set crds.enabled=true \
+            --wait --timeout 2m
+
+      - name: Wait for cert-manager readiness
+        run: |
+          echo "Waiting for cert-manager webhook to be ready..."
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/component=webhook \
+            -n cert-manager --timeout=60s
+          sleep 5
+
+      # --- Previous release ---------------------------------------------------
+
+      - name: Install previous CRDs chart
+        run: |
+          helm install "$CRDS_RELEASE" "${OCI_REPO}/temporal-worker-controller-crds" \
+            --version "$FROM_VERSION" \
+            --namespace "$NAMESPACE" \
+            --create-namespace
+
+      - name: Install previous TWC
+        run: |
+          helm install "$CONTROLLER_RELEASE" "${OCI_REPO}/temporal-worker-controller" \
+            --version "$FROM_VERSION" \
+            --namespace "$NAMESPACE" \
+            --set webhook.enabled=true \
+            --set certmanager.enabled=true
+
+      - name: Wait for webhook cert
+        run: |
+          echo "Waiting for webhook cert Secret webhook-server-cert..."
+          for i in $(seq 1 60); do
+            if kubectl get secret webhook-server-cert -n "$NAMESPACE" 2>/dev/null; then
+              echo "Secret found after ${i} attempts"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "FAIL: Secret not created after 5 minutes"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Restart previous controller pods
+        run: |
+          kubectl rollout restart deployment/temporal-worker-controller-manager \
+            -n "$NAMESPACE"
+          kubectl rollout status deployment/temporal-worker-controller-manager \
+            -n "$NAMESPACE" --timeout=120s
+
+      - name: Wait for webhook readiness
+        run: |
+          echo "Waiting for webhook CA bundle injection..."
+          for i in $(seq 1 30); do
+            if kubectl get validatingwebhookconfiguration \
+              temporal-worker-controller-wd-validating-webhook-configuration -o jsonpath='{.webhooks[0].clientConfig.caBundle}' 2>/dev/null | grep -q .; then
+              echo "Webhook CA bundle injected after ${i} attempts"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "FAIL: Webhook CA bundle not injected after 150s"
+          exit 1
+
+      - name: Apply test WorkerDeployment on previous version
+        run: |
+          # The webhook can lag the CA bundle by a few seconds; retry briefly.
+          for i in $(seq 1 12); do
+            if kubectl apply -f test/e2e/fixtures/basic-wd.yaml; then
+              break
+            fi
+            if [ "$i" -eq 12 ]; then
+              echo "FAIL: WorkerDeployment not accepted by previous version's webhook"
+              exit 1
+            fi
+            sleep 5
+          done
+          UID_BEFORE=$(kubectl get workerdeployment test-worker -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')
+          echo "WorkerDeployment UID before upgrade: ${UID_BEFORE}"
+          echo "WD_UID_BEFORE=${UID_BEFORE}" >> "$GITHUB_ENV"
+
+      - name: Verify previous controller reconciles WorkerDeployment
+        run: |
+          # Without a Connection the controller cannot make the WorkerDeployment
+          # Ready; seeing Ready=False/ConnectionNotFound proves it reconciled it.
+          for i in $(seq 1 30); do
+            reason=$(kubectl get workerdeployment test-worker -n "$NAMESPACE" \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')
+            if [ "$reason" = "ConnectionNotFound" ]; then
+              echo "Previous controller reconciled WorkerDeployment (Ready reason: ${reason})"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "FAIL: WorkerDeployment not reconciled by previous controller (Ready reason: '${reason}')"
+          exit 1
+
+      - name: Check previous controller for unexpected error logs
+        run: |
+          errors=$(kubectl logs -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -c manager --tail=-1 2>&1 \
+            | grep '"level":"error"' \
+            | grep -v -E "$ALLOWED_ERROR_PATTERN" || true)
+          if [ -n "$errors" ]; then
+            echo "ERROR: Found unexpected error-level logs:"
+            echo "$errors"
+            exit 1
+          fi
+          echo "No unexpected error logs detected"
+
+      # --- Upgrade to this branch ----------------------------------------------
+
+      - name: Build controller image
+        run: docker build -t temporal-worker-controller:e2e .
+
+      - name: Load image into Kind
+        run: kind load docker-image temporal-worker-controller:e2e --name twc-e2e
+
+      - name: Record pre-upgrade controller state
+        run: |
+          OLD_PODS=$(kubectl get pods -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -o jsonpath='{.items[*].metadata.name}')
+          RESTARTS=$(kubectl get pods -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' \
+            | tr ' ' '\n' | awk '{s+=$1} END {print s+0}')
+          echo "Pre-upgrade pods: ${OLD_PODS} (total restarts: ${RESTARTS})"
+          echo "OLD_PODS=${OLD_PODS}" >> "$GITHUB_ENV"
+          echo "RESTARTS_BEFORE=${RESTARTS}" >> "$GITHUB_ENV"
+
+      - name: Upgrade CRDs chart
+        run: |
+          helm upgrade "$CRDS_RELEASE" helm/temporal-worker-controller-crds \
+            --namespace "$NAMESPACE"
+
+      - name: Verify previous controller is healthy on new CRDs
+        run: |
+          # docs/crd-management.md: CRD chart N supports controller chart N-1.
+          sleep 20
+          kubectl rollout status deployment/temporal-worker-controller-manager \
+            -n "$NAMESPACE" --timeout=60s
+          RESTARTS=$(kubectl get pods -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' \
+            | tr ' ' '\n' | awk '{s+=$1} END {print s+0}')
+          if [ "$RESTARTS" -ne "$RESTARTS_BEFORE" ]; then
+            echo "FAIL: previous controller restarted after CRD upgrade (${RESTARTS_BEFORE} -> ${RESTARTS})"
+            exit 1
+          fi
+          echo "Previous controller healthy on new CRDs"
+
+      - name: Upgrade TWC
+        run: |
+          # Same values as the install, plus the local image. --reuse-values is
+          # deliberately not used: it skips new chart defaults and old values
+          # may not satisfy the current values.schema.json.
+          helm upgrade "$CONTROLLER_RELEASE" helm/temporal-worker-controller \
+            --namespace "$NAMESPACE" \
+            --set image.repository=temporal-worker-controller \
+            --set image.tag=e2e \
+            --set image.pullPolicy=IfNotPresent \
+            --set webhook.enabled=true \
+            --set certmanager.enabled=true
+
+      # --- Verify ---------------------------------------------------------------
+
+      - name: Verify controller pods rolled to new image
+        run: |
+          kubectl rollout status deployment/temporal-worker-controller-manager \
+            -n "$NAMESPACE" --timeout=120s
+          for pod in $OLD_PODS; do
+            kubectl wait --for=delete "pod/${pod}" -n "$NAMESPACE" --timeout=60s
+          done
+          images=$(kubectl get pods -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -o jsonpath='{range .items[*]}{.spec.containers[?(@.name=="manager")].image}{"\n"}{end}')
+          echo "Controller images after upgrade:"
+          echo "$images"
+          if [ -z "$images" ] || echo "$images" | grep -v -x -q 'temporal-worker-controller:e2e'; then
+            echo "FAIL: not all controller pods run temporal-worker-controller:e2e"
+            exit 1
+          fi
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -n "$NAMESPACE" --timeout=60s
+
+      - name: Verify existing WorkerDeployment survived upgrade
+        run: |
+          UID_AFTER=$(kubectl get workerdeployment test-worker -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')
+          DELETION=$(kubectl get workerdeployment test-worker -n "$NAMESPACE" -o jsonpath='{.metadata.deletionTimestamp}')
+          if [ "$UID_AFTER" != "$WD_UID_BEFORE" ]; then
+            echo "FAIL: WorkerDeployment UID changed (${WD_UID_BEFORE} -> ${UID_AFTER}); it was recreated"
+            exit 1
+          fi
+          if [ -n "$DELETION" ]; then
+            echo "FAIL: WorkerDeployment is being deleted (deletionTimestamp: ${DELETION})"
+            exit 1
+          fi
+          echo "WorkerDeployment test-worker survived upgrade (UID ${UID_AFTER})"
+
+      - name: Wait for webhook readiness after upgrade
+        run: |
+          # Apply the new WorkerDeployment with retries until the upgraded
+          # webhook serves it.
+          for i in $(seq 1 12); do
+            if kubectl apply -f test/e2e/fixtures/upgrade-wd-new.yaml; then
+              echo "New WorkerDeployment accepted by upgraded webhook"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "FAIL: New WorkerDeployment not accepted after upgrade"
+          exit 1
+
+      - name: Verify webhook rejects invalid WorkerDeployment
+        run: |
+          if out=$(kubectl apply -f test/e2e/fixtures/upgrade-wd-invalid.yaml 2>&1); then
+            echo "FAIL: invalid WorkerDeployment was accepted"
+            echo "$out"
+            exit 1
+          fi
+          echo "$out"
+          # This rule is enforced only by the webhook, not the CRD schema.
+          if ! echo "$out" | grep -q 'rampPercentage must increase between each step'; then
+            echo "FAIL: rejected, but not by the WorkerDeployment webhook"
+            exit 1
+          fi
+          echo "Invalid WorkerDeployment rejected by webhook"
+
+      - name: Verify upgraded controller reconciles WorkerDeployments
+        run: |
+          for wd in test-worker test-worker-new; do
+            for i in $(seq 1 30); do
+              reason=$(kubectl get workerdeployment "$wd" -n "$NAMESPACE" \
+                -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')
+              if [ "$reason" = "ConnectionNotFound" ]; then
+                echo "${wd} reconciled (Ready reason: ${reason})"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "FAIL: ${wd} not reconciled by upgraded controller (Ready reason: '${reason}')"
+                exit 1
+              fi
+              sleep 2
+            done
+          done
+
+      - name: Check upgraded controller for unexpected error logs
+        run: |
+          errors=$(kubectl logs -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=temporal-worker-controller \
+            -c manager --tail=-1 2>&1 \
+            | grep '"level":"error"' \
+            | grep -v -E "$ALLOWED_ERROR_PATTERN" || true)
+          if [ -n "$errors" ]; then
+            echo "ERROR: Found unexpected error-level logs:"
+            echo "$errors"
+            exit 1
+          fi
+          echo "No unexpected error logs detected"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== Helm releases ==="
+          helm list -n "$NAMESPACE" || true
+          echo "=== Helm history: ${CRDS_RELEASE} ==="
+          helm history "$CRDS_RELEASE" -n "$NAMESPACE" || true
+          echo "=== Helm history: ${CONTROLLER_RELEASE} ==="
+          helm history "$CONTROLLER_RELEASE" -n "$NAMESPACE" || true
+          echo "=== Pod status ==="
+          kubectl get pods -n "$NAMESPACE" -o wide
+          echo "=== Pod describe ==="
+          kubectl describe pods -n "$NAMESPACE" -l app.kubernetes.io/name=temporal-worker-controller
+          echo "=== Pod logs ==="
+          kubectl logs -n "$NAMESPACE" -l app.kubernetes.io/name=temporal-worker-controller --all-containers --tail=100 || true
+          echo "=== Previous container logs ==="
+          kubectl logs -n "$NAMESPACE" -l app.kubernetes.io/name=temporal-worker-controller --all-containers --previous --tail=100 || true
+          echo "=== WorkerDeployments ==="
+          kubectl get workerdeployments -n "$NAMESPACE" -o yaml || true
+          echo "=== Events ==="
+          kubectl get events -n "$NAMESPACE" --sort-by=.lastTimestamp | tail -30
+          echo "=== Secrets ==="
+          kubectl get secrets -n "$NAMESPACE"
+          echo "=== Certificates ==="
+          kubectl get certificate -n "$NAMESPACE" -o wide || true
