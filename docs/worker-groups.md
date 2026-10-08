@@ -102,7 +102,7 @@ Turn off workflow polling in activity-only groups. In Go, set `worker.Options.Di
 
 Set `replicas` on a group to have the controller manage it, or omit it to let an autoscaler own that group. This works the same as `spec.deployment.replicas`.
 
-To autoscale a group, set `group` on a `WorkerResourceTemplate`. The controller then renders one copy per version for that group's Deployment only. A `WorkerResourceTemplate` for a `WorkerDeployment` with groups must set `group`.
+To autoscale a group, set `workerGroup` on a `WorkerResourceTemplate`. The controller then renders one copy per version for that group's Deployment only. A `WorkerResourceTemplate` for a `WorkerDeployment` with groups must set `workerGroup`.
 
 ```yaml
 apiVersion: temporal.io/v1alpha1

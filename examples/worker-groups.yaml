@@ -53,7 +53,7 @@ spec:
                     value: parse
                 resources:
                   requests:
-                    # The CPU utilization HPA in wrt-hpa-group.yaml needs a CPU request.
+                    # The CPU utilization HPA in wrt-hpa-worker-group.yaml needs a CPU request.
                     cpu: "1"
                   limits:
                     nvidia.com/gpu: 1

@@ -7,7 +7,7 @@
 #
 # Apply:
 #   kubectl apply -f examples/worker-groups.yaml
-#   kubectl apply -f examples/wrt-hpa-group.yaml
+#   kubectl apply -f examples/wrt-hpa-worker-group.yaml
 #
 # Verify:
 #   kubectl get hpa   # one HPA per version, scaleTargetRef is the parse Deployment
