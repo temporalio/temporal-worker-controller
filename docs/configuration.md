@@ -544,6 +544,25 @@ spec:
     strategy: Progressive
 ```
 
+### Labels on versioned Deployments
+
+Labels in `spec.deployment.template.metadata.labels` go on the pods. To label the
+versioned Kubernetes Deployment objects themselves, set `spec.deploymentLabels`.
+Use this for tools that act on the Deployment rather than its pods, such as
+admission webhooks that opt workloads in or out by label, or cost allocation.
+
+```yaml
+spec:
+  deploymentLabels:
+    team: payments
+    example.com/instrumentation: "false"
+```
+
+The controller applies these labels when it creates a versioned Deployment.
+Changing them does not relabel Deployments that already exist; new labels take
+effect from the next Build ID. `temporal.io/build-id` and
+`temporal.io/deployment-name` are managed by the controller and cannot be set.
+
 ### Environment-Specific Configurations
 
 **Production Configuration:**
