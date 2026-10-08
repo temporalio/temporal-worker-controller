@@ -159,11 +159,19 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 // validateDeploymentSpec examines the supplied WorkerDeploymentSpec structs
 // and returns any warnings about using the deprecated replicas,
 // minReadySeconds and ProgressDeadlineSeconds fields instead of the
-// WorkerDeploymentSpec.Deployment struct field, or about group selectors the
-// controller ignores.
+// WorkerDeploymentSpec.Deployment struct field, or alongside worker groups,
+// which ignore them, and about group selectors the controller ignores.
 func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
 	var warns admission.Warnings
-	if spec.Deployment == nil {
+	if spec.HasWorkerGroups() {
+		// progressDeadlineSeconds isn't checked: the CRD defaults it on every spec.
+		if spec.MinReadySeconds > 0 {
+			warns = append(warns, "spec.minReadySeconds is ignored with spec.workerGroups; set deployment.minReadySeconds on each worker group instead")
+		}
+		if spec.Replicas != nil {
+			warns = append(warns, "spec.replicas is ignored with spec.workerGroups; set deployment.replicas on each worker group instead")
+		}
+	} else if spec.Deployment == nil {
 		if spec.MinReadySeconds > 0 {
 			warns = append(warns, "spec.minReadySeconds is deprecated; use spec.deployment.minReadySeconds instead")
 		}
