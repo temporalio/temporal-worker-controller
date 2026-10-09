@@ -15,6 +15,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -254,33 +256,6 @@ func TestFetchMTLS_TLSServerNameOverride(t *testing.T) {
 	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
 }
 
-func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
-	secret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
-	}
-	ctx := context.TODO()
-	cp := newTestPoolWithFakeClient(&secret)
-	apiKeySelector := &corev1.SecretKeySelector{
-		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-		Key:                  "apikey",
-	}
-	opts := temporaliov1alpha1.ConnectionSpec{
-		HostPort: "temporal-nlb.example.com:443",
-		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-			ServerName: "temporal-cloud.example.com",
-		},
-		APIKeySecretRef: apiKeySelector,
-	}
-
-	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
-
-	require.NoError(t, err)
-	require.NotNil(t, a.tls)
-	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
-}
-
 func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
 	ctx := context.TODO()
 	cp := newTestPool()
@@ -297,115 +272,6 @@ func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
 	require.NotNil(t, a.tls)
 	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
 	assert.Equal(t, temporaliov1alpha1.AuthModeNoCredentials, a.mode)
-}
-
-func newTestPoolWithFakeClient(objects ...runtime.Object) *ClientPool {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()
-	cp := New(noopLogger{}, k8sClient, nil)
-	cp.dialFn = sdkclient.Dial
-	return cp
-}
-
-// ─── Tests: fetchClientUsingAPIKeySecret ──────────────────────────────────────
-
-// TestFetchAPIKey_CredentialsAndTLSSet verifies that API key auth sets credentials and
-// an empty (non-nil) TLS config, which gRPC requires for TLS transport even with token auth.
-func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
-	secret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
-	}
-	ctx := context.TODO()
-	cp := newTestPoolWithFakeClient(&secret)
-	apiKeySelector := &corev1.SecretKeySelector{
-		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-		Key:                  "apikey",
-	}
-	opts := temporaliov1alpha1.ConnectionSpec{
-		HostPort:        "localhost:7233",
-		APIKeySecretRef: apiKeySelector,
-	}
-
-	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
-
-	require.NoError(t, err)
-	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, a.mode)
-	assert.True(t, a.expiryTime.IsZero())
-	assert.NotNil(t, a.credentials, "API key credentials must be set")
-	require.NotNil(t, a.tls, "TLS config must be non-nil for gRPC API key transport")
-}
-
-// TestFetchAPIKey_CACertAppendsToSystemPool verifies that TLS.CACertSecretRef, resolved by
-// the caller into a caCert argument, is appended to the system CA pool for API-key auth —
-// the same additive behavior TestFetchMTLS_CACertAppendsToSystemPool covers for mTLS auth
-// (PR #227). See that test for why the system-CA-preserved assertion was dropped.
-func TestFetchAPIKey_CACertAppendsToSystemPool(t *testing.T) {
-	now := time.Now()
-
-	customCACert, customCAKey, customPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
-	_, customLeafPEM, _ := generateLeafCert(t, customCACert, customCAKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
-	customLeafCert, err := decodePEMCert(customLeafPEM)
-	require.NoError(t, err)
-	caSecret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{"ca.crt": customPEM},
-	}
-
-	apiKeySecret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
-	}
-	ctx := context.TODO()
-	cp := newTestPoolWithFakeClient(&caSecret, &apiKeySecret)
-
-	opts := temporaliov1alpha1.ConnectionSpec{
-		HostPort: "localhost:7233",
-		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
-			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
-		},
-		APIKeySecretRef: &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-			Key:                  "apikey",
-		},
-	}
-
-	a, err := cp.fetchClientUsingAPIKey(ctx, opts, apiKeySecret.Namespace)
-	require.NoError(t, err)
-
-	pool := a.tls.RootCAs
-	require.NotNil(t, pool, "RootCAs must be set when a CA cert is supplied")
-
-	_, err = customLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "custom.example.com"})
-	assert.NoError(t, err, "custom CA should be trusted")
-}
-
-// TestFetchAPIKey_NoCACert_RootCAsNil verifies that omitting TLS.CACertSecretRef leaves
-// RootCAs nil, preserving today's behavior (Go falls back to the system CA bundle).
-func TestFetchAPIKey_NoCACert_RootCAsNil(t *testing.T) {
-	secret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
-	}
-	ctx := context.TODO()
-	cp := newTestPoolWithFakeClient(&secret)
-	opts := temporaliov1alpha1.ConnectionSpec{
-		HostPort: "localhost:7233",
-		APIKeySecretRef: &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
-			Key:                  "apikey",
-		},
-	}
-
-	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
-
-	require.NoError(t, err)
-	assert.Nil(t, a.tls.RootCAs)
 }
 
 // TestFetchNoCredentials_CACertSetsRootCAs verifies that fetchClientUsingNoCredentials
@@ -441,10 +307,417 @@ func TestFetchNoCredentials_CACertSetsRootCAs(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestParseClientSecret_APIKeyWithCACertSecretRef is the end-to-end regression test: it
+func newTestPoolWithFakeClient(objects ...runtime.Object) *ClientPool {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()
+	cp := New(noopLogger{}, k8sClient, nil)
+	cp.dialFn = sdkclient.Dial
+	return cp
+}
+
+// ─── Tests: fetchClientUsingAPIKey ──────────────────────────────────────
+
+func TestFetchAPIKeySecretRef_TLSServerNameOverride(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&secret)
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "temporal-nlb.example.com:443",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			ServerName: "temporal-cloud.example.com",
+		},
+		APIKeySecretRef: apiKeySelector,
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
+
+	require.NoError(t, err)
+	require.NotNil(t, a.tls)
+	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
+}
+
+func TestFetchAPIKeyConfigSecretRef_TLSServerNameOverride(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&secret)
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "temporal-nlb.example.com:443",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			ServerName: "temporal-cloud.example.com",
+		},
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			SecretRef: apiKeySelector,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
+
+	require.NoError(t, err)
+	require.NotNil(t, a.tls)
+	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
+}
+
+func TestFetchAPIKeyConfigPath_TLSServerNameOverride(t *testing.T) {
+	keyDir := t.TempDir()
+	apiKeyContents := "test-api-key-value"
+	apiKeyPath := filepath.Join(keyDir, "api-key")
+	err := os.WriteFile(apiKeyPath, []byte(apiKeyContents), 0644)
+	require.NoError(t, err)
+
+	ctx := context.TODO()
+	cp := newTestPool()
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "temporal-nlb.example.com:443",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			ServerName: "temporal-cloud.example.com",
+		},
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			Path: apiKeyPath,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, "test-ns")
+
+	require.NoError(t, err)
+	require.NotNil(t, a.tls)
+	assert.Equal(t, "temporal-cloud.example.com", a.tls.ServerName)
+}
+
+// TestFetchAPIKeySecretRef_CredentialsAndTLSSet verifies that API key auth sets credentials and
+// an empty (non-nil) TLS config, which gRPC requires for TLS transport even with token auth.
+func TestFetchAPIKeySecretRef_CredentialsAndTLSSet(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&secret)
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort:        "localhost:7233",
+		APIKeySecretRef: apiKeySelector,
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
+
+	require.NoError(t, err)
+	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, a.mode)
+	assert.True(t, a.expiryTime.IsZero())
+	assert.NotNil(t, a.credentials, "API key credentials must be set")
+	require.NotNil(t, a.tls, "TLS config must be non-nil for gRPC API key transport")
+}
+
+func TestFetchAPIKeyConfigSecretRef_CredentialsAndTLSSet(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&secret)
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			SecretRef: apiKeySelector,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
+
+	require.NoError(t, err)
+	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, a.mode)
+	assert.True(t, a.expiryTime.IsZero())
+	assert.NotNil(t, a.credentials, "API key credentials must be set")
+	require.NotNil(t, a.tls, "TLS config must be non-nil for gRPC API key transport")
+}
+
+func TestFetchAPIKeyConfigPath_CredentialsAndTLSSet(t *testing.T) {
+	keyDir := t.TempDir()
+	apiKeyContents := "test-api-key-value"
+	apiKeyPath := filepath.Join(keyDir, "api-key")
+	err := os.WriteFile(apiKeyPath, []byte(apiKeyContents), 0644)
+	require.NoError(t, err)
+
+	ctx := context.TODO()
+	cp := newTestPool()
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			Path: apiKeyPath,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, "test-ns")
+
+	require.NoError(t, err)
+	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, a.mode)
+	assert.True(t, a.expiryTime.IsZero())
+	assert.NotNil(t, a.credentials, "API key credentials must be set")
+	require.NotNil(t, a.tls, "TLS config must be non-nil for gRPC API key transport")
+}
+
+// TestFetchAPIKeySecretRef_CACertAppendsToSystemPool verifies that TLS.CACertSecretRef, resolved by
+// the caller into a caCert argument, is appended to the system CA pool for API-key auth —
+// the same additive behavior TestFetchMTLS_CACertAppendsToSystemPool covers for mTLS auth
+// (PR #227). See that test for why the system-CA-preserved assertion was dropped.
+func TestFetchAPIKeySecretRef_CACertAppendsToSystemPool(t *testing.T) {
+	now := time.Now()
+
+	customCACert, customCAKey, customPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, customLeafPEM, _ := generateLeafCert(t, customCACert, customCAKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
+	customLeafCert, err := decodePEMCert(customLeafPEM)
+	require.NoError(t, err)
+	caSecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"ca.crt": customPEM},
+	}
+
+	apiKeySecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&caSecret, &apiKeySecret)
+
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+		},
+		APIKeySecretRef: apiKeySelector,
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, apiKeySecret.Namespace)
+	require.NoError(t, err)
+
+	pool := a.tls.RootCAs
+	require.NotNil(t, pool, "RootCAs must be set when a CA cert is supplied")
+
+	_, err = customLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "custom.example.com"})
+	assert.NoError(t, err, "custom CA should be trusted")
+}
+
+func TestFetchAPIKeyConfigSecretRef_CACertAppendsToSystemPool(t *testing.T) {
+	now := time.Now()
+
+	customCACert, customCAKey, customPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, customLeafPEM, _ := generateLeafCert(t, customCACert, customCAKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
+	customLeafCert, err := decodePEMCert(customLeafPEM)
+	require.NoError(t, err)
+	caSecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"ca.crt": customPEM},
+	}
+
+	apiKeySecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&caSecret, &apiKeySecret)
+
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+		},
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			SecretRef: apiKeySelector,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, apiKeySecret.Namespace)
+	require.NoError(t, err)
+
+	pool := a.tls.RootCAs
+	require.NotNil(t, pool, "RootCAs must be set when a CA cert is supplied")
+
+	_, err = customLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "custom.example.com"})
+	assert.NoError(t, err, "custom CA should be trusted")
+}
+
+func TestFetchAPIKeyConfigPath_CACertAppendsToSystemPool(t *testing.T) {
+	now := time.Now()
+
+	customCACert, customCAKey, customPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	_, customLeafPEM, _ := generateLeafCert(t, customCACert, customCAKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
+	customLeafCert, err := decodePEMCert(customLeafPEM)
+	require.NoError(t, err)
+	caSecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"ca.crt": customPEM},
+	}
+
+	keyDir := t.TempDir()
+	apiKeyContents := "test-api-key-value"
+	apiKeyPath := filepath.Join(keyDir, "api-key")
+	err = os.WriteFile(apiKeyPath, []byte(apiKeyContents), 0644)
+	require.NoError(t, err)
+
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&caSecret)
+
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+		},
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			Path: apiKeyPath,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, "test-ns")
+	require.NoError(t, err)
+
+	pool := a.tls.RootCAs
+	require.NotNil(t, pool, "RootCAs must be set when a CA cert is supplied")
+
+	_, err = customLeafCert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, DNSName: "custom.example.com"})
+	assert.NoError(t, err, "custom CA should be trusted")
+}
+
+// TestFetchAPIKeySecretRef_NoCACert_RootCAsNil verifies that omitting TLS.CACertSecretRef leaves
+// RootCAs nil, preserving today's behavior (Go falls back to the system CA bundle).
+func TestFetchAPIKeySecretRef_NoCACert_RootCAsNil(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&secret)
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort:        "localhost:7233",
+		APIKeySecretRef: apiKeySelector,
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
+
+	require.NoError(t, err)
+	assert.Nil(t, a.tls.RootCAs)
+}
+
+func TestFetchAPIKeyConfigSecretRef_NoCACert_RootCAsNil(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
+	}
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&secret)
+	apiKeySelector := &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+		Key:                  "apikey",
+	}
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			SecretRef: apiKeySelector,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
+
+	require.NoError(t, err)
+	assert.Nil(t, a.tls.RootCAs)
+}
+
+func TestFetchAPIKeyConfigPath_NoCACert_RootCAsNil(t *testing.T) {
+	keyDir := t.TempDir()
+	apiKeyContents := "test-api-key-value"
+	apiKeyPath := filepath.Join(keyDir, "api-key")
+	err := os.WriteFile(apiKeyPath, []byte(apiKeyContents), 0644)
+	require.NoError(t, err)
+
+	ctx := context.TODO()
+	cp := newTestPool()
+	opts := temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		APIKey: &temporaliov1alpha1.APIKeyConfig{
+			Path: apiKeyPath,
+		},
+	}
+
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, "test-ns")
+
+	require.NoError(t, err)
+	assert.Nil(t, a.tls.RootCAs)
+}
+
+// TestFetchAPIKeySecretRef_CredentialClosureReadsLiveSecret verifies that fetchAPIKeyFromSecret
+// reads from the K8s secret at call time, picking up rotated keys without a client re-dial.
+// The credentials closure delegates to fetchAPIKeyFromSecret, so this covers the end-to-end path.
+func TestFetchAPIKeySecretRef_CredentialClosureReadsLiveSecret(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"apikey": []byte("original-key")},
+	}
+	cp := newTestPoolWithFakeClient(&secret)
+
+	token, err := cp.fetchAPIKeyFromSecret(context.Background(), "api-key-secret", "test-ns", "apikey")
+	require.NoError(t, err)
+	assert.Equal(t, "original-key", token)
+
+	// Simulate key rotation by updating the secret in the fake client.
+	secret.Data["apikey"] = []byte("rotated-key")
+	require.NoError(t, cp.k8sClient.Update(context.Background(), &secret))
+
+	// Next call must return the rotated key without any client eviction or re-dial.
+	token, err = cp.fetchAPIKeyFromSecret(context.Background(), "api-key-secret", "test-ns", "apikey")
+	require.NoError(t, err)
+	assert.Equal(t, "rotated-key", token)
+}
+
+// ─── Tests: ParseConnectionSpec ─────────────────────────────────────────────────
+
+// TestParseConnectionSpec_APIKeyWithCACertSecretRef is the end-to-end regression test: it
 // exercises parseConnectionSpec (not the fetchClientUsing* functions directly) to confirm the
 // CA secret is actually read from the fake k8s client and threaded through to the TLS config.
-func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
+func TestParseConnectionSpec_APIKeyWithCACertSecretRef(t *testing.T) {
 	now := time.Now()
 	caCert, caKey, caPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, leafPEM, _ := generateLeafCert(t, caCert, caKey, "temporal.internal", now.Add(-time.Hour), now.Add(time.Hour))
@@ -482,12 +755,12 @@ func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestParseClientSecret_CACertSecretMissingKey_ReturnsError verifies that a CA secret
+// TestParseConnectionSpec_CACertSecretMissingKey_ReturnsError verifies that a CA secret
 // referenced by tls.caCertSecretRef but missing its ca.crt key is a hard error, not a
 // silent no-op. Unlike MutualTLSSecretRef's ca.crt (optional, since that secret's primary
 // job is tls.crt/tls.key), this field's only purpose is carrying a CA — a missing key here
 // is a misconfiguration that must surface, not silently fall back to system-trust-only.
-func TestParseClientSecret_CACertSecretMissingKey_ReturnsError(t *testing.T) {
+func TestParseConnectionSpec_CACertSecretMissingKey_ReturnsError(t *testing.T) {
 	apiKeySecret := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
 		Type:       corev1.SecretTypeOpaque,
@@ -518,37 +791,10 @@ func TestParseClientSecret_CACertSecretMissingKey_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "ca.crt")
 }
 
-// TestFetchAPIKey_CredentialClosureReadsLiveSecret verifies that fetchAPIKeyFromSecret
-// reads from the K8s secret at call time, picking up rotated keys without a client re-dial.
-// The credentials closure delegates to fetchAPIKeyFromSecret, so this covers the end-to-end path.
-func TestFetchAPIKey_CredentialClosureReadsLiveSecret(t *testing.T) {
-	secret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{"apikey": []byte("original-key")},
-	}
-	cp := newTestPoolWithFakeClient(&secret)
-
-	token, err := cp.fetchAPIKeyFromSecret(context.Background(), "api-key-secret", "test-ns", "apikey")
-	require.NoError(t, err)
-	assert.Equal(t, "original-key", token)
-
-	// Simulate key rotation by updating the secret in the fake client.
-	secret.Data["apikey"] = []byte("rotated-key")
-	require.NoError(t, cp.k8sClient.Update(context.Background(), &secret))
-
-	// Next call must return the rotated key without any client eviction or re-dial.
-	token, err = cp.fetchAPIKeyFromSecret(context.Background(), "api-key-secret", "test-ns", "apikey")
-	require.NoError(t, err)
-	assert.Equal(t, "rotated-key", token)
-}
-
-// ─── Tests: ParseClientSecret ─────────────────────────────────────────────────
-
-// TestParseClientSecret_OpaqueSecretType verifies that an Opaque secret containing tls.crt
+// TestParseConnectionSpec_OpaqueSecretType verifies that an Opaque secret containing tls.crt
 // and tls.key is accepted for mTLS auth. This is the regression test for the fix that
-// relaxed the type check in ParseClientSecret to accept both kubernetes.io/tls and Opaque.
-func TestParseClientSecret_OpaqueSecretType(t *testing.T) {
+// relaxed the type check in ParseConnectionSpec to accept both kubernetes.io/tls and Opaque.
+func TestParseConnectionSpec_OpaqueSecretType(t *testing.T) {
 	now := time.Now()
 	caCert, caKey, _ := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", now.Add(-time.Hour), now.Add(time.Hour))

@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type ClientPoolKey struct {
 	SecretName          string            // invalidate cache when the secret name changes
 	TLSCACertSecretName string            // invalidate cache when TLS.CACertSecretRef changes
 	AuthMode            v1alpha1.AuthMode // invalidate cache when the auth mode changes
+	Path                string            // invalidate cache when apiKey.path changes
 }
 
 // CachedClient is a Temporal SDK client paired with a validity check. The pool calls IsValid on every
@@ -175,7 +177,7 @@ func (cp *ClientPool) defaultValidityCheck(auth clientAuth) func() bool {
 }
 
 func (cp *ClientPool) createKey(spec v1alpha1.ConnectionSpec, temporalNamespace string) ClientPoolKey {
-	return ClientPoolKey{
+	k := ClientPoolKey{
 		HostPort:            spec.HostPort,
 		TLSServerName:       spec.TLSServerName(),
 		Namespace:           temporalNamespace,
@@ -183,6 +185,10 @@ func (cp *ClientPool) createKey(spec v1alpha1.ConnectionSpec, temporalNamespace 
 		TLSCACertSecretName: spec.TLSCACertSecretName(),
 		AuthMode:            spec.AuthMode(),
 	}
+	if spec.APIKey != nil && spec.APIKey.Path != "" {
+		k.Path = spec.APIKey.Path
+	}
+	return k
 }
 
 func (cp *ClientPool) getClientByKey(key ClientPoolKey) (CachedClient, bool) {
@@ -284,25 +290,54 @@ func (cp *ClientPool) fetchClientUsingMTLS(
 	}, nil
 }
 
+// fetchClientUsingAPIKey returns the Temporal client auth to use when API Key
+// authentication mode is specified for the Connection.
+//
+// The Temporal API Key can be retrieved from either a Kubernetes Secret or
+// from a file within the controller or worker Pod.
 func (cp *ClientPool) fetchClientUsingAPIKey(
 	ctx context.Context,
 	spec v1alpha1.ConnectionSpec,
 	k8sNamespace string,
 ) (clientAuth, error) {
-	if spec.SecretName() == "" {
-		// NOTE(jaypipes): This should not happen because of CEL validation
-		// rules, but let's be safe and prevent nil pointer exceptions.
-		return clientAuth{}, fmt.Errorf("secret required")
-	}
-	var secret corev1.Secret
-	if err := cp.k8sClient.Get(ctx, types.NamespacedName{
-		Name:      spec.SecretName(),
-		Namespace: k8sNamespace,
-	}, &secret); err != nil {
-		return clientAuth{}, fmt.Errorf("failed to read API Key secret: %w", err)
-	}
-	if secret.Type != corev1.SecretTypeOpaque {
-		return clientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
+	var credentials sdkclient.Credentials
+	if spec.APIKey != nil && spec.APIKey.Path != "" {
+		path := spec.APIKey.Path
+		credentials = sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
+			apiKey, err := os.ReadFile(path)
+			if err != nil {
+				return "", fmt.Errorf(
+					"failed to read API Key from path %q: %w", path, err,
+				)
+			}
+			return string(apiKey), nil
+		})
+	} else {
+		secretName := spec.SecretName()
+		if secretName == "" {
+			// NOTE(jaypipes): This should not happen because of CEL validation
+			// rules, but let's be safe and prevent nil pointer exceptions.
+			return clientAuth{}, fmt.Errorf("secret required")
+		}
+		var secret corev1.Secret
+		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
+			Name:      secretName,
+			Namespace: k8sNamespace,
+		}, &secret); err != nil {
+			return clientAuth{}, fmt.Errorf("failed to read API Key secret: %w", err)
+		}
+		if secret.Type != corev1.SecretTypeOpaque {
+			return clientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secretName)
+		}
+		var secretKey string
+		if spec.APIKey != nil {
+			secretKey = spec.APIKey.SecretRef.Key
+		} else {
+			secretKey = spec.APIKeySecretRef.Key
+		}
+		credentials = sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
+			return cp.fetchAPIKeyFromSecret(ctx, secretName, k8sNamespace, secretKey)
+		})
 	}
 
 	caCert, err := cp.caCertFromConnectionSpec(ctx, spec, k8sNamespace)
@@ -316,12 +351,6 @@ func (cp *ClientPool) fetchClientUsingAPIKey(
 		return clientAuth{}, err
 	}
 	tlsCfg.RootCAs = rootCAs
-
-	secretName := spec.APIKeySecretRef.Name
-	secretKey := spec.APIKeySecretRef.Key
-	credentials := sdkclient.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
-		return cp.fetchAPIKeyFromSecret(ctx, secretName, k8sNamespace, secretKey)
-	})
 
 	return clientAuth{
 		mode:        v1alpha1.AuthModeAPIKey,

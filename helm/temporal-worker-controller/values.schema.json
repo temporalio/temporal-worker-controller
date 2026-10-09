@@ -82,14 +82,14 @@
       "type": "array"
     },
     "extraVolumeMounts": {
-      "description": "extraVolumeMounts adds volume mounts to the manager container. Volumes must be\nsupplied via extraVolumes above.\n\nextraVolumeMounts:\n  - name: custom-ca\n    mountPath: /etc/ssl/custom-ca\n    readOnly: true",
+      "description": "extraVolumeMounts adds volume mounts to the manager container. Volumes must be\nsupplied via extraVolumes above.\n\nextraVolumeMounts:\n  - name: custom-ca\n    mountPath: /etc/ssl/custom-ca\n    readOnly: true\n  - name: api-key\n    mountPath: /temporal-api-key\n    readOnly: true",
       "items": {
         "type": "object"
       },
       "type": "array"
     },
     "extraVolumes": {
-      "description": "extraVolumes adds volumes to the manager pod, alongside the webhook certificate\nvolume the chart already creates.\n\nextraVolumes:\n  - name: custom-ca\n    secret:\n      secretName: custom-ca",
+      "description": "extraVolumes adds volumes to the manager pod, alongside the webhook certificate\nvolume the chart already creates.\n\nextraVolumes:\n  - name: custom-ca\n    secret:\n      secretName: custom-ca\n  - name: api-key\n    secret:\n      secretName: api-key",
       "items": {
         "type": "object"
       },
