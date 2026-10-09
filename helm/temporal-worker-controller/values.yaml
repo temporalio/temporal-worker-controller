@@ -236,6 +236,9 @@ extraEnv: []
 #   - name: custom-ca
 #     secret:
 #       secretName: custom-ca
+#   - name: api-key
+#     secret:
+#       secretName: api-key
 extraVolumes: [] # @schema items.type:object
 
 # extraVolumeMounts adds volume mounts to the manager container. Volumes must be
@@ -244,6 +247,9 @@ extraVolumes: [] # @schema items.type:object
 # extraVolumeMounts:
 #   - name: custom-ca
 #     mountPath: /etc/ssl/custom-ca
+#     readOnly: true
+#   - name: api-key
+#     mountPath: /temporal-api-key
 #     readOnly: true
 extraVolumeMounts: [] # @schema items.type:object
 
