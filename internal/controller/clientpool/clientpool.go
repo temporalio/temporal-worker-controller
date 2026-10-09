@@ -136,7 +136,7 @@ func (cp *ClientPool) DefaultCreateClient(
 	spec v1alpha1.ConnectionSpec,
 	temporalNamespace, k8sNamespace, identity string,
 ) (CachedClient, error) {
-	auth, err := cp.parseClientSecret(ctx, spec, k8sNamespace)
+	auth, err := cp.parseConnectionSpec(ctx, spec, k8sNamespace)
 	if err != nil {
 		return CachedClient{}, &AuthConfigError{Err: err}
 	}
@@ -227,7 +227,26 @@ func (cp *ClientPool) getClientOptions(spec v1alpha1.ConnectionSpec, temporalNam
 	return opts
 }
 
-func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, spec v1alpha1.ConnectionSpec) (clientAuth, error) {
+func (cp *ClientPool) fetchClientUsingMTLS(
+	ctx context.Context,
+	spec v1alpha1.ConnectionSpec,
+	k8sNamespace string,
+) (clientAuth, error) {
+	if spec.SecretName() == "" {
+		// NOTE(jaypipes): This should not happen because of CEL validation
+		// rules, but let's be safe and prevent nil pointer exceptions.
+		return clientAuth{}, fmt.Errorf("secret required")
+	}
+	var secret corev1.Secret
+	if err := cp.k8sClient.Get(ctx, types.NamespacedName{
+		Name:      spec.SecretName(),
+		Namespace: k8sNamespace,
+	}, &secret); err != nil {
+		return clientAuth{}, fmt.Errorf("failed to read MTLS secret: %w", err)
+	}
+	if secret.Type != corev1.SecretTypeTLS && secret.Type != corev1.SecretTypeOpaque {
+		return clientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/tls or Opaque", secret.Name)
+	}
 	tlsServerName := spec.TLSServerName()
 
 	pemCert := secret.Data["tls.crt"]
@@ -265,7 +284,31 @@ func (cp *ClientPool) fetchClientUsingMTLSSecret(secret corev1.Secret, spec v1al
 	}, nil
 }
 
-func (cp *ClientPool) fetchClientUsingAPIKeySecret(spec v1alpha1.ConnectionSpec, k8sNamespace string, caCert []byte) (clientAuth, error) {
+func (cp *ClientPool) fetchClientUsingAPIKey(
+	ctx context.Context,
+	spec v1alpha1.ConnectionSpec,
+	k8sNamespace string,
+) (clientAuth, error) {
+	if spec.SecretName() == "" {
+		// NOTE(jaypipes): This should not happen because of CEL validation
+		// rules, but let's be safe and prevent nil pointer exceptions.
+		return clientAuth{}, fmt.Errorf("secret required")
+	}
+	var secret corev1.Secret
+	if err := cp.k8sClient.Get(ctx, types.NamespacedName{
+		Name:      spec.SecretName(),
+		Namespace: k8sNamespace,
+	}, &secret); err != nil {
+		return clientAuth{}, fmt.Errorf("failed to read API Key secret: %w", err)
+	}
+	if secret.Type != corev1.SecretTypeOpaque {
+		return clientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
+	}
+
+	caCert, err := cp.caCertFromConnectionSpec(ctx, spec, k8sNamespace)
+	if err != nil {
+		return clientAuth{}, err
+	}
 	tlsServerName := spec.TLSServerName()
 	tlsCfg := &tls.Config{ServerName: tlsServerName}
 	rootCAs, err := cp.TLSCertPool(caCert)
@@ -287,7 +330,15 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(spec v1alpha1.ConnectionSpec,
 	}, nil
 }
 
-func (cp *ClientPool) fetchClientUsingNoCredentials(spec v1alpha1.ConnectionSpec, caCert []byte) (clientAuth, error) {
+func (cp *ClientPool) fetchClientUsingNoCredentials(
+	ctx context.Context,
+	spec v1alpha1.ConnectionSpec,
+	k8sNamespace string,
+) (clientAuth, error) {
+	caCert, err := cp.caCertFromConnectionSpec(ctx, spec, k8sNamespace)
+	if err != nil {
+		return clientAuth{}, err
+	}
 	tlsServerName := spec.TLSServerName()
 	rootCAs, err := cp.TLSCertPool(caCert)
 	if err != nil {
@@ -321,23 +372,33 @@ func (cp *ClientPool) TLSCertPool(caCert []byte) (*x509.CertPool, error) {
 	return rootCAs, nil
 }
 
-// parseClientSecret fetches the referenced Secret, resolves the CA cert, and returns auth material for the
+// parseConnectionSpec parses the supplied ConnectionSpec, fetches any
+// referenced Secrets, resolves the CA cert, and returns auth material for the
 // connection's auth mode.
-func (cp *ClientPool) parseClientSecret(
+func (cp *ClientPool) parseConnectionSpec(
 	ctx context.Context,
 	spec v1alpha1.ConnectionSpec,
 	k8sNamespace string,
 ) (clientAuth, error) {
-	var secret corev1.Secret
-	if spec.SecretName() != "" {
-		if err := cp.k8sClient.Get(ctx, types.NamespacedName{
-			Name:      spec.SecretName(),
-			Namespace: k8sNamespace,
-		}, &secret); err != nil {
-			return clientAuth{}, err
-		}
+	switch spec.AuthMode() {
+	case v1alpha1.AuthModeTLS:
+		return cp.fetchClientUsingMTLS(ctx, spec, k8sNamespace)
+	case v1alpha1.AuthModeAPIKey:
+		return cp.fetchClientUsingAPIKey(ctx, spec, k8sNamespace)
+	case v1alpha1.AuthModeNoCredentials:
+		return cp.fetchClientUsingNoCredentials(ctx, spec, k8sNamespace)
+	default:
+		return clientAuth{}, fmt.Errorf("invalid auth mode: %s", spec.AuthMode())
 	}
+}
 
+// caCertFromConnectionSpec returns the CA cert from the supplied
+// ConnectionSpec.
+func (cp *ClientPool) caCertFromConnectionSpec(
+	ctx context.Context,
+	spec v1alpha1.ConnectionSpec,
+	k8sNamespace string,
+) ([]byte, error) {
 	// TLS.CACertSecretRef applies to API_KEY and NO_CREDENTIALS only; AuthModeTLS ignores it (its own
 	// ca.crt covers it), and the two are mutually exclusive by CEL validation.
 	var caCert []byte
@@ -347,36 +408,17 @@ func (cp *ClientPool) parseClientSecret(
 			Name:      caCertSecretName,
 			Namespace: k8sNamespace,
 		}, &caSecret); err != nil {
-			return clientAuth{}, fmt.Errorf("failed to read CA secret %q: %w", caCertSecretName, err)
+			return nil, fmt.Errorf("failed to read CA secret %q: %w", caCertSecretName, err)
 		}
 		// This field's only purpose is carrying a CA, so a missing ca.crt key is a misconfiguration, not
 		// "no CA requested".
 		var ok bool
 		caCert, ok = caSecret.Data["ca.crt"]
 		if !ok || len(caCert) == 0 {
-			return clientAuth{}, fmt.Errorf("CA secret %q referenced by tls.caCertSecretRef has no ca.crt key", caCertSecretName)
+			return nil, fmt.Errorf("CA secret %q referenced by tls.caCertSecretRef has no ca.crt key", caCertSecretName)
 		}
 	}
-
-	switch spec.AuthMode() {
-	case v1alpha1.AuthModeTLS:
-		if secret.Type != corev1.SecretTypeTLS && secret.Type != corev1.SecretTypeOpaque {
-			return clientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/tls or Opaque", secret.Name)
-		}
-		return cp.fetchClientUsingMTLSSecret(secret, spec)
-
-	case v1alpha1.AuthModeAPIKey:
-		if secret.Type != corev1.SecretTypeOpaque {
-			return clientAuth{}, fmt.Errorf("secret %s must be of type kubernetes.io/opaque", secret.Name)
-		}
-		return cp.fetchClientUsingAPIKeySecret(spec, k8sNamespace, caCert)
-
-	case v1alpha1.AuthModeNoCredentials:
-		return cp.fetchClientUsingNoCredentials(spec, caCert)
-
-	default:
-		return clientAuth{}, fmt.Errorf("invalid auth mode: %s", spec.AuthMode())
-	}
+	return caCert, nil
 }
 
 // healthCheck probes the client for readiness. Skipped for API key auth (namespace-scoped credentials

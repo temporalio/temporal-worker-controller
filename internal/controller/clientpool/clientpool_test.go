@@ -152,9 +152,10 @@ func TestFetchMTLS_NoCACert_RootCAsNil(t *testing.T) {
 	caCert, caKey, _ := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 
-	cp := newTestPool()
+	ctx := context.TODO()
 	secret := makeTLSSecret(certPEM, keyPEM, nil) // no ca.crt
-	a, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
+	cp := newTestPoolWithFakeClient(&secret)
+	a, err := cp.fetchClientUsingMTLS(ctx, makeMTLSSpec("localhost:7233"), secret.Namespace)
 
 	require.NoError(t, err)
 	assert.Nil(t, a.tls.RootCAs, "RootCAs must be nil when no ca.crt is provided so Go uses the system CA bundle")
@@ -185,10 +186,11 @@ func TestFetchMTLS_CACertAppendsToSystemPool(t *testing.T) {
 	// Client cert (signed by custom CA — used as the mTLS identity, not for pool verification).
 	_, clientCertPEM, clientKeyPEM := generateLeafCert(t, customCACert, customCAKey, "client.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 
-	cp := newTestPool()
+	ctx := context.TODO()
 
 	secret := makeTLSSecret(clientCertPEM, clientKeyPEM, customCAPEM)
-	a, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
+	cp := newTestPoolWithFakeClient(&secret)
+	a, err := cp.fetchClientUsingMTLS(ctx, makeMTLSSpec("localhost:7233"), secret.Namespace)
 	require.NoError(t, err)
 
 	pool := a.tls.RootCAs
@@ -205,9 +207,10 @@ func TestFetchMTLS_ExpiredCert_ReturnsError(t *testing.T) {
 	caCert, caKey, _ := generateSelfSignedCACert(t, past.Add(-time.Hour), past)
 	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", past.Add(-time.Hour), past)
 
-	cp := newTestPool()
+	ctx := context.TODO()
 	secret := makeTLSSecret(certPEM, keyPEM, nil)
-	_, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
+	cp := newTestPoolWithFakeClient(&secret)
+	_, err := cp.fetchClientUsingMTLS(ctx, makeMTLSSpec("localhost:7233"), secret.Namespace)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expired")
@@ -219,9 +222,10 @@ func TestFetchMTLS_ValidCert_Succeeds(t *testing.T) {
 	caCert, caKey, _ := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 
-	cp := newTestPool()
+	ctx := context.TODO()
 	secret := makeTLSSecret(certPEM, keyPEM, nil)
-	a, err := cp.fetchClientUsingMTLSSecret(secret, makeMTLSSpec("localhost:7233"))
+	cp := newTestPoolWithFakeClient(&secret)
+	a, err := cp.fetchClientUsingMTLS(ctx, makeMTLSSpec("localhost:7233"), secret.Namespace)
 
 	require.NoError(t, err)
 	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, a.mode)
@@ -235,14 +239,15 @@ func TestFetchMTLS_TLSServerNameOverride(t *testing.T) {
 	caCert, caKey, _ := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 
-	cp := newTestPool()
+	ctx := context.TODO()
 	secret := makeTLSSecret(certPEM, keyPEM, nil)
+	cp := newTestPoolWithFakeClient(&secret)
 	opts := makeMTLSSpec("temporal-nlb.example.com:443")
 	opts.TLS = &temporaliov1alpha1.ConnectionTLSConfig{
 		ServerName: "temporal-cloud.example.com",
 	}
 
-	a, err := cp.fetchClientUsingMTLSSecret(secret, opts)
+	a, err := cp.fetchClientUsingMTLS(ctx, opts, secret.Namespace)
 
 	require.NoError(t, err)
 	require.NotNil(t, a.tls)
@@ -255,6 +260,7 @@ func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
 		Type:       corev1.SecretTypeOpaque,
 		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
 	}
+	ctx := context.TODO()
 	cp := newTestPoolWithFakeClient(&secret)
 	apiKeySelector := &corev1.SecretKeySelector{
 		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
@@ -268,7 +274,7 @@ func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
 		APIKeySecretRef: apiKeySelector,
 	}
 
-	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", nil)
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
 
 	require.NoError(t, err)
 	require.NotNil(t, a.tls)
@@ -276,6 +282,7 @@ func TestFetchAPIKey_TLSServerNameOverride(t *testing.T) {
 }
 
 func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
+	ctx := context.TODO()
 	cp := newTestPool()
 	opts := temporaliov1alpha1.ConnectionSpec{
 		HostPort: "temporal-nlb.example.com:443",
@@ -284,7 +291,7 @@ func TestFetchNoCredentials_TLSServerNameOverride(t *testing.T) {
 		},
 	}
 
-	a, err := cp.fetchClientUsingNoCredentials(opts, nil)
+	a, err := cp.fetchClientUsingNoCredentials(ctx, opts, "test-ns")
 
 	require.NoError(t, err)
 	require.NotNil(t, a.tls)
@@ -311,6 +318,7 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 		Type:       corev1.SecretTypeOpaque,
 		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
 	}
+	ctx := context.TODO()
 	cp := newTestPoolWithFakeClient(&secret)
 	apiKeySelector := &corev1.SecretKeySelector{
 		LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
@@ -321,7 +329,7 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 		APIKeySecretRef: apiKeySelector,
 	}
 
-	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", nil)
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
 
 	require.NoError(t, err)
 	assert.Equal(t, temporaliov1alpha1.AuthModeAPIKey, a.mode)
@@ -337,17 +345,23 @@ func TestFetchAPIKey_CredentialsAndTLSSet(t *testing.T) {
 func TestFetchAPIKey_CACertAppendsToSystemPool(t *testing.T) {
 	now := time.Now()
 
-	customCACert, customCAKey, customCAPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
+	customCACert, customCAKey, customPEM := generateSelfSignedCACert(t, now.Add(-time.Hour), now.Add(time.Hour))
 	_, customLeafPEM, _ := generateLeafCert(t, customCACert, customCAKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 	customLeafCert, err := decodePEMCert(customLeafPEM)
 	require.NoError(t, err)
+	caSecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"ca.crt": customPEM},
+	}
 
 	apiKeySecret := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "api-key-secret", Namespace: "test-ns"},
 		Type:       corev1.SecretTypeOpaque,
 		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
 	}
-	cp := newTestPoolWithFakeClient(&apiKeySecret)
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&caSecret, &apiKeySecret)
 
 	opts := temporaliov1alpha1.ConnectionSpec{
 		HostPort: "localhost:7233",
@@ -360,7 +374,7 @@ func TestFetchAPIKey_CACertAppendsToSystemPool(t *testing.T) {
 		},
 	}
 
-	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", customCAPEM)
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, apiKeySecret.Namespace)
 	require.NoError(t, err)
 
 	pool := a.tls.RootCAs
@@ -378,6 +392,7 @@ func TestFetchAPIKey_NoCACert_RootCAsNil(t *testing.T) {
 		Type:       corev1.SecretTypeOpaque,
 		Data:       map[string][]byte{"apikey": []byte("test-api-key-value")},
 	}
+	ctx := context.TODO()
 	cp := newTestPoolWithFakeClient(&secret)
 	opts := temporaliov1alpha1.ConnectionSpec{
 		HostPort: "localhost:7233",
@@ -387,7 +402,7 @@ func TestFetchAPIKey_NoCACert_RootCAsNil(t *testing.T) {
 		},
 	}
 
-	a, err := cp.fetchClientUsingAPIKeySecret(opts, "test-ns", nil)
+	a, err := cp.fetchClientUsingAPIKey(ctx, opts, secret.Namespace)
 
 	require.NoError(t, err)
 	assert.Nil(t, a.tls.RootCAs)
@@ -402,16 +417,22 @@ func TestFetchNoCredentials_CACertSetsRootCAs(t *testing.T) {
 	_, leafPEM, _ := generateLeafCert(t, caCert, caKey, "custom.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 	leafCert, err := decodePEMCert(leafPEM)
 	require.NoError(t, err)
+	caSecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-secret", Namespace: "test-ns"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"ca.crt": caPEM},
+	}
 
-	cp := newTestPool()
+	ctx := context.TODO()
 	opts := temporaliov1alpha1.ConnectionSpec{
 		HostPort: "localhost:7233",
 		TLS: &temporaliov1alpha1.ConnectionTLSConfig{
 			CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
 		},
 	}
+	cp := newTestPoolWithFakeClient(&caSecret)
 
-	a, err := cp.fetchClientUsingNoCredentials(opts, caPEM)
+	a, err := cp.fetchClientUsingNoCredentials(ctx, opts, "test-ns")
 
 	require.NoError(t, err)
 	require.NotNil(t, a.tls, "TLS config must be allocated once a CA cert is supplied")
@@ -421,7 +442,7 @@ func TestFetchNoCredentials_CACertSetsRootCAs(t *testing.T) {
 }
 
 // TestParseClientSecret_APIKeyWithCACertSecretRef is the end-to-end regression test: it
-// exercises parseClientSecret (not the fetchClientUsing* functions directly) to confirm the
+// exercises parseConnectionSpec (not the fetchClientUsing* functions directly) to confirm the
 // CA secret is actually read from the fake k8s client and threaded through to the TLS config.
 func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
 	now := time.Now()
@@ -453,7 +474,7 @@ func TestParseClientSecret_APIKeyWithCACertSecretRef(t *testing.T) {
 		},
 	}
 
-	a, err := cp.parseClientSecret(context.Background(), opts, "test-ns")
+	a, err := cp.parseConnectionSpec(context.Background(), opts, "test-ns")
 
 	require.NoError(t, err)
 	require.NotNil(t, a.tls.RootCAs)
@@ -490,7 +511,7 @@ func TestParseClientSecret_CACertSecretMissingKey_ReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := cp.parseClientSecret(context.Background(), opts, "test-ns")
+	_, err := cp.parseConnectionSpec(context.Background(), opts, "test-ns")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ca-secret")
@@ -533,13 +554,14 @@ func TestParseClientSecret_OpaqueSecretType(t *testing.T) {
 	_, certPEM, keyPEM := generateLeafCert(t, caCert, caKey, "test.example.com", now.Add(-time.Hour), now.Add(time.Hour))
 
 	opaqueSecret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "tls-secret", Namespace: "test-ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-tls-secret", Namespace: "test-ns"},
 		Type:       corev1.SecretTypeOpaque,
 		Data:       map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM},
 	}
 
-	cp := newTestPool()
-	a, err := cp.fetchClientUsingMTLSSecret(opaqueSecret, makeMTLSSpec("localhost:7233"))
+	ctx := context.TODO()
+	cp := newTestPoolWithFakeClient(&opaqueSecret)
+	a, err := cp.fetchClientUsingMTLS(ctx, makeMTLSSpec("localhost:7233"), opaqueSecret.Namespace)
 
 	require.NoError(t, err, "Opaque secret with tls.crt and tls.key should be accepted for mTLS auth")
 	assert.Equal(t, temporaliov1alpha1.AuthModeTLS, a.mode)
