@@ -155,9 +155,12 @@ jobs:
             exit 1
           fi
           echo "No error logs detected"
+          # We sleep a little longer here because of transient context deadline
+          # exceeded when trying to apply the fixture.
+          sleep 10
 
       - name: Apply test WorkerDeployment
-        run: kubectl apply -f test/e2e/fixtures/basic-wd.yaml
+        run: kubectl apply -f tests/e2e/fixtures/basic-wd.yaml
 
       - name: Verify WorkerDeployment accepted
         run: |
