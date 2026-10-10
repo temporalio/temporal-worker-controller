@@ -245,4 +245,4 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-**Questions?** Reach out to [@jlegrone](https://github.com/jlegrone) or the [#safe-deploys](https://temporalio.slack.com/archives/C07MDJ6S3HP) channel on Temporal Slack!
+**Questions?** Reach out on the [#temporal-workers](https://temporalio.slack.com/archives/C07MDJ6S3HP) channel on [Temporal Slack](https://temporal.io/community)!

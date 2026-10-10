@@ -53,8 +53,11 @@ type ConnectionTLSConfig struct {
 // +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))",message="Only one of mutualTLSSecretRef or apiKeySecretRef may be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.tls) && has(self.tls.caCertSecretRef))",message="tls.caCertSecretRef cannot be combined with mutualTLSSecretRef; bundle the CA into that secret's own ca.crt key instead"
 type ConnectionSpec struct {
-	// The host and port of the Temporal server.
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:[0-9]+$`
+	// HostPort is the Temporal server endpoint. Accepts a host:port (e.g.
+	// "production.tmprl.cloud:7233") or a gRPC resolver target URI
+	// (e.g. "dns:///production.tmprl.cloud:7233",
+	// "xds://example.dest").
+	// +kubebuilder:validation:Pattern=`^([a-zA-Z0-9.-]+:[0-9]+|(dns|xds|passthrough)://[a-zA-Z0-9._/:-]+)$`
 	HostPort string `json:"hostPort"`
 
 	// TLS configures TLS behavior for the Temporal server connection.

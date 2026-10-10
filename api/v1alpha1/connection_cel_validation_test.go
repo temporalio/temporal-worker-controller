@@ -87,4 +87,44 @@ var _ = Describe("Connection CRD CEL validation", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("tls.caCertSecretRef cannot be combined with mutualTLSSecretRef"))
 	})
+
+	It("accepts a host:port", func() {
+		conn := baseConnection("hostport-basic")
+		conn.Spec.HostPort = "temporal.example.com:7233"
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
+	It("accepts a dns:/// resolver target", func() {
+		conn := baseConnection("hostport-dns")
+		conn.Spec.HostPort = "dns:///temporal.example.com:7233"
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
+	It("accepts an xds:// resolver target", func() {
+		conn := baseConnection("hostport-xds")
+		conn.Spec.HostPort = "xds://example.dest"
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
+	It("accepts a passthrough:/// resolver target", func() {
+		conn := baseConnection("hostport-passthrough")
+		conn.Spec.HostPort = "passthrough:///temporal"
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
+	It("rejects a hostPort without a port", func() {
+		conn := baseConnection("hostport-no-port")
+		conn.Spec.HostPort = "temporal.example.com"
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("hostPort"))
+	})
+
+	It("rejects an invalid scheme", func() {
+		conn := baseConnection("hostport-ftp")
+		conn.Spec.HostPort = "ftp://temporal.example.com"
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("hostPort"))
+	})
 })

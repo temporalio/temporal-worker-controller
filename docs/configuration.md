@@ -167,7 +167,7 @@ workerOptions:
 
 ### Connection Configuration
 
-Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname.
+Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname. `hostPort` accepts a host:port (e.g. `production.abc123.tmprl.cloud:7233`) or a gRPC resolver target URI (e.g. `dns:///production.abc123.tmprl.cloud:7233`, `xds://example.dest`).
 
 **Using mTLS Authentication:**
 
@@ -316,6 +316,58 @@ echo -n "your-api-key-token-here" | base64
 - `tls.serverName` affects TLS certificate verification by the controller and is injected into Worker Pods as `TEMPORAL_TLS_SERVER_NAME` for SDK envconfig users.
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
 - `tls.caCertSecretRef` trusts an extra CA for API-key or no-credentials connections (mTLS already covers this via its own secret's `ca.crt` key, and cannot be combined with `tls.caCertSecretRef`). The referenced Secret must have a `ca.crt` key.
+
+**Using Custom Authentication:**
+
+Wrapper binaries that embed the controller can customize Temporal client construction at two levels. These are mutually exclusive:
+
+- **Default path** — `WithDefaultClient`: use the built-in client-creation path (parse Secret, build options, dial, health-check). Optionally pass `WithCustomizeClientOptions` to mutate SDK options (e.g. add an interceptor or a custom `HeadersProvider`) before the pool dials. The pool still owns Secret parsing, dialing, and the health check.
+- **Full control** — `WithCreateClient`: replace the entire client-creation path. The function owns secret parsing, options building, dialing, and health checking; the pool only caches the result. This is the path for wrappers that need to reuse their own client constructor (e.g. one that returns a ready-made client, not options).
+
+**Default path (add an interceptor):**
+
+```go
+r := controller.New(mgr,
+    controller.WithDefaultClient(controller.WithCustomizeClientOptions(func(opts sdkclient.Options) sdkclient.Options {
+        opts.Interceptors = append(opts.Interceptors, myInterceptor)
+        return opts
+    })),
+)
+```
+
+**Full control (reuse a custom client constructor):**
+
+```go
+r := controller.New(mgr,
+    controller.WithCreateClient(func(ctx context.Context, spec v1alpha1.ConnectionSpec, ns, k8sNs, identity string) (controller.CachedClient, error) {
+        client, err := myClientConstructor(spec, ns, identity)
+        if err != nil {
+            return controller.CachedClient{}, err
+        }
+        return controller.CachedClient{
+            Client:  client,
+            IsValid: func() bool { return true }, // e.g. check cert/token expiry, not a readiness probe
+        }, nil
+    }),
+)
+```
+
+A `Connection` using custom auth (no Secret refs):
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: Connection
+metadata:
+  name: production-temporal
+spec:
+  hostPort: "production.abc123.tmprl.cloud:7233"
+```
+
+**Important Notes:**
+- Custom auth is derived from the absence of `mutualTLSSecretRef` and `apiKeySecretRef`; there is no `customAuth` field on the `Connection` CRD.
+- `WithCreateClient` and `WithDefaultClient` are mutually exclusive.
+- With `WithCustomizeClientOptions` (inside `WithDefaultClient`), the wrapper should wrap, not replace, the pool's `HeadersProvider` so the `temporal-namespace` header continues to ride every RPC (including system-level RPCs like `GetSystemInfo`).
+- The pool owns the client cache and eviction in both cases. Creation success is determined by the `CreateClientFunc`'s error return — if it returns an error, the client is never cached. On a cache hit, the pool calls the cached client's `IsValid` closure; returning false triggers eviction and re-dial (the built-in path uses this for mTLS cert-expiry invalidation). On transport-class failures the reconciler evicts the cached client as usual so the next reconcile re-dials.
 
 ## Gate Configuration
 
