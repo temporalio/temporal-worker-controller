@@ -350,6 +350,7 @@ The `WorkerResourceTemplate` renders the same VPA for every version, so one `upd
 | `Recreate` | Evicts a pod whose requests are outside the recommended range, so it is recreated at the new size | Rarely: an eviction stops the worker, and activities that do not finish during its shutdown are retried per their retry policy |
 | `InPlaceOrRecreate` | Resizes the running pod, and evicts it when an in-place resize is not possible | To resize long-lived pods, such as a draining version kept up for pinned workflows |
 | `InPlace` | Resizes the running pod and never evicts; retries later instead (alpha in VPA 1.7.0, needs the VPA `InPlace` feature gate) | When an eviction is never acceptable |
+> **Warning**: `Initial` applies the recommendation only when a pod is created. A new version's pods are created before its VPA has a recommendation, so they keep the pod template's requests. Only pods added later, from a scale-up or a reschedule, get the recommended size. Use `InPlaceOrRecreate`, or set the pod template's requests close to real usage.
 
 > **Warning**: `Initial` applies the recommendation only when a pod is created. A new version's pods are created before its VPA has a recommendation, so they keep the pod template's requests. Only pods added later, from a scale-up or a reschedule, get the recommended size. Use `InPlaceOrRecreate`, or set the pod template's requests close to real usage.
 
