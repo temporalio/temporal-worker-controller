@@ -194,6 +194,47 @@ func TestWorkerDeployment_DeprecatedFieldEmitsWarning(t *testing.T) {
 	assert.Contains(t, warns[0], "spec.replicas is deprecated; use spec.deployment.replicas instead")
 }
 
+func TestWorkerDeployment_GroupSelectorEmitsWarning(t *testing.T) {
+	ctx := context.Background()
+	dep := testhelpers.MakeWDWithName("valid-worker", "")
+	dep.Spec.WorkerGroups = []temporaliov1alpha1.WorkerGroup{
+		{Name: "plain", Deployment: *dep.Spec.Deployment.DeepCopy()},
+		{Name: "selected", Deployment: *dep.Spec.Deployment.DeepCopy()},
+	}
+	dep.Spec.Deployment = nil
+	dep.Spec.WorkerGroups[1].Deployment.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "worker"}}
+
+	webhook := &temporaliov1alpha1.WorkerDeployment{}
+	warns, err := webhook.ValidateCreate(ctx, dep)
+
+	require.NoError(t, err)
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "spec.workerGroups[1].deployment.selector is ignored")
+}
+
+func TestWorkerDeployment_WorkerGroupsWarnAboutIgnoredFields(t *testing.T) {
+	ctx := context.Background()
+	dep := testhelpers.MakeWDWithName("valid-worker", "")
+	dep.Spec.WorkerGroups = []temporaliov1alpha1.WorkerGroup{{Name: "activities", Deployment: *dep.Spec.Deployment.DeepCopy()}}
+	dep.Spec.Deployment = nil
+	progressDeadline := int32(600) // the CRD default
+	dep.Spec.ProgressDeadlineSeconds = &progressDeadline
+	webhook := &temporaliov1alpha1.WorkerDeployment{}
+
+	warns, err := webhook.ValidateCreate(ctx, dep)
+	require.NoError(t, err)
+	assert.Empty(t, warns, "the defaulted progressDeadlineSeconds is not a user mistake")
+
+	replicas := int32(3)
+	dep.Spec.Replicas = &replicas
+	dep.Spec.MinReadySeconds = 10
+	warns, err = webhook.ValidateCreate(ctx, dep)
+	require.NoError(t, err)
+	require.Len(t, warns, 2)
+	assert.Contains(t, warns[0], "spec.minReadySeconds is ignored with spec.workerGroups")
+	assert.Contains(t, warns[1], "spec.replicas is ignored with spec.workerGroups")
+}
+
 func TestWorkerDeployment_ValidateUpdate(t *testing.T) {
 	tests := map[string]struct {
 		oldObj   runtime.Object

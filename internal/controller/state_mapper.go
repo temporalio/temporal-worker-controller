@@ -11,6 +11,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,6 +20,8 @@ type stateMapper struct {
 	k8sState             *k8s.DeploymentState
 	temporalState        *temporal.TemporalWorkerState
 	workerDeploymentName string
+	// targetSpec, when set, lists the groups the target version must run before it is healthy.
+	targetSpec *v1alpha1.WorkerDeploymentSpec
 }
 
 // newStateMapper creates a new state mapper
@@ -57,7 +60,7 @@ func (m *stateMapper) mapToStatus(targetBuildID string) *v1alpha1.WorkerDeployme
 
 	// Add deprecated versions
 	var deprecatedVersions []*v1alpha1.DeprecatedWorkerDeploymentVersion
-	for buildID := range m.k8sState.Deployments {
+	for _, buildID := range m.k8sState.BuildIDs() {
 		// Skip current and target versions
 		if buildID == currentBuildID || buildID == targetBuildID {
 			continue
@@ -100,16 +103,7 @@ func (m *stateMapper) mapCurrentWorkerDeploymentVersionByBuildID(buildID string)
 		},
 	}
 
-	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[buildID]
-
-		// Check deployment health
-		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
-		if healthy {
-			version.HealthySince = healthySince
-		}
-	}
+	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 
 	// Set version status from temporal state
 	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
@@ -135,15 +129,10 @@ func (m *stateMapper) mapTargetWorkerDeploymentVersionByBuildID(buildID string) 
 		return version
 	}
 
-	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[buildID]
-
-		// Check deployment health
-		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
-		if healthy {
-			version.HealthySince = healthySince
-		}
+	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
+	// The stricter rule gates promotion only; a current target keeps the plain health check.
+	if m.targetSpec != nil && m.targetSpec.HasWorkerGroups() && buildID != m.temporalState.CurrentBuildID {
+		m.applyTargetGroupHealth(&version.BaseWorkerDeploymentVersion, buildID)
 	}
 
 	// Set version status from temporal state
@@ -181,8 +170,8 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 	eligibleForDeletion := false
 	if vInfo, exists := m.temporalState.Versions[buildID]; exists {
 		hasActiveDeployment := false
-		if d, ok := m.k8sState.Deployments[buildID]; ok {
-			hasActiveDeployment = d.Status.Replicas > 0
+		for _, d := range m.k8sState.VersionDeployments(buildID) {
+			hasActiveDeployment = hasActiveDeployment || d.Status.Replicas > 0
 		}
 		eligibleForDeletion = vInfo.Status == v1alpha1.VersionStatusDrained && !hasActiveDeployment
 	}
@@ -195,16 +184,7 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 		EligibleForDeletion: eligibleForDeletion,
 	}
 
-	// Set deployment reference if it exists
-	if deployment, exists := m.k8sState.Deployments[buildID]; exists {
-		version.Deployment = m.k8sState.DeploymentRefs[buildID]
-
-		// Check deployment health
-		healthy, healthySince := k8s.IsDeploymentHealthy(deployment)
-		if healthy {
-			version.HealthySince = healthySince
-		}
-	}
+	m.setVersionDeployments(&version.BaseWorkerDeploymentVersion, buildID)
 
 	// Set version status from temporal state
 	if temporalVersion, exists := m.temporalState.Versions[buildID]; exists {
@@ -221,4 +201,94 @@ func (m *stateMapper) mapDeprecatedWorkerDeploymentVersionByBuildID(buildID stri
 	}
 
 	return version
+}
+
+// setVersionDeployments points a version at its default group's deployment and marks
+// it healthy once every group's deployment is available.
+func (m *stateMapper) setVersionDeployments(version *v1alpha1.BaseWorkerDeploymentVersion, buildID string) {
+	deployments := m.k8sState.VersionDeployments(buildID)
+	if len(deployments) == 0 {
+		return
+	}
+	version.Deployment = m.k8sState.DeploymentRefs[buildID]
+	version.HealthySince = versionHealthySince(deployments)
+	version.WorkerGroups = groupStatuses(deployments)
+}
+
+// groupStatuses reports each group of a multi-group version, sorted by name so status
+// doesn't churn. Versions without group labels keep an empty list.
+func groupStatuses(deployments map[string]*appsv1.Deployment) []v1alpha1.WorkerGroupStatus {
+	if !k8s.HasWorkerGroupLabel(deployments) {
+		return nil
+	}
+	groups := make([]v1alpha1.WorkerGroupStatus, 0, len(deployments))
+	for name, d := range deployments {
+		group := v1alpha1.WorkerGroupStatus{Name: name, Deployment: k8s.NewObjectRef(d)}
+		if healthy, since := k8s.IsDeploymentHealthy(d); healthy {
+			group.HealthySince = since
+		}
+		groups = append(groups, group)
+	}
+	slices.SortFunc(groups, func(a, b v1alpha1.WorkerGroupStatus) int { return cmp.Compare(a.Name, b.Name) })
+	return groups
+}
+
+// applyTargetGroupHealth marks each spec group of a multi-group target healthy only once it
+// also has an available replica, and the version once every spec group is.
+func (m *stateMapper) applyTargetGroupHealth(version *v1alpha1.BaseWorkerDeploymentVersion, buildID string) {
+	deployments := m.k8sState.VersionDeployments(buildID)
+	var times []*metav1.Time
+	for _, group := range m.targetSpec.WorkerGroupNames() {
+		var since *metav1.Time
+		if d, ok := deployments[group]; ok {
+			since = targetGroupHealthySince(m.targetSpec, group, d)
+		}
+		times = append(times, since)
+		for i := range version.WorkerGroups {
+			if version.WorkerGroups[i].Name == group {
+				version.WorkerGroups[i].HealthySince = since
+			}
+		}
+	}
+	version.HealthySince = latestOrNil(times)
+}
+
+// targetGroupHealthySince also requires an available replica: a Deployment is Available at
+// zero replicas, which would pass a group that never polled.
+func targetGroupHealthySince(spec *v1alpha1.WorkerDeploymentSpec, group string, d *appsv1.Deployment) *metav1.Time {
+	healthy, since := k8s.IsDeploymentHealthy(d)
+	if !healthy {
+		return nil
+	}
+	groupSpec, _ := spec.WorkerGroupDeploymentSpec(group)
+	scaledToZero := groupSpec.Replicas != nil && *groupSpec.Replicas == 0
+	if d.Status.AvailableReplicas < 1 && !scaledToZero {
+		return nil
+	}
+	return since
+}
+
+// versionHealthySince returns when the last of the deployments became available, or
+// nil while any of them is unavailable.
+func versionHealthySince(deployments map[string]*appsv1.Deployment) *metav1.Time {
+	times := make([]*metav1.Time, 0, len(deployments))
+	for _, d := range deployments {
+		_, since := k8s.IsDeploymentHealthy(d)
+		times = append(times, since)
+	}
+	return latestOrNil(times)
+}
+
+// latestOrNil returns the latest of the times, or nil if any of them is nil.
+func latestOrNil(times []*metav1.Time) *metav1.Time {
+	var latest *metav1.Time
+	for _, t := range times {
+		if t == nil {
+			return nil
+		}
+		if latest == nil || t.After(latest.Time) {
+			latest = t
+		}
+	}
+	return latest
 }

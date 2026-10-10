@@ -27,9 +27,14 @@ type plan struct {
 
 	// Which actions to take
 	DeleteDeployments []*appsv1.Deployment
-	CreateDeployment  *appsv1.Deployment
-	ScaleDeployments  map[*corev1.ObjectReference]uint32
-	UpdateDeployments []*appsv1.Deployment
+	// DeleteWorkerGroupDeployments are Deployments of groups removed from the target version.
+	// Deleting them never deletes the version in Temporal.
+	DeleteWorkerGroupDeployments []*appsv1.Deployment
+	CreateDeployments            []*appsv1.Deployment
+	ScaleDeployments             map[*corev1.ObjectReference]uint32
+	UpdateDeployments            []*appsv1.Deployment
+	// BlockedReason explains a spec change the controller refuses to apply.
+	BlockedReason string
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
@@ -49,6 +54,11 @@ type plan struct {
 	// WRTs that need a controller owner reference added, as (base, patched) pairs
 	// ready for client.MergeFrom patching in executePlan.
 	EnsureWRTOwnerRefs []planner.WRTOwnerRefPatch
+
+	// WRTsWithMissingWorkerGroup names WRTs whose group no version has and the spec does not declare.
+	WRTsWithMissingWorkerGroup []string
+	// WRTsWithStaleWorkerGroupNotFound names WRTs still marked WorkerGroupNotFound whose group is known again.
+	WRTsWithStaleWorkerGroupNotFound []string
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -172,8 +182,10 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 
 	// Convert planner result to controller plan
 	plan.DeleteDeployments = planResult.DeleteDeployments
+	plan.DeleteWorkerGroupDeployments = planResult.DeleteWorkerGroupDeployments
 	plan.ScaleDeployments = planResult.ScaleDeployments
 	plan.UpdateDeployments = planResult.UpdateDeployments
+	plan.BlockedReason = planResult.BlockedReason
 
 	// Convert version config
 	plan.UpdateVersionConfig = planResult.VersionConfig
@@ -181,6 +193,8 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
 	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
+	plan.WRTsWithMissingWorkerGroup = planResult.WRTsWithMissingWorkerGroup
+	plan.WRTsWithStaleWorkerGroupNotFound = planResult.WRTsWithStaleWorkerGroupNotFound
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
@@ -197,22 +211,13 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	}
 
 	// Handle deployment creation if needed
-	if planResult.ShouldCreateDeployment {
-		d, err := r.newDeployment(w, targetBuildID, connection)
+	for _, group := range planResult.CreateDeploymentWorkerGroups {
+		d, err := k8s.NewWorkerGroupDeploymentWithControllerRef(w, targetBuildID, group, connection, r.Scheme)
 		if err != nil {
 			return nil, err
 		}
-		plan.CreateDeployment = d
+		plan.CreateDeployments = append(plan.CreateDeployments, d)
 	}
 
 	return plan, nil
-}
-
-// Create a new deployment with owner reference
-func (r *WorkerDeploymentReconciler) newDeployment(
-	w *temporaliov1alpha1.WorkerDeployment,
-	buildID string,
-	connection temporaliov1alpha1.ConnectionSpec,
-) (*appsv1.Deployment, error) {
-	return k8s.NewDeploymentWithControllerRef(w, buildID, connection, r.Scheme)
 }

@@ -533,6 +533,35 @@ func TestExecutePlan_VersionAlreadyDeletedOnServer_DeletesDeployment(t *testing.
 	require.False(t, deploymentExists(t, r, namespace, depA.Name))
 }
 
+func TestExecutePlan_DrainedMultiGroupVersion_DeletesVersionOnceAndEveryGroup(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 0, connection)
+	depA.Labels[k8s.WorkerGroupLabel] = temporaliov1alpha1.DefaultWorkerGroupName
+	depAActivities := makeVersionedDeployment(twd, buildA, 0, connection)
+	depAActivities.Name += "-activities"
+	depAActivities.Labels[k8s.WorkerGroupLabel] = "activities"
+	depB := makeVersionedDeployment(twd, buildB, 1, connection)
+	r, _ := newTestReconciler([]client.Object{twd, depA, depAActivities, depB})
+
+	handle := newPruneStubHandle(nil)
+	tc := newStubTemporalClientWithHandle(handle)
+
+	drainedSince := metav1.NewTime(time.Now().Add(-time.Hour))
+	status := statusWithDeprecated(buildB, depB, drainedVersion(buildA, depA, drainedSince))
+
+	p := runPlanCycleWith(t, r, twd, connection, status, tc)
+	require.Equal(t, []string{buildA}, handle.deletedVersions)
+	require.Len(t, p.DeleteDeployments, 2)
+	require.False(t, deploymentExists(t, r, namespace, depA.Name))
+	require.False(t, deploymentExists(t, r, namespace, depAActivities.Name))
+}
+
 // ─── gateWorkflowArg tests ───────────────────────────────────────────────────
 //
 // gateWorkflowArg decides how the gate input is handed to the Temporal SDK. The

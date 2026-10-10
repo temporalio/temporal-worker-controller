@@ -1026,6 +1026,9 @@ func TestIntegration(t *testing.T) {
 	)
 	runRateLimitTest(t, k8sClient, tsRateLimit, testNamespace.Name)
 
+	// Worker group tests sunset a version, so they need pollers to expire quickly too.
+	runWorkerGroupTests(t, k8sClient, tsShortTTL, testNamespace.Name)
+
 	// Deletion cleanup tests — use short poller TTL server so active pollers expire
 	// in 1s rather than the default 5 minutes, keeping test runtime reasonable.
 	runDeletionTests(t, k8sClient, tsShortTTL, testNamespace.Name)

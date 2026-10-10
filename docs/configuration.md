@@ -544,6 +544,29 @@ spec:
     strategy: Progressive
 ```
 
+### Worker groups
+
+To run roles with different pod shapes in one version, use `spec.workerGroups` in place
+of `spec.deployment`. Each group takes the same `appsv1.DeploymentSpec` as
+`spec.deployment`:
+
+```yaml
+spec:
+  workerGroups:
+    - name: workflows
+      deployment:
+        replicas: 2
+        template: {...}   # workflow workers
+    - name: activities
+      deployment:
+        replicas: 6
+        template: {...}   # activity workers, different resources
+```
+
+All groups share the Build ID and roll out together. See
+[Worker Groups](worker-groups.md) for how rollouts, scaling and custom Build IDs
+work with groups.
+
 ### Environment-Specific Configurations
 
 **Production Configuration:**

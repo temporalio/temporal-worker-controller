@@ -32,6 +32,9 @@ const (
 	BuildIDLabel = "temporal.io/build-id"
 	// WorkerDeploymentNameLabel identifies Deployments managed for a TemporalWorkerDeployment.
 	WorkerDeploymentNameLabel = "temporal.io/deployment-name"
+	// WorkerGroupLabel names the worker group of a Deployment in a version that uses groups.
+	// Deployments without it belong to a WorkerDeployment without groups.
+	WorkerGroupLabel = "temporal.io/worker-group"
 	// WorkerDeploymentNameSeparator joins the K8s namespace and the WorkerDeployment resource
 	// name to form the Temporal-server-side worker deployment name (namespace/wdName).
 	WorkerDeploymentNameSeparator = "/"
@@ -44,6 +47,7 @@ const (
 	MaxDeploymentNameLen                           = 47
 	ConnectionSpecHashAnnotation                   = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation                  = "temporal.io/pod-template-spec-hash"
+	groupsBuildIDHashLen                           = 10
 
 	// Environment variables read by the Temporal Go SDK's envconfig package
 	// (go.temporal.io/sdk/contrib/envconfig) to configure the worker's connection.
@@ -74,12 +78,84 @@ const (
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
 type DeploymentState struct {
-	// Map of buildID to deployment
+	// Map of buildID to the default group's deployment. Use VersionDeployments to
+	// decide whether a version has any deployment.
 	Deployments map[string]*appsv1.Deployment
 	// Sorted deployments by creation time
 	DeploymentsByTime []*appsv1.Deployment
-	// Map of buildID to deployment references
+	// Map of buildID to the default group's deployment reference
 	DeploymentRefs map[string]*corev1.ObjectReference
+	// Map of buildID to group name to deployment, for every group including the default
+	WorkerGroupDeployments map[string]map[string]*appsv1.Deployment
+}
+
+// VersionDeployments returns every group's deployment for a build ID, keyed by group name.
+func (s *DeploymentState) VersionDeployments(buildID string) map[string]*appsv1.Deployment {
+	if s.WorkerGroupDeployments != nil {
+		return s.WorkerGroupDeployments[buildID]
+	}
+	// States built without WorkerGroupDeployments (e.g. in tests) only have default groups.
+	if d, ok := s.Deployments[buildID]; ok {
+		return map[string]*appsv1.Deployment{temporaliov1alpha1.DefaultWorkerGroupName: d}
+	}
+	return nil
+}
+
+// VersionDeploymentList returns every group's deployment for a build ID: named
+// groups sorted by name, then the default group.
+func (s *DeploymentState) VersionDeploymentList(buildID string) []*appsv1.Deployment {
+	groups := s.VersionDeployments(buildID)
+	names := make([]string, 0, len(groups))
+	for name := range groups {
+		if name != temporaliov1alpha1.DefaultWorkerGroupName {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	list := make([]*appsv1.Deployment, 0, len(groups))
+	for _, name := range names {
+		list = append(list, groups[name])
+	}
+	if d, ok := groups[temporaliov1alpha1.DefaultWorkerGroupName]; ok {
+		list = append(list, d)
+	}
+	return list
+}
+
+// BuildIDs returns the sorted build IDs that have at least one deployment.
+func (s *DeploymentState) BuildIDs() []string {
+	seen := make(map[string]struct{}, len(s.Deployments)+len(s.WorkerGroupDeployments))
+	for buildID := range s.Deployments {
+		seen[buildID] = struct{}{}
+	}
+	for buildID := range s.WorkerGroupDeployments {
+		seen[buildID] = struct{}{}
+	}
+	buildIDs := make([]string, 0, len(seen))
+	for buildID := range seen {
+		buildIDs = append(buildIDs, buildID)
+	}
+	sort.Strings(buildIDs)
+	return buildIDs
+}
+
+// HasWorkerGroupLabel reports whether any of a version's deployments carries the group label,
+// which marks a multi-group version.
+func HasWorkerGroupLabel(deployments map[string]*appsv1.Deployment) bool {
+	for _, d := range deployments {
+		if _, ok := d.Labels[WorkerGroupLabel]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// WorkerGroupName returns the worker group a deployment belongs to.
+func WorkerGroupName(d *appsv1.Deployment) string {
+	if group := d.GetLabels()[WorkerGroupLabel]; group != "" {
+		return group
+	}
+	return temporaliov1alpha1.DefaultWorkerGroupName
 }
 
 // GetDeploymentState queries Kubernetes to get the state of all deployments
@@ -91,12 +167,6 @@ func GetDeploymentState(
 	ownerName string,
 	workerDeploymentName string,
 ) (*DeploymentState, error) {
-	state := &DeploymentState{
-		Deployments:       make(map[string]*appsv1.Deployment),
-		DeploymentsByTime: []*appsv1.Deployment{},
-		DeploymentRefs:    make(map[string]*corev1.ObjectReference),
-	}
-
 	// List k8s deployments that correspond to managed worker deployment versions
 	var childDeploys appsv1.DeploymentList
 	if err := k8sClient.List(
@@ -113,18 +183,39 @@ func GetDeploymentState(
 		return childDeploys.Items[i].ObjectMeta.CreationTimestamp.Before(&childDeploys.Items[j].ObjectMeta.CreationTimestamp)
 	})
 
-	// Track each k8s deployment by build ID
+	deploys := make([]*appsv1.Deployment, len(childDeploys.Items))
 	for i := range childDeploys.Items {
-		deploy := &childDeploys.Items[i]
-		if buildID, ok := deploy.GetLabels()[BuildIDLabel]; ok {
+		deploys[i] = &childDeploys.Items[i]
+	}
+	return NewDeploymentState(deploys...), nil
+}
+
+// NewDeploymentState indexes deployments by build ID and group, keeping their order.
+// Deployments without the build ID label are ignored.
+func NewDeploymentState(deploys ...*appsv1.Deployment) *DeploymentState {
+	state := &DeploymentState{
+		Deployments:            make(map[string]*appsv1.Deployment),
+		DeploymentsByTime:      []*appsv1.Deployment{},
+		DeploymentRefs:         make(map[string]*corev1.ObjectReference),
+		WorkerGroupDeployments: make(map[string]map[string]*appsv1.Deployment),
+	}
+	for _, deploy := range deploys {
+		buildID, ok := deploy.GetLabels()[BuildIDLabel]
+		if !ok {
+			continue
+		}
+		group := WorkerGroupName(deploy)
+		if state.WorkerGroupDeployments[buildID] == nil {
+			state.WorkerGroupDeployments[buildID] = make(map[string]*appsv1.Deployment)
+		}
+		state.WorkerGroupDeployments[buildID][group] = deploy
+		state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
+		if group == temporaliov1alpha1.DefaultWorkerGroupName {
 			state.Deployments[buildID] = deploy
-			state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
 			state.DeploymentRefs[buildID] = NewObjectRef(deploy)
 		}
-		// Any deployments without the build ID label are ignored
 	}
-
-	return state, nil
+	return state
 }
 
 // IsDeploymentHealthy checks if a deployment is in the "Available" state
@@ -159,17 +250,52 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 		// Fall through to default hash-based generation if buildID is invalid after cleaning
 	}
 
+	if w.Spec.HasWorkerGroups() {
+		return computeGroupsBuildID(w.Spec)
+	}
 	depSpec := w.Spec.DeploymentSpec()
 
-	if containers := depSpec.Template.Spec.Containers; len(containers) > 0 {
-		if img := containers[0].Image; img != "" {
-			shortHashSuffix := ResourceNameSeparator + utils.ComputeHash(&depSpec.Template, nil, true)
-			maxImgLen := MaxBuildIDLen - len(shortHashSuffix)
-			imagePrefix := computeImagePrefix(img, maxImgLen)
-			return cleanBuildID(imagePrefix + shortHashSuffix)
-		}
+	if img := firstImage(depSpec.Template); img != "" {
+		return imagePrefixedBuildID(img, utils.ComputeHash(&depSpec.Template, nil, true))
 	}
 	return utils.ComputeHash(&depSpec.Template, nil, false)
+}
+
+// computeGroupsBuildID hashes every group's name and pod template, so a change to any
+// group starts one new version for all of them. Groups are sorted by name, so their order
+// in the spec doesn't matter.
+func computeGroupsBuildID(spec temporaliov1alpha1.WorkerDeploymentSpec) string {
+	type groupTemplate struct {
+		Name     string                 `json:"name"`
+		Template corev1.PodTemplateSpec `json:"template"`
+	}
+	sorted := slices.Clone(spec.WorkerGroups)
+	slices.SortFunc(sorted, func(a, b temporaliov1alpha1.WorkerGroup) int { return strings.Compare(a.Name, b.Name) })
+	groups := make([]groupTemplate, 0, len(sorted))
+	for _, p := range sorted {
+		groups = append(groups, groupTemplate{Name: p.Name, Template: p.Deployment.Template})
+	}
+	data, _ := json.Marshal(groups) // never errors for these types
+	hash := HashString(string(data))[:groupsBuildIDHashLen]
+
+	if img := firstImage(sorted[0].Deployment.Template); img != "" {
+		return imagePrefixedBuildID(img, hash)
+	}
+	return hash
+}
+
+func firstImage(template corev1.PodTemplateSpec) string {
+	if containers := template.Spec.Containers; len(containers) > 0 {
+		return containers[0].Image
+	}
+	return ""
+}
+
+// imagePrefixedBuildID prefixes hash with the image's tag, digest or path, cut to fit the
+// build ID length limit.
+func imagePrefixedBuildID(image, hash string) string {
+	suffix := ResourceNameSeparator + hash
+	return cleanBuildID(computeImagePrefix(image, MaxBuildIDLen-len(suffix)) + suffix)
 }
 
 // ComputeWorkerDeploymentName generates the base worker deployment name
@@ -191,6 +317,15 @@ func ComputeVersionedDeploymentName(baseName, buildID string) string {
 		fullName = TruncateString(baseName, 10) + ResourceNameSeparator + TruncateString(buildID, 10) + ResourceNameSeparator + hashName
 	}
 	return CleanStringForDNS(fullName)
+}
+
+// ComputeWorkerGroupDeploymentName names a named group's versioned Deployment. The hash of the
+// full triple keeps it from ever taking another group's or a default group's name.
+func ComputeWorkerGroupDeploymentName(baseName, group, buildID string) string {
+	return hashSuffixedName(
+		baseName+WorkerDeploymentNameSeparator+group+WorkerDeploymentNameSeparator+buildID,
+		baseName+ResourceNameSeparator+group+ResourceNameSeparator+buildID,
+	)
 }
 
 func HashString(s string) string {
@@ -264,6 +399,14 @@ func ComputeSelectorLabels(twdName, buildID string) map[string]string {
 	}
 }
 
+// ComputeWorkerGroupSelectorLabels returns the selector labels of a group's Deployment in a
+// multi-group version.
+func ComputeWorkerGroupSelectorLabels(twdName, buildID, group string) map[string]string {
+	labels := ComputeSelectorLabels(twdName, buildID)
+	labels[WorkerGroupLabel] = group
+	return labels
+}
+
 // NewDeploymentWithOwnerRef creates a new deployment resource, including owner references
 func NewDeploymentWithOwnerRef(
 	typeMeta *metav1.TypeMeta,
@@ -273,9 +416,33 @@ func NewDeploymentWithOwnerRef(
 	buildID string,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) *appsv1.Deployment {
-	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
+	d, _ := NewWorkerGroupDeploymentWithOwnerRef(typeMeta, objectMeta, spec, workerDeploymentName, buildID,
+		temporaliov1alpha1.DefaultWorkerGroupName, connection) // a spec without groups always has the default group
+	return d
+}
 
-	depSpec := spec.DeploymentSpec()
+// NewWorkerGroupDeploymentWithOwnerRef creates one worker group's deployment for a version. Groups
+// carry the group label in their selector; the default group of a spec without groups doesn't.
+func NewWorkerGroupDeploymentWithOwnerRef(
+	typeMeta *metav1.TypeMeta,
+	objectMeta *metav1.ObjectMeta,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	workerDeploymentName string,
+	buildID string,
+	group string,
+	connection temporaliov1alpha1.ConnectionSpec,
+) (*appsv1.Deployment, error) {
+	depSpec, ok := spec.WorkerGroupDeploymentSpec(group)
+	if !ok {
+		return nil, fmt.Errorf("worker group %q is not in the WorkerDeployment spec", group)
+	}
+	name := ComputeVersionedDeploymentName(objectMeta.Name, buildID)
+	selectorLabels := ComputeSelectorLabels(objectMeta.GetName(), buildID)
+	if spec.HasWorkerGroups() {
+		name = ComputeWorkerGroupDeploymentName(objectMeta.Name, group, buildID)
+		selectorLabels = ComputeWorkerGroupSelectorLabels(objectMeta.GetName(), buildID, group)
+	}
+
 	depSpec.Selector = &metav1.LabelSelector{
 		MatchLabels: selectorLabels,
 	}
@@ -319,7 +486,7 @@ func NewDeploymentWithOwnerRef(
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:                       ComputeVersionedDeploymentName(objectMeta.Name, buildID),
+			Name:                       name,
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
 			Labels:                     selectorLabels,
@@ -336,7 +503,7 @@ func NewDeploymentWithOwnerRef(
 			//                 deleting deployments that are still reachable.
 		},
 		Spec: depSpec,
-	}
+	}, nil
 }
 
 // TODO (Shivam): Change hash when secret name is updated as well.
@@ -589,20 +756,27 @@ func RemoveTLSCAVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 	return mounts
 }
 
-func NewDeploymentWithControllerRef(
+// NewWorkerGroupDeploymentWithControllerRef creates one worker group's deployment for a version,
+// with the WorkerDeployment as its controller.
+func NewWorkerGroupDeploymentWithControllerRef(
 	w *temporaliov1alpha1.WorkerDeployment,
 	buildID string,
+	group string,
 	connection temporaliov1alpha1.ConnectionSpec,
 	reconcilerScheme *runtime.Scheme,
 ) (*appsv1.Deployment, error) {
-	d := NewDeploymentWithOwnerRef(
+	d, err := NewWorkerGroupDeploymentWithOwnerRef(
 		&w.TypeMeta,
 		&w.ObjectMeta,
 		&w.Spec,
 		ComputeWorkerDeploymentName(w),
 		buildID,
+		group,
 		connection,
 	)
+	if err != nil {
+		return nil, err
+	}
 	if err := ctrl.SetControllerReference(w, d, reconcilerScheme); err != nil {
 		return nil, err
 	}
