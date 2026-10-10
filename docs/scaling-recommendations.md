@@ -332,8 +332,8 @@ A `WorkerResourceTemplate` attaches one VPA to each versioned Deployment through
 
 ### VPA prerequisites
 
-- The worker container sets CPU and memory requests in the `WorkerDeployment` pod template. Without them the pod is BestEffort, and adding requests changes its QoS class, which an in-place resize cannot do, so VPA evicts the pod instead. The helloworld demo sets no requests.
-- For `updateMode: InPlaceOrRecreate`: Kubernetes 1.33+, where `InPlacePodVerticalScaling` is on by default, and VPA 1.4.0+. On VPA 1.4.x, also enable the VPA `InPlaceOrRecreate` feature gate; it is on by default from 1.5.0. See [In-place updates][vpa-in-place].
+- The `WorkerDeployment` pod template (`spec.template`) must set non-zero `resources.requests.cpu` and `resources.requests.memory` on the worker container. Without them the pod is BestEffort, and adding requests changes its QoS class, which an in-place resize cannot do, so VPA evicts the pod instead. The helloworld demo sets no requests.
+- When using `updateMode: InPlaceOrRecreate`, you need Kubernetes 1.33+, where the `InPlacePodVerticalScaling` feature gate is on by default, and VPA 1.4+. If you are using VPA 1.4, you must enable the VPA `InPlaceOrRecreate` feature gate; it is on by default from 1.5. See [In-place updates][vpa-in-place].
 
 ### How VPA treats a worker version
 
@@ -350,6 +350,8 @@ The `WorkerResourceTemplate` renders the same VPA for every version, so one `upd
 | `Recreate` | Evicts a pod whose requests are outside the recommended range, so it is recreated at the new size | Rarely: an eviction stops the worker, and activities that do not finish during its shutdown are retried per their retry policy |
 | `InPlaceOrRecreate` | Resizes the running pod, and evicts it when an in-place resize is not possible | To resize long-lived pods, such as a draining version kept up for pinned workflows |
 | `InPlace` | Resizes the running pod and never evicts; retries later instead (alpha in VPA 1.7.0, needs the VPA `InPlace` feature gate) | When an eviction is never acceptable |
+
+> **Warning**: `Initial` applies the recommendation only when a pod is created. A new version's pods are created before its VPA has a recommendation, so they keep the pod template's requests. Only pods added later, from a scale-up or a reschedule, get the recommended size. Use `InPlaceOrRecreate`, or set the pod template's requests close to real usage.
 
 `Auto` is deprecated in the VPA API; use `Recreate`.
 

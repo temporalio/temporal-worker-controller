@@ -10,9 +10,10 @@
 #   - VPA is installed (recommender, updater, and admission controller). The
 #     controller does not install it.
 #   - VerticalPodAutoscaler is in workerResourceTemplate.allowedResources
-#   - The worker container sets CPU and memory requests. The helloworld demo
-#     sets none: its pods are BestEffort, and adding requests changes the QoS
-#     class, which an in-place resize cannot do, so VPA would evict the pod.
+#   - The WorkerDeployment pod template (spec.template) must set non-zero CPU
+#     and memory requests on the worker container. The helloworld demo sets
+#     none: its pods are BestEffort, and adding requests changes the QoS class,
+#     which an in-place resize cannot do, so VPA would evict the pod.
 #   - For updateMode InPlaceOrRecreate: Kubernetes 1.33+ and VPA 1.4.0+
 #     (on 1.4.x, enable the VPA InPlaceOrRecreate feature gate)
 #
