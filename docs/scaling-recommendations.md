@@ -4,6 +4,8 @@ This document describes practical reactivity and reliability tradeoffs when scal
 
 The `internal/demo/` example wires the HPA path described here. The KEDA path is a supported alternative that polls the Temporal API directly instead of going through a metrics pipeline. They can't both run in the same cluster, because Kubernetes allows only one provider for the `external.metrics.k8s.io` API and each of them claims it.
 
+To size each pod's CPU and memory rather than the number of pods, see [Vertical scaling with VPA](#vertical-scaling-with-vpa).
+
 ## TL;DR
 
 We recommend choosing a scaler approach that aligns with the workload pattern your application exhibits.
@@ -322,6 +324,83 @@ A non-empty value for `namespace`, `workerDeploymentName`, or `workerDeploymentB
 
 To also scale on a cluster metric such as slot utilization, add a trigger whose query uses the tokens above. [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml) pairs the temporal trigger with a Prometheus query. KEDA takes the trigger that asks for more replicas.
 
+## Vertical scaling with VPA
+
+HPA and KEDA change how many pods a worker deployment version runs. A VerticalPodAutoscaler (VPA) changes how much CPU and memory each pod requests, based on observed usage. They can run together; see [Combining VPA with HPA or KEDA](#combining-vpa-with-hpa-or-keda).
+
+A `WorkerResourceTemplate` attaches one VPA to each versioned Deployment through `spec.targetRef: {}`. [Example: VerticalPodAutoscaler per worker version](worker-resource-templates.md#example-verticalpodautoscaler-per-worker-version) covers installing VPA, adding it to `workerResourceTemplate.allowedResources`, and how the reference is injected.
+
+### VPA prerequisites
+
+- The `WorkerDeployment` pod template (`spec.template`) must set non-zero `resources.requests.cpu` and `resources.requests.memory` on the worker container. Without them the pod is BestEffort, and adding requests changes its QoS class, which an in-place resize cannot do, so VPA evicts the pod instead. The helloworld demo sets no requests.
+- When using `updateMode: InPlaceOrRecreate`, you need Kubernetes 1.33+, where the `InPlacePodVerticalScaling` feature gate is on by default, and VPA 1.4+. If you are using VPA 1.4, you must enable the VPA `InPlaceOrRecreate` feature gate; it is on by default from 1.5. See [In-place updates][vpa-in-place].
+
+### How VPA treats a worker version
+
+Each rendered VPA is a separate object with its own usage history and checkpoint, so a new version starts with no recommendation. Until it has one, pods run with the requests in the `WorkerDeployment` pod template. Early recommendations are based on little data; `minAllowed` and `maxAllowed` bound them.
+
+VPA changes the resources of running pods, not the `WorkerDeployment` pod template. A resize does not produce a new Build ID or start a rollout, and the controller does not revert it. The controller removes a rendered VPA when it deletes the versioned Deployment.
+
+The `WorkerResourceTemplate` renders the same VPA for every version, so one `updateMode` applies to the current version and to draining versions alike. [#608](https://github.com/temporalio/temporal-worker-controller/issues/608) tracks selecting a different template per version status.
+
+| `updateMode` | What it does | When to use it for workers |
+|---|---|---|
+| `Off` | Writes recommendations and never changes pods | To review recommendations before applying them |
+| `Initial` | Sets requests when a pod is created, and never touches running pods | When running workers must never be disturbed. New pods of the version, for example from a scale-up or a reschedule, get the new size |
+| `Recreate` | Evicts a pod whose requests are outside the recommended range, so it is recreated at the new size | Rarely: an eviction stops the worker, and activities that do not finish during its shutdown are retried per their retry policy |
+| `InPlaceOrRecreate` | Resizes the running pod, and evicts it when an in-place resize is not possible | To resize long-lived pods, such as a draining version kept up for pinned workflows |
+| `InPlace` | Resizes the running pod and never evicts; retries later instead (alpha in VPA 1.7.0, needs the VPA `InPlace` feature gate) | When an eviction is never acceptable |
+
+> **Warning**: `Initial` applies the recommendation only when a pod is created. A new version's pods are created before its VPA has a recommendation, so they keep the pod template's requests. Only pods added later, from a scale-up or a reschedule, get the recommended size. Use `InPlaceOrRecreate`, or set the pod template's requests close to real usage.
+
+`Auto` is deprecated in the VPA API; use `Recreate`.
+
+> **Note**: By default the VPA updater only changes pods of a Deployment with at least 2 replicas (`--min-replicas=2`), and this applies to in-place resizes too. A version running one pod, such as a draining version scaled down to one replica, is skipped. Set `updatePolicy.minReplicas: 1` on the VPA to include it. The alternative is the cluster-wide updater flag `--in-place-skip-disruption-budget` (beta), which skips this check for in-place resizes when no container's resize policy requires a restart. With `minReplicas: 1`, an eviction (in `Recreate`, or the fallback of `InPlaceOrRecreate`) takes the version's only pod down until it is replaced.
+
+### Combining VPA with HPA or KEDA
+
+VPA [should not run with an HPA on the same resource metric][vpa-limits]. When both react to CPU, VPA raises a pod's CPU request, the HPA sees utilization (usage divided by request) fall and removes replicas, and the remaining pods use more CPU again. KEDA `cpu` and `memory` triggers create the same kind of HPA.
+
+| Horizontal scaler | VPA `controlledResources` |
+|---|---|
+| HPA on External metrics such as backlog or slot utilization (`examples/wrt-hpa-backlog.yaml`), or the KEDA `temporal` trigger (`examples/wrt-keda.yaml`) | `cpu` and `memory` |
+| HPA on CPU utilization (`examples/wrt-hpa.yaml`), or a KEDA `cpu` trigger | `memory` only |
+| HPA on memory utilization, or a KEDA `memory` trigger | `cpu` only |
+
+Set `controlledResources` under `resourcePolicy.containerPolicies`.
+
+### VPA example configuration
+
+**WorkerResourceTemplate** (`examples/wrt-vpa.yaml`): one VPA per version, resized in place, with bounds on the recommendation.
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+spec:
+  workerDeploymentRef:
+    name: helloworld
+  template:
+    apiVersion: autoscaling.k8s.io/v1
+    kind: VerticalPodAutoscaler
+    spec:
+      targetRef: {}
+      updatePolicy:
+        updateMode: InPlaceOrRecreate
+        minReplicas: 1
+      resourcePolicy:
+        containerPolicies:
+          - containerName: "*"
+            minAllowed:
+              cpu: 100m
+              memory: 128Mi
+            maxAllowed:
+              cpu: "2"
+              memory: 2Gi
+            controlledResources: ["cpu", "memory"]
+```
+
+[vpa-in-place]: https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/docs/features.md#in-place-updates-inplaceorrecreate
+[vpa-limits]: https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/docs/known-limitations.md
+
 ## References
 
 - [Temporal Cloud OpenMetrics](https://docs.temporal.io/cloud/metrics/openmetrics) — endpoint and opt-in labels
@@ -334,4 +413,7 @@ To also scale on a cluster metric such as slot utilization, add a trigger whose 
 - [KEDA Prometheus scaler](https://keda.sh/docs/latest/scalers/prometheus/) — query-string trigger used with per-version tokens
 - [KEDA ScaledObject specification](https://keda.sh/docs/latest/reference/scaledobject-spec/) — `pollingInterval`, `cooldownPeriod`, and HPA `behavior` overrides
 - [kedacore/keda#7672](https://github.com/kedacore/keda/pull/7672) — Worker Deployment Version support in the Temporal scaler, released in KEDA 2.20.0
+- [VPA installation](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/docs/installation.md) — the recommender, updater, and admission controller
+- [VPA in-place updates](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/docs/features.md#in-place-updates-inplaceorrecreate) — `InPlaceOrRecreate` and `InPlace` requirements and fallback behavior
+- [VPA known limitations](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/docs/known-limitations.md) — VPA with an HPA on the same resource metric
 - [Temporal Cloud service regions](https://docs.temporal.io/cloud/regions) — regional gRPC endpoints

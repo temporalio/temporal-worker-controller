@@ -219,6 +219,8 @@ spec:
         updateMode: "Initial"
 ```
 
+See [Vertical scaling with VPA](scaling-recommendations.md#vertical-scaling-with-vpa) for the other update modes and which HPA and KEDA combinations are safe.
+
 ## Checking status
 
 ```bash
