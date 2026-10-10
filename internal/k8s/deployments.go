@@ -317,12 +317,21 @@ func NewDeploymentWithOwnerRef(
 	)
 	depSpec.Template.Spec = *podSpec
 
+	// Selector labels are applied last so user labels can never override them.
+	deploymentLabels := make(map[string]string, len(spec.DeploymentLabels)+len(selectorLabels))
+	for k, v := range spec.DeploymentLabels {
+		deploymentLabels[k] = v
+	}
+	for k, v := range selectorLabels {
+		deploymentLabels[k] = v
+	}
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:                       ComputeVersionedDeploymentName(objectMeta.Name, buildID),
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
-			Labels:                     selectorLabels,
+			Labels:                     deploymentLabels,
 			Annotations:                depSpec.Template.Annotations,
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         typeMeta.APIVersion,

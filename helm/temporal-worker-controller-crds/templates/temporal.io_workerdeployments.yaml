@@ -3927,6 +3927,15 @@ spec:
                 required:
                 - template
                 type: object
+              deploymentLabels:
+                additionalProperties:
+                  type: string
+                type: object
+                x-kubernetes-validations:
+                - message: temporal.io/build-id and temporal.io/deployment-name are
+                    managed by the controller
+                  rule: '!(''temporal.io/build-id'' in self) && !(''temporal.io/deployment-name''
+                    in self)'
               minReadySeconds:
                 default: 0
                 format: int32

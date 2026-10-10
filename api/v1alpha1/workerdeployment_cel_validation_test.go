@@ -56,6 +56,22 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(k8sClient.Create(ctx, baseTWD("valid-worker"))).To(Succeed())
 	})
 
+	It("accepts custom deploymentLabels", func() {
+		twd := baseTWD("custom-deployment-labels")
+		twd.Spec.DeploymentLabels = map[string]string{"team": "payments"}
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
+	})
+
+	It("rejects deploymentLabels that set controller-managed keys", func() {
+		for i, key := range []string{"temporal.io/build-id", "temporal.io/deployment-name"} {
+			twd := baseTWD(fmt.Sprintf("reserved-deployment-label-%d", i))
+			twd.Spec.DeploymentLabels = map[string]string{key: "user-supplied"}
+			err := k8sClient.Create(ctx, twd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("are managed by the controller"))
+		}
+	})
+
 	It("rejects name longer than 63 characters", func() {
 		twd := baseTWD(strings.Repeat("a", 64))
 		err := k8sClient.Create(ctx, twd)
