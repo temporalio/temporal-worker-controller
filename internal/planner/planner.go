@@ -467,7 +467,7 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 
 	tlsServerName := connection.TLSServerName()
 	mtls := connection.MutualTLSSecretRef != nil
-	apiKey := !mtls && connection.APIKeySecretRef != nil
+	apiKeyWithSecret := !mtls && (connection.APIKeySecretRef != nil || (connection.APIKey != nil && connection.APIKey.SecretRef != nil))
 	// TLSCACertSecretName is mutually exclusive with MutualTLSSecretRef (enforced by
 	// ConnectionSpec's CEL validation) -- mTLS bundles its own CA into that secret's ca.crt
 	// key instead, see ConnectionTLSConfig.CACertSecretRef.
@@ -508,8 +508,8 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 			container.VolumeMounts = k8s.RemoveTLSCAVolumeMount(container.VolumeMounts)
 		}
 
-		if apiKey {
-			container.Env = setEnvVarFrom(container.Env, k8s.EnvTemporalAPIKey, &corev1.EnvVarSource{SecretKeyRef: connection.APIKeySecretRef})
+		if apiKeyWithSecret {
+			container.Env = setEnvVarFrom(container.Env, k8s.EnvTemporalAPIKey, &corev1.EnvVarSource{SecretKeyRef: connection.SecretKeySelector()})
 		} else {
 			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalAPIKey)
 		}

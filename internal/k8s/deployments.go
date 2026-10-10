@@ -446,13 +446,14 @@ func ApplyControllerPodSpecModifications(
 				},
 			},
 		})
-	} else if connection.APIKeySecretRef != nil {
+	} else if connection.APIKeySecretRef != nil ||
+		(connection.APIKey != nil && connection.APIKey.SecretRef != nil) {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
 					Name: EnvTemporalAPIKey,
 					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: connection.APIKeySecretRef,
+						SecretKeyRef: connection.SecretKeySelector(),
 					},
 				},
 			)
