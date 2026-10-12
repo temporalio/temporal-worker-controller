@@ -939,10 +939,10 @@ func getScaleDeployments(
 				replicas := int32(1)
 				// If the controller manages the replicas we set it to the spec's value. If a
 				// scaler manages them, we explicitly set it to 1 to unblock drainage.
-				if spec.Replicas != nil {
-					replicas = *spec.Replicas
+				if wdDepSpec.Replicas != nil {
+					replicas = *wdDepSpec.Replicas
 				}
-				// spec.Replicas may legitimately be 0, so we guard it.
+				// The spec's replicas may legitimately be 0, so we guard it.
 				if replicas != 0 {
 					l.Info("scaling draining version back up from 0 replicas",
 						"buildID", version.BuildID,
