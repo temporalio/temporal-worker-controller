@@ -56,6 +56,14 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(k8sClient.Create(ctx, baseTWD("valid-worker"))).To(Succeed())
 	})
 
+	It("rejects drainingDeployment.replicas below 1", func() {
+		twd := baseTWD("draining-zero")
+		twd.Spec.DrainingDeployment = &DrainingDeploymentSpec{Replicas: ptr(int32(0))}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.drainingDeployment.replicas"))
+	})
+
 	It("rejects name longer than 63 characters", func() {
 		twd := baseTWD(strings.Repeat("a", 64))
 		err := k8sClient.Create(ctx, twd)

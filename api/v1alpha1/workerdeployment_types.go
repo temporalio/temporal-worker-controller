@@ -126,6 +126,12 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
+	// DrainingDeployment overrides settings on the Kubernetes Deployments of
+	// draining versions. Unset fields keep the behavior that applies without
+	// this field.
+	// +optional
+	DrainingDeployment *DrainingDeploymentSpec `json:"drainingDeployment,omitempty"`
+
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 
@@ -158,6 +164,34 @@ func (s WorkerDeploymentSpec) DeploymentSpec() appsv1.DeploymentSpec {
 		depSpec.Strategy = DefaultDeploymentStrategy()
 	}
 	return depSpec
+}
+
+// DrainingReplicas returns the replica count the controller keeps draining
+// versions at. ok is false when DrainingDeployment.Replicas is unset or when
+// the controller does not manage replicas because an autoscaler owns them.
+func (s WorkerDeploymentSpec) DrainingReplicas() (replicas int32, ok bool) {
+	if s.DrainingDeployment == nil || s.DrainingDeployment.Replicas == nil {
+		return 0, false
+	}
+	if s.DeploymentSpec().Replicas == nil {
+		return 0, false
+	}
+	return *s.DrainingDeployment.Replicas, true
+}
+
+// DrainingDeploymentSpec overrides settings on the Kubernetes Deployments of
+// draining versions.
+type DrainingDeploymentSpec struct {
+	// Replicas is the number of pods for each draining version's Deployment.
+	// A draining version only serves its pinned executions, so it often needs
+	// fewer pods than the current version.
+	//
+	// Applies only when the controller manages replicas (deployment.replicas
+	// is set). When unset, the controller leaves draining versions at their
+	// current count.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Replicas *int32 `json:"replicas,omitempty"`
 }
 
 // DefaultDeploymentStrategy returns the default appsv1.DeploymentStrategy

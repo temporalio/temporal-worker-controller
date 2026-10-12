@@ -6,6 +6,8 @@ The `internal/demo/` example wires the HPA path described here. The KEDA path is
 
 To size each pod's CPU and memory rather than the number of pods, see [Vertical scaling with VPA](#vertical-scaling-with-vpa).
 
+Without an autoscaler, when the controller manages replicas, you can run Draining versions at fewer replicas than the Current version with `spec.drainingDeployment.replicas`. See [Draining version Deployment configuration](configuration.md#draining-version-deployment-configuration).
+
 ## TL;DR
 
 We recommend choosing a scaler approach that aligns with the workload pattern your application exhibits.

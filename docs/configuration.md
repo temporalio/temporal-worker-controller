@@ -131,6 +131,10 @@ sunset:
   deleteDelay: 24h      # Wait 24 hours after draining before deleting
 ```
 
+Until `scaledownDelay` elapses, a Draining version keeps its replica count. To
+run Draining versions at fewer replicas, see
+[Draining version Deployment configuration](#draining-version-deployment-configuration).
+
 ### Sunset Configuration Examples
 
 **Conservative Cleanup (Recommended for Production):**
@@ -543,6 +547,55 @@ spec:
   rollout:
     strategy: Progressive
 ```
+
+### Draining version Deployment configuration
+
+A Draining version receives no new workflow executions. It only serves the
+executions pinned to it, so it often needs fewer replicas than the Current
+version. Set `spec.drainingDeployment` to override settings on the Kubernetes
+Deployments of Draining versions. Fields left unset keep the behavior that
+applies without `spec.drainingDeployment`.
+
+```yaml
+spec:
+  deployment:
+    replicas: 4
+  drainingDeployment:
+    replicas: 1
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 24h
+```
+
+With this configuration, versions are scaled as follows:
+
+| Version status | Replicas |
+|----------------|----------|
+| Current and Target | `deployment.replicas` (4) |
+| Draining | `drainingDeployment.replicas` (1) |
+| Drained, after `scaledownDelay` | 0 |
+
+`drainingDeployment.replicas`:
+
+- Applies only when the controller manages replicas, that is when
+  `spec.deployment.replicas` is set. When an autoscaler manages replicas, the
+  field is ignored and the webhook returns a warning. See
+  [#608](https://github.com/temporalio/temporal-worker-controller/issues/608)
+  for per-version autoscaler configuration.
+- Must be at least 1, so a Draining version keeps a poller for its pinned
+  executions. This holds even when `deployment.replicas` is 0.
+- When unset, the controller leaves Draining versions at their current replica
+  count, and only scales one back up if it reaches 0.
+
+A Draining version that becomes the Target or Current version again, for
+example after a rollback, scales back to `deployment.replicas`.
+
+> **NOTE**: Scaling down terminates pods that may be running in-flight tasks,
+> which a versioned rollout otherwise avoids. Before you set
+> `drainingDeployment.replicas`, make sure workers stop gracefully on
+> SIGTERM, with a stop timeout that fits inside
+> `terminationGracePeriodSeconds`. Long-running activities should heartbeat so
+> they resume on another pod.
 
 ### Environment-Specific Configurations
 

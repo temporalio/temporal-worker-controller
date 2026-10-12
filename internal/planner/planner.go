@@ -932,10 +932,16 @@ func getScaleDeployments(
 				}
 			}
 		case temporaliov1alpha1.VersionStatusDraining:
-			// A draining version with 0 replicas has no pollers, so it will never finish
-			// draining and will never be retired. We detect and repair this scenario
-			// here. Any other non-zero count still has pollers and will drain on its own.
-			if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+			// When drainingDeployment.replicas is set, keep the version at that count.
+			// This also repairs a draining version that was scaled to 0.
+			if replicas, ok := spec.DrainingReplicas(); ok {
+				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
+					scaleDeployments[version.Deployment] = uint32(replicas)
+				}
+			} else if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+				// A draining version with 0 replicas has no pollers, so it will never finish
+				// draining and will never be retired. We detect and repair this scenario
+				// here. Any other non-zero count still has pollers and will drain on its own.
 				replicas := int32(1)
 				// If the controller manages the replicas we set it to the spec's value. If a
 				// scaler manages them, we explicitly set it to 1 to unblock drainage.

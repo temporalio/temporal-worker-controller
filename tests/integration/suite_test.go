@@ -1015,6 +1015,10 @@ func TestIntegration(t *testing.T) {
 	// Version-summary divergence safety test
 	runNotRegisteredVersionTests(t, k8sClient, clientPool, ts, testNamespace.Name)
 
+	t.Run("draining-deployment-replicas", func(t *testing.T) {
+		testDrainingDeploymentReplicas(t, k8sClient, ts, testNamespace.Name)
+	})
+
 	// Rate limit test: uses a dedicated server to avoid interfering with the tests above.
 	// Ten TWDs in the same Temporal namespace produce 10 concurrent DescribeWorkerDeployment
 	// calls per second against a 1 RPS limit, reliably triggering ResourceExhausted errors.
