@@ -332,7 +332,7 @@ A `WorkerResourceTemplate` attaches one VPA to each versioned Deployment through
 
 ### VPA prerequisites
 
-- The `WorkerDeployment` pod template (`spec.template`) must set non-zero `resources.requests.cpu` and `resources.requests.memory` on the worker container. Without them the pod is BestEffort, and adding requests changes its QoS class, which an in-place resize cannot do, so VPA evicts the pod instead. The helloworld demo sets no requests.
+- The `WorkerDeployment` pod template (`spec.deployment.template`) must set non-zero `resources.requests.cpu` and `resources.requests.memory` on the worker container. Without them the pod is BestEffort, and adding requests changes its QoS class, which an in-place resize cannot do, so VPA evicts the pod instead. The helloworld demo sets no requests.
 - When using `updateMode: InPlaceOrRecreate`, you need Kubernetes 1.33+, where the `InPlacePodVerticalScaling` feature gate is on by default, and VPA 1.4+. If you are using VPA 1.4, you must enable the VPA `InPlaceOrRecreate` feature gate; it is on by default from 1.5. See [In-place updates][vpa-in-place].
 
 ### How VPA treats a worker version
