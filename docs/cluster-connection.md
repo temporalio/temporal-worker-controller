@@ -8,9 +8,7 @@ A `ClusterConnection` is the cluster-scoped version of a [`Connection`](configur
 
 Use a `ClusterConnection` when many namespaces connect to the same Temporal server in the same way. For example, one namespace per team or per worker, or short-lived per-PR namespaces, all pointing at the same Temporal Cloud endpoint.
 
-Use a namespaced `Connection` when:
-- each namespace needs different connection settings, or
-- the people who manage a namespace should also manage its connection.
+Use a namespaced `Connection` when each Namespace needs different connection settings, or the people who manage a Namespace should also manage its connection.
 
 A `ClusterConnection` is a cluster-wide object, so it is owned by a cluster admin. The chart's optional end-user roles (`rbac.createEndUserRoles`) cover `connections` only, not `clusterconnections`.
 
