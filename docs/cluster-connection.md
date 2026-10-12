@@ -6,7 +6,7 @@ A `ClusterConnection` is the cluster-scoped version of a [`Connection`](configur
 
 ## When to use it
 
-Use a `ClusterConnection` when many namespaces connect to the same Temporal server in the same way. For example, one namespace per team or per worker, or short-lived per-PR namespaces, all pointing at the same Temporal Cloud endpoint.
+Use a `ClusterConnection` when many Namespaces connect to the same Temporal server in the same way. For example, environments with one Namespace per application or team, or environments with many short-lived Namespaces, all connecting to the same Temporal Cloud endpoint.
 
 Use a namespaced `Connection` when each Namespace needs different connection settings, or the people who manage a Namespace should also manage its connection.
 
