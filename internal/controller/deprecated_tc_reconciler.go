@@ -35,14 +35,22 @@ func (r *DeprecatedTCReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion: if the resource is being deleted and we hold the
-	// migration-guard finalizer, only release it once a matching Connection exists.
-	if !tc.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(&tc, deprecatedMigrationFinalizer) {
+	// Handle deletion: if the resource is being deleted and holds the
+	// migration-guard or a leftover delete-protection finalizer, only release
+	// them once a matching Connection exists. delete-protection must also be
+	// checked on its own, so objects already stuck with only that finalizer get unstuck.
+	if !tc.DeletionTimestamp.IsZero() &&
+		(controllerutil.ContainsFinalizer(&tc, deprecatedMigrationFinalizer) || controllerutil.ContainsFinalizer(&tc, finalizerName)) {
 		var conn temporaliov1alpha1.Connection
 		err := r.Get(ctx, req.NamespacedName, &conn)
 		switch {
 		case err == nil:
+			// delete-protection was added by pre-v1.7 controllers to block deletion
+			// while TemporalWorkerDeployments referenced this connection. Those are
+			// now inert stubs and WorkerDeployments reference the Connection, so it
+			// protects nothing here.
 			controllerutil.RemoveFinalizer(&tc, deprecatedMigrationFinalizer)
+			controllerutil.RemoveFinalizer(&tc, finalizerName)
 			if err := r.Update(ctx, &tc); err != nil {
 				return ctrl.Result{}, err
 			}
