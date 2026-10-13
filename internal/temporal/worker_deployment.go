@@ -19,7 +19,6 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
-	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -82,7 +81,7 @@ func GetWorkerDeploymentState(
 	client temporalClient.Client,
 	workerDeploymentName string,
 	namespace string,
-	k8sDeployments map[string]*appsv1.Deployment,
+	k8sBuildIDs []string,
 	targetBuildID string,
 	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
 	controllerIdentity string,
@@ -173,7 +172,7 @@ func GetWorkerDeploymentState(
 	// that are present. For versions that are known to TWC but absent from the Worker Deployment
 	// description's version summaries, double-check their state before allowing them to map to
 	// NotRegistered and get scaled down.
-	for buildID := range k8sDeployments {
+	for _, buildID := range k8sBuildIDs {
 		if _, exists := state.Versions[buildID]; exists {
 			continue
 		}

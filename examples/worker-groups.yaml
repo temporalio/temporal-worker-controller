@@ -1,0 +1,96 @@
+# WorkerDeployment with worker groups
+#
+# One WorkerDeployment runs three groups that release as one Worker Deployment Version:
+#   - workflows: workflow workers on the "documents" task queue
+#   - parse:     GPU activity workers on "documents-parse", scaled by an autoscaler
+#   - extract:   activity workers on "documents-extract", four replicas
+#
+# Every group gets its own Deployment per version and the same TEMPORAL_DEPLOYMENT_NAME
+# and TEMPORAL_WORKER_BUILD_ID, so a Pinned workflow's activities stay on its build.
+# Your worker picks its task queues; here it reads WORKER_ROLE.
+#
+# Apply:
+#   kubectl apply -f examples/worker-groups.yaml
+#
+# Verify:
+#   kubectl get deploy -l temporal.io/deployment-name=documents -L temporal.io/worker-group
+#   kubectl get wd documents -o jsonpath='{.status.targetVersion.workerGroups}'
+#
+# See docs/worker-groups.md for full documentation.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerDeployment
+metadata:
+  name: documents
+spec:
+  workerGroups:
+    - name: workflows
+      deployment:
+        replicas: 2
+        template:
+          spec:
+            containers:
+              - name: worker
+                image: registry.example.com/documents:v42
+                env:
+                  - name: WORKER_ROLE
+                    value: workflows
+                readinessProbe:
+                  httpGet:
+                    path: /ready
+                    port: 8080
+    - name: parse
+      deployment:
+        template:
+          spec:
+            serviceAccountName: parser
+            nodeSelector:
+              gpu: "true"
+            containers:
+              - name: worker
+                image: registry.example.com/documents:v42
+                env:
+                  - name: WORKER_ROLE
+                    value: parse
+                resources:
+                  requests:
+                    # The CPU utilization HPA in wrt-hpa-worker-group.yaml needs a CPU request.
+                    cpu: "1"
+                  limits:
+                    nvidia.com/gpu: 1
+                readinessProbe:
+                  httpGet:
+                    path: /ready
+                    port: 8080
+    - name: extract
+      deployment:
+        replicas: 4
+        template:
+          spec:
+            containers:
+              - name: worker
+                image: registry.example.com/documents:v42
+                env:
+                  - name: WORKER_ROLE
+                    value: extract
+                resources:
+                  requests:
+                    cpu: "2"
+                    memory: 1Gi
+                readinessProbe:
+                  httpGet:
+                    path: /ready
+                    port: 8080
+  rollout:
+    strategy: Progressive
+    steps:
+      - rampPercentage: 10
+        pauseDuration: 10m
+      - rampPercentage: 50
+        pauseDuration: 10m
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 24h
+  workerOptions:
+    connectionRef:
+      name: temporal
+    temporalNamespace: documents

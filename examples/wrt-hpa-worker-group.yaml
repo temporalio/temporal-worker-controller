@@ -1,0 +1,38 @@
+# WorkerResourceTemplate — HPA for one worker group
+#
+# This example autoscales only the "parse" group of the "documents" WorkerDeployment
+# from examples/worker-groups.yaml. The controller creates one HPA per version, each
+# targeting that version's parse Deployment. spec.workerGroup is required for a WorkerDeployment
+# with groups.
+#
+# Apply:
+#   kubectl apply -f examples/worker-groups.yaml
+#   kubectl apply -f examples/wrt-hpa-worker-group.yaml
+#
+# Verify:
+#   kubectl get hpa   # one HPA per version, scaleTargetRef is the parse Deployment
+#
+# See docs/worker-groups.md and docs/worker-resource-templates.md.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: documents-parse-hpa
+spec:
+  workerDeploymentRef:
+    name: documents
+  workerGroup: parse
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      scaleTargetRef: {}
+      # Keep at least one replica: a group at zero never becomes healthy, which blocks rollouts.
+      minReplicas: 1
+      maxReplicas: 20
+      metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 70

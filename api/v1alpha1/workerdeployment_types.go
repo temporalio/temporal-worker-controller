@@ -5,6 +5,9 @@
 package v1alpha1
 
 import (
+	"slices"
+	"sort"
+
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -71,8 +74,9 @@ type WorkerOptions struct {
 }
 
 // WorkerDeploymentSpec defines the desired state of WorkerDeployment
-// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template)",message="one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template) || has(self.workerGroups)",message="one of deployment, template or workerGroups must be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.deployment) && has(self.template))",message="exactly one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerGroups) || !(has(self.deployment) || has(self.template))",message="workerGroups cannot be combined with deployment or template"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -126,6 +130,17 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
+	// WorkerGroups runs several named worker groups in one Worker Deployment Version, in
+	// place of Deployment. Each group gets its own Kubernetes Deployment in every
+	// version, with the same deployment name and build ID, so groups roll out
+	// together while each one scales on its own.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=10
+	WorkerGroups []WorkerGroup `json:"workerGroups,omitempty"`
+
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 
@@ -134,6 +149,70 @@ type WorkerDeploymentSpec struct {
 
 	// WorkerOptions configures the worker's connection to Temporal.
 	WorkerOptions WorkerOptions `json:"workerOptions"`
+}
+
+// WorkerGroup is a named group of workers with its own Kubernetes Deployment in
+// every version of a WorkerDeployment.
+type WorkerGroup struct {
+	// Name identifies the group. "default" is reserved for WorkerDeployments without groups.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=24
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self != 'default'",message="group name default is reserved"
+	Name string `json:"name"`
+
+	// Deployment configures this group's Kubernetes Deployment in each version.
+	// Selector is computed by the controller.
+	Deployment appsv1.DeploymentSpec `json:"deployment"`
+}
+
+// DefaultWorkerGroupName names the single group of a WorkerDeployment without groups, described
+// by spec.deployment (or the deprecated spec.template fields).
+const DefaultWorkerGroupName = "default"
+
+// HasWorkerGroups reports whether the spec declares worker groups.
+func (s WorkerDeploymentSpec) HasWorkerGroups() bool {
+	return len(s.WorkerGroups) > 0
+}
+
+// HasWorkerGroup reports whether the spec has a group with the given name.
+func (s WorkerDeploymentSpec) HasWorkerGroup(name string) bool {
+	if !s.HasWorkerGroups() {
+		return name == DefaultWorkerGroupName
+	}
+	return slices.ContainsFunc(s.WorkerGroups, func(p WorkerGroup) bool { return p.Name == name })
+}
+
+// WorkerGroupNames returns the group names, sorted, or the default group alone when the spec
+// has no groups.
+func (s WorkerDeploymentSpec) WorkerGroupNames() []string {
+	if !s.HasWorkerGroups() {
+		return []string{DefaultWorkerGroupName}
+	}
+	names := make([]string, 0, len(s.WorkerGroups))
+	for _, p := range s.WorkerGroups {
+		names = append(names, p.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// WorkerGroupDeploymentSpec returns the DeploymentSpec of the named group, with the
+// default rolling update strategy applied, and whether the group exists.
+func (s WorkerDeploymentSpec) WorkerGroupDeploymentSpec(name string) (appsv1.DeploymentSpec, bool) {
+	if !s.HasWorkerGroups() {
+		return s.DeploymentSpec(), name == DefaultWorkerGroupName
+	}
+	for _, p := range s.WorkerGroups {
+		if p.Name == name {
+			depSpec := *p.Deployment.DeepCopy()
+			if depSpec.Strategy.Type == "" {
+				depSpec.Strategy = DefaultDeploymentStrategy()
+			}
+			return depSpec, true
+		}
+	}
+	return appsv1.DeploymentSpec{}, false
 }
 
 // DeploymentSpec returns the appsv1.DeploymentSpec struct constructed by
@@ -409,9 +488,29 @@ type BaseWorkerDeploymentVersion struct {
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
+	// WorkerGroups lists each worker group's Deployment in a version that uses groups.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	WorkerGroups []WorkerGroupStatus `json:"workerGroups,omitempty"`
+
 	// ManagedBy is the identity of the client that is managing the rollout of this version.
 	// +optional
 	ManagedBy string `json:"managedBy,omitempty"`
+}
+
+// WorkerGroupStatus describes one worker group's Deployment in a version.
+type WorkerGroupStatus struct {
+	// Name of the group.
+	Name string `json:"name"`
+
+	// A pointer to the group's managed k8s deployment.
+	// +optional
+	Deployment *corev1.ObjectReference `json:"deployment,omitempty"`
+
+	// HealthySince is when the group's deployment became available.
+	// +optional
+	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 }
 
 // CurrentWorkerDeploymentVersion represents a worker deployment version that is currently
