@@ -1,3 +1,5 @@
+# TODO: Replace busybox sleeper with a real Temporal worker image
+# to verify end-to-end functionality after upgrade (see PR #640 review).
 # Created after the upgrade to confirm the upgraded webhook still admits
 # valid WorkerDeployments. Same shape as basic-wd.yaml with a different name.
 apiVersion: temporal.io/v1alpha1
@@ -11,12 +13,13 @@ spec:
   sunset:
     scaledownDelay: 1h
     deleteDelay: 2h
-  template:
-    spec:
-      containers:
-        - name: main
-          image: busybox:latest
-          command: ["sleep", "infinity"]
+  deployment:
+    template:
+      spec:
+        containers:
+          - name: main
+            image: busybox:latest
+            command: ["sleep", "infinity"]
   workerOptions:
     connectionRef:
       name: test-connection

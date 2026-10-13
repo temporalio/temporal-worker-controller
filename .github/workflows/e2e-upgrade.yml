@@ -138,7 +138,7 @@ jobs:
         run: |
           # The webhook can lag the CA bundle by a few seconds; retry briefly.
           for i in $(seq 1 12); do
-            if kubectl apply -f test/e2e/fixtures/basic-wd.yaml; then
+            if kubectl apply -f tests/e2e/fixtures/basic-wd.yaml; then
               break
             fi
             if [ "$i" -eq 12 ]; then
@@ -277,7 +277,7 @@ jobs:
           # Apply the new WorkerDeployment with retries until the upgraded
           # webhook serves it.
           for i in $(seq 1 12); do
-            if kubectl apply -f test/e2e/fixtures/upgrade-wd-new.yaml; then
+            if kubectl apply -f tests/e2e/fixtures/upgrade-wd-new.yaml; then
               echo "New WorkerDeployment accepted by upgraded webhook"
               exit 0
             fi
@@ -288,7 +288,7 @@ jobs:
 
       - name: Verify webhook rejects invalid WorkerDeployment
         run: |
-          if out=$(kubectl apply -f test/e2e/fixtures/upgrade-wd-invalid.yaml 2>&1); then
+          if out=$(kubectl apply -f tests/e2e/fixtures/upgrade-wd-invalid.yaml 2>&1); then
             echo "FAIL: invalid WorkerDeployment was accepted"
             echo "$out"
             exit 1
