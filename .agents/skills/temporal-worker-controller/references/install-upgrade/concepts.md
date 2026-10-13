@@ -2,12 +2,14 @@
 
 ## Two Helm charts
 
-Document what the CRDs chart and controller chart own, why they have the same chart version, and why CRDs go first on install and upgrade. Use [Why a Separate CRDs Chart?](../../../../../docs/crd-management.md#why-a-separate-crds-chart) and [Compatibility Commitment](../../../../../docs/crd-management.md#compatibility-commitment).
+`temporal-worker-controller-crds` owns the CustomResourceDefinitions. `temporal-worker-controller` owns the controller Deployment, RBAC, Services, and admission webhooks. The charts have matching version numbers. Install or upgrade the CRDs chart first, then the controller chart at the same target version. Helm does not upgrade CRDs placed in a chart's `crds/` directory during `helm upgrade`; the separate chart gives CRDs an explicit upgrade path. Uninstalling the CRDs chart deletes custom resources of those types.
+
+CRD chart version N is compatible with controller chart versions N and N−1.
 
 ## Webhook TLS
 
-Explain the optional WorkerDeployment webhook and the always-on WorkerResourceTemplate webhook. The controller needs a TLS Secret even with `webhook.enabled: false`. Use [upgrade.md](../../../../../docs/upgrade.md#webhooks) and the [README](../../../../../README.md#webhook-tls-configuration).
+TWC has two admission webhooks. The `WorkerDeployment` validating/defaulting webhook is controlled by `webhook.enabled` (default `false`). The `WorkerResourceTemplate` validating webhook is always enabled and cannot be disabled. The controller Pod therefore always mounts a webhook TLS Secret, even when `webhook.enabled: false`.
 
 ## cert-manager relationship
 
-Explain that the current controller chart can create an Issuer and Certificate, but cert-manager itself must be installed separately. Point upgrades from the old `certmanager.install: true` subchart to [subchart migration](cert-manager-subchart-migration.md).
+With `certmanager.enabled: true` (the default), the current controller chart creates an Issuer and Certificate, but cert-manager itself must already be installed independently. With `certmanager.enabled: false`, the operator supplies the TLS Secret and CA bundle. The older `certmanager.install: true` value installed cert-manager as a subchart; crossing controller chart v0.30.0 requires the separate [subchart migration](cert-manager-subchart-migration.md).
