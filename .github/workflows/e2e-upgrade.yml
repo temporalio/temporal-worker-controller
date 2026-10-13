@@ -159,7 +159,7 @@ jobs:
             reason=$(kubectl get workerdeployment test-worker -n "$NAMESPACE" \
               -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')
             if [ "$reason" = "ConnectionNotFound" ]; then
-              echo "Previous controller reconciled WorkerDeployment (Ready reason: ${reason})"
+              echo "Previous controller reconciled WorkerDeployment after ${i} attempts (Ready reason: ${reason})"
               exit 0
             fi
             sleep 2
@@ -278,7 +278,7 @@ jobs:
           # webhook serves it.
           for i in $(seq 1 12); do
             if kubectl apply -f tests/e2e/fixtures/upgrade-wd-new.yaml; then
-              echo "New WorkerDeployment accepted by upgraded webhook"
+              echo "New WorkerDeployment accepted by upgraded webhook after ${i} attempts"
               exit 0
             fi
             sleep 5
