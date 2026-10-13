@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
+## [1.13.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.12.0...v1.13.0) - 2026-10-13
+
+### Features
+
+- support KEDA per-version substitutions for metrics ([#616](https://github.com/temporalio/temporal-worker-controller/pull/616)) ([`1e54f9e`](https://github.com/temporalio/temporal-worker-controller/commit/1e54f9ee207be08eda7a1a0d0745679e28dd4c9b))
+- **wrt:** auto-inject spec.targetRef for VerticalPodAutoscaler ([#623](https://github.com/temporalio/temporal-worker-controller/pull/623)) ([`2348575`](https://github.com/temporalio/temporal-worker-controller/commit/2348575af5befb8d6166e6d67711cbb82ddad2ee))
+
+### Refactoring
+
+- **controller:** move TLS volume/mount helpers to internal/k8s, const-ify hard-coded strings ([#625](https://github.com/temporalio/temporal-worker-controller/pull/625)) ([`fbc30eb`](https://github.com/temporalio/temporal-worker-controller/commit/fbc30eb3c3997582142882b6e4bb93e6f08bc804))
+
+### Documentation
+
+- add ClusterConnection documentation ([#636](https://github.com/temporalio/temporal-worker-controller/pull/636)) ([`c35eeca`](https://github.com/temporalio/temporal-worker-controller/commit/c35eeca0708dabd52da3aa8e7d45dd1ed63c52ce))
+- use spec.deployment.template in the VPA prerequisites ([#645](https://github.com/temporalio/temporal-worker-controller/pull/645)) ([`809d378`](https://github.com/temporalio/temporal-worker-controller/commit/809d378ee482cd0167baf2d46f2d543f1bf52c32))
+- add VPA scaling recommendations and a wrt-vpa example ([#634](https://github.com/temporalio/temporal-worker-controller/pull/634)) ([`b338a47`](https://github.com/temporalio/temporal-worker-controller/commit/b338a47e899e07c90be2e6687a17f999cba57455))
+
+### Tests
+
+- add E2E configuration matrix workflow for TWC ([#582](https://github.com/temporalio/temporal-worker-controller/pull/582)) ([`a3f330c`](https://github.com/temporalio/temporal-worker-controller/commit/a3f330c5b3691fe94ad8d3c46b45210b3224565a))
+
+### Chores
+
+- **deps:** bump github.com/onsi/ginkgo/v2 in / ([#637](https://github.com/temporalio/temporal-worker-controller/pull/637)) ([`64a6671`](https://github.com/temporalio/temporal-worker-controller/commit/64a667142030f51a26901af25f285a2598f19e1d))
+- **deps:** bump github.com/onsi/gomega in / ([#638](https://github.com/temporalio/temporal-worker-controller/pull/638)) ([`9d21a1d`](https://github.com/temporalio/temporal-worker-controller/commit/9d21a1dc3dccbaea011c7cb13fbbd304e326e753))
+- **deps:** bump github.com/onsi/ginkgo/v2 in / ([#628](https://github.com/temporalio/temporal-worker-controller/pull/628)) ([`56c09cd`](https://github.com/temporalio/temporal-worker-controller/commit/56c09cda8484ae1146cf3ae389b305c034c098be))
+- **deps:** bump docker/setup-buildx-action from 4.3.0 to 4.4.1 ([#627](https://github.com/temporalio/temporal-worker-controller/pull/627)) ([`2c1ded8`](https://github.com/temporalio/temporal-worker-controller/commit/2c1ded85142db79a416d5465fa3f7b848d9903be))
+- **deps:** bump go.opentelemetry.io/otel/exporters/prometheus in / ([#602](https://github.com/temporalio/temporal-worker-controller/pull/602)) ([`67d9ef3`](https://github.com/temporalio/temporal-worker-controller/commit/67d9ef30a819b6932309937b4c9f9d7e35f4dfb3))
+
+### Other Changes
+
+- Fix missing pkg/ COPY in Dockerfile ([#642](https://github.com/temporalio/temporal-worker-controller/pull/642)) ([`49bc08c`](https://github.com/temporalio/temporal-worker-controller/commit/49bc08c8edb413cfef12da2e44ebb7d9e3774010))
+- Update README.md ([#607](https://github.com/temporalio/temporal-worker-controller/pull/607)) ([`3752db6`](https://github.com/temporalio/temporal-worker-controller/commit/3752db6cf56815d9e9a9d48c289cce3b031e3566))
+- [Issue 246]: Refactor clientpool into a cache + pluggable client creation, and expose a `twc` facade ([#597](https://github.com/temporalio/temporal-worker-controller/pull/597)) ([`847755a`](https://github.com/temporalio/temporal-worker-controller/commit/847755af4d00bf91aa95edbaa50e369bba161fab))
+- Add kstatus functionality to CRD statuses ([#621](https://github.com/temporalio/temporal-worker-controller/pull/621)) ([`2eca410`](https://github.com/temporalio/temporal-worker-controller/commit/2eca4100bd8ecc193fd6fb438bcc485209006361))
+- generate values.schema.json from values.yaml ([#565](https://github.com/temporalio/temporal-worker-controller/pull/565)) ([`a5a9328`](https://github.com/temporalio/temporal-worker-controller/commit/a5a93289e62c93d14e4572cb181ae5f0097a80a3))
+- Bump chart version to 0.31.0 [skip ci] ([`d217fc1`](https://github.com/temporalio/temporal-worker-controller/commit/d217fc15d2e1876f95b38c2a9ca61f2615c15e0b))
+
 ## [1.11.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.10.1...v1.11.0) - 2026-09-15
 
 ### ⚠ Breaking Changes
