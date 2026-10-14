@@ -127,13 +127,12 @@ Controls how old versions are scaled down and cleaned up after they're no longer
 
 ```yaml
 sunset:
-  scaledownDelay: 1h    # Wait 1 hour after draining before scaling to 0
-  deleteDelay: 24h      # Wait 24 hours after draining before deleting
+  scaledownDelay: 1h    # Wait 1 hour after the version is Drained before scaling to 0
+  deleteDelay: 24h      # Wait 24 hours after the version is Drained before deleting
 ```
 
-Until `scaledownDelay` elapses, a Draining version keeps its replica count. To
-run Draining versions at fewer replicas, see
-[Draining version Deployment configuration](#draining-version-deployment-configuration).
+A Draining version keeps its replica count. To run Draining versions at fewer
+replicas, see [Draining version Deployment configuration](#draining-version-deployment-configuration).
 
 ### Sunset Configuration Examples
 
@@ -573,6 +572,7 @@ With this configuration, versions are scaled as follows:
 |----------------|----------|
 | Current and Target | `deployment.replicas` (4) |
 | Draining | `drainingDeployment.replicas` (1) |
+| Drained, before `scaledownDelay` | Unchanged (1) |
 | Drained, after `scaledownDelay` | 0 |
 
 `drainingDeployment.replicas`:
