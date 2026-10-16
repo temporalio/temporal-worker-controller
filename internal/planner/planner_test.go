@@ -862,6 +862,41 @@ func TestGetDeleteDeployments(t *testing.T) {
 			expectDeletes:             0,
 			foundDeploymentInTemporal: false,
 		},
+		{
+			// A drained version that was scaled to zero and then became Draining again
+			// (e.g. workflows moved onto it with a Versioning Override) must not be deleted,
+			// even if a DrainedSince from its earlier drain is older than the sunset delays.
+			name: "draining version at 0 replicas with stale DrainedSince is not deleted",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"123": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "123",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
+						},
+						DrainedSince: &metav1.Time{
+							Time: time.Now().Add(-24 * time.Hour),
+						},
+						EligibleForDeletion: true,
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: time.Hour},
+					DeleteDelay:    &metav1.Duration{Duration: 4 * time.Hour},
+				},
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			expectDeletes:             0,
+			foundDeploymentInTemporal: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -4913,6 +4948,7 @@ func TestGetDeleteWorkerResources_SunsetBuildIDs(t *testing.T) {
 func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 	const (
 		drained  = temporaliov1alpha1.VersionStatusDrained
+		draining = temporaliov1alpha1.VersionStatusDraining
 		inactive = temporaliov1alpha1.VersionStatusInactive
 		ramping  = temporaliov1alpha1.VersionStatusRamping
 		current  = temporaliov1alpha1.VersionStatusCurrent
@@ -4978,6 +5014,14 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 			expect:         nil,
 		},
 		{
+			// A version that drained, was sunset, and is now Draining again must have its
+			// autoscalers restored, so it must not stay in the sunset set.
+			name:           "draining again after a drain is excluded even with a stale DrainedSince",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-a", draining, ago(24*time.Hour))},
+			scaledownDelay: time.Hour,
+			expect:         nil,
+		},
+		{
 			name: "only the qualifying versions of a mixed set",
 			versions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 				ver("build-old", drained, ago(2*time.Hour)),
@@ -5019,6 +5063,124 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 				buildIDs = append(buildIDs, id)
 			}
 			assert.ElementsMatch(t, tc.expect, buildIDs)
+		})
+	}
+}
+
+// TestDrainedVersionRevivedWhenDrainingAgain walks a version through the sunset lifecycle:
+// it drains, is scaled to zero after scaledownDelay, and then becomes Draining again before
+// deleteDelay expires (e.g. workflows are moved onto it with a Versioning Override). The
+// retained Deployment must be scaled back up, kept, and have its autoscalers restored.
+func TestDrainedVersionRevivedWhenDrainingAgain(t *testing.T) {
+	const (
+		buildID        = "old"
+		deploymentName = "test-old"
+	)
+
+	for _, tc := range []struct {
+		name            string
+		specReplicas    *int32
+		initialReplicas int32
+		revivedReplicas uint32
+	}{
+		{
+			name:            "controller-managed replicas",
+			specReplicas:    func() *int32 { r := int32(3); return &r }(),
+			initialReplicas: 3,
+			revivedReplicas: 3,
+		},
+		{
+			name:            "scaler-managed replicas",
+			specReplicas:    nil,
+			initialReplicas: 2,
+			revivedReplicas: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: tc.specReplicas,
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: time.Hour},
+					DeleteDelay:    &metav1.Duration{Duration: 4 * time.Hour},
+				},
+			}
+
+			k8sStateWith := func(replicas int32) *k8s.DeploymentState {
+				return &k8s.DeploymentState{
+					Deployments: map[string]*appsv1.Deployment{
+						buildID: createDeploymentWithDefaultConnectionSpecHash(replicas),
+					},
+				}
+			}
+			statusWith := func(versionStatus temporaliov1alpha1.VersionStatus, drainedSince *metav1.Time) *temporaliov1alpha1.WorkerDeploymentStatus {
+				return &temporaliov1alpha1.WorkerDeploymentStatus{
+					TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "new",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &corev1.ObjectReference{Name: "test-new"},
+						},
+					},
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+						{
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								BuildID:    buildID,
+								Status:     versionStatus,
+								Deployment: &corev1.ObjectReference{Name: deploymentName},
+							},
+							DrainedSince:        drainedSince,
+							EligibleForDeletion: true,
+						},
+					},
+				}
+			}
+			scalesByName := func(k8sState *k8s.DeploymentState, status *temporaliov1alpha1.WorkerDeploymentStatus) map[string]uint32 {
+				out := map[string]uint32{}
+				for ref, replicas := range getScaleDeployments(logr.Discard(), k8sState, status, spec) {
+					out[ref.Name] = replicas
+				}
+				return out
+			}
+			assertNotDeleted := func(k8sState *k8s.DeploymentState, status *temporaliov1alpha1.WorkerDeploymentStatus) {
+				assert.Empty(t, getDeleteDeployments(k8sState, status, spec, true), "deployment must not be deleted")
+			}
+			inSunsetSet := func(status *temporaliov1alpha1.WorkerDeploymentStatus) bool {
+				_, ok := getSunsetScaleDownBuildIDs(status, spec)[buildID]
+				return ok
+			}
+
+			// 1. Drained past scaledownDelay: the controller scales the Deployment to zero.
+			drainedAt := &metav1.Time{Time: time.Now().Add(-2 * time.Hour)}
+			k8sState := k8sStateWith(tc.initialReplicas)
+			status := statusWith(temporaliov1alpha1.VersionStatusDrained, drainedAt)
+			assert.Equal(t, map[string]uint32{deploymentName: 0}, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+			assert.True(t, inSunsetSet(status), "drained version past scaledownDelay should be held at zero")
+
+			// 2. Retained at zero replicas, still within deleteDelay: nothing changes.
+			k8sState = k8sStateWith(0)
+			assert.Empty(t, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+
+			// 3. The version becomes Draining again. DrainedSince is only reported for Drained
+			//    versions, so it is cleared. The Deployment is scaled back up and kept.
+			status = statusWith(temporaliov1alpha1.VersionStatusDraining, nil)
+			assert.Equal(t, map[string]uint32{deploymentName: tc.revivedReplicas}, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+			assert.False(t, inSunsetSet(status), "draining version must have its autoscalers restored")
+
+			// Even a stale DrainedSince past every delay must not cause scale-down or deletion.
+			staleStatus := statusWith(temporaliov1alpha1.VersionStatusDraining, &metav1.Time{Time: time.Now().Add(-24 * time.Hour)})
+			assert.Equal(t, map[string]uint32{deploymentName: tc.revivedReplicas}, scalesByName(k8sState, staleStatus))
+			assertNotDeleted(k8sState, staleStatus)
+			assert.False(t, inSunsetSet(staleStatus))
+
+			// 4. Once scaled up and drained again, the sunset delays restart from the new drain.
+			k8sState = k8sStateWith(int32(tc.revivedReplicas))
+			status = statusWith(temporaliov1alpha1.VersionStatusDrained, &metav1.Time{Time: time.Now()})
+			assert.Empty(t, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+			assert.False(t, inSunsetSet(status))
 		})
 	}
 }
