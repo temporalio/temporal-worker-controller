@@ -199,28 +199,39 @@ func TestWorkerDeployment_DrainingReplicasWarning(t *testing.T) {
 	deploymentReplicas := int32(3)
 	tests := map[string]struct {
 		deploymentReplicas *int32
-		wantWarning        bool
+		// deprecatedReplicas sets the deprecated top-level spec.replicas
+		// field and leaves spec.deployment nil.
+		deprecatedReplicas *int32
+		wantWarnings       []string
 	}{
 		"controller manages replicas": {deploymentReplicas: &deploymentReplicas},
-		"autoscaler manages replicas": {wantWarning: true},
+		"controller manages replicas via deprecated field": {
+			deprecatedReplicas: &deploymentReplicas,
+			wantWarnings:       []string{"spec.replicas is deprecated"},
+		},
+		"autoscaler manages replicas": {
+			wantWarnings: []string{"spec.drainingDeployment.replicas is ignored"},
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			dep := testhelpers.MakeWDWithName("valid-worker", "")
 			dep.Spec.Deployment.Replicas = tc.deploymentReplicas
+			if tc.deprecatedReplicas != nil {
+				dep.Spec.Replicas = tc.deprecatedReplicas
+				dep.Spec.Deployment = nil
+			}
 			dep.Spec.DrainingDeployment = &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: &drainingReplicas}
 
 			webhook := &temporaliov1alpha1.WorkerDeployment{}
 			warns, err := webhook.ValidateCreate(context.Background(), dep)
 
 			require.NoError(t, err)
-			if !tc.wantWarning {
-				assert.Empty(t, warns)
-				return
+			require.Len(t, warns, len(tc.wantWarnings))
+			for i, want := range tc.wantWarnings {
+				assert.Contains(t, warns[i], want)
 			}
-			require.Len(t, warns, 1)
-			assert.Contains(t, warns[0], "spec.drainingDeployment.replicas is ignored")
 		})
 	}
 }
