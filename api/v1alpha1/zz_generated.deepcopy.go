@@ -856,6 +856,13 @@ func (in *WorkerDeploymentSpec) DeepCopyInto(out *WorkerDeploymentSpec) {
 		*out = new(appsv1.DeploymentSpec)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.DeploymentLabels != nil {
+		in, out := &in.DeploymentLabels, &out.DeploymentLabels
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	in.RolloutStrategy.DeepCopyInto(&out.RolloutStrategy)
 	in.SunsetStrategy.DeepCopyInto(&out.SunsetStrategy)
 	in.WorkerOptions.DeepCopyInto(&out.WorkerOptions)

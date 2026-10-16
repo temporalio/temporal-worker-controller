@@ -126,6 +126,16 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
+	// DeploymentLabels are added to the metadata of each versioned Kubernetes
+	// Deployment that the controller creates. Pod labels belong in the pod
+	// template instead. Use this for tools that act on the Deployment object
+	// itself, such as admission webhooks that opt workloads in or out by label.
+	// The labels are applied when a versioned Deployment is created; changing
+	// them does not update existing Deployments.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="!('temporal.io/build-id' in self) && !('temporal.io/deployment-name' in self)",message="temporal.io/build-id and temporal.io/deployment-name are managed by the controller"
+	DeploymentLabels map[string]string `json:"deploymentLabels,omitempty"`
+
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 
