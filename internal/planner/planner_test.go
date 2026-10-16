@@ -2883,12 +2883,31 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 			MutualTLSSecretRef: &temporaliov1alpha1.SecretReference{Name: secret},
 		}
 	}
-	apiKeyConn := func(host, secret, key string) temporaliov1alpha1.ConnectionSpec {
+	apiKeySecretRefConn := func(host, secret, key string) temporaliov1alpha1.ConnectionSpec {
 		return temporaliov1alpha1.ConnectionSpec{
 			HostPort: host,
 			APIKeySecretRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: secret},
 				Key:                  key,
+			},
+		}
+	}
+	apiKeySecretConn := func(host, secret, key string) temporaliov1alpha1.ConnectionSpec {
+		return temporaliov1alpha1.ConnectionSpec{
+			HostPort: host,
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secret},
+					Key:                  key,
+				},
+			},
+		}
+	}
+	apiKeyPathConn := func(host, path string) temporaliov1alpha1.ConnectionSpec {
+		return temporaliov1alpha1.ConnectionSpec{
+			HostPort: host,
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				Path: path,
 			},
 		}
 	}
@@ -2933,8 +2952,8 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		return result
 	}
 
-	t.Run("mTLS to API key", func(t *testing.T) {
-		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), apiKeyConn("regional:7233", "api-secret", "key"), "v1-image:pinned")
+	t.Run("old style - mTLS to API key", func(t *testing.T) {
+		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), apiKeySecretRefConn("regional:7233", "api-secret", "key"), "v1-image:pinned")
 		c := res.Spec.Template.Spec.Containers[0]
 
 		e, ok := getEnv(c, "TEMPORAL_API_KEY")
@@ -2957,8 +2976,53 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		assert.Equal(t, "v1-image:pinned", c.Image, "image must not be clobbered")
 	})
 
-	t.Run("API key to mTLS", func(t *testing.T) {
-		res := run(apiKeyConn(defaultHostPort(), "old-api", "key"), mtlsConn("mtls-host:7233", "tls-secret"), "v1-image:pinned")
+	t.Run("new style - mTLS to API key", func(t *testing.T) {
+		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), apiKeySecretConn("regional:7233", "api-secret", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_API_KEY")
+		require.True(t, ok, "TEMPORAL_API_KEY must be present")
+		require.NotNil(t, e.ValueFrom)
+		require.NotNil(t, e.ValueFrom.SecretKeyRef)
+		assert.Equal(t, "api-secret", e.ValueFrom.SecretKeyRef.Name)
+
+		_, ok = getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok, "TEMPORAL_TLS must be removed")
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.False(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasVolume(res, "temporal-tls"), "temporal-tls volume must be removed")
+		assert.False(t, hasMount(c, "temporal-tls"), "temporal-tls mount must be removed")
+
+		e, _ = getEnv(c, "TEMPORAL_ADDRESS")
+		assert.Equal(t, "regional:7233", e.Value)
+		assert.Equal(t, "v1-image:pinned", c.Image, "image must not be clobbered")
+	})
+
+	t.Run("new style - mTLS to API key path", func(t *testing.T) {
+		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), apiKeyPathConn("regional:7233", "api-key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_API_KEY")
+		require.False(t, ok, "TEMPORAL_API_KEY must not be present")
+
+		_, ok = getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok, "TEMPORAL_TLS must be removed")
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.False(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasVolume(res, "temporal-tls"), "temporal-tls volume must be removed")
+		assert.False(t, hasMount(c, "temporal-tls"), "temporal-tls mount must be removed")
+
+		e, _ = getEnv(c, "TEMPORAL_ADDRESS")
+		assert.Equal(t, "regional:7233", e.Value)
+		assert.Equal(t, "v1-image:pinned", c.Image, "image must not be clobbered")
+	})
+
+	t.Run("old style - API key to mTLS", func(t *testing.T) {
+		res := run(apiKeySecretRefConn(defaultHostPort(), "old-api", "key"), mtlsConn("mtls-host:7233", "tls-secret"), "v1-image:pinned")
 		c := res.Spec.Template.Spec.Containers[0]
 
 		e, ok := getEnv(c, "TEMPORAL_TLS")
@@ -2977,8 +3041,83 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		assert.Equal(t, "v1-image:pinned", c.Image)
 	})
 
-	t.Run("API key to API key secret rename", func(t *testing.T) {
-		res := run(apiKeyConn(defaultHostPort(), "old-api", "key"), apiKeyConn(defaultHostPort(), "new-api", "key"), "v1-image:pinned")
+	t.Run("new style - API key to mTLS", func(t *testing.T) {
+		res := run(apiKeySecretConn(defaultHostPort(), "old-api", "key"), mtlsConn("mtls-host:7233", "tls-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok)
+		assert.Equal(t, "true", e.Value)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.True(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.True(t, ok)
+		assert.True(t, hasVolume(res, "temporal-tls"))
+		assert.Equal(t, "tls-secret", tlsSecretName(res))
+		assert.True(t, hasMount(c, "temporal-tls"))
+
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.False(t, ok, "TEMPORAL_API_KEY must be removed")
+		assert.Equal(t, "v1-image:pinned", c.Image)
+	})
+
+	t.Run("new style - API key path to mTLS", func(t *testing.T) {
+		res := run(apiKeyPathConn(defaultHostPort(), "api-key"), mtlsConn("mtls-host:7233", "tls-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok)
+		assert.Equal(t, "true", e.Value)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.True(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.True(t, ok)
+		assert.True(t, hasVolume(res, "temporal-tls"))
+		assert.Equal(t, "tls-secret", tlsSecretName(res))
+		assert.True(t, hasMount(c, "temporal-tls"))
+
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.False(t, ok, "TEMPORAL_API_KEY must be removed")
+		assert.Equal(t, "v1-image:pinned", c.Image)
+	})
+
+	t.Run("old style to new style - API key secret", func(t *testing.T) {
+		res := run(apiKeySecretRefConn(defaultHostPort(), "old-api", "key"), apiKeySecretConn(defaultHostPort(), "new-api", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_API_KEY")
+		require.True(t, ok, "TEMPORAL_API_KEY must be present")
+		require.NotNil(t, e.ValueFrom)
+		require.NotNil(t, e.ValueFrom.SecretKeyRef)
+		assert.Equal(t, "new-api", e.ValueFrom.SecretKeyRef.Name)
+
+		_, ok = getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok, "TEMPORAL_TLS must be removed")
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_KEY_PATH")
+		assert.False(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS_CLIENT_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasVolume(res, "temporal-tls"), "temporal-tls volume must be removed")
+		assert.False(t, hasMount(c, "temporal-tls"), "temporal-tls mount must be removed")
+
+		e, _ = getEnv(c, "TEMPORAL_ADDRESS")
+		assert.Equal(t, "default-host:7233", e.Value)
+		assert.Equal(t, "v1-image:pinned", c.Image, "image must not be clobbered")
+	})
+
+	t.Run("old style - API key to API key secret rename", func(t *testing.T) {
+		res := run(apiKeySecretRefConn(defaultHostPort(), "old-api", "key"), apiKeySecretRefConn(defaultHostPort(), "new-api", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+		e, ok := getEnv(c, "TEMPORAL_API_KEY")
+		require.True(t, ok)
+		require.NotNil(t, e.ValueFrom)
+		require.NotNil(t, e.ValueFrom.SecretKeyRef)
+		assert.Equal(t, "new-api", e.ValueFrom.SecretKeyRef.Name)
+		assert.False(t, hasVolume(res, "temporal-tls"))
+	})
+
+	t.Run("new style - API key to API key secret rename", func(t *testing.T) {
+		res := run(apiKeySecretConn(defaultHostPort(), "old-api", "key"), apiKeySecretConn(defaultHostPort(), "new-api", "key"), "v1-image:pinned")
 		c := res.Spec.Template.Spec.Containers[0]
 		e, ok := getEnv(c, "TEMPORAL_API_KEY")
 		require.True(t, ok)
@@ -3021,8 +3160,8 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		return ""
 	}
 
-	t.Run("API key to API key with CA cert", func(t *testing.T) {
-		res := run(apiKeyConn(defaultHostPort(), "api-secret", "key"), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
+	t.Run("old style - API key to API key with CA cert", func(t *testing.T) {
+		res := run(apiKeySecretRefConn(defaultHostPort(), "api-secret", "key"), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
 		c := res.Spec.Template.Spec.Containers[0]
 
 		e, ok := getEnv(c, "TEMPORAL_TLS")
@@ -3042,8 +3181,41 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("API key with CA cert back to plain API key removes the CA volume and mount", func(t *testing.T) {
-		res := run(caCertConn(defaultHostPort(), "api-secret", "ca-secret"), apiKeyConn(defaultHostPort(), "api-secret", "key"), "v1-image:pinned")
+	t.Run("new style - API key to API key with CA cert", func(t *testing.T) {
+		res := run(apiKeySecretConn(defaultHostPort(), "api-secret", "key"), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok, "TEMPORAL_TLS must be set once a CA cert is configured")
+		assert.Equal(t, "true", e.Value)
+
+		e, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		require.True(t, ok, "TEMPORAL_TLS_SERVER_CA_CERT_PATH must be set")
+		assert.Equal(t, "/etc/temporal/tls-ca/ca.crt", e.Value)
+
+		assert.True(t, hasMount(c, "temporal-tls-ca"))
+		assert.True(t, hasVolume(res, "temporal-tls-ca"))
+		assert.Equal(t, "ca-secret", caVolumeSecretName(res))
+
+		// API key must still be present alongside the CA config.
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.True(t, ok)
+	})
+
+	t.Run("old style - API key with CA cert back to plain API key removes the CA volume and mount", func(t *testing.T) {
+		res := run(caCertConn(defaultHostPort(), "api-secret", "ca-secret"), apiKeySecretRefConn(defaultHostPort(), "api-secret", "key"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		_, ok := getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok, "TEMPORAL_TLS must be removed once the CA cert is unset")
+		_, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		assert.False(t, ok)
+		assert.False(t, hasMount(c, "temporal-tls-ca"))
+		assert.False(t, hasVolume(res, "temporal-tls-ca"))
+	})
+
+	t.Run("new style - API key with CA cert back to plain API key removes the CA volume and mount", func(t *testing.T) {
+		res := run(caCertConn(defaultHostPort(), "api-secret", "ca-secret"), apiKeySecretConn(defaultHostPort(), "api-secret", "key"), "v1-image:pinned")
 		c := res.Spec.Template.Spec.Containers[0]
 
 		_, ok := getEnv(c, "TEMPORAL_TLS")

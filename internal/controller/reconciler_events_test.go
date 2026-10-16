@@ -630,11 +630,24 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 		},
 		{
 			// Same as above for API key auth.
-			name: "MissingAPIKeySecret_AuthSecretInvalid",
+			name: "MissingAPIKeySecretRef_AuthSecretInvalid",
 			setupConn: func(tc *temporaliov1alpha1.Connection) {
 				tc.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "missing-api-key-secret"},
+					LocalObjectReference: corev1.LocalObjectReference{Name: "missing-api-key-secret-ref"},
 					Key:                  "api-key",
+				}
+			},
+			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
+		},
+		{
+			// Test the newer spec.APIKey.SecretRef
+			name: "MissingAPIKey_SecretRef_AuthSecretInvalid",
+			setupConn: func(tc *temporaliov1alpha1.Connection) {
+				tc.Spec.APIKey = &temporaliov1alpha1.APIKeyConfig{
+					SecretRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "missing-api-key-secret"},
+						Key:                  "api-key",
+					},
 				}
 			},
 			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
@@ -654,6 +667,19 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 				tc.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: ""},
 					Key:                  "api-key",
+				}
+			},
+			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
+		},
+		{
+			// Test the newer spec.APIKey.SecretRef
+			name: "MalformedAPIKey_SecretRef_AuthSecretInvalid",
+			setupConn: func(tc *temporaliov1alpha1.Connection) {
+				tc.Spec.APIKey = &temporaliov1alpha1.APIKeyConfig{
+					SecretRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: ""},
+						Key:                  "api-key",
+					},
 				}
 			},
 			expectedReason: temporaliov1alpha1.ReasonAuthSecretInvalid,
