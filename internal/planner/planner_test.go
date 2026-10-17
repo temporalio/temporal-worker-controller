@@ -1070,6 +1070,105 @@ func TestGetScaleDeployments(t *testing.T) {
 			expectScales: map[string]uint32{},
 		},
 		{
+			name: "draining version at 0 replicas is scaled back up to deployment.replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment: &appsv1.DeploymentSpec{Replicas: int32Ptr(3)},
+			},
+			expectScales: map[string]uint32{"test-old": 3},
+		},
+		{
+			name: "draining version at 0 is left alone when deployment.replicas is 0",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment: &appsv1.DeploymentSpec{Replicas: int32Ptr(0)},
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "draining version is scaled to drainingDeployment.replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"new": createDeploymentWithDefaultConnectionSpecHash(3),
+					"old": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{Replicas: int32Ptr(3)},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{"test-old": 1},
+		},
+		{
+			name: "draining version is scaled to drainingDeployment.replicas with deprecated spec.replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas:           int32Ptr(3),
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{"test-old": 1},
+		},
+		{
+			name: "draining version stays at drainingDeployment.replicas when the WD is scaled to 0",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(1),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{Replicas: int32Ptr(0)},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "drainingDeployment.replicas is ignored when a scaler manages replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(4),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
+			// drainingDeployment.replicas must not turn off the scale-from-0 repair
+			// when a scaler manages replicas.
+			name: "draining version at 0 is scaled to 1 when a scaler manages replicas and drainingDeployment.replicas is set",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(2)},
+			},
+			expectScales: map[string]uint32{"test-old": 1},
+		},
+		{
 			name: "inactive non-target version needs scaling down",
 			k8sState: &k8s.DeploymentState{
 				Deployments: map[string]*appsv1.Deployment{
@@ -3472,6 +3571,29 @@ func createDeploymentWithoutHashAnnotation(replicas int32, buildID string, image
 
 func int32Ptr(v int32) *int32 {
 	return &v
+}
+
+// drainingVersionStatus returns a status with current version "new" and
+// draining version "old".
+func drainingVersionStatus() *temporaliov1alpha1.WorkerDeploymentStatus {
+	return &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+				BuildID:    "new",
+				Status:     temporaliov1alpha1.VersionStatusCurrent,
+				Deployment: &corev1.ObjectReference{Name: "test-new"},
+			},
+		},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{
+				BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+					BuildID:    "old",
+					Status:     temporaliov1alpha1.VersionStatusDraining,
+					Deployment: &corev1.ObjectReference{Name: "test-old"},
+				},
+			},
+		},
+	}
 }
 
 func float32Ptr(v float32) *float32 {

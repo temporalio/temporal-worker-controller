@@ -3927,6 +3927,13 @@ spec:
                 required:
                 - template
                 type: object
+              drainingDeployment:
+                properties:
+                  replicas:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
               minReadySeconds:
                 default: 0
                 format: int32

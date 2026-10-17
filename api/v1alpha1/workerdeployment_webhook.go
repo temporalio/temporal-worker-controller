@@ -159,9 +159,14 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 // validateDeploymentSpec examines the supplied WorkerDeploymentSpec structs
 // and returns any warnings about using the deprecated replicas,
 // minReadySeconds and ProgressDeadlineSeconds fields instead of the
-// WorkerDeploymentSpec.Deployment struct field.
+// WorkerDeploymentSpec.Deployment struct field, and about
+// drainingDeployment.replicas being ignored while an autoscaler manages
+// replicas.
 func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
 	var warns admission.Warnings
+	if spec.DrainingDeployment != nil && spec.DrainingDeployment.Replicas != nil && spec.DeploymentSpec().Replicas == nil {
+		warns = append(warns, "spec.drainingDeployment.replicas is ignored because spec.deployment.replicas is not set; an autoscaler manages replicas")
+	}
 	if spec.Deployment == nil {
 		if spec.MinReadySeconds > 0 {
 			warns = append(warns, "spec.minReadySeconds is deprecated; use spec.deployment.minReadySeconds instead")
