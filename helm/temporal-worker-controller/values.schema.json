@@ -3,7 +3,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "properties": {
     "affinity": {
-      "description": "Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager\npods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.",
+      "description": "Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager\npods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.\nThe default is not rendered when topologySpreadConstraints is set.",
       "type": "object"
     },
     "authProxy": {
@@ -355,6 +355,10 @@
       "type": "integer"
     },
     "tolerations": {
+      "type": "array"
+    },
+    "topologySpreadConstraints": {
+      "description": "Topology spread constraints for the manager pods, e.g. to spread replicas across\nnodes and zones. When set and affinity is empty, the default podAntiAffinity is\nskipped so the two do not overlap.",
       "type": "array"
     },
     "webhook": {

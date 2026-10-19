@@ -100,7 +100,13 @@ containerSecurityContext: {}
 
 # Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager
 # pods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.
+# The default is not rendered when topologySpreadConstraints is set.
 affinity: {}
+
+# Topology spread constraints for the manager pods, e.g. to spread replicas across
+# nodes and zones. When set and affinity is empty, the default podAntiAffinity is
+# skipped so the two do not overlap.
+topologySpreadConstraints: []
 
 # More than one replica is required for high availability.
 replicas: 2
