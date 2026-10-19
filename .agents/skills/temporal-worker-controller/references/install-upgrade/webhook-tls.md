@@ -8,7 +8,7 @@ With `certmanager.enabled: true` (default), install cert-manager independently f
 
 ## Bring your own certificate
 
-Create a `kubernetes.io/tls` Secret containing the serving certificate and key in the controller release namespace. Set `certmanager.enabled: false`, `webhook.certSecretName: <secret-name>`, and `certmanager.caBundle` to the base64-encoded PEM CA certificate that signed the serving certificate. The API server uses that CA bundle to verify the webhook. For example:
+Create a `kubernetes.io/tls` Secret containing the serving certificate and key in the controller release namespace. The serving certificate needs DNS SANs for `<controller-release>-webhook-service.<namespace>.svc` and `<controller-release>-webhook-service.<namespace>.svc.cluster.local`. Choose the release name and namespace before issuing it; for chart versions newer than v0.31.0, verify the webhook Service name in that chart. Set `certmanager.enabled: false`, `webhook.certSecretName: <secret-name>`, and `certmanager.caBundle` to the base64-encoded PEM CA certificate that signed the serving certificate. The API server uses that CA bundle to verify the webhook. For example:
 
 ```bash
 kubectl create secret tls my-webhook-cert \
@@ -22,8 +22,8 @@ kubectl create secret tls my-webhook-cert \
 # --set certmanager.caBundle=<base64-encoded-CA-PEM>
 ```
 
-If an external PKI rotates the CA, the chart can instead use `certmanager.caInjectorJob.enabled: true` with `certmanager.caInjectorJob.secret.name` and `.secret.key` pointing to a Secret containing the CA. The post-install/post-upgrade Job copies its CA to both validating webhook configurations. This option applies only with `certmanager.enabled: false`; inspect the target chart's values before setting it.
+If an external PKI rotates the CA, the chart can use `certmanager.caInjectorJob.enabled: true` with `certmanager.caInjectorJob.secret.name` and `.secret.key` pointing to a Secret containing the CA. The Job copies the CA into the WorkerResourceTemplate validating webhook configuration and, when `webhook.enabled: true`, the WorkerDeployment configuration. It runs after Helm install or upgrade; changing the CA Secret alone does not update the webhook bundles. Plan a Helm upgrade after CA rotation and verify the bundles. This option applies only with `certmanager.enabled: false`; inspect the target chart's values before setting it.
 
 ## Verify
 
-Check the Secret is mounted by the controller, its serving certificate is valid for the webhook Service, and the validating webhook configuration CA bundles match the issuer. With cert-manager, also check the TWC Certificate is Ready.
+Check the Secret is mounted by the controller, its serving certificate is valid for the webhook Service, and the WorkerResourceTemplate validating webhook configuration's CA bundle matches the issuer. Check the WorkerDeployment configuration too only when `webhook.enabled: true`. With cert-manager, also check the TWC Certificate is Ready.

@@ -11,7 +11,7 @@ kubectl get workerdeployments,workerresourcetemplates,connections -A
 kubectl get clusterconnections
 ```
 
-Also list deprecated TemporalWorkerDeployments and TemporalConnections where those CRDs exist. Identify resources managed by GitOps or other tools and remove them through that source so they are not recreated. Decide whether the CRDs should be deleted or retained.Independently installed cert-manager may serve other workloads; leave it in place unless its removal is a separate, explicit task.
+Also list deprecated TemporalWorkerDeployments and TemporalConnections where those CRDs exist. Identify resources managed by GitOps or other tools and remove them through that source so they are not recreated. Decide whether the CRDs should be deleted or retained. Independently installed cert-manager may serve other workloads; leave it in place unless its removal is a separate, explicit task.
 
 ## Remove resources while the controller is running
 

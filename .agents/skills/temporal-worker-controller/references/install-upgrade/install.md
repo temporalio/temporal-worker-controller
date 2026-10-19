@@ -4,7 +4,7 @@ Use this path for a new installation. If TWC releases or CRDs already exist, ins
 
 ## Helm prerequisite
 
-Check `helm version --short`. TWC chart installation requires Helm v3.0 or newer. If Helm is missing, install a compatible CLI for the user's operating system using the [official Helm v3 installation instructions](https://helm.sh/docs/v3/intro/install/), then check again.
+Check `helm version --short`. The OCI chart commands below require Helm v3.8 or newer, or Helm v4. If Helm is missing, install a compatible CLI for the user's operating system using the [official Helm installation instructions](https://helm.sh/docs/intro/install/), then check again.
 
 ## Prepare webhook TLS
 

@@ -112,24 +112,20 @@ If the output is empty, no objects are using those fields and rollback is safe. 
 
 ## Migration Guide for Existing Users
 
-### Migrating from crds/ directory (Chart Version v0.12.0 and earlier)
+### Migrating from the old `crds/` directory
 
-If you are upgrading from a chart version that shipped CRDs in the `crds/` directory (Controller Helm Chart v0.12.0 and earlier), follow these steps.
+Controller chart v0.12.0 and earlier installed CRDs from its `crds/` directory. Helm leaves those CRDs on the cluster during a controller upgrade but does not update them. Check the live CRDs and their ownership if the separate CRDs release is missing; do not infer ownership from the controller version alone.
 
-When upgrading to the new chart version, Helm will **not** delete the existing CRDs — they remain on the cluster untouched. The controller continues working normally. The CRDs become temporarily "orphaned" from Helm tracking, which is fine.
+For a v0.12.0-or-earlier installation, first bring both charts to v0.22.0, the first published matching controller and CRDs chart version. Do not upgrade the controller straight to a later target while its old CRDs remain. The v0.22.0 CRD chart retains both old kinds and adds optional status fields compared with v0.12.0. Installing it before upgrading the controller briefly pairs v0.22.0 CRDs with an older controller, outside the N/N−1 compatibility commitment. Test this handoff on a representative nonproduction cluster before using it in production; compare schemas first if the installed CRDs differ from v0.12.0.
 
-#### One-Time Migration
+#### One-time adoption at v0.22.0
+
+Save the controller release's values and manifest, and inventory any `TemporalWorkerDeployment` and `TemporalConnection` objects. Confirm that the existing CRDs have no conflicting Helm ownership. Do not delete them: deleting a CRD deletes its custom resources.
 
 ```bash
-# Step 1: Upgrade the main chart as usual (CRDs on the cluster are untouched)
-helm upgrade temporal-worker-controller \
-  oci://docker.io/temporalio/temporal-worker-controller \
-  --version <new-version> \
-  --namespace temporal-system
-
-# Step 2: Stamp Helm ownership labels/annotations onto the existing CRDs.
+# Step 1: Stamp Helm ownership labels/annotations onto the existing CRDs.
 # CRDs installed via the old `crds/` directory have no Helm tracking metadata.
-# Without this step, `helm install` in step 3 fails with "cannot be imported into
+# Without this step, `helm install` in step 2 fails with "cannot be imported into
 # the current release: invalid ownership metadata".
 kubectl label crd \
   temporalconnections.temporal.io \
@@ -142,16 +138,21 @@ kubectl annotate crd \
   meta.helm.sh/release-name=temporal-worker-controller-crds \
   meta.helm.sh/release-namespace=temporal-system --overwrite
 
-# Step 3: Install the CRDs chart to take Helm ownership of the existing CRDs.
-# Same-version CRDs are a no-op on the cluster.
+# Step 2: Adopt and update the CRDs before upgrading the controller.
 helm install temporal-worker-controller-crds \
   oci://docker.io/temporalio/temporal-worker-controller-crds \
-  --version <new-version> \
+  --version 0.22.0 \
+  --namespace temporal-system
+
+# Step 3: After checking the CRDs and existing objects, upgrade the controller.
+helm upgrade temporal-worker-controller \
+  oci://docker.io/temporalio/temporal-worker-controller \
+  --version 0.22.0 \
   --namespace temporal-system
 ```
 
-After this migration, follow the standard upgrade and rollback instructions above for all future releases.
+Verify both chart versions, controller readiness, and existing custom resources before continuing. For later versions, follow the standard CRDs-first upgrade order, one published chart version at a time. Complete the [CRD rename migration](migration-crd-rename.md) when crossing v0.26.0.
 
 ### Migrating from TemporalWorkerDeployment/TemporalConnection CRDs (Chart Version v0.25.0 and earlier)
 
-See the [CRD rename migration guide](migration-crd-rename.md) for step-by-step instructions to migrate from the old CRD names (`TemporalWorkerDeployment`, `TemporalConnection`) to the new names (`WorkerDeployment`, `Connection`) introduced in Chart Version v0.27.0 (App Version v1.7.0).
+See the [CRD rename migration guide](migration-crd-rename.md) for step-by-step instructions to migrate from the old CRD names (`TemporalWorkerDeployment`, `TemporalConnection`) to the new names (`WorkerDeployment`, `Connection`) introduced in Chart Version v0.26.0 (App Version v1.7.0).

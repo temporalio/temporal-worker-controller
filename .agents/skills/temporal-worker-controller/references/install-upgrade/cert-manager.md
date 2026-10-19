@@ -4,7 +4,7 @@ Read this when TWC uses chart-managed webhook certificates (`certmanager.enabled
 
 ## Determine ownership
 
-Check whether cert-manager is already installed and healthy. On an existing TWC release, inspect `helm get values <twc-release> -n <namespace> -o yaml`. If `certmanager.install: true`, cert-manager belongs to the old TWC subchart; use [subchart migration](cert-manager-subchart-migration.md) before upgrading. Do not install another cert-manager release over those resources.
+Check whether cert-manager is already installed and healthy. On an existing TWC release, Read `helm get values <twc-release> -n <namespace> -o yaml`. If `certmanager.install: true`, cert-manager belongs to the old TWC subchart; use [subchart migration](cert-manager-subchart-migration.md) when upgrading across v0.30.0. Do not install another cert-manager release over those resources.
 
 ## Independent installation
 
