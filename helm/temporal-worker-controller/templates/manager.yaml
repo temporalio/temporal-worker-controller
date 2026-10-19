@@ -38,7 +38,7 @@ spec:
       {{- if .Values.affinity }}
       affinity:
 {{ toYaml .Values.affinity | nindent 8 }}
-      {{- else }}
+      {{- else if not .Values.topologySpreadConstraints }}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -209,5 +209,9 @@ spec:
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
