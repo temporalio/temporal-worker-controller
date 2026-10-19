@@ -128,6 +128,28 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 		"valid temporal worker deployment": {
 			obj: testhelpers.MakeWDWithName("valid-worker", ""),
 		},
+		"deploymentLabels with valid keys and values": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("valid-deployment-labels", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				obj.Spec.DeploymentLabels = map[string]string{"team": "payments", "example.com/instrumentation": "false", "empty": ""}
+				return obj
+			}),
+		},
+		// Without this check the CRD accepts the label and the controller then fails
+		// to create the versioned Deployment, which stalls the rollout.
+		"deploymentLabels with an invalid value": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("invalid-deployment-label-value", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				obj.Spec.DeploymentLabels = map[string]string{"team": "foo bar"}
+				return obj
+			}),
+			errorMsg: `spec.deploymentLabels: Invalid value: "foo bar"`,
+		},
+		"deploymentLabels with an invalid key": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("invalid-deployment-label-key", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				obj.Spec.DeploymentLabels = map[string]string{"-team": "payments"}
+				return obj
+			}),
+			errorMsg: `spec.deploymentLabels: Invalid value: "-team"`,
+		},
 		"invalid object type": {
 			obj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{

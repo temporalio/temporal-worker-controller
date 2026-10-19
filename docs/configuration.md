@@ -612,10 +612,16 @@ spec:
     example.com/instrumentation: "false"
 ```
 
-The controller applies these labels when it creates a versioned Deployment.
-Changing them does not relabel Deployments that already exist; new labels take
-effect from the next Build ID. `temporal.io/build-id` and
-`temporal.io/deployment-name` are managed by the controller and cannot be set.
+The controller keeps these labels in sync on the Deployments of every version it
+manages, including Draining ones. A change is applied in place: it doesn't create
+a new Build ID or restart pods. Removing a key from `spec.deploymentLabels` removes
+it from the Deployments. Labels that other tools add to the Deployments are left
+alone; the controller tracks the keys it applied in the
+`temporal.io/managed-deployment-labels` annotation.
+
+`temporal.io/build-id` and `temporal.io/deployment-name` are managed by the
+controller and cannot be set. Keys and values must be valid Kubernetes labels;
+the validating webhook rejects invalid ones.
 
 ### Environment-Specific Configurations
 
