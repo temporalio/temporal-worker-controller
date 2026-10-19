@@ -16,6 +16,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	"github.com/temporalio/temporal-worker-controller/pkg/controller/config"
 	"go.temporal.io/api/serviceerror"
 	sdkclient "go.temporal.io/sdk/client"
 	"google.golang.org/grpc/codes"
@@ -64,32 +65,7 @@ type WorkerDeploymentReconciler struct {
 	Scheme             *runtime.Scheme
 	TemporalClientPool *clientpool.ClientPool
 	Recorder           record.EventRecorder
-
-	// Disables panic recovery if true
-	DisableRecoverPanic  bool
-	DisableDeprecatedTWD bool
-
-	// DisableClusterConnections drops ClusterConnection support. Set when the manager is
-	// namespace-scoped: ClusterConnection is cluster-scoped, so a namespaced Role can never
-	// authorize listing it and the watch would retry forever against a 403.
-	DisableClusterConnections bool
-
-	// WRTHPAMatchLabelsStripTemporalPrefix removes the "temporal_" prefix from
-	// controller-managed external metric matchLabels in rendered WorkerResourceTemplates.
-	WRTHPAMatchLabelsStripTemporalPrefix bool
-
-	// When a Worker Deployment has the maximum number of versions (100 per Worker Deployment by default),
-	// it will delete the oldest eligible version when a worker with the 101st version arrives.
-	// If no versions are eligible for deletion, that worker's poll will fail, which is dangerous.
-	// To protect against this, when a Worker Deployment has too many versions ineligible for deletion,
-	// the controller will stop deploying new workers in order to give the user the opportunity to adjust
-	// their sunset policy to avoid this situation before it actually blocks deployment of a new worker
-	// version on the server side.
-	//
-	// MaxDeploymentVersionsIneligibleForDeletion is currently defaulted to 75, which is safe for the default
-	// server value of `matching.maxVersionsInDeployment=100`.
-	// Users who reduce `matching.maxVersionsInDeployment` in their dynamicconfig should also reduce this value.
-	MaxDeploymentVersionsIneligibleForDeletion int32
+	Config             config.Config
 
 	// deleteBackoff rate-limits repeated DeleteVersion failures per (worker deployment, build ID).
 	deleteBackoff     *flowcontrol.Backoff
@@ -137,9 +113,9 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Fallback identity check for when the reconciler is used as a library and
 	// main() is not in the call path. main() is kept as the primary check for
 	// faster feedback in normal Helm-based deployments.
-	if getControllerIdentity() == "" {
+	if config.GetControllerIdentity() == "" {
 		return ctrl.Result{}, errors.New(fmt.Sprintf("%s and %s are not set",
-			IdentityEnvKey, IdentitySuffixEnvKey))
+			config.IdentityEnvKey, config.IdentitySuffixEnvKey))
 	}
 
 	l.V(1).Info("Running Reconcile loop")
@@ -165,7 +141,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Migration: if a deprecated TemporalWorkerDeployment with the same name/namespace
 	// exists and has not yet been migrated, transfer ownership of its child Deployments
 	// and WorkerResourceTemplates to this WorkerDeployment.
-	if !r.DisableDeprecatedTWD {
+	if !r.Config.DisableDeprecatedTWD {
 		if err := r.migrateFromDeprecatedTWD(ctx, l, &workerDeploy); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -207,7 +183,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// This WorkerDeployment can never reconcile. Reported before the finalizer is added so it
 	// stays deletable, and without requeueing since only a spec or deployment-mode change can
 	// resolve it.
-	if r.DisableClusterConnections && workerDeploy.Spec.WorkerOptions.ConnectionRef.IsCluster() {
+	if r.Config.DisableClusterConnections && workerDeploy.Spec.WorkerOptions.ConnectionRef.IsCluster() {
 		msg := fmt.Sprintf(
 			"ClusterConnection %q cannot be used because the controller is namespace-scoped",
 			workerDeploy.Spec.WorkerOptions.ConnectionRef.ResolvedName(),
@@ -302,7 +278,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		connection.Spec,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		workerDeploy.Namespace,
-		getControllerIdentity(),
+		config.GetControllerIdentity(),
 	)
 	if err != nil {
 		var authErr *clientpool.AuthConfigError
@@ -355,7 +331,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		k8sState.Deployments,
 		targetBuildID,
 		workerDeploy.Spec.RolloutStrategy.Strategy,
-		getControllerIdentity(),
+		config.GetControllerIdentity(),
 	)
 	if err != nil {
 		if shouldEvictClient(err) {
@@ -631,7 +607,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		connection.Spec,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
 		workerDeploy.Namespace,
-		getControllerIdentity(),
+		config.GetControllerIdentity(),
 	)
 	if err != nil {
 		return fmt.Errorf("unable to create TemporalClient: %w", err)
@@ -670,7 +646,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		if _, err := deploymentHandler.SetRampingVersion(ctx, sdkclient.WorkerDeploymentSetRampingVersionOptions{
 			BuildID:    "",
 			Percentage: 0,
-			Identity:   getControllerIdentity(),
+			Identity:   config.GetControllerIdentity(),
 		}); err != nil {
 			return fmt.Errorf("unable to clear ramping version: %w", err)
 		}
@@ -692,7 +668,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 			BuildID:                 "", // empty = unversioned
 			ConflictToken:           resp.ConflictToken,
-			Identity:                getControllerIdentity(),
+			Identity:                config.GetControllerIdentity(),
 			IgnoreMissingTaskQueues: true,
 		}); err != nil {
 			return fmt.Errorf("unable to set current version to unversioned: %w", err)
@@ -731,7 +707,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		if _, err := deploymentHandler.DeleteVersion(ctx, sdkclient.WorkerDeploymentDeleteVersionOptions{
 			BuildID:      buildID,
 			SkipDrainage: true,
-			Identity:     getControllerIdentity(),
+			Identity:     config.GetControllerIdentity(),
 		}); err != nil {
 			return fmt.Errorf("unable to delete version %s (will retry): %w", buildID, err)
 		}
@@ -741,7 +717,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 	l.Info("Attempting to delete worker deployment from Temporal server", "name", workerDeploymentName)
 	if _, err := temporalClient.WorkerDeploymentClient().Delete(ctx, sdkclient.WorkerDeploymentDeleteOptions{
 		Name:     workerDeploymentName,
-		Identity: getControllerIdentity(),
+		Identity: config.GetControllerIdentity(),
 	}); err != nil {
 		return fmt.Errorf("unable to delete worker deployment %s (will retry): %w", workerDeploymentName, err)
 	}
@@ -976,16 +952,16 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	recoverPanic := !r.DisableRecoverPanic
+	recoverPanic := !r.Config.DisableRecoverPanic
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.WorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
 		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT))
-	if !r.DisableClusterConnections {
+	if !r.Config.DisableClusterConnections {
 		builder = builder.Watches(&temporaliov1alpha1.ClusterConnection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingClusterConnection))
 	}
-	if !r.DisableDeprecatedTWD {
+	if !r.Config.DisableDeprecatedTWD {
 		// Watch deprecated TemporalWorkerDeployments so that any modification to an existing TWD
 		// (e.g. a status update before migration completes) triggers a reconcile of the matching WD
 		// and causes migrateFromDeprecatedTWD to run.

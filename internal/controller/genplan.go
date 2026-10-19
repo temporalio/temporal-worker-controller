@@ -137,7 +137,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
 		RolloutStrategy:                      rolloutStrategy,
-		WRTHPAMatchLabelsStripTemporalPrefix: r.WRTHPAMatchLabelsStripTemporalPrefix,
+		WRTHPAMatchLabelsStripTemporalPrefix: r.Config.WRTHPAMatchLabelsStripTemporalPrefix,
 	}
 
 	// Fetch all WorkerResourceTemplates that reference this TWD so that the planner
@@ -159,7 +159,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 		connection,
 		plannerConfig,
 		workerDeploymentName,
-		r.MaxDeploymentVersionsIneligibleForDeletion,
+		r.Config.MaxDeploymentVersionsIneligibleForDeletion,
 		gateInput,
 		isGateInputSecret,
 		wrtList.Items,

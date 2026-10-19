@@ -1,4 +1,4 @@
-package controller
+package config
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	deprecatedTWDResource = schema.GroupVersionResource{
+	DeprecatedTWDResource = schema.GroupVersionResource{
 		Group: "temporal.io", Version: "v1alpha1", Resource: "temporalworkerdeployments",
 	}
-	deprecatedTCResource = schema.GroupVersionResource{
+	DeprecatedTCResource = schema.GroupVersionResource{
 		Group: "temporal.io", Version: "v1alpha1", Resource: "temporalconnections",
 	}
 )
@@ -30,11 +30,11 @@ func DetectDeprecatedCRDWatches(
 	client dynamic.Interface,
 	namespaces []string,
 ) (DeprecatedCRDWatches, error) {
-	twd, err := canListAndWatch(ctx, client, deprecatedTWDResource, namespaces)
+	twd, err := canListAndWatch(ctx, client, DeprecatedTWDResource, namespaces)
 	if err != nil {
 		return DeprecatedCRDWatches{}, fmt.Errorf("check TemporalWorkerDeployment availability: %w", err)
 	}
-	tc, err := canListAndWatch(ctx, client, deprecatedTCResource, namespaces)
+	tc, err := canListAndWatch(ctx, client, DeprecatedTCResource, namespaces)
 	if err != nil {
 		return DeprecatedCRDWatches{}, fmt.Errorf("check TemporalConnection availability: %w", err)
 	}

@@ -72,7 +72,7 @@ func (r *WorkerDeploymentReconciler) releaseConnectionFinalizerIfUnused(
 
 	// A namespace-scoped controller never placed a finalizer on a ClusterConnection, and
 	// cannot read one to check. Nothing to release.
-	if isCluster && r.DisableClusterConnections {
+	if isCluster && r.Config.DisableClusterConnections {
 		return nil
 	}
 

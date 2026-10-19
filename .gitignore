@@ -5,7 +5,7 @@ bin
 dist
 helm/**/charts/*.tgz
 .stamp/
-config/
+config/rbac/
 
 secret.env
 skaffold.env
