@@ -1,6 +1,6 @@
 # Install and upgrade workflow
 
-Use this area for TWC installation, upgrades, rollbacks, uninstallation, cert-manager setup or migration, webhook TLS, and failures that may come up during those operations.
+Use this skill for TWC installation, upgrades, rollbacks, uninstallation, cert-manager setup or migration, webhook TLS, and failures that may come up during those operations.
 
 ## Discover the installed state
 
@@ -17,7 +17,7 @@ If cluster access is unavailable or the user requests a plan without commands, a
 
 Inspect the installed releases and affected resources first. Show the user the proposed commands, the resources they will change or delete, and how you will verify the result. Get explicit approval for that plan before running `helm install`, `helm upgrade`, `helm rollback`, `helm uninstall`, or mutating `kubectl` commands, unless the user has already approved those specific changes. Read only checks do not need approval.
 
-## Route within this area
+## Choose a reference
 
 | Task | Read |
 | --- | --- |
