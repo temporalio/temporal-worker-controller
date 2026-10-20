@@ -600,6 +600,31 @@ example after a rollback, scales back to `deployment.replicas`.
 > `terminationGracePeriodSeconds`. Long-running activities should heartbeat so
 > they resume on another pod.
 
+### Labels on versioned Deployments
+
+Labels in `spec.deployment.template.metadata.labels` go on the pods. To label the
+versioned Kubernetes Deployment objects themselves, set `spec.deploymentLabels`.
+Use this for tools that act on the Deployment rather than its pods, such as
+admission webhooks that opt workloads in or out by label, or cost allocation.
+
+```yaml
+spec:
+  deploymentLabels:
+    team: payments
+    example.com/instrumentation: "false"
+```
+
+The controller keeps these labels in sync on the Deployments of every version it
+manages, including Draining ones. A change is applied in place: it doesn't create
+a new Build ID or restart pods. Removing a key from `spec.deploymentLabels` removes
+it from the Deployments. Labels that other tools add to the Deployments are left
+alone; the controller tracks the keys it applied in the
+`temporal.io/managed-deployment-labels` annotation.
+
+`temporal.io/build-id` and `temporal.io/deployment-name` are managed by the
+controller and cannot be set. Keys and values must be valid Kubernetes labels;
+the validating webhook rejects invalid ones.
+
 ### Environment-Specific Configurations
 
 **Production Configuration:**

@@ -708,6 +708,23 @@ func checkAndUpdateDeploymentStrategy(
 	return existingDeployment
 }
 
+// checkAndUpdateDeploymentLabels updates an owned Deployment when its labels
+// differ from spec.deploymentLabels.
+func checkAndUpdateDeploymentLabels(
+	buildID string,
+	k8sState *k8s.DeploymentState,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[buildID]
+	if !exists {
+		return nil
+	}
+	if !k8s.ApplyDeploymentLabels(existingDeployment, spec.DeploymentLabels) {
+		return nil
+	}
+	return existingDeployment
+}
+
 func getUpdateDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
@@ -758,6 +775,22 @@ func getUpdateDeployments(
 			continue
 		}
 		if deployment := checkAndUpdateDeploymentStrategy(buildID, k8sState, spec); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[buildID] = true
+		}
+	}
+
+	// Sync deployment labels the same way, after the strategy sync, so a
+	// Kubernetes Deployment already queued for update picks up label changes in
+	// the same write.
+	for _, buildID := range ownedBuildIDs(status) {
+		if updatedBuildIDs[buildID] {
+			if deployment, exists := k8sState.Deployments[buildID]; exists {
+				k8s.ApplyDeploymentLabels(deployment, spec.DeploymentLabels)
+			}
+			continue
+		}
+		if deployment := checkAndUpdateDeploymentLabels(buildID, k8sState, spec); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 			updatedBuildIDs[buildID] = true
 		}

@@ -5187,3 +5187,58 @@ func TestGetDeleteDeployments_Inactive(t *testing.T) {
 		})
 	}
 }
+
+func TestGetUpdateDeployments_DeploymentLabelsReconcile(t *testing.T) {
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		DeploymentLabels: map[string]string{"team": "payments"},
+	}
+	newDeployment := func(name string) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: appsv1.DeploymentSpec{
+				Strategy: spec.DeploymentSpec().Strategy,
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			},
+		}
+	}
+	target := newDeployment("worker-v2")
+	deprecated := newDeployment("worker-v1")
+
+	status := &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v2"},
+		},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"}},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"v1": deprecated, "v2": target},
+	}
+
+	// A connection change queues the target Deployment first; its labels must land in the same write.
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "temporal:7233"}
+	updates := getUpdateDeployments(k8sState, status, spec, connection)
+	require.Len(t, updates, 2)
+	assert.Equal(t, map[string]string{"team": "payments"}, target.Labels)
+	assert.Equal(t, map[string]string{"team": "payments"}, deprecated.Labels)
+
+	assert.Empty(t, getUpdateDeployments(k8sState, status, spec, connection), "no update once labels are in sync")
+
+	// A strategy change and a label change on the same Deployment go out in one update.
+	maxSurge := intstr.FromInt32(0)
+	changed := &temporaliov1alpha1.WorkerDeploymentSpec{
+		DeploymentLabels: map[string]string{"team": "billing"},
+		Deployment: &appsv1.DeploymentSpec{Strategy: appsv1.DeploymentStrategy{
+			Type:          appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{MaxSurge: &maxSurge},
+		}},
+	}
+	updates = getUpdateDeployments(k8sState, status, changed, connection)
+	require.Len(t, updates, 2)
+	for _, d := range updates {
+		assert.Equal(t, "billing", d.Labels["team"], d.Name)
+		require.NotNil(t, d.Spec.Strategy.RollingUpdate, d.Name)
+		assert.Equal(t, maxSurge, *d.Spec.Strategy.RollingUpdate.MaxSurge, d.Name)
+	}
+}
