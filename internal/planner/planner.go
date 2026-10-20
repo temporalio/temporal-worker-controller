@@ -622,6 +622,9 @@ func updateDeploymentWithPodTemplateSpec(
 	connection temporaliov1alpha1.ConnectionSpec,
 ) {
 	wdDepSpec := spec.DeploymentSpec()
+	// Hash the user template, excluding controller-managed fields.
+	podTemplateSpecHash := k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	wdDepSpec.Template = *wdDepSpec.Template.DeepCopy()
 
 	// Extract the build ID from the deployment's labels (with nil safety)
 	var buildID string
@@ -659,8 +662,7 @@ func updateDeploymentWithPodTemplateSpec(
 		podAnnotations[k] = v
 	}
 	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
-	// Store the new pod template spec hash
-	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = podTemplateSpecHash
 
 	// Preserve existing pod labels and add/update required labels
 	podLabels := make(map[string]string)
