@@ -50,6 +50,10 @@ type plan struct {
 	// WRTs that need a controller owner reference added, as (base, patched) pairs
 	// ready for client.MergeFrom patching in executePlan.
 	EnsureWRTOwnerRefs []planner.WRTOwnerRefPatch
+
+	// All WRTs that reference the WorkerDeployment, so executePlan can record the status
+	// of a WRT that renders no copy this cycle.
+	WorkerResourceTemplates []temporaliov1alpha1.WorkerResourceTemplate
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -182,6 +186,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
 	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
+	plan.WorkerResourceTemplates = wrtList.Items
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
