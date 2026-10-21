@@ -624,6 +624,8 @@ func updateDeploymentWithPodTemplateSpec(
 	wdDepSpec := spec.DeploymentSpec()
 	// Hash the user template, excluding controller-managed fields.
 	podTemplateSpecHash := k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	// DeploymentSpec() shares the template with spec on the legacy spec.template path;
+	// copy so the modifications below don't mutate spec.
 	wdDepSpec.Template = *wdDepSpec.Template.DeepCopy()
 
 	// Extract the build ID from the deployment's labels (with nil safety)
