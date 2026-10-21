@@ -127,16 +127,12 @@ func testDeletionSetsCurrentToUnversioned(
 
 	// Update the WD to target v2.0, creating a second version to use as a ramping version.
 	// This exercises the ramping-version clear path in handleDeletion.
-	var wdForUpdate temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wd.Name, Namespace: namespace}, &wdForUpdate); err != nil {
-		t.Fatalf("failed to get WD for v2.0 update: %v", err)
-	}
-	wdForUpdate.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
-	buildIDv2 := k8s.ComputeBuildID(&wdForUpdate)
+	var buildIDv2 string
+	updateWorkerDeployment(t, ctx, k8sClient, types.NamespacedName{Name: wd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
+		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
+		buildIDv2 = k8s.ComputeBuildID(w)
+	})
 	deploymentNameV2 := k8s.ComputeVersionedDeploymentName(wd.Name, buildIDv2)
-	if err := k8sClient.Update(ctx, &wdForUpdate); err != nil {
-		t.Fatalf("failed to update WD to v2.0: %v", err)
-	}
 
 	// Wait for the controller to create the v2.0 K8s Deployment
 	eventually(t, 30*time.Second, time.Second, func() error {
@@ -425,16 +421,12 @@ func testDrainedVersionPrunedOnSunset(
 	setCurrentVersion(t, ctx, ts, workerDeploymentName, buildIDv1)
 
 	// Roll out v2.0 and make it current, so v1.0 becomes deprecated and starts draining.
-	var twdV2 temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdV2); err != nil {
-		t.Fatalf("failed to get TWD for v2.0 update: %v", err)
-	}
-	twdV2.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
-	buildIDv2 := k8s.ComputeBuildID(&twdV2)
+	var buildIDv2 string
+	updateWorkerDeployment(t, ctx, k8sClient, types.NamespacedName{Name: twd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
+		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
+		buildIDv2 = k8s.ComputeBuildID(w)
+	})
 	depNameV2 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv2)
-	if err := k8sClient.Update(ctx, &twdV2); err != nil {
-		t.Fatalf("failed to update TWD to v2.0: %v", err)
-	}
 	eventually(t, 30*time.Second, time.Second, func() error {
 		var dep appsv1.Deployment
 		return k8sClient.Get(ctx, types.NamespacedName{Name: depNameV2, Namespace: namespace}, &dep)

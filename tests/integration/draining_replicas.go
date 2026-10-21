@@ -90,17 +90,13 @@ func testDrainingDeploymentReplicas(t *testing.T, k8sClient client.Client, ts *t
 		_ = ts.GetDefaultClient().TerminateWorkflow(context.Background(), run.GetID(), run.GetRunID(), "integration test cleanup")
 	}()
 
-	var next temporaliov1alpha1.WorkerDeployment
 	key := types.NamespacedName{Name: twd.Name, Namespace: namespace}
-	if err := k8sClient.Get(ctx, key, &next); err != nil {
-		t.Fatalf("failed to get WorkerDeployment for v2 update: %v", err)
-	}
-	next.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
-	buildIDv2 := k8s.ComputeBuildID(&next)
+	var buildIDv2 string
+	next := updateWorkerDeployment(t, ctx, k8sClient, key, func(w *temporaliov1alpha1.WorkerDeployment) {
+		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
+		buildIDv2 = k8s.ComputeBuildID(w)
+	})
 	keyV2 := types.NamespacedName{Name: k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv2), Namespace: namespace}
-	if err := k8sClient.Update(ctx, &next); err != nil {
-		t.Fatalf("failed to update WorkerDeployment to v2: %v", err)
-	}
 	eventually(t, 30*time.Second, time.Second, func() error {
 		var deployment appsv1.Deployment
 		return k8sClient.Get(ctx, keyV2, &deployment)
