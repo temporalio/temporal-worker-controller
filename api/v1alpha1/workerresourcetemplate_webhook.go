@@ -158,6 +158,21 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 		))
 	}
 
+	// Immutability: the template's resource type must not change on update. Resources
+	// already rendered from the old type stay owned by this WRT, but delete authorization
+	// and sunset cleanup only see the current type.
+	if oldWRT != nil {
+		oldGK, oldOK := templateGroupKind(oldWRT.Spec.Template.Raw)
+		newGK, newOK := templateGroupKind(newWRT.Spec.Template.Raw)
+		if oldOK && newOK && oldGK != newGK {
+			allErrs = append(allErrs, field.Forbidden(
+				field.NewPath("spec").Child("template"),
+				fmt.Sprintf("the template's resource type is immutable (%s cannot change to %s); "+
+					"create a new WorkerResourceTemplate for the new type instead", oldGK, newGK),
+			))
+		}
+	}
+
 	// Return early if pure validation failed (API checks won't help)
 	if len(allErrs) > 0 {
 		return warnings, apierrors.NewInvalid(
@@ -181,6 +196,23 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	}
 
 	return warnings, nil
+}
+
+// templateGroupKind returns the group and kind of a raw spec.template. ok is false
+// when either is missing or apiVersion is unparseable.
+func templateGroupKind(raw []byte) (gk schema.GroupKind, ok bool) {
+	var typeMeta struct {
+		APIVersion string `json:"apiVersion"`
+		Kind       string `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &typeMeta); err != nil || typeMeta.Kind == "" {
+		return schema.GroupKind{}, false
+	}
+	gv, err := schema.ParseGroupVersion(typeMeta.APIVersion)
+	if err != nil || gv.Version == "" {
+		return schema.GroupKind{}, false
+	}
+	return schema.GroupKind{Group: gv.Group, Kind: typeMeta.Kind}, true
 }
 
 // validateWorkerResourceTemplateSpec performs pure (no-API) validation of the spec fields.
