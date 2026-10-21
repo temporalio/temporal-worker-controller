@@ -14,6 +14,24 @@ This command will:
 1. Set up the envtest environment with proper `KUBEBUILDER_ASSETS`
 2. Run the integration tests
 
+## Running a focused test
+
+With the envtest binaries installed, run the rate-limit scenario on its own:
+
+```bash
+KUBEBUILDER_ASSETS="$(./bin/setup-envtest use 1.29.0 --bin-dir "$PWD/bin" -p path)" \
+  GOWORK=off go test -v -tags integration ./tests/integration/... \
+  -run '^TestWorkerDeploymentRateLimit$' -count=1
+```
+
+This starts a separate controller environment and the rate-limited Temporal
+server, without the rollout suite's default and short-poller-TTL servers.
+`make test-integration` still runs both top-level tests.
+
+Existing rollout subtests can be selected with a slash-qualified expression,
+for example `-run '^TestIntegration/manual-rollout-expect-no-change$'`.
+That filters test bodies but still runs their parent suite's shared setup.
+
 ## Test Structure
 
 The integration test (`internal/integration_test.go`) includes:
