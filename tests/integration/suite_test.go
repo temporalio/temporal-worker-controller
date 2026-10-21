@@ -1019,6 +1019,10 @@ func TestIntegration(t *testing.T) {
 		testDrainingDeploymentReplicas(t, k8sClient, ts, testNamespace.Name)
 	})
 
+	t.Run("wrt-version-statuses-current-to-draining", func(t *testing.T) {
+		testWRTVersionStatusesCurrentToDraining(t, k8sClient, ts, testNamespace.Name)
+	})
+
 	// Deletion cleanup tests — use short poller TTL server so active pollers expire
 	// in 1s rather than the default 5 minutes, keeping test runtime reasonable.
 	runDeletionTests(t, k8sClient, tsShortTTL, testNamespace.Name)
