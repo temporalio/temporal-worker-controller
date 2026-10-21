@@ -4033,7 +4033,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil, false)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil, nil, false)
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of worker resource applies")
 		})
 	}
@@ -4050,7 +4050,7 @@ func TestGetWorkerResourceApplies_RenderError(t *testing.T) {
 		createTestWRT("my-hpa", "my-worker"),
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil, false)
+	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil, nil, false)
 	require.Len(t, applies, 2)
 
 	var errEntry, okEntry *WorkerResourceApply
@@ -4082,7 +4082,7 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, false)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false)
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -4175,7 +4175,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, false)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false)
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -4231,6 +4231,7 @@ func TestGetWorkerResourceApplies_StripsTemporalMetricLabelPrefix(t *testing.T) 
 		[]temporaliov1alpha1.WorkerResourceTemplate{wrt},
 		k8sState,
 		"test-temporal-ns",
+		nil,
 		nil,
 		nil,
 		true,
@@ -4300,13 +4301,13 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 	}
 
 	t.Run("no delete deployments and no status entries produces no refs", func(t *testing.T) {
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, nil, stateWith(), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, nil, stateWith(), nil, nil)
 		assert.Nil(t, refs)
 	})
 
 	t.Run("no wrts produces no refs", func(t *testing.T) {
 		dep := makeDeployment("worker-abc", "abc")
-		refs := getDeleteWorkerResources(nil, []*appsv1.Deployment{dep}, stateWith(dep), nil)
+		refs := getDeleteWorkerResources(nil, []*appsv1.Deployment{dep}, stateWith(dep), nil, nil)
 		assert.Nil(t, refs)
 	})
 
@@ -4314,7 +4315,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		// The resource name must be computable even when wrt.Status.Versions is empty —
 		// i.e. the WRT was never applied for this buildID before the Deployment was deleted.
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil, nil)
 		require.Len(t, refs, 1)
 		expectedName := k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")
 		assert.Equal(t, expectedName, refs[0].Name)
@@ -4341,7 +4342,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			},
 		}
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt, wrt2}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt, wrt2}, []*appsv1.Deployment{dep}, stateWith(dep), nil, nil)
 		require.Len(t, refs, 2)
 		kinds := map[string]bool{refs[0].Kind: true, refs[1].Kind: true}
 		assert.True(t, kinds["HorizontalPodAutoscaler"], "expected HPA ref")
@@ -4351,7 +4352,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 	t.Run("single WRT × multiple deployments produces one ref per deployment", func(t *testing.T) {
 		dep1 := makeDeployment("worker-abc", "build-abc")
 		dep2 := makeDeployment("worker-def", "build-def")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep1, dep2}, stateWith(dep1, dep2), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep1, dep2}, stateWith(dep1, dep2), nil, nil)
 		require.Len(t, refs, 2)
 		names := map[string]bool{refs[0].Name: true, refs[1].Name: true}
 		assert.True(t, names[k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc")])
@@ -4362,7 +4363,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		dep := &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Name: "worker-no-label"},
 		}
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil, nil)
 		assert.Nil(t, refs)
 	})
 
@@ -4375,7 +4376,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			},
 		}
 		dep := makeDeployment("worker-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{badWRT, wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{badWRT, wrt}, []*appsv1.Deployment{dep}, stateWith(dep), nil, nil)
 		require.Len(t, refs, 1) // only the valid WRT
 		assert.Equal(t, "HorizontalPodAutoscaler", refs[0].Kind)
 	})
@@ -4389,7 +4390,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 		orphanWRT.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
 			{BuildID: "build-gone", LastAppliedHash: "somehash", ResourceName: "stale-resource"},
 		}
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{orphanWRT}, nil, stateWith(), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{orphanWRT}, nil, stateWith(), nil, nil)
 		require.Len(t, refs, 1)
 		assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-gone"), refs[0].Name)
 		assert.Equal(t, "autoscaling/v2", refs[0].APIVersion)
@@ -4404,7 +4405,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			{BuildID: "build-abc", LastAppliedHash: "somehash"},
 		}
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{liveWRT}, nil, stateWith(dep), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{liveWRT}, nil, stateWith(dep), nil, nil)
 		assert.Nil(t, refs)
 	})
 
@@ -4416,7 +4417,7 @@ func TestGetDeleteWorkerResources(t *testing.T) {
 			{BuildID: "build-abc", LastAppliedHash: "somehash"},
 		}
 		dep := makeDeployment("worker-build-abc", "build-abc")
-		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{entryWRT}, []*appsv1.Deployment{dep}, stateWith(dep), nil)
+		refs := getDeleteWorkerResources([]temporaliov1alpha1.WorkerResourceTemplate{entryWRT}, []*appsv1.Deployment{dep}, stateWith(dep), nil, nil)
 		require.Len(t, refs, 1)
 		assert.Equal(t, "build-abc", refs[0].BuildID)
 	})
@@ -4931,7 +4932,7 @@ func TestGetWorkerResourceApplies_SunsetBuildIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, false)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, nil, false)
 			assert.ElementsMatch(t, tc.expectKeys, applyKeys(applies))
 		})
 	}
@@ -5064,7 +5065,7 @@ func TestGetDeleteWorkerResources_SunsetBuildIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			refs := getDeleteWorkerResources(tc.wrts, tc.deleteDeployments, stateWith(depA, depB), tc.sunsetBuildIDs)
+			refs := getDeleteWorkerResources(tc.wrts, tc.deleteDeployments, stateWith(depA, depB), tc.sunsetBuildIDs, nil)
 			assert.ElementsMatch(t, tc.expectRefs, refs)
 		})
 	}

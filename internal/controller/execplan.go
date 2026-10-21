@@ -71,8 +71,9 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		}
 	}
 
-	// Delete rendered WRT resources whose versioned Deployment is being sunset, or whose
-	// WRT status entry is orphaned (its build ID has no versioned Deployment anymore).
+	// Delete rendered WRT resources whose versioned Deployment is being sunset, whose
+	// version status the WRT no longer selects, or whose WRT status entry is orphaned
+	// (its build ID has no versioned Deployment anymore).
 	// Rendered resources are owned by the WRT (not the Deployment), so k8s GC does not
 	// clean them up when the Deployment is deleted; the controller does it here instead.
 	// Errors are logged and skipped: the WRT status entry for the build ID is only pruned

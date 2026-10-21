@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -27,6 +29,20 @@ type WorkerResourceTemplateSpec struct {
 	// Will be removed in a future release.
 	// +optional
 	TemporalWorkerDeploymentRef *WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
+
+	// VersionStatuses limits the template to versions with one of these statuses.
+	// The controller does not render a copy for a version with another status, and
+	// deletes the copy of a version that changes to an unlisted status. Unset means
+	// every status.
+	//
+	// Use two WorkerResourceTemplates for the same WorkerDeployment to give versions
+	// that receive new workflows (Current, Ramping) a different policy from versions
+	// that only finish pinned workflows (Draining).
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:Enum=NotRegistered;Created;Inactive;Ramping;Current;Draining;Drained
+	VersionStatuses []VersionStatus `json:"versionStatuses,omitempty"`
 
 	// Template is the Kubernetes resource template applied per active Build ID.
 	// Must include apiVersion, kind, and spec. metadata.name and metadata.namespace
@@ -169,6 +185,12 @@ func (s *WorkerResourceTemplateSpec) EffectiveWorkerDeploymentName() string {
 		return s.TemporalWorkerDeploymentRef.Name
 	}
 	return ""
+}
+
+// SelectsVersionStatus reports whether the template applies to a version with the
+// given status. An unset VersionStatuses selects every status.
+func (s *WorkerResourceTemplateSpec) SelectsVersionStatus(status VersionStatus) bool {
+	return len(s.VersionStatuses) == 0 || slices.Contains(s.VersionStatuses, status)
 }
 
 func init() {
