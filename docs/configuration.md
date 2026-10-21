@@ -582,9 +582,9 @@ With this configuration, versions are scaled as follows:
 
 - Applies only when the controller manages replicas, that is when
   `spec.deployment.replicas` is set. When an autoscaler manages replicas, the
-  field is ignored and the webhook returns a warning. See
-  [#608](https://github.com/temporalio/temporal-worker-controller/issues/608)
-  for per-version autoscaler configuration.
+  field is ignored and the webhook returns a warning. To give Draining versions
+  their own autoscaler, see
+  [Splitting autoscalers by status](worker-resource-templates.md#splitting-autoscalers-by-status).
 - Must be at least 1, so a Draining version keeps a poller for its pinned
   executions. This holds even when `deployment.replicas` is 0.
 - When unset, the controller leaves Draining versions at their current replica
