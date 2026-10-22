@@ -3388,7 +3388,9 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				k8sState.Deployments[buildID] = tt.existingDeployment
 			}
 
+			originalSpec := tt.newSpec.DeepCopy()
 			result := checkAndUpdateDeploymentPodTemplateSpec(buildID, k8sState, tt.newSpec, tt.connection)
+			assert.Equal(t, originalSpec, tt.newSpec, "Controller modifications must not mutate the worker spec")
 
 			if !tt.expectUpdate {
 				assert.Nil(t, result, "Expected no update, but got deployment")
@@ -3415,6 +3417,9 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				}
 			}
 			assert.True(t, found, "Should find TEMPORAL_WORKER_BUILD_ID environment variable")
+
+			assert.Nil(t, checkAndUpdateDeploymentPodTemplateSpec(buildID, k8sState, tt.newSpec, tt.connection),
+				"An unchanged pod template should not trigger another update")
 		})
 	}
 }
