@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
@@ -83,15 +82,14 @@ func (r *WorkerDeploymentReconciler) planGroupedDeployments(
 		}
 		version := temporalState.Versions[buildID]
 		markedForDeletion := saved.Object.Annotations[k8s.GroupDeletionAnnotation] == "true"
-		retiring := markedForDeletion
 		deleting := markedForDeletion
-		if buildID != target && buildID != temporalState.CurrentBuildID && buildID != temporalState.RampingBuildID && version != nil && version.Status == v1alpha1.VersionStatusDrained && version.DrainedSince != nil {
-			elapsed := time.Since(*version.DrainedSince)
-			retiring = retiring || elapsed > saved.Spec.SunsetStrategy.ScaledownDelay.Duration
-			deleting = deleting || elapsed > saved.Spec.SunsetStrategy.ScaledownDelay.Duration+saved.Spec.SunsetStrategy.DeleteDelay.Duration && groupStopped(state.Members[buildID], members)
+		if markedForDeletion && (buildID == target || buildID == temporalState.CurrentBuildID || buildID == temporalState.RampingBuildID) {
+			return fmt.Errorf("grouped build %q already entered retirement; use a new build ID", buildID)
 		}
-		if deleting && !markedForDeletion {
-			p.MarkRevisionsForDeletion = append(p.MarkRevisionsForDeletion, saved.Object)
+		if !markedForDeletion && buildID != target && buildID != temporalState.CurrentBuildID && (buildID != temporalState.RampingBuildID || temporalState.RampPercentage == 0) {
+			p.groupRetirements = append(p.groupRetirements, groupRetirement{
+				buildID: buildID, saved: saved, actual: state.Members[buildID], desired: members, version: version,
+			})
 		}
 		for name, desired := range members {
 			actual := state.Members[buildID][name]
@@ -100,10 +98,6 @@ func (r *WorkerDeploymentReconciler) planGroupedDeployments(
 					p.DeleteDeployments = append(p.DeleteDeployments, actual)
 				}
 				continue
-			}
-			if retiring {
-				zero := int32(0)
-				desired.Spec.Replicas = &zero
 			}
 			if actual == nil {
 				p.CreateDeployments = append(p.CreateDeployments, desired)
@@ -118,6 +112,7 @@ func (r *WorkerDeploymentReconciler) planGroupedDeployments(
 		}
 	}
 	if saved := state.Revisions[target]; saved != nil {
+		p.targetGroup = saved
 		pendingMemberUpdate := slices.ContainsFunc(p.UpdateDeployments, func(deployment *appsv1.Deployment) bool {
 			return deployment.Labels[k8s.BuildIDLabel] == target && deployment.Labels[k8s.MemberLabel] != ""
 		})
@@ -311,6 +306,7 @@ func groupHasNoPods(members map[string]*appsv1.Deployment) bool {
 // unrelated executions and completed gates are never canceled. Temporal still
 // decides when the canceled workflow has closed and its build has drained.
 func cancelSupersededGates(ctx context.Context, temporalClient sdkclient.Client, p *plan) error {
+	var failures []error
 	for _, gate := range p.cancelTestWorkflows {
 		description, err := temporalClient.DescribeWorkflowExecution(ctx, gate.workflowID, "")
 		if err != nil {
@@ -318,7 +314,8 @@ func cancelSupersededGates(ctx context.Context, temporalClient sdkclient.Client,
 			if errors.As(err, &notFound) {
 				continue
 			}
-			return fmt.Errorf("describe superseded gate %q: %w", gate.workflowID, err)
+			failures = append(failures, fmt.Errorf("describe superseded gate %q: %w", gate.workflowID, err))
+			continue
 		}
 		info := description.GetWorkflowExecutionInfo()
 		if info.GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
@@ -328,17 +325,18 @@ func cancelSupersededGates(ctx context.Context, temporalClient sdkclient.Client,
 		if execution.GetWorkflowId() != gate.workflowID || execution.GetRunId() == "" ||
 			info.GetType().GetName() != gate.workflowType || info.GetTaskQueue() != gate.taskQueue ||
 			!gatePinnedToBuild(info.GetVersioningInfo().GetVersioningOverride(), p.WorkerDeploymentName, gate.buildID) {
-			return fmt.Errorf("superseded gate %q does not match its saved controller settings", gate.workflowID)
+			failures = append(failures, fmt.Errorf("superseded gate %q does not match its saved controller settings", gate.workflowID))
+			continue
 		}
 		if err := temporalClient.CancelWorkflow(ctx, gate.workflowID, execution.GetRunId()); err != nil {
 			var notFound *serviceerror.NotFound
 			if errors.As(err, &notFound) {
 				continue
 			}
-			return fmt.Errorf("cancel superseded gate %q: %w", gate.workflowID, err)
+			failures = append(failures, fmt.Errorf("cancel superseded gate %q: %w", gate.workflowID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // gatePinnedToBuild reads the pinned override forms supported by the Temporal

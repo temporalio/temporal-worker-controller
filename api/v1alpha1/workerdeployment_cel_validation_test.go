@@ -349,6 +349,9 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 			valid  bool
 		}{
 			{"valid-group", func(*WorkerDeployment) {}, true},
+			{"missing-retirement", func(w *WorkerDeployment) { w.Spec.GroupRetirementWorkflow = nil }, false},
+			{"empty-retirement-type", func(w *WorkerDeployment) { w.Spec.GroupRetirementWorkflow.WorkflowType = "" }, false},
+			{"empty-retirement-queue", func(w *WorkerDeployment) { w.Spec.GroupRetirementWorkflow.TaskQueue = "" }, false},
 			{"single-queue-declaration", func(w *WorkerDeployment) { w.Spec.AdditionalDeployments = nil }, false},
 			{"missing-count", func(w *WorkerDeployment) { w.Spec.Deployment.Replicas = nil }, false},
 			{"zero-count", func(w *WorkerDeployment) { w.Spec.Deployment.Replicas = ptr(int32(0)) }, false},
@@ -366,6 +369,7 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 			worker := baseTWD(test.name)
 			worker.Spec.Deployment.Replicas = ptr(int32(2))
 			worker.Spec.AdditionalDeployments = []AdditionalDeployment{{Name: "activities", Replicas: 3, Template: *worker.Spec.Deployment.Template.DeepCopy()}}
+			worker.Spec.GroupRetirementWorkflow = &GroupRetirementWorkflowConfig{WorkflowType: "RetireBuild", TaskQueue: "management"}
 			worker.Spec.ExpectedTaskQueues = []ExpectedTaskQueue{{Name: "jobs", Kinds: []TaskQueueKind{TaskQueueWorkflow, TaskQueueActivity}}}
 			test.change(worker)
 			err := k8sClient.Create(ctx, worker)

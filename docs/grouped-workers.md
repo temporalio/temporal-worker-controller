@@ -51,6 +51,9 @@ spec:
   expectedTaskQueues:
     - name: jobs
       kinds: [Workflow, Activity]
+  groupRetirementWorkflow:
+    workflowType: AuthorizeRetirement
+    taskQueue: release-management
   rollout:
     strategy: AllAtOnce
   sunset:
@@ -90,7 +93,8 @@ keep their existing one-hour execution deadline. When another build becomes
 desired, the controller requests cancellation of still-running gates for the
 superseded build after checking their saved type,
 queue, and pinned build. It does not cancel application workflows. Cancellation
-is asynchronous: workers remain until Temporal reports global drainage. A canceled
+is asynchronous: workers remain until those workflows close and Temporal reports
+global drainage. A canceled
 gate cannot approve a later rollback of the same build. Use a new build ID when a
 release needs a fresh gate run. An application that must stop accepting new
 requests on an older release must perform that application-specific work itself,
@@ -125,27 +129,70 @@ connection credential references still update every live member. Those mutable
 connection settings are not frozen in the saved group record. Secret references
 inside each application pod template remain specific to that member.
 
-Selecting a retained build with its original specification restores every saved
-member and count, then waits for combined readiness and any configured gate before
+Before its retirement workflow starts, selecting a retained build with its
+original specification restores every saved member and count, then waits for combined readiness and any configured gate before
 routing workflows to it. Reverting only the primary image while keeping different
 group settings is not a rollback of that saved build.
 
 ## Retirement and deletion
 
-A grouped version keeps its saved member counts until Temporal reports it globally
-`Drained`. After its saved `sunset.scaledownDelay`, the controller scales every
-member to zero. After the additional saved `sunset.deleteDelay`, it waits for
-Kubernetes to observe no remaining or terminating pods and starts cleanup.
+Every grouped specification must supply `groupRetirementWorkflow.workflowType`
+and `taskQueue`. An unversioned management worker outside the group implements
+this workflow. The controller supplies the canonical Temporal deployment name and
+build ID as two separate string arguments. The workflow must keep those arguments
+when continuing as new. It must complete only after the application has permanently
+stopped accepting new work for that build and no application caller relies on
+Temporal's implicit ramp selection (including `UseRampingVersion`). Existing
+pinned workflows may still be running. Retry temporary dependency failures within
+the workflow; a failed or canceled execution retains the group. The controller
+imposes no execution or run deadline and does not restart closed executions.
+
+Once a retirement workflow exists, the same saved build cannot become the desired
+build again. Deploy the previous code with a fresh build ID for rollback. Build
+identities must never be reused after application admission has closed, including
+after saved records and Temporal history expire. Keep retirement workflow history
+available until the saved build is deleted.
+
+The controller checks the execution's type, queue, effective unversioned behavior,
+and exact original arguments for its latest run. Success authorizes routing
+maintenance, not worker shutdown. For an obsolete inactive or unregistered build
+when the current resource uses the `AllAtOnce` rollout strategy, the controller
+briefly sets that build as a zero-percent ramp and clears it. This
+initializes Temporal's normal drainage tracking even if the build was never
+current. The operation explicitly permits missing queues and absent pollers, so a
+partially started build can still enter drainage. It does not route ordinary new
+work to that build. Applications using implicit ramp selection must not opt into
+this contract, since those requests can select a zero-percent ramp.
+
+This maintenance operation is not performed while the current resource uses
+`Manual` or `Progressive` rollout. A historical build's saved strategy does not
+grant or veto current routing authority. All strategies can retire builds that
+Temporal already reports drained after the application check succeeds.
+
+Actual release routing takes priority. The controller waits while another build
+occupies the ramp slot or a rollout routing update is pending. It never replaces
+an existing canary. Each maintenance write uses Temporal's routing conflict token;
+a concurrent change causes a retry after fresh state is read. A failed retirement
+check or readiness cancellation emits a warning while the current release keeps
+its normal readiness status; other obsolete groups can still retire. A process stopped
+between assignment and removal can resume from the approved build's observed
+zero-percent assignment without an extra saved phase record.
+
+A grouped version keeps every saved member count until its application workflow
+has succeeded, its controller-created readiness workflows have closed, and
+Temporal reports it globally `Drained`. Temporal's drainage check includes
+remaining pinned workflow activity and its visibility grace period. After its
+saved `sunset.scaledownDelay` measured from Temporal's `DrainedSince`, the
+controller scales every member to zero. After the additional saved
+`sunset.deleteDelay`, it waits for Kubernetes to observe no remaining or
+terminating pods and starts cleanup. An application workflow's success time or a
+zero running-workflow count never substitutes for `Drained`.
 
 The controller records cleanup intent in the saved revision's metadata before
 removing the Temporal version. If cleanup is interrupted, later reconciles finish
 deleting members instead of recreating workers. The saved record is deleted only
 after every member Deployment object is gone. A build whose cleanup has already
 started completes cleanup before it can be created again.
-
-A version that never received routed traffic may remain `Inactive`, rather than
-becoming `Drained`. Grouped workers retain that version; they do not infer global
-drainage from a missing queue or one idle member.
 
 Enabling grouping uses a new build ID. The controller rejects adoption of an
 existing build that has no saved grouped settings. Whole-resource deletion keeps

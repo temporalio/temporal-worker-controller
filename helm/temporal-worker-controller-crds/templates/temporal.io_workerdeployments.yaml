@@ -7807,6 +7807,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              groupRetirementWorkflow:
+                properties:
+                  taskQueue:
+                    minLength: 1
+                    type: string
+                  workflowType:
+                    minLength: 1
+                    type: string
+                required:
+                - taskQueue
+                - workflowType
+                type: object
               minReadySeconds:
                 default: 0
                 format: int32
@@ -11805,6 +11817,12 @@ spec:
               rule: '!has(self.expectedTaskQueues) || size(self.expectedTaskQueues)
                 == 0 || (has(self.additionalDeployments) && size(self.additionalDeployments)
                 > 0)'
+            - message: grouped workers require groupRetirementWorkflow
+              rule: '!has(self.additionalDeployments) || size(self.additionalDeployments)
+                == 0 || has(self.groupRetirementWorkflow)'
+            - message: groupRetirementWorkflow is only supported for grouped workers
+              rule: '!has(self.groupRetirementWorkflow) || (has(self.additionalDeployments)
+                && size(self.additionalDeployments) > 0)'
           status:
             properties:
               conditions:

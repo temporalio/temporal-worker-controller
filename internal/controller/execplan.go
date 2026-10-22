@@ -971,10 +971,19 @@ func (r *WorkerDeploymentReconciler) executePlan(
 ) error {
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
-	// Abandoned gate workflows must close before Temporal can drain their build.
-	// Retry failed cancellation requests before changing routing or deleting members.
-	if err := cancelSupersededGates(ctx, temporalClient, p); err != nil {
+	// A selected build whose retirement has started cannot accept new work again.
+	// Require a new build identity before restoring members or changing routing.
+	if err := checkTargetGroupRetirement(ctx, temporalClient, workerDeploy, p); err != nil {
 		return err
+	}
+
+	// Old readiness workflows must close before their group can retire. Failed
+	// cancellation or retirement checks keep that group alive and are retried by
+	// normal reconciliation; they do not make the new target unavailable.
+	retirementErr := errors.Join(cancelSupersededGates(ctx, temporalClient, p), planGroupRetirements(ctx, temporalClient, p))
+	if retirementErr != nil {
+		r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonGroupRetirementFailed,
+			"Obsolete grouped workers remain running while retirement is retried: %v", retirementErr)
 	}
 
 	// Save the cleanup decision before deleting the Temporal version. If this

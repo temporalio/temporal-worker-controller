@@ -51,6 +51,8 @@ type WorkerOptions struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.additionalDeployments) || size(self.additionalDeployments) == 0 || (has(self.deployment) ? has(self.deployment.replicas) && self.deployment.replicas > 0 : has(self.replicas) && self.replicas > 0)",message="grouped workers require a positive fixed primary replica count"
 // +kubebuilder:validation:XValidation:rule="!has(self.additionalDeployments) || size(self.additionalDeployments) == 0 || !has(self.drainingDeployment)",message="grouped workers retain independent member counts; drainingDeployment is only supported for a single Deployment"
 // +kubebuilder:validation:XValidation:rule="!has(self.expectedTaskQueues) || size(self.expectedTaskQueues) == 0 || (has(self.additionalDeployments) && size(self.additionalDeployments) > 0)",message="expectedTaskQueues is only supported for grouped workers"
+// +kubebuilder:validation:XValidation:rule="!has(self.additionalDeployments) || size(self.additionalDeployments) == 0 || has(self.groupRetirementWorkflow)",message="grouped workers require groupRetirementWorkflow"
+// +kubebuilder:validation:XValidation:rule="!has(self.groupRetirementWorkflow) || (has(self.additionalDeployments) && size(self.additionalDeployments) > 0)",message="groupRetirementWorkflow is only supported for grouped workers"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -119,6 +121,15 @@ type WorkerDeploymentSpec struct {
 	// +listMapKey=name
 	ExpectedTaskQueues []ExpectedTaskQueue `json:"expectedTaskQueues,omitempty"`
 
+	// GroupRetirementWorkflow certifies that an obsolete group accepts no new
+	// work and no application caller relies on implicit ramp selection. It runs on
+	// an unversioned queue outside the group and receives deployment name and
+	// build ID as two string arguments. Success authorizes a zero-percent ramp
+	// assignment and removal; only Temporal drainage permits worker shutdown.
+	// Required and only supported when additionalDeployments is set.
+	// +optional
+	GroupRetirementWorkflow *GroupRetirementWorkflowConfig `json:"groupRetirementWorkflow,omitempty"`
+
 	// DrainingDeployment overrides settings for single-Deployment versions only.
 	// Grouped builds retain their independent saved member counts while draining.
 	// It changes the Kubernetes Deployments of
@@ -148,6 +159,19 @@ type WorkerDeploymentSpec struct {
 }
 
 type (
+	// GroupRetirementWorkflowConfig identifies the application's retirement check.
+	// The workflow must finish only after the application permanently stops new
+	// admission and no caller relies on the server selecting its ramping version.
+	// Dependency failures must retry within the workflow.
+	GroupRetirementWorkflowConfig struct {
+		// WorkflowType is registered on the unversioned management worker.
+		// +kubebuilder:validation:MinLength=1
+		WorkflowType string `json:"workflowType"`
+		// TaskQueue is polled by unversioned workers outside every grouped build.
+		// +kubebuilder:validation:MinLength=1
+		TaskQueue string `json:"taskQueue"`
+	}
+
 	// AdditionalDeployment defines an independently configured worker member.
 	AdditionalDeployment struct {
 		// Name identifies this member across builds. "primary" is reserved.

@@ -147,6 +147,9 @@ func validateSavedGroup(ctx context.Context, spec *v1alpha1.WorkerDeploymentSpec
 	if len(spec.AdditionalDeployments) == 0 || spec.SunsetStrategy.ScaledownDelay == nil || spec.SunsetStrategy.DeleteDelay == nil {
 		return fmt.Errorf("group members and sunset delays are required")
 	}
+	if spec.GroupRetirementWorkflow == nil || spec.GroupRetirementWorkflow.WorkflowType == "" || spec.GroupRetirementWorkflow.TaskQueue == "" {
+		return fmt.Errorf("group retirement workflow type and task queue are required")
+	}
 	members := map[string]bool{PrimaryMember: true}
 	for _, member := range spec.AdditionalDeployments {
 		if members[member.Name] || len(validation.IsDNS1123Label(member.Name)) > 0 || member.Replicas < 1 {

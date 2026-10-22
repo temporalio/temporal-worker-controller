@@ -28,6 +28,7 @@ import (
 func groupedWorker(buildID string) *v1alpha1.WorkerDeployment {
 	w := makeExecplanTWD("grouped-worker", "default")
 	w.Spec.WorkerOptions.UnsafeCustomBuildID = buildID
+	w.Spec.GroupRetirementWorkflow = &v1alpha1.GroupRetirementWorkflowConfig{WorkflowType: "RetireBuild", TaskQueue: "management"}
 	primary := w.Spec.DeploymentSpec()
 	replicas := int32(2)
 	primary.Replicas = &replicas
@@ -229,6 +230,7 @@ func TestGroupedRetirementWaitsForGlobalDrainAndStopsAllMembers(t *testing.T) {
 	ts.Versions["build-a"].Status = v1alpha1.VersionStatusDraining
 	p := groupPlan()
 	require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, false))
+	require.NoError(t, planGroupRetirements(context.Background(), approvedRetirements(t, p, nil), p))
 	assert.Empty(t, p.ScaleDeployments)
 	assert.Empty(t, p.DeleteDeployments)
 	drained := time.Now().Add(-3 * time.Minute)
@@ -236,6 +238,7 @@ func TestGroupedRetirementWaitsForGlobalDrainAndStopsAllMembers(t *testing.T) {
 	ts.Versions["build-a"].DrainedSince = &drained
 	p = groupPlan()
 	require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, false))
+	require.NoError(t, planGroupRetirements(context.Background(), approvedRetirements(t, p, nil), p))
 	assert.Len(t, p.ScaleDeployments, 2)
 	assert.Empty(t, p.DeleteDeployments)
 	for _, replicas := range p.ScaleDeployments {
@@ -248,6 +251,7 @@ func TestGroupedRetirementWaitsForGlobalDrainAndStopsAllMembers(t *testing.T) {
 	}
 	p = groupPlan()
 	require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, false))
+	require.NoError(t, planGroupRetirements(context.Background(), approvedRetirements(t, p, nil), p))
 	assert.Len(t, p.DeleteDeployments, 2)
 	assert.Len(t, p.MarkRevisionsForDeletion, 1)
 	assert.Empty(t, p.DeleteRevisions)
@@ -255,6 +259,7 @@ func TestGroupedRetirementWaitsForGlobalDrainAndStopsAllMembers(t *testing.T) {
 	state.Members["build-a"] = nil
 	p = groupPlan()
 	require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, false))
+	require.NoError(t, planGroupRetirements(context.Background(), approvedRetirements(t, p, nil), p))
 	assert.Len(t, p.DeleteRevisions, 1)
 }
 
@@ -355,7 +360,7 @@ func TestGroupedCleanupResumesAfterTemporalDeletionAndMemberFailure(t *testing.T
 			p := groupPlan()
 			require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, groupState("build-a", saved, members), p, false))
 			handle := newPruneStubHandle(nil)
-			tc := newStubTemporalClientWithHandle(handle)
+			tc := approvedRetirements(t, p, newStubTemporalClientWithHandle(handle))
 			require.ErrorContains(t, r.executePlan(context.Background(), logr.Discard(), next, tc, p), "member delete interrupted")
 			assert.Equal(t, []string{"build-a"}, handle.deletedVersions)
 			var retained appsv1.ControllerRevision

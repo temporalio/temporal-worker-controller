@@ -37,8 +37,11 @@ type plan struct {
 	UpdateVersionConfig *planner.VersionConfig
 
 	// Start desired gates and cancel gates from superseded grouped builds.
-	startTestWorkflows  []startWorkflowConfig
-	cancelTestWorkflows []cancelWorkflowConfig
+	startTestWorkflows   []startWorkflowConfig
+	cancelTestWorkflows  []cancelWorkflowConfig
+	groupRetirements     []groupRetirement
+	allowGroupedDrainage bool
+	targetGroup          *k8s.GroupRevision
 
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []planner.WorkerResourceApply
@@ -100,6 +103,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan := &plan{
 		TemporalNamespace:    w.Spec.WorkerOptions.TemporalNamespace,
 		WorkerDeploymentName: workerDeploymentName,
+		allowGroupedDrainage: w.Spec.RolloutStrategy.Strategy == temporaliov1alpha1.UpdateAllAtOnce,
 		ScaleDeployments:     make(map[*corev1.ObjectReference]uint32),
 	}
 

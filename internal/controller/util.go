@@ -20,6 +20,7 @@ import (
 const (
 	ReasonPlanGenerationFailed       = "PlanGenerationFailed"
 	ReasonPlanExecutionFailed        = "PlanExecutionFailed"
+	ReasonGroupRetirementFailed      = "GroupRetirementFailed"
 	ReasonDeploymentCreateFailed     = "DeploymentCreateFailed"
 	ReasonDeploymentDeleteFailed     = "DeploymentDeleteFailed"
 	ReasonDeploymentScaleFailed      = "DeploymentScaleFailed"

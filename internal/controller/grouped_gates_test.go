@@ -30,6 +30,7 @@ type (
 	gateCancellationClient struct {
 		sdkclient.Client
 		description     *workflowservice.DescribeWorkflowExecutionResponse
+		descriptions    map[string]*workflowservice.DescribeWorkflowExecutionResponse
 		describeErr     error
 		cancelErr       error
 		describedIDs    []string
@@ -45,6 +46,9 @@ type (
 func (c *gateCancellationClient) DescribeWorkflowExecution(_ context.Context, workflowID, runID string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
 	c.describedIDs = append(c.describedIDs, workflowID)
 	c.describedRunIDs = append(c.describedRunIDs, runID)
+	if c.descriptions != nil {
+		return c.descriptions[workflowID], c.describeErr
+	}
 	return c.description, c.describeErr
 }
 
@@ -260,4 +264,25 @@ func TestCancelSupersededGateReadsLatestRunAfterContinuation(t *testing.T) {
 func (c *gateStartClient) ExecuteWorkflow(_ context.Context, options sdkclient.StartWorkflowOptions, _ any, _ ...any) (sdkclient.WorkflowRun, error) {
 	c.started = append(c.started, options)
 	return nil, nil
+}
+
+func TestCancelSupersededGateFailureDoesNotBlockLaterBuild(t *testing.T) {
+	gates := []cancelWorkflowConfig{
+		{workflowID: "readiness-b", workflowType: "CheckRelease", buildID: "build-b", taskQueue: "jobs"},
+		{workflowID: "readiness-d", workflowType: "CheckRelease", buildID: "build-d", taskQueue: "jobs"},
+	}
+	c := &gateCancellationClient{descriptions: make(map[string]*workflowservice.DescribeWorkflowExecutionResponse)}
+	for _, gate := range gates {
+		c.descriptions[gate.workflowID] = &workflowservice.DescribeWorkflowExecutionResponse{WorkflowExecutionInfo: &workflowpb.WorkflowExecutionInfo{
+			Execution: &commonpb.WorkflowExecution{WorkflowId: gate.workflowID, RunId: "latest-continued-" + gate.buildID},
+			Type:      &commonpb.WorkflowType{Name: gate.workflowType}, TaskQueue: gate.taskQueue, Status: enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+			VersioningInfo: &workflowpb.WorkflowExecutionVersioningInfo{VersioningOverride: &workflowpb.VersioningOverride{Override: &workflowpb.VersioningOverride_Pinned{Pinned: &workflowpb.VersioningOverride_PinnedOverride{Version: &deploymentpb.WorkerDeploymentVersion{DeploymentName: "workers", BuildId: gate.buildID}}}}},
+		}}
+	}
+	c.descriptions["readiness-b"].WorkflowExecutionInfo.TaskQueue = "wrong-queue"
+	err := cancelSupersededGates(context.Background(), c, &plan{WorkerDeploymentName: "workers", cancelTestWorkflows: gates})
+	assert.ErrorContains(t, err, "readiness-b")
+	assert.Equal(t, []string{"readiness-b", "readiness-d"}, c.describedIDs)
+	assert.Equal(t, []string{"", ""}, c.describedRunIDs)
+	assert.Equal(t, []v1alpha1.WorkflowExecution{{WorkflowID: "readiness-d", RunID: "latest-continued-build-d"}}, c.canceled)
 }
