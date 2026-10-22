@@ -198,7 +198,7 @@ func TestGetDeploymentState(t *testing.T) {
 		Build()
 
 	// Test the GetDeploymentState function
-	state, err := k8s.GetDeploymentState(ctx, fakeClient, "default", "test-worker", "test-worker")
+	state, err := k8s.GetDeploymentState(ctx, fakeClient, "default", "test-worker", owner.UID)
 	require.NoError(t, err)
 
 	// Verify the state is constructed correctly

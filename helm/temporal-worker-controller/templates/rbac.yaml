@@ -93,6 +93,17 @@ rules:
   - apiGroups:
       - apps
     resources:
+      - controllerrevisions
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - apps
+    resources:
       - deployments
     verbs:
       - create
@@ -203,6 +214,17 @@ rules:
       - namespaces
     verbs:
       - get
+  - apiGroups:
+      - apps
+    resources:
+      - controllerrevisions
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - watch
   - apiGroups:
       - apps
     resources:

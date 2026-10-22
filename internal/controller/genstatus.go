@@ -43,7 +43,7 @@ func (r *WorkerDeploymentReconciler) generateStatus(
 	targetBuildID := k8s.ComputeBuildID(workerDeploy)
 
 	// Fetch test workflow status for the desired version
-	if targetBuildID != temporalState.CurrentBuildID {
+	if targetBuildID != temporalState.CurrentBuildID || k8sState.Revisions[targetBuildID] != nil || len(workerDeploy.Spec.AdditionalDeployments) > 0 {
 		testWorkflows, err := temporal.GetTestWorkflowStatus(
 			ctx,
 			temporalClient,
@@ -87,6 +87,7 @@ func (r *WorkerDeploymentReconciler) generateStatus(
 	// Use the state mapper to convert state objects to CRD status
 	stateMapper := newStateMapper(k8sState, temporalState, workerDeploymentName)
 	status := stateMapper.mapToStatus(targetBuildID)
+	applyGroupedStatus(status, k8sState, temporalState)
 
 	return status, nil
 }

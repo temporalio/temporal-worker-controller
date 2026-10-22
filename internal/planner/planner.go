@@ -165,17 +165,56 @@ func GeneratePlan(
 	// exists and was found, there will always be at least one version in the list.
 	foundDeploymentInTemporal := temporalState != nil && len(temporalState.Versions) > 0
 
+	// Grouped builds retain their templates and counts in saved revisions.
+	// The controller manages those members together; this planner continues
+	// to update single Deployments and render resources for each build.
+	legacyState := *k8sState
+	legacyState.Deployments = make(map[string]*appsv1.Deployment)
+	for buildID, deployment := range k8sState.Deployments {
+		if k8sState.Revisions[buildID] == nil {
+			legacyState.Deployments[buildID] = deployment
+		}
+	}
 	// Add delete/scale operations based on version status
-	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
-	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec)
+	plan.DeleteDeployments = getDeleteDeployments(&legacyState, status, spec, foundDeploymentInTemporal)
+	plan.ScaleDeployments = getScaleDeployments(l, &legacyState, status, spec)
 	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
-	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
+	plan.UpdateDeployments = getUpdateDeployments(&legacyState, status, spec, connection)
+	// Shared Temporal connection changes apply to every live member without
+	// replacing the saved application template, credentials, or replica count.
+	for _, members := range k8sState.Members {
+		for _, deployment := range members {
+			if k8s.ComputeConnectionSpecHash(connection) != deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
+				updateDeploymentWithConnection(deployment, connection)
+				plan.UpdateDeployments = append(plan.UpdateDeployments, deployment)
+			}
+		}
+	}
 
-	// Determine if we need to start any test workflows
-	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName, gateInput, isGateInputSecret)
+	// Grouped gates run on declared workflow queues. Use the same queue set
+	// for starting gates and checking their success, so activity-only queues
+	// cannot receive a workflow or leave promotion waiting for an impossible result.
+	gateStatus := status
+	if len(spec.AdditionalDeployments) > 0 {
+		workflowQueues := make(map[string]struct{})
+		for _, queue := range spec.ExpectedTaskQueues {
+			if slices.Contains(queue.Kinds, temporaliov1alpha1.TaskQueueWorkflow) {
+				workflowQueues[queue.Name] = struct{}{}
+			}
+		}
+		gateStatus = status.DeepCopy()
+		gateStatus.TargetVersion.TaskQueues = slices.DeleteFunc(gateStatus.TargetVersion.TaskQueues, func(queue temporaliov1alpha1.TaskQueue) bool {
+			_, declared := workflowQueues[queue.Name]
+			return !declared
+		})
+		gateStatus.TargetVersion.TestWorkflows = slices.DeleteFunc(gateStatus.TargetVersion.TestWorkflows, func(workflow temporaliov1alpha1.WorkflowExecution) bool {
+			_, declared := workflowQueues[workflow.TaskQueue]
+			return !declared
+		})
+	}
 
-	// Determine version config changes
-	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config)
+	plan.TestWorkflows = getTestWorkflows(gateStatus, config, workerDeploymentName, gateInput, isGateInputSecret)
+	plan.VersionConfig = getVersionConfigDiff(l, gateStatus, temporalState, config)
 
 	// TODO(jlegrone): generate warnings/events on the WorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.

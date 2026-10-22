@@ -6,6 +6,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,27 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalclient "go.temporal.io/sdk/client"
+	"google.golang.org/grpc"
+)
+
+type (
+	exactVersionClient struct {
+		temporalclient.Client
+		handle  *exactVersionHandle
+		service workflowservice.WorkflowServiceClient
+	}
+	exactVersionDeploymentClient struct {
+		temporalclient.WorkerDeploymentClient
+		handle *exactVersionHandle
+	}
+	exactVersionHandle struct {
+		temporalclient.WorkerDeploymentHandle
+		buildID string
+	}
+	savedVersionService struct {
+		workflowservice.WorkflowServiceClient
+		buildIDs []string
+	}
 )
 
 func TestVersionStatusMap(t *testing.T) {
@@ -281,4 +303,61 @@ func TestGetTaskQueuesWithNoPollersDoesNotFalsePositiveOnNexus(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Empty(t, withoutPollers, "a Nexus task queue with an active poller must not be reported as having no poller")
+}
+
+func TestGetTestWorkflowStatusObservesAllQueueKindsBeforeGateLookup(t *testing.T) {
+	handle := &exactVersionHandle{}
+	c := &exactVersionClient{handle: handle}
+	state := &TemporalWorkerState{Versions: map[string]*VersionInfo{"build-a": {BuildID: "build-a", Status: temporaliov1alpha1.VersionStatusInactive}}}
+	_, err := GetTestWorkflowStatus(context.Background(), c, "workers", "build-a", &temporaliov1alpha1.WorkerDeployment{}, state)
+	require.ErrorContains(t, err, "gate lookup failed")
+	assert.Equal(t, "build-a", handle.buildID)
+	assert.Equal(t, []temporaliov1alpha1.ExpectedTaskQueue{
+		{Name: "jobs", Kinds: []temporaliov1alpha1.TaskQueueKind{temporaliov1alpha1.TaskQueueWorkflow}},
+		{Name: "jobs", Kinds: []temporaliov1alpha1.TaskQueueKind{temporaliov1alpha1.TaskQueueActivity}},
+	}, state.Versions["build-a"].RegisteredTaskQueues)
+}
+
+func (c *exactVersionClient) WorkerDeploymentClient() temporalclient.WorkerDeploymentClient {
+	return &exactVersionDeploymentClient{handle: c.handle}
+}
+
+func (c *exactVersionClient) DescribeWorkflowExecution(context.Context, string, string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
+	return nil, errors.New("gate lookup failed")
+}
+
+func (c *exactVersionDeploymentClient) GetHandle(string) temporalclient.WorkerDeploymentHandle {
+	return c.handle
+}
+
+func (h *exactVersionHandle) DescribeVersion(_ context.Context, options temporalclient.WorkerDeploymentDescribeVersionOptions) (temporalclient.WorkerDeploymentVersionDescription, error) {
+	h.buildID = options.BuildID
+	return temporalclient.WorkerDeploymentVersionDescription{Info: temporalclient.WorkerDeploymentVersionInfo{TaskQueuesInfos: []temporalclient.WorkerDeploymentTaskQueueInfo{
+		{Name: "jobs", Type: temporalclient.TaskQueueTypeWorkflow},
+		{Name: "jobs", Type: temporalclient.TaskQueueTypeActivity},
+	}}}, nil
+}
+
+func TestGetWorkerDeploymentStateChecksSavedBuildWithoutDeployment(t *testing.T) {
+	service := &savedVersionService{}
+	c := &exactVersionClient{handle: &exactVersionHandle{}, service: service}
+	logger := funcr.New(func(string, string) {}, funcr.Options{})
+	state, err := GetWorkerDeploymentState(context.Background(), logger, c, "workers", "test-namespace", map[string]struct{}{"saved-build": {}}, "new-build", temporaliov1alpha1.UpdateAllAtOnce, "test-identity")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"saved-build"}, service.buildIDs)
+	require.Contains(t, state.Versions, "saved-build")
+	assert.Equal(t, temporaliov1alpha1.VersionStatusDrained, state.Versions["saved-build"].Status)
+}
+
+func (c *exactVersionClient) WorkflowService() workflowservice.WorkflowServiceClient {
+	return c.service
+}
+
+func (s *savedVersionService) DescribeWorkerDeployment(context.Context, *workflowservice.DescribeWorkerDeploymentRequest, ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentResponse, error) {
+	return &workflowservice.DescribeWorkerDeploymentResponse{WorkerDeploymentInfo: &deploymentpb.WorkerDeploymentInfo{RoutingConfig: &deploymentpb.RoutingConfig{}}}, nil
+}
+
+func (s *savedVersionService) DescribeWorkerDeploymentVersion(_ context.Context, request *workflowservice.DescribeWorkerDeploymentVersionRequest, _ ...grpc.CallOption) (*workflowservice.DescribeWorkerDeploymentVersionResponse, error) {
+	s.buildIDs = append(s.buildIDs, request.DeploymentVersion.BuildId)
+	return &workflowservice.DescribeWorkerDeploymentVersionResponse{WorkerDeploymentVersionInfo: &deploymentpb.WorkerDeploymentVersionInfo{DeploymentVersion: request.DeploymentVersion, Status: enumspb.WORKER_DEPLOYMENT_VERSION_STATUS_DRAINED}}, nil
 }

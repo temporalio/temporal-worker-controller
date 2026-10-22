@@ -29,6 +29,9 @@ Configuration options for the Temporal Worker Controller.
 ### [CRD Management](crd-management.md)
 How to install and upgrade the Temporal Worker Controller Custom Resource Definitions (CRDs).
 
+### [Grouped workers](grouped-workers.md)
+How to release independently configured workflow and activity Deployments as one Temporal build, including readiness, saved templates, rollback, and retirement.
+
 ### [Limits](limits.md)
 Technical constraints and limitations of the Temporal Worker Controller system, including maximum field lengths and other operational boundaries.
 

@@ -8,6 +8,8 @@ This document provides a detailed technical overview of how the Temporal Worker 
 
 Every `WorkerDeployment` resource manages one or more standard `Deployment` resources. Each Deployment manages pods which in turn poll Temporal for tasks routed to their respective worker versions.
 
+By default, one Deployment runs each build. [Grouped workers](grouped-workers.md) run separate member Deployments for the same build, with independent pod settings and counts. The existing controller saves their specification in an immutable `ControllerRevision` before creating members, then requires every member and declared queue kind to be ready before starting release gates. The diagram below illustrates the single-Deployment case.
+
 ```mermaid
 flowchart TD
     subgraph "K8s Namespace 'ns'"

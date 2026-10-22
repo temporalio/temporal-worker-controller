@@ -83,6 +83,21 @@ func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj ru
 
 func validateForUpdateOrCreate(dep *WorkerDeployment) (admission.Warnings, error) {
 	allErrs := validateRolloutStrategy(dep.Spec.RolloutStrategy)
+	if len(dep.Spec.AdditionalDeployments) == 0 && len(dep.Spec.ExpectedTaskQueues) > 0 {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "expectedTaskQueues"), "only supported for grouped workers"))
+	}
+	if len(dep.Spec.AdditionalDeployments) > 0 {
+		if dep.Spec.DrainingDeployment != nil {
+			allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "drainingDeployment"), "grouped workers retain independent member counts until drained"))
+		}
+		primary := dep.Spec.DeploymentSpec()
+		if primary.Replicas == nil || *primary.Replicas < 1 {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("spec", "deployment", "replicas"), primary.Replicas, "grouped workers require a positive fixed primary replica count"))
+		}
+		if len(dep.Spec.ExpectedTaskQueues) == 0 {
+			allErrs = append(allErrs, field.Required(field.NewPath("spec", "expectedTaskQueues"), "grouped workers require expected task queues"))
+		}
+	}
 	allErrs = append(allErrs, metav1validation.ValidateLabels(dep.Spec.DeploymentLabels, field.NewPath("spec.deploymentLabels"))...)
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(dep, allErrs)

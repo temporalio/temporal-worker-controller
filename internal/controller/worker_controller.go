@@ -113,6 +113,7 @@ type WorkerDeploymentReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=controllerrevisions,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=update
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
@@ -341,10 +342,20 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		r.Client,
 		req.Namespace,
 		req.Name,
-		workerDeploymentName,
+		workerDeploy.UID,
 	)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("unable to get Kubernetes deployment state: %w", err)
+	}
+
+	// Saved grouped builds can outlive every member during cleanup. Include
+	// their IDs when Temporal double-checks versions missing from its summaries.
+	knownBuildIDs := make(map[string]struct{}, len(k8sState.Deployments)+len(k8sState.Revisions))
+	for buildID := range k8sState.Deployments {
+		knownBuildIDs[buildID] = struct{}{}
+	}
+	for buildID := range k8sState.Revisions {
+		knownBuildIDs[buildID] = struct{}{}
 	}
 
 	// Fetch Temporal worker deployment state
@@ -354,7 +365,7 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		temporalClient,
 		workerDeploymentName,
 		workerDeploy.Spec.WorkerOptions.TemporalNamespace,
-		k8sState.Deployments,
+		knownBuildIDs,
 		targetBuildID,
 		workerDeploy.Spec.RolloutStrategy.Strategy,
 		getControllerIdentity(),
@@ -711,7 +722,7 @@ func (r *WorkerDeploymentReconciler) handleDeletion(
 		r.Client,
 		workerDeploy.Namespace,
 		workerDeploy.Name,
-		workerDeploymentName)
+		workerDeploy.UID)
 	if err != nil {
 		return fmt.Errorf("unable to list k8s deployments during deletion of worker deployment: %w", err)
 	}
@@ -982,6 +993,7 @@ func (r *WorkerDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&temporaliov1alpha1.WorkerDeployment{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&appsv1.ControllerRevision{}).
 		Watches(&temporaliov1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.findTWDsUsingConnection)).
 		Watches(&temporaliov1alpha1.WorkerResourceTemplate{}, handler.EnqueueRequestsFromMapFunc(r.reconcileRequestForWRT))
 	if !r.DisableClusterConnections {

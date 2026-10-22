@@ -26,15 +26,22 @@ type plan struct {
 	WorkerDeploymentName string
 
 	// Which actions to take
-	DeleteDeployments []*appsv1.Deployment
-	CreateDeployment  *appsv1.Deployment
-	ScaleDeployments  map[*corev1.ObjectReference]uint32
-	UpdateDeployments []*appsv1.Deployment
+	DeleteDeployments        []*appsv1.Deployment
+	CreateDeployments        []*appsv1.Deployment
+	CreateRevisions          []*appsv1.ControllerRevision
+	DeleteRevisions          []*appsv1.ControllerRevision
+	MarkRevisionsForDeletion []*appsv1.ControllerRevision
+	ScaleDeployments         map[*corev1.ObjectReference]uint32
+	UpdateDeployments        []*appsv1.Deployment
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
-	// Start a workflow
-	startTestWorkflows []startWorkflowConfig
+	// Start desired gates and cancel gates from superseded grouped builds.
+	startTestWorkflows   []startWorkflowConfig
+	cancelTestWorkflows  []cancelWorkflowConfig
+	groupRetirements     []groupRetirement
+	allowGroupedDrainage bool
+	targetGroup          *k8s.GroupRevision
 
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []planner.WorkerResourceApply
@@ -86,7 +93,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 		r.Client,
 		w.Namespace,
 		w.Name,
-		workerDeploymentName,
+		w.UID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get Kubernetes deployment state: %w", err)
@@ -96,6 +103,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan := &plan{
 		TemporalNamespace:    w.Spec.WorkerOptions.TemporalNamespace,
 		WorkerDeploymentName: workerDeploymentName,
+		allowGroupedDrainage: w.Spec.RolloutStrategy.Strategy == temporaliov1alpha1.UpdateAllAtOnce,
 		ScaleDeployments:     make(map[*corev1.ObjectReference]uint32),
 	}
 
@@ -197,14 +205,17 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	}
 
 	// Handle deployment creation if needed
-	if planResult.ShouldCreateDeployment {
+	if planResult.ShouldCreateDeployment && len(w.Spec.AdditionalDeployments) == 0 && k8sState.Revisions[targetBuildID] == nil {
 		d, err := r.newDeployment(w, targetBuildID, connection)
 		if err != nil {
 			return nil, err
 		}
-		plan.CreateDeployment = d
+		plan.CreateDeployments = append(plan.CreateDeployments, d)
 	}
 
+	if err := r.planGroupedDeployments(w, connection, temporalState, k8sState, plan, planResult.ShouldCreateDeployment); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 
