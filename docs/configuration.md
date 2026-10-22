@@ -409,6 +409,8 @@ Gate workflow input details:
 - `input` accepts any JSON object and is passed as the first parameter to the gate workflow.
 - `inputFrom` reads a JSON document from the specified `ConfigMap` or `Secret` key.
 - The target workflow should declare a single argument matching the JSON shape (e.g., a struct or `json.RawMessage`).
+- The `ConfigMap` or `Secret` is read from the WorkerDeployment's own namespace, using the controller's ServiceAccount. The chart grants it `get`, `list` and `watch` on both.
+- The contents are sent to the gate workflow as its input over the WorkerDeployment's connection. Anyone who can create a WorkerDeployment in a namespace can therefore read any `ConfigMap` or `Secret` in that namespace through `inputFrom`. This is the same trust boundary as a pod template, which can already mount those Secrets, so only let people create WorkerDeployments in namespaces whose ConfigMaps and Secrets they are trusted to read.
 
 ### Gate Input Encoding
 
@@ -597,6 +599,31 @@ example after a rollback, scales back to `deployment.replicas`.
 > SIGTERM, with a stop timeout that fits inside
 > `terminationGracePeriodSeconds`. Long-running activities should heartbeat so
 > they resume on another pod.
+
+### Labels on versioned Deployments
+
+Labels in `spec.deployment.template.metadata.labels` go on the pods. To label the
+versioned Kubernetes Deployment objects themselves, set `spec.deploymentLabels`.
+Use this for tools that act on the Deployment rather than its pods, such as
+admission webhooks that opt workloads in or out by label, or cost allocation.
+
+```yaml
+spec:
+  deploymentLabels:
+    team: payments
+    example.com/instrumentation: "false"
+```
+
+The controller keeps these labels in sync on the Deployments of every version it
+manages, including Draining ones. A change is applied in place: it doesn't create
+a new Build ID or restart pods. Removing a key from `spec.deploymentLabels` removes
+it from the Deployments. Labels that other tools add to the Deployments are left
+alone; the controller tracks the keys it applied in the
+`temporal.io/managed-deployment-labels` annotation.
+
+`temporal.io/build-id` and `temporal.io/deployment-name` are managed by the
+controller and cannot be set. Keys and values must be valid Kubernetes labels;
+the validating webhook rejects invalid ones.
 
 ### Environment-Specific Configurations
 

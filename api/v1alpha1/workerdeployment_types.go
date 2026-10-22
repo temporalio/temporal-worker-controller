@@ -103,6 +103,16 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	DrainingDeployment *DrainingDeploymentSpec `json:"drainingDeployment,omitempty"`
 
+	// DeploymentLabels are added to the metadata of each versioned Kubernetes
+	// Deployment that the controller creates. Pod labels belong in the pod
+	// template instead. Use this for tools that act on the Deployment object
+	// itself, such as admission webhooks that opt workloads in or out by label.
+	// Changes are applied in place to the Deployments of existing versions,
+	// without restarting their pods.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="!('temporal.io/build-id' in self) && !('temporal.io/deployment-name' in self)",message="temporal.io/build-id and temporal.io/deployment-name are managed by the controller"
+	DeploymentLabels map[string]string `json:"deploymentLabels,omitempty"`
+
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 

@@ -622,6 +622,11 @@ func updateDeploymentWithPodTemplateSpec(
 	connection temporaliov1alpha1.ConnectionSpec,
 ) {
 	wdDepSpec := spec.DeploymentSpec()
+	// Hash the user template, excluding controller-managed fields.
+	podTemplateSpecHash := k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	// DeploymentSpec() shares the template with spec on the legacy spec.template path;
+	// copy so the modifications below don't mutate spec.
+	wdDepSpec.Template = *wdDepSpec.Template.DeepCopy()
 
 	// Extract the build ID from the deployment's labels (with nil safety)
 	var buildID string
@@ -659,8 +664,7 @@ func updateDeploymentWithPodTemplateSpec(
 		podAnnotations[k] = v
 	}
 	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
-	// Store the new pod template spec hash
-	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = podTemplateSpecHash
 
 	// Preserve existing pod labels and add/update required labels
 	podLabels := make(map[string]string)
@@ -705,6 +709,23 @@ func checkAndUpdateDeploymentStrategy(
 	}
 
 	existingDeployment.Spec.Strategy = desired
+	return existingDeployment
+}
+
+// checkAndUpdateDeploymentLabels updates an owned Deployment when its labels
+// differ from spec.deploymentLabels.
+func checkAndUpdateDeploymentLabels(
+	buildID string,
+	k8sState *k8s.DeploymentState,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[buildID]
+	if !exists {
+		return nil
+	}
+	if !k8s.ApplyDeploymentLabels(existingDeployment, spec.DeploymentLabels) {
+		return nil
+	}
 	return existingDeployment
 }
 
@@ -758,6 +779,22 @@ func getUpdateDeployments(
 			continue
 		}
 		if deployment := checkAndUpdateDeploymentStrategy(buildID, k8sState, spec); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[buildID] = true
+		}
+	}
+
+	// Sync deployment labels the same way, after the strategy sync, so a
+	// Kubernetes Deployment already queued for update picks up label changes in
+	// the same write.
+	for _, buildID := range ownedBuildIDs(status) {
+		if updatedBuildIDs[buildID] {
+			if deployment, exists := k8sState.Deployments[buildID]; exists {
+				k8s.ApplyDeploymentLabels(deployment, spec.DeploymentLabels)
+			}
+			continue
+		}
+		if deployment := checkAndUpdateDeploymentLabels(buildID, k8sState, spec); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 			updatedBuildIDs[buildID] = true
 		}

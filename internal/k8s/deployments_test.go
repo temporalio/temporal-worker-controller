@@ -13,6 +13,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -586,7 +587,9 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 	deployment := k8s.NewDeploymentWithOwnerRef(
 		&metav1.TypeMeta{},
 		&metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
-		&temporaliov1alpha1.WorkerDeploymentSpec{},
+		&temporaliov1alpha1.WorkerDeploymentSpec{
+			DeploymentLabels: map[string]string{"team": "payments"},
+		},
 		"test-deployment",
 		"build123",
 		temporaliov1alpha1.ConnectionSpec{},
@@ -594,6 +597,95 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 
 	assert.Equal(t, "test-worker", deployment.Labels[k8s.WorkerDeploymentNameLabel])
 	assert.Equal(t, "build123", deployment.Labels[k8s.BuildIDLabel])
+	assert.Equal(t, "payments", deployment.Labels["team"])
+	assert.NotContains(t, deployment.Spec.Template.Labels, "team", "deployment labels must not leak into pod labels")
+	assert.Equal(t, "team", deployment.Annotations[k8s.ManagedDeploymentLabelsAnnotation])
+	assert.NotContains(t, deployment.Spec.Template.Annotations, k8s.ManagedDeploymentLabelsAnnotation,
+		"a pod template change would roll the pods")
+	assert.Equal(t, map[string]string{
+		k8s.WorkerDeploymentNameLabel: "test-worker",
+		k8s.BuildIDLabel:              "build123",
+	}, deployment.Spec.Selector.MatchLabels)
+}
+
+func TestApplyDeploymentLabels(t *testing.T) {
+	selector := map[string]string{
+		k8s.WorkerDeploymentNameLabel: "test-worker",
+		k8s.BuildIDLabel:              "build123",
+	}
+	tests := map[string]struct {
+		labels      map[string]string
+		managed     string
+		desired     map[string]string
+		wantLabels  map[string]string
+		wantManaged string
+		wantChanged bool
+	}{
+		"adds labels to a Deployment created before the field existed": {
+			labels:      map[string]string{"argocd": "x"},
+			desired:     map[string]string{"team": "payments"},
+			wantLabels:  map[string]string{"argocd": "x", "team": "payments"},
+			wantManaged: "team",
+			wantChanged: true,
+		},
+		"updates a changed value": {
+			labels:      map[string]string{"team": "payments"},
+			managed:     "team",
+			desired:     map[string]string{"team": "billing"},
+			wantLabels:  map[string]string{"team": "billing"},
+			wantManaged: "team",
+			wantChanged: true,
+		},
+		"removes a key dropped from the spec and keeps labels other tools added": {
+			labels:      map[string]string{"team": "payments", "opt-out": "true", "argocd": "x"},
+			managed:     "opt-out,team",
+			desired:     map[string]string{"team": "payments"},
+			wantLabels:  map[string]string{"team": "payments", "argocd": "x"},
+			wantManaged: "team",
+			wantChanged: true,
+		},
+		"removes the annotation when the spec is emptied": {
+			labels:      map[string]string{"team": "payments"},
+			managed:     "team",
+			wantLabels:  map[string]string{},
+			wantChanged: true,
+		},
+		"never overrides or removes selector labels": {
+			managed:     k8s.BuildIDLabel,
+			desired:     map[string]string{k8s.BuildIDLabel: "user-supplied"},
+			wantLabels:  map[string]string{},
+			wantChanged: true,
+		},
+		"reports no change when in sync": {
+			labels:      map[string]string{"b": "2", "a": "1"},
+			managed:     "a,b",
+			desired:     map[string]string{"a": "1", "b": "2"},
+			wantLabels:  map[string]string{"a": "1", "b": "2"},
+			wantManaged: "a,b",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			labels := maps.Clone(selector)
+			maps.Copy(labels, tc.labels)
+			deployment := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{"other": "kept"}},
+				Spec:       appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: maps.Clone(selector)}},
+			}
+			if tc.managed != "" {
+				deployment.Annotations[k8s.ManagedDeploymentLabelsAnnotation] = tc.managed
+			}
+
+			changed := k8s.ApplyDeploymentLabels(deployment, tc.desired)
+
+			wantLabels := maps.Clone(selector)
+			maps.Copy(wantLabels, tc.wantLabels)
+			assert.Equal(t, tc.wantChanged, changed)
+			assert.Equal(t, wantLabels, deployment.Labels)
+			assert.Equal(t, tc.wantManaged, deployment.Annotations[k8s.ManagedDeploymentLabelsAnnotation])
+			assert.Equal(t, "kept", deployment.Annotations["other"])
+		})
+	}
 }
 
 func TestNewDeploymentWithOwnerRef_Strategy(t *testing.T) {

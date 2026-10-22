@@ -11,6 +11,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1validation "k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -82,6 +83,7 @@ func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj ru
 
 func validateForUpdateOrCreate(dep *WorkerDeployment) (admission.Warnings, error) {
 	allErrs := validateRolloutStrategy(dep.Spec.RolloutStrategy)
+	allErrs = append(allErrs, metav1validation.ValidateLabels(dep.Spec.DeploymentLabels, field.NewPath("spec.deploymentLabels"))...)
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(dep, allErrs)
 	}

@@ -52,10 +52,12 @@ const (
 	// wrtWorkerRefKey is the field index key for WorkerResourceTemplate by effective workerDeploymentRef name.
 	wrtWorkerRefKey = ".spec.workerDeploymentRef.name"
 
-	// finalizerName is the finalizer added to deprecated TemporalWorkerDeployment and TemporalConnection
-	// resources to prevent deletion before cleanup actions are taken. On TWD resources, it
-	// ensures Temporal server-side versioning data is cleaned up. On TemporalConnection
-	// resources, it prevents deletion while any TWD still references the connection.
+	// finalizerName is the finalizer added to WorkerDeployment and Connection/ClusterConnection
+	// resources to prevent deletion before cleanup actions are taken. On WorkerDeployment
+	// resources, it ensures Temporal server-side versioning data is cleaned up. On connection
+	// resources, it prevents deletion while any WorkerDeployment still references the connection.
+	// Pre-v1.7 controllers also placed it on TemporalWorkerDeployment and TemporalConnection;
+	// the deprecated reconcilers remove it from those once migration is confirmed.
 	finalizerName = "temporal.io/delete-protection"
 )
 
