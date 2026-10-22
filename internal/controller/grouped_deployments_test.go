@@ -123,7 +123,7 @@ func TestGroupedPromotionRequiresEveryObservedMemberAndQueueKind(t *testing.T) {
 			w.Status.TargetVersion.HealthySince = &metav1.Time{Time: time.Now()}
 			p := groupPlan()
 			p.UpdateVersionConfig = &planner.VersionConfig{BuildID: "build-a", SetCurrent: true}
-			p.startTestWorkflows = []startWorkflowConfig{{buildID: "build-a"}}
+			p.startTestWorkflows = []startWorkflowConfig{{buildID: "build-a", taskQueue: "jobs"}}
 			require.NoError(t, r.planGroupedDeployments(w, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, groupState("build-a", saved, members), p, true))
 			assert.Equal(t, test.name == "ready", p.UpdateVersionConfig != nil)
 			assert.Equal(t, test.name == "ready", w.Status.TargetVersion.HealthySince != nil)
@@ -396,7 +396,7 @@ func TestGroupedCleanupResumesAfterTemporalDeletionAndMemberFailure(t *testing.T
 }
 
 func TestGroupedConfiguredGateAlsoProtectsRollback(t *testing.T) {
-	for _, workflowStatus := range []v1alpha1.WorkflowExecutionStatus{v1alpha1.WorkflowExecutionStatusRunning, v1alpha1.WorkflowExecutionStatusFailed, v1alpha1.WorkflowExecutionStatusCompleted} {
+	for _, workflowStatus := range []v1alpha1.WorkflowExecutionStatus{v1alpha1.WorkflowExecutionStatusRunning, v1alpha1.WorkflowExecutionStatusFailed, v1alpha1.WorkflowExecutionStatusCanceled, v1alpha1.WorkflowExecutionStatusCompleted} {
 		t.Run(string(workflowStatus), func(t *testing.T) {
 			r, _ := newTestReconciler(nil)
 			w := groupedWorker("build-a")

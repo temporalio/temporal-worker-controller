@@ -964,6 +964,12 @@ func (r *WorkerDeploymentReconciler) executePlan(
 ) error {
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
 
+	// Abandoned gate workflows must close before Temporal can drain their build.
+	// Retry failed cancellation requests before changing routing or deleting members.
+	if err := cancelSupersededGates(ctx, temporalClient, p); err != nil {
+		return err
+	}
+
 	// Save the cleanup decision before deleting the Temporal version. If this
 	// process stops after that deletion, a later reconcile keeps removing members
 	// rather than restoring pods for a version Temporal no longer reports.

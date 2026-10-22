@@ -81,9 +81,15 @@ and `temporal.io/deployment-name` labels for inspection.
 Configured gate workflows must complete successfully before Temporal routing is
 promoted, including when selecting a retained build for rollback. A gate runs once
 per build and workflow queue; selecting the same build again reuses its existing
-gate result. Use a new build ID when a release needs a fresh gate run. An application
-that must stop accepting new requests on an older release must perform that
-application-specific work itself, for example in its gate workflow. The controller
+gate result. Gates run only on declared `Workflow` queues, never on activity-only
+queues. When another build becomes desired, the controller requests cancellation
+of still-running gates for the superseded build after checking their saved type,
+queue, and pinned build. It does not cancel application workflows. Cancellation
+is asynchronous: workers remain until Temporal reports global drainage. A canceled
+gate cannot approve a later rollback of the same build. Use a new build ID when a
+release needs a fresh gate run. An application that must stop accepting new
+requests on an older release must perform that application-specific work itself,
+for example in its gate workflow. The controller
 owns Temporal routing and worker lifecycle, not application request routing.
 
 ## Upgrade order

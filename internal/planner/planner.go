@@ -191,11 +191,30 @@ func GeneratePlan(
 		}
 	}
 
-	// Determine if we need to start any test workflows
-	plan.TestWorkflows = getTestWorkflows(status, config, workerDeploymentName, gateInput, isGateInputSecret)
+	// Grouped gates run on declared workflow queues. Use the same queue set
+	// for starting gates and checking their success, so activity-only queues
+	// cannot receive a workflow or leave promotion waiting for an impossible result.
+	gateStatus := status
+	if len(spec.AdditionalDeployments) > 0 {
+		workflowQueues := make(map[string]struct{})
+		for _, queue := range spec.ExpectedTaskQueues {
+			if slices.Contains(queue.Kinds, temporaliov1alpha1.TaskQueueWorkflow) {
+				workflowQueues[queue.Name] = struct{}{}
+			}
+		}
+		gateStatus = status.DeepCopy()
+		gateStatus.TargetVersion.TaskQueues = slices.DeleteFunc(gateStatus.TargetVersion.TaskQueues, func(queue temporaliov1alpha1.TaskQueue) bool {
+			_, declared := workflowQueues[queue.Name]
+			return !declared
+		})
+		gateStatus.TargetVersion.TestWorkflows = slices.DeleteFunc(gateStatus.TargetVersion.TestWorkflows, func(workflow temporaliov1alpha1.WorkflowExecution) bool {
+			_, declared := workflowQueues[workflow.TaskQueue]
+			return !declared
+		})
+	}
 
-	// Determine version config changes
-	plan.VersionConfig = getVersionConfigDiff(l, status, temporalState, config)
+	plan.TestWorkflows = getTestWorkflows(gateStatus, config, workerDeploymentName, gateInput, isGateInputSecret)
+	plan.VersionConfig = getVersionConfigDiff(l, gateStatus, temporalState, config)
 
 	// TODO(jlegrone): generate warnings/events on the WorkerDeployment resource when buildIDs are reachable
 	//                 but have no corresponding Deployment.

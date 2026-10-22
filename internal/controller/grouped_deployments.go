@@ -8,6 +8,8 @@
 package controller
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -15,9 +17,21 @@ import (
 	"github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/temporal"
+	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
+	workflowpb "go.temporal.io/api/workflow/v1"
+	sdkclient "go.temporal.io/sdk/client"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// cancelWorkflowConfig identifies one controller-created gate from saved build settings.
+type cancelWorkflowConfig struct {
+	workflowID   string
+	workflowType string
+	buildID      string
+	taskQueue    string
+}
 
 // planGroupedDeployments restores saved members and applies retirement to the
 // whole build. A new resource specification never rewrites a historical build.
@@ -51,6 +65,18 @@ func (r *WorkerDeploymentReconciler) planGroupedDeployments(
 	}
 
 	for buildID, saved := range state.Revisions {
+		if buildID != target && saved.Spec.RolloutStrategy.Gate != nil {
+			for _, queue := range saved.Spec.ExpectedTaskQueues {
+				if slices.Contains(queue.Kinds, v1alpha1.TaskQueueWorkflow) {
+					p.cancelTestWorkflows = append(p.cancelTestWorkflows, cancelWorkflowConfig{
+						workflowID:   temporal.GetTestWorkflowID(k8s.ComputeWorkerDeploymentName(w), buildID, queue.Name),
+						workflowType: saved.Spec.RolloutStrategy.Gate.WorkflowType,
+						buildID:      buildID,
+						taskQueue:    queue.Name,
+					})
+				}
+			}
+		}
 		members, err := saved.Deployments(w, buildID, connection, r.Scheme)
 		if err != nil {
 			return err
@@ -278,4 +304,61 @@ func groupHasNoPods(members map[string]*appsv1.Deployment) bool {
 		}
 	}
 	return true
+}
+
+// cancelSupersededGates looks up only gate IDs derived from saved group settings.
+// A matching running execution receives a cancellation request for its exact run;
+// unrelated executions and completed gates are never canceled. Temporal still
+// decides when the canceled workflow has closed and its build has drained.
+func cancelSupersededGates(ctx context.Context, temporalClient sdkclient.Client, p *plan) error {
+	for _, gate := range p.cancelTestWorkflows {
+		description, err := temporalClient.DescribeWorkflowExecution(ctx, gate.workflowID, "")
+		if err != nil {
+			var notFound *serviceerror.NotFound
+			if errors.As(err, &notFound) {
+				continue
+			}
+			return fmt.Errorf("describe superseded gate %q: %w", gate.workflowID, err)
+		}
+		info := description.GetWorkflowExecutionInfo()
+		if info.GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+			continue
+		}
+		execution := info.GetExecution()
+		if execution.GetWorkflowId() != gate.workflowID || execution.GetRunId() == "" ||
+			info.GetType().GetName() != gate.workflowType || info.GetTaskQueue() != gate.taskQueue ||
+			!gatePinnedToBuild(info.GetVersioningInfo().GetVersioningOverride(), p.WorkerDeploymentName, gate.buildID) {
+			return fmt.Errorf("superseded gate %q does not match its saved controller settings", gate.workflowID)
+		}
+		if err := temporalClient.CancelWorkflow(ctx, gate.workflowID, execution.GetRunId()); err != nil {
+			var notFound *serviceerror.NotFound
+			if errors.As(err, &notFound) {
+				continue
+			}
+			return fmt.Errorf("cancel superseded gate %q: %w", gate.workflowID, err)
+		}
+	}
+	return nil
+}
+
+// gatePinnedToBuild reads the pinned override forms supported by the Temporal
+// SDK. Older servers return the original string or Deployment fields; newer
+// servers return the typed override. An explicit different override never matches.
+func gatePinnedToBuild(override *workflowpb.VersioningOverride, deploymentName, buildID string) bool {
+	if override.GetOverride() != nil {
+		version := override.GetPinned().GetVersion()
+		return version.GetDeploymentName() == deploymentName && version.GetBuildId() == buildID
+	}
+	//lint:ignore SA1019 Read the older server representation supported by the SDK.
+	if override.GetBehavior() != enumspb.VERSIONING_BEHAVIOR_PINNED {
+		return false
+	}
+	//lint:ignore SA1019 Read the older server representation supported by the SDK.
+	if override.GetPinnedVersion() != "" {
+		//lint:ignore SA1019 Read the older server representation supported by the SDK.
+		return override.GetPinnedVersion() == deploymentName+"."+buildID
+	}
+	//lint:ignore SA1019 Read the older server representation supported by the SDK.
+	deployment := override.GetDeployment()
+	return deployment.GetSeriesName() == deploymentName && deployment.GetBuildId() == buildID
 }

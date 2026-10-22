@@ -36,8 +36,9 @@ type plan struct {
 	// Register new versions as current or with ramp
 	UpdateVersionConfig *planner.VersionConfig
 
-	// Start a workflow
-	startTestWorkflows []startWorkflowConfig
+	// Start desired gates and cancel gates from superseded grouped builds.
+	startTestWorkflows  []startWorkflowConfig
+	cancelTestWorkflows []cancelWorkflowConfig
 
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []planner.WorkerResourceApply
