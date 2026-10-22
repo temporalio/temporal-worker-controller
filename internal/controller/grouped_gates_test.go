@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -25,23 +26,70 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type gateCancellationClient struct {
-	sdkclient.Client
-	description  *workflowservice.DescribeWorkflowExecutionResponse
-	describeErr  error
-	cancelErr    error
-	describedIDs []string
-	canceled     []v1alpha1.WorkflowExecution
-}
+type (
+	gateCancellationClient struct {
+		sdkclient.Client
+		description     *workflowservice.DescribeWorkflowExecutionResponse
+		describeErr     error
+		cancelErr       error
+		describedIDs    []string
+		describedRunIDs []string
+		canceled        []v1alpha1.WorkflowExecution
+	}
+	gateStartClient struct {
+		sdkclient.Client
+		started []sdkclient.StartWorkflowOptions
+	}
+)
 
-func (c *gateCancellationClient) DescribeWorkflowExecution(_ context.Context, workflowID, _ string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
+func (c *gateCancellationClient) DescribeWorkflowExecution(_ context.Context, workflowID, runID string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
 	c.describedIDs = append(c.describedIDs, workflowID)
+	c.describedRunIDs = append(c.describedRunIDs, runID)
 	return c.description, c.describeErr
 }
 
 func (c *gateCancellationClient) CancelWorkflow(_ context.Context, workflowID, runID string) error {
 	c.canceled = append(c.canceled, v1alpha1.WorkflowExecution{WorkflowID: workflowID, RunID: runID})
 	return c.cancelErr
+}
+
+func TestGateStartLifetimeMatchesDeploymentOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		grouped bool
+		input   []byte
+		want    time.Duration
+	}{
+		{name: "single deployment", want: time.Hour},
+		{name: "grouped build waits for dependencies", grouped: true},
+		{name: "grouped build with gate input", grouped: true, input: []byte(`{"check":"ready"}`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := groupedWorker("build-b")
+			if !test.grouped {
+				w.Spec.AdditionalDeployments = nil
+			}
+			r, _ := newTestReconciler(nil)
+			gateID := temporal.GetTestWorkflowID(w.Name, "build-b", "jobs")
+			p := &plan{WorkerDeploymentName: w.Name, startTestWorkflows: []startWorkflowConfig{{
+				workflowID: gateID, workflowType: "CheckRelease", buildID: "build-b", taskQueue: "jobs", input: test.input,
+			}}}
+			c := &gateStartClient{}
+			require.NoError(t, r.startTestWorkflows(context.Background(), logr.Discard(), w, c, p))
+			require.Len(t, c.started, 1)
+			options := c.started[0]
+			assert.Equal(t, test.want, options.WorkflowExecutionTimeout)
+			assert.Zero(t, options.WorkflowRunTimeout)
+			assert.Equal(t, gateID, options.ID)
+			assert.Equal(t, "jobs", options.TaskQueue)
+			assert.Equal(t, enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE, options.WorkflowIDReusePolicy)
+			assert.Equal(t, enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL, options.WorkflowIDConflictPolicy)
+			pinned, ok := options.VersioningOverride.(*sdkclient.PinnedVersioningOverride)
+			require.True(t, ok)
+			assert.Equal(t, w.Name, pinned.Version.DeploymentName)
+			assert.Equal(t, "build-b", pinned.Version.BuildID)
+		})
+	}
 }
 
 func TestGroupedSupersessionPlansOnlySavedGateWorkflowQueues(t *testing.T) {
@@ -184,4 +232,32 @@ func TestCancelSupersededGatesRetriesFailuresAndIgnoresTypedNotFound(t *testing.
 	c.cancelErr = &serviceerror.NotFound{Message: "closed during cancellation"}
 	assert.NoError(t, cancelSupersededGates(context.Background(), c, p))
 	assert.Len(t, c.canceled, 3)
+}
+
+func TestCancelSupersededGateReadsLatestRunAfterContinuation(t *testing.T) {
+	gate := cancelWorkflowConfig{workflowID: "gate", workflowType: "CheckRelease", buildID: "build-b", taskQueue: "jobs"}
+	p := &plan{WorkerDeploymentName: "workers", cancelTestWorkflows: []cancelWorkflowConfig{gate}}
+	info := &workflowpb.WorkflowExecutionInfo{
+		Execution: &commonpb.WorkflowExecution{WorkflowId: "gate", RunId: "first-run"},
+		Type:      &commonpb.WorkflowType{Name: "CheckRelease"}, TaskQueue: "jobs", Status: enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+		VersioningInfo: &workflowpb.WorkflowExecutionVersioningInfo{VersioningOverride: &workflowpb.VersioningOverride{Override: &workflowpb.VersioningOverride_Pinned{Pinned: &workflowpb.VersioningOverride_PinnedOverride{Version: &deploymentpb.WorkerDeploymentVersion{DeploymentName: "workers", BuildId: "build-b"}}}}},
+	}
+	c := &gateCancellationClient{
+		description: &workflowservice.DescribeWorkflowExecutionResponse{WorkflowExecutionInfo: info},
+		cancelErr:   &serviceerror.NotFound{Message: "first run continued before cancellation"},
+	}
+	require.NoError(t, cancelSupersededGates(context.Background(), c, p))
+	info.Execution.RunId = "continued-run"
+	c.cancelErr = nil
+	require.NoError(t, cancelSupersededGates(context.Background(), c, p))
+	assert.Equal(t, []string{"", ""}, c.describedRunIDs)
+	assert.Equal(t, []v1alpha1.WorkflowExecution{
+		{WorkflowID: "gate", RunID: "first-run"},
+		{WorkflowID: "gate", RunID: "continued-run"},
+	}, c.canceled)
+}
+
+func (c *gateStartClient) ExecuteWorkflow(_ context.Context, options sdkclient.StartWorkflowOptions, _ any, _ ...any) (sdkclient.WorkflowRun, error) {
+	c.started = append(c.started, options)
+	return nil, nil
 }

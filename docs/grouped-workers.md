@@ -82,8 +82,13 @@ Configured gate workflows must complete successfully before Temporal routing is
 promoted, including when selecting a retained build for rollback. A gate runs once
 per build and workflow queue; selecting the same build again reuses its existing
 gate result. Gates run only on declared `Workflow` queues, never on activity-only
-queues. When another build becomes desired, the controller requests cancellation
-of still-running gates for the superseded build after checking their saved type,
+queues. Grouped gates have no controller-imposed execution deadline: they may wait
+for dependencies or authorization to recover without permanently blocking the
+build. Gate workflows should continue as new when needed to bound their history;
+the same workflow identity and pinned build are retained. Single-Deployment gates
+keep their existing one-hour execution deadline. When another build becomes
+desired, the controller requests cancellation of still-running gates for the
+superseded build after checking their saved type,
 queue, and pinned build. It does not cancel application workflows. Cancellation
 is asynchronous: workers remain until Temporal reports global drainage. A canceled
 gate cannot approve a later rollback of the same build. Use a new build ID when a

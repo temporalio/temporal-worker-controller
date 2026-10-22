@@ -194,6 +194,13 @@ func containsDeployment(subject *appsv1.Deployment, search []*appsv1.Deployment)
 }
 
 func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, temporalClient sdkclient.Client, p *plan) error {
+	executionTimeout := time.Hour
+	if len(workerDeploy.Spec.AdditionalDeployments) > 0 {
+		// Grouped build gates may wait for application dependencies to recover.
+		// Keep them running until they finish or a newer desired build causes
+		// the controller to cancel them, so a long wait cannot prevent promotion.
+		executionTimeout = 0
+	}
 	for _, wf := range p.startTestWorkflows {
 		// Identify the gate workflow on every log line for this iteration, so the call
 		// sites below only carry what differs between them. Declared per iteration, so
@@ -244,7 +251,7 @@ func (r *WorkerDeploymentReconciler) startTestWorkflows(ctx context.Context, l l
 		opts := sdkclient.StartWorkflowOptions{
 			ID:                       wf.workflowID,
 			TaskQueue:                wf.taskQueue,
-			WorkflowExecutionTimeout: time.Hour,
+			WorkflowExecutionTimeout: executionTimeout,
 			WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 			WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_FAIL,
 			VersioningOverride: &sdkclient.PinnedVersioningOverride{
