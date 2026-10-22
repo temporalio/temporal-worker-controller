@@ -18,6 +18,7 @@ import (
 	sdkclient "go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
+	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/temporaltest"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,12 +71,19 @@ func testInactiveVersionRetirement(t *testing.T, k8sClient client.Client, ts *te
 
 	var run sdkclient.WorkflowRun
 	if pinned {
-		run, err = ts.GetDefaultClient().ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
-			ID: name, TaskQueue: name, VersioningOverride: &sdkclient.PinnedVersioningOverride{Version: version},
-		}, "inactivePinnedWorkflow")
-		if err != nil {
-			t.Fatal(err)
-		}
+		// The deployment summary can precede propagation of version membership
+		// to matching. Retry only that explicit readiness error; other start
+		// failures must still fail the test immediately.
+		eventually(t, 30*time.Second, time.Second, func() error {
+			var startErr error
+			run, startErr = ts.GetDefaultClient().ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{
+				ID: name, TaskQueue: name, VersioningOverride: &sdkclient.PinnedVersioningOverride{Version: version},
+			}, "inactivePinnedWorkflow")
+			if startErr != nil && !worker_versioning.IsPinnedVersionNotInTaskQueueError(startErr) {
+				t.Fatal(startErr)
+			}
+			return startErr
+		})
 		defer func() { _ = ts.GetDefaultClient().TerminateWorkflow(ctx, run.GetID(), run.GetRunID(), "test cleanup") }()
 		// Wait for the actual visibility index, not just the start RPC, before retiring.
 		eventually(t, 30*time.Second, time.Second, func() error {
