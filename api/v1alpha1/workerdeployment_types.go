@@ -31,10 +31,13 @@ type WorkerOptions struct {
 	// code. Only use this when you have a reliable way to detect changes in your workflow
 	// definitions (e.g., hashing workflow source files in CI/CD).
 	//
-	// When the UnsafeCustomBuildID is stable but pod template spec changes, the controller triggers
-	// a rolling update instead of creating a new deployment version. The controller uses
+	// For a single Deployment, when UnsafeCustomBuildID is stable but the pod template
+	// changes, the controller triggers a rolling update instead of creating a new
+	// deployment version. The controller uses
 	// a hash of the user-provided pod template spec to detect ANY changes, including
 	// container images, env vars, commands, volumes, resources, and all other fields.
+	// Grouped builds instead retain immutable settings for each build ID; changing
+	// any saved group setting requires a new build ID.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$`
@@ -44,6 +47,10 @@ type WorkerOptions struct {
 // WorkerDeploymentSpec defines the desired state of WorkerDeployment
 // +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template)",message="one of deployment or template must be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.deployment) && has(self.template))",message="exactly one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.additionalDeployments) || size(self.additionalDeployments) == 0 || (has(self.expectedTaskQueues) && size(self.expectedTaskQueues) > 0)",message="grouped workers require expectedTaskQueues"
+// +kubebuilder:validation:XValidation:rule="!has(self.additionalDeployments) || size(self.additionalDeployments) == 0 || (has(self.deployment) ? has(self.deployment.replicas) && self.deployment.replicas > 0 : has(self.replicas) && self.replicas > 0)",message="grouped workers require a positive fixed primary replica count"
+// +kubebuilder:validation:XValidation:rule="!has(self.additionalDeployments) || size(self.additionalDeployments) == 0 || !has(self.drainingDeployment)",message="grouped workers retain independent member counts; drainingDeployment is only supported for a single Deployment"
+// +kubebuilder:validation:XValidation:rule="!has(self.expectedTaskQueues) || size(self.expectedTaskQueues) == 0 || (has(self.additionalDeployments) && size(self.additionalDeployments) > 0)",message="expectedTaskQueues is only supported for grouped workers"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -97,7 +104,24 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
-	// DrainingDeployment overrides settings on the Kubernetes Deployments of
+	// AdditionalDeployments run separate worker pods in the same Temporal build.
+	// Each member keeps its own credentials, resources, and fixed replica count.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	AdditionalDeployments []AdditionalDeployment `json:"additionalDeployments,omitempty"`
+
+	// ExpectedTaskQueues lists the queue names and kinds that must register for
+	// this build before the controller routes new workflows to it.
+	// Required and only supported when additionalDeployments is set.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	ExpectedTaskQueues []ExpectedTaskQueue `json:"expectedTaskQueues,omitempty"`
+
+	// DrainingDeployment overrides settings for single-Deployment versions only.
+	// Grouped builds retain their independent saved member counts while draining.
+	// It changes the Kubernetes Deployments of
 	// draining versions. Unset fields keep the behavior that applies without
 	// this field.
 	// +optional
@@ -107,10 +131,10 @@ type WorkerDeploymentSpec struct {
 	// Deployment that the controller creates. Pod labels belong in the pod
 	// template instead. Use this for tools that act on the Deployment object
 	// itself, such as admission webhooks that opt workloads in or out by label.
-	// Changes are applied in place to the Deployments of existing versions,
-	// without restarting their pods.
+	// For single-Deployment builds, changes are applied in place to existing versions,
+	// without restarting their pods. Grouped builds retain their saved label settings.
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="!('temporal.io/build-id' in self) && !('temporal.io/deployment-name' in self)",message="temporal.io/build-id and temporal.io/deployment-name are managed by the controller"
+	// +kubebuilder:validation:XValidation:rule="!('temporal.io/build-id' in self) && !('temporal.io/deployment-name' in self) && !('temporal.io/member' in self)",message="temporal.io/build-id, temporal.io/deployment-name and temporal.io/member are managed by the controller"
 	DeploymentLabels map[string]string `json:"deploymentLabels,omitempty"`
 
 	// How to rollout new workflow executions to the target version.
@@ -122,6 +146,44 @@ type WorkerDeploymentSpec struct {
 	// WorkerOptions configures the worker's connection to Temporal.
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
+
+type (
+	// AdditionalDeployment defines an independently configured worker member.
+	AdditionalDeployment struct {
+		// Name identifies this member across builds. "primary" is reserved.
+		// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+		// +kubebuilder:validation:MaxLength=63
+		// +kubebuilder:validation:XValidation:rule="self != 'primary'",message="primary is reserved"
+		Name string `json:"name"`
+		// Replicas is the fixed number of pods for this member.
+		// +kubebuilder:validation:Minimum=1
+		Replicas int32 `json:"replicas"`
+		// Template describes this member's pods, including service account and secrets.
+		Template corev1.PodTemplateSpec `json:"template"`
+	}
+
+	// ExpectedTaskQueue names a queue and the worker kinds required for promotion.
+	ExpectedTaskQueue struct {
+		// Name is the Temporal task queue name.
+		// +kubebuilder:validation:MinLength=1
+		Name string `json:"name"`
+		// Kinds specifies which pollers must register for this queue.
+		// +kubebuilder:validation:MinItems=1
+		// +listType=set
+		Kinds []TaskQueueKind `json:"kinds"`
+	}
+
+	// TaskQueueKind identifies the kind of tasks a worker polls.
+	// +kubebuilder:validation:Enum=Workflow;Activity
+	TaskQueueKind string
+)
+
+const (
+	// TaskQueueWorkflow identifies workflow task polling.
+	TaskQueueWorkflow TaskQueueKind = "Workflow"
+	// TaskQueueActivity identifies activity task polling.
+	TaskQueueActivity TaskQueueKind = "Activity"
+)
 
 // DeploymentSpec returns the appsv1.DeploymentSpec struct constructed by
 // examining the WorkerDeploymentSpec. If WorkerDeploymentSpec.deployment is

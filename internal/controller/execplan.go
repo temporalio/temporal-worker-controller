@@ -47,25 +47,37 @@ import (
 // the next reconcile. Rendered-resource delete failures are logged rather than returned as
 // errors, so the returned slice can be partial even when the error is nil.
 func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l logr.Logger, workerDeploy *temporaliov1alpha1.WorkerDeployment, p *plan) ([]planner.WorkerResourceRef, error) {
-	// Create deployment
-	if p.CreateDeployment != nil {
-		l.Info("creating deployment", "deployment", p.CreateDeployment.Name)
-		if err := r.Create(ctx, p.CreateDeployment); err != nil {
-			l.Error(err, "unable to create deployment", "deployment", p.CreateDeployment.Name)
+	// Save a grouped build before creating any members. A restart can then
+	// recreate every missing member from the same immutable settings.
+	for _, revision := range p.CreateRevisions {
+		if err := r.Create(ctx, revision); err != nil {
+			return nil, fmt.Errorf("save grouped build: %w", err)
+		}
+	}
+	for _, deployment := range p.CreateDeployments {
+		l.Info("creating deployment", "deployment", deployment.Name)
+		if err := r.Create(ctx, deployment); err != nil {
+			l.Error(err, "unable to create deployment", "deployment", deployment.Name)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentCreateFailed,
-				"Failed to create Deployment %q: %v", p.CreateDeployment.Name, err)
-			return nil, err
+				"Failed to create Deployment %q: %v", deployment.Name, err)
+			return nil, fmt.Errorf("create Deployment %s: %w", deployment.Name, err)
 		}
 	}
 
 	// Delete deployments
 	for _, d := range p.DeleteDeployments {
 		l.Info("deleting deployment", "deployment", d.Name)
-		if err := r.Delete(ctx, d); err != nil {
+		if err := r.Delete(ctx, d); client.IgnoreNotFound(err) != nil {
 			l.Error(err, "unable to delete deployment", "deployment", d.Name)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonDeploymentDeleteFailed,
 				"Failed to delete Deployment %q: %v", d.Name, err)
 			return nil, err
+		}
+	}
+
+	for _, revision := range p.DeleteRevisions {
+		if err := r.Delete(ctx, revision); client.IgnoreNotFound(err) != nil {
+			return nil, fmt.Errorf("delete grouped build: %w", err)
 		}
 	}
 
@@ -778,38 +790,15 @@ func isTerminalWorkerResourceError(err error, renderFailed bool) bool {
 		apierrors.IsMethodNotSupported(err)
 }
 
-// deleteDeprecatedVersions prunes the Temporal server-side Worker Deployment Version
-// record for each k8s Deployment in DeleteDeployments, before executeK8sOperations
-// deletes them. It is mutated to remove the k8s Deployments that should not be
-// deleted because their Temporal server-side WDV record could not be removed or
-// because the k8s Deployment has no build ID label. The removed k8s deployments
-// stay in the cluster so that a later reconcile retries the pruning.
+// deleteDeprecatedVersions asks Temporal to delete each nominated build once,
+// then keeps only the Kubernetes deletions whose Temporal version is confirmed
+// gone. A failed deletion retains every member and saved build for later retries.
+// Saved grouped records can finish cleanup after their last Deployment is gone.
 //
-// Because DeleteVersion does not check to see if there are open workflows using
-// pinned execution for Inactive versions, we query the Temporal visibility service
-// for open pinned workflows before deleting Inactive versions.
-// Like Temporal drainage, visibility is eventually consistent: callers must stop
-// sending new pinned overrides to a version being retired. This is not an atomic
-// exclusion against concurrent workflow starts or override updates.
-//
-// The planner only adds a drained version to DeleteDeployments once it is
-// EligibleForDeletion (see planner.getDeleteDeployments): drained past the sunset
-// delays with no active worker pods. Deleting the Kubernetes Deployment alone would
-// leave the server-side version registered forever — the only other cleanup path is
-// the CRD-deletion finalizer, which never runs during a normal rollout. This is also
-// the only point that can reliably prune it: a version's status entry only exists in
-// status.DeprecatedVersions while its Deployment does (see state_mapper.go), so once
-// the Deployment is gone there is no way to retry on a later reconcile. Left unpruned,
-// these accumulate one per rollout and eventually hit the server's per-deployment
-// version cap, after which every new build ID fails to register (#377) if the
-// automated delete-oldest-drained-version-when-exceeding-version-limit
-// behaviour of temporal server is not working properly
-// (temporalio/temporal#10737).
-//
-// Build IDs are read off the in-memory Deployment objects, so this runs in the Temporal
-// phase without reaching back into k8sState. NotRegistered Deployments are also carried
-// in DeleteDeployments; they have no server-side version, so they skip DeleteVersion and
-// are retained for deletion.
+// Temporal does not check pinned workflows when deleting an Inactive version,
+// so the existing single-Deployment path first checks for running pinned work.
+// That check is eventually consistent: callers must already have stopped new
+// pinned starts and overrides before an Inactive version is retired.
 func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	ctx context.Context,
 	l logr.Logger,
@@ -818,62 +807,79 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	temporalClient sdkclient.Client,
 	p *plan,
 ) {
-	identity := getControllerIdentity()
 	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
-	for _, d := range p.DeleteDeployments {
-		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]
-		if !ok {
-			// No build ID means we cannot specify which version to prune. We should
-			// never get here, but one way we could is, if someone stripped the build ID
-			// label off the k8s Deployment. If they did, assume the cleanup is intentional
-			// and leave the Deployment alone.
-			l.Info("deployment has no build ID label, leaving the k8s Deployment alone", "deployment", d.Name)
+	checkedBuilds := make(map[string]bool)
+	deletedBuilds := make(map[string]bool)
+	for _, deployment := range p.DeleteDeployments {
+		buildID := deployment.Labels[k8s.BuildIDLabel]
+		if buildID == "" {
+			l.Info("deployment has no build ID label, leaving it alone", "deployment", deployment.Name)
 			continue
 		}
-		if isVersionNotRegistered(workerDeploy, buildID) {
-			markedForDeletion = append(markedForDeletion, d)
-			continue
+		if !checkedBuilds[buildID] {
+			checkedBuilds[buildID] = true
+			deletedBuilds[buildID] = r.deleteDeprecatedVersion(ctx, l, workerDeploy, depHandle, temporalClient, p.WorkerDeploymentName, buildID)
 		}
-		backoffKey := k8s.ComputeWorkerDeploymentName(workerDeploy) + "/" + buildID
-		if r.skipVersionDelete(backoffKey) {
-			continue
+		if deletedBuilds[buildID] {
+			markedForDeletion = append(markedForDeletion, deployment)
 		}
-		if slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
-			return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
-		}) {
-			count, err := getOpenPinnedWorkflowExecutions(ctx, temporalClient, p.WorkerDeploymentName, buildID)
-			if err != nil || count == nil {
-				l.Info("could not confirm inactive version has no running pinned workflows, keeping its Deployment", "buildID", buildID, "error", err)
-				continue
-			}
-			if count.Count != 0 {
-				l.Info("inactive version has running pinned workflows, keeping its Deployment", "buildID", buildID, "count", count.Count)
-				continue
-			}
+	}
+	// A saved grouped build can outlive its last member after an interrupted
+	// cleanup. Confirm its Temporal version is gone before removing that record.
+	for _, revision := range p.DeleteRevisions {
+		buildID := revision.Labels[k8s.BuildIDLabel]
+		if !checkedBuilds[buildID] {
+			checkedBuilds[buildID] = true
+			deletedBuilds[buildID] = r.deleteDeprecatedVersion(ctx, l, workerDeploy, depHandle, temporalClient, p.WorkerDeploymentName, buildID)
 		}
-		_, err := depHandle.DeleteVersion(
-			ctx,
-			sdkclient.WorkerDeploymentDeleteVersionOptions{
-				BuildID:  buildID,
-				Identity: identity,
-			},
-		)
-		if err != nil {
-			var notFound *serviceerror.NotFound
-			if !errors.As(err, &notFound) {
-				l.Info("could not delete worker deployment version, keeping its k8s Deployment to reconcile",
-					"buildID", buildID, "deployment", d.Name, "error", err)
-				r.noteVersionDeleteFailure(backoffKey)
-				continue
-			}
-			l.Info("worker deployment version already deleted", "buildID", buildID)
-		} else {
-			l.Info("deleted deprecated worker deployment version", "buildID", buildID)
-		}
-		r.noteVersionDeleteSuccess(backoffKey)
-		markedForDeletion = append(markedForDeletion, d)
 	}
 	p.DeleteDeployments = markedForDeletion
+	p.DeleteRevisions = slices.DeleteFunc(p.DeleteRevisions, func(revision *appsv1.ControllerRevision) bool {
+		return !deletedBuilds[revision.Labels[k8s.BuildIDLabel]]
+	})
+}
+
+// deleteDeprecatedVersion asks Temporal to remove one retired version. A failure
+// retains every Kubernetes member and the saved build for a later reconcile.
+func (r *WorkerDeploymentReconciler) deleteDeprecatedVersion(
+	ctx context.Context,
+	l logr.Logger,
+	workerDeploy *temporaliov1alpha1.WorkerDeployment,
+	depHandle sdkclient.WorkerDeploymentHandle,
+	temporalClient sdkclient.Client,
+	deploymentName, buildID string,
+) bool {
+	if isVersionNotRegistered(workerDeploy, buildID) {
+		return true
+	}
+	backoffKey := k8s.ComputeWorkerDeploymentName(workerDeploy) + "/" + buildID
+	if r.skipVersionDelete(backoffKey) {
+		return false
+	}
+	if slices.ContainsFunc(workerDeploy.Status.DeprecatedVersions, func(v *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion) bool {
+		return v.BuildID == buildID && v.Status == temporaliov1alpha1.VersionStatusInactive
+	}) {
+		count, err := getOpenPinnedWorkflowExecutions(ctx, temporalClient, deploymentName, buildID)
+		if err != nil || count == nil {
+			l.Info("could not confirm inactive version has no running pinned workflows, keeping its Deployments", "buildID", buildID, "error", err)
+			return false
+		}
+		if count.Count != 0 {
+			l.Info("inactive version has running pinned workflows, keeping its Deployments", "buildID", buildID, "count", count.Count)
+			return false
+		}
+	}
+	_, err := depHandle.DeleteVersion(ctx, sdkclient.WorkerDeploymentDeleteVersionOptions{BuildID: buildID, Identity: getControllerIdentity()})
+	if err != nil {
+		var notFound *serviceerror.NotFound
+		if !errors.As(err, &notFound) {
+			l.Info("could not delete worker deployment version, keeping its Deployments and saved settings", "buildID", buildID, "error", err)
+			r.noteVersionDeleteFailure(backoffKey)
+			return false
+		}
+	}
+	r.noteVersionDeleteSuccess(backoffKey)
+	return true
 }
 
 const (
@@ -957,6 +963,20 @@ func (r *WorkerDeploymentReconciler) executePlan(
 	p *plan,
 ) error {
 	deploymentHandler := temporalClient.WorkerDeploymentClient().GetHandle(p.WorkerDeploymentName)
+
+	// Save the cleanup decision before deleting the Temporal version. If this
+	// process stops after that deletion, a later reconcile keeps removing members
+	// rather than restoring pods for a version Temporal no longer reports.
+	for _, revision := range p.MarkRevisionsForDeletion {
+		base := client.MergeFrom(revision.DeepCopy())
+		if revision.Annotations == nil {
+			revision.Annotations = make(map[string]string)
+		}
+		revision.Annotations[k8s.GroupDeletionAnnotation] = "true"
+		if err := r.Patch(ctx, revision, base); err != nil {
+			return fmt.Errorf("save grouped build cleanup decision: %w", err)
+		}
+	}
 
 	// Prune the Temporal server-side version records before their k8s Deployments are
 	// deleted, and narrow the plan to the versions the server confirmed gone. A Deployment

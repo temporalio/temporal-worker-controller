@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -81,6 +82,10 @@ const (
 type DeploymentState struct {
 	// Map of buildID to deployment
 	Deployments map[string]*appsv1.Deployment
+	// Members groups separately configured Deployments by build and member name.
+	Members map[string]map[string]*appsv1.Deployment
+	// Revisions retain the complete settings that created each grouped build.
+	Revisions map[string]*GroupRevision
 	// Sorted deployments by creation time
 	DeploymentsByTime []*appsv1.Deployment
 	// Map of buildID to deployment references
@@ -94,10 +99,11 @@ func GetDeploymentState(
 	k8sClient client.Client,
 	namespace string,
 	ownerName string,
-	workerDeploymentName string,
+	ownerUID types.UID,
 ) (*DeploymentState, error) {
 	state := &DeploymentState{
 		Deployments:       make(map[string]*appsv1.Deployment),
+		Members:           make(map[string]map[string]*appsv1.Deployment),
 		DeploymentsByTime: []*appsv1.Deployment{},
 		DeploymentRefs:    make(map[string]*corev1.ObjectReference),
 	}
@@ -121,14 +127,45 @@ func GetDeploymentState(
 	// Track each k8s deployment by build ID
 	for i := range childDeploys.Items {
 		deploy := &childDeploys.Items[i]
+		if owner := metav1.GetControllerOf(deploy); owner == nil || owner.UID != ownerUID {
+			continue
+		}
 		if buildID, ok := deploy.GetLabels()[BuildIDLabel]; ok {
-			state.Deployments[buildID] = deploy
+			member := deploy.Labels[MemberLabel]
+			if member != "" {
+				if state.Members[buildID] == nil {
+					state.Members[buildID] = make(map[string]*appsv1.Deployment)
+				}
+				if state.Members[buildID][member] != nil {
+					return nil, fmt.Errorf("multiple Deployments for grouped build %q member %q", buildID, member)
+				}
+				state.Members[buildID][member] = deploy
+			}
+			if member == "" || member == PrimaryMember {
+				state.Deployments[buildID] = deploy
+				state.DeploymentRefs[buildID] = NewObjectRef(deploy)
+			}
 			state.DeploymentsByTime = append(state.DeploymentsByTime, deploy)
-			state.DeploymentRefs[buildID] = NewObjectRef(deploy)
 		}
 		// Any deployments without the build ID label are ignored
 	}
 
+	var err error
+	state.Revisions, err = GetGroupRevisions(ctx, k8sClient, namespace, ownerName, ownerUID)
+	if err != nil {
+		return nil, err
+	}
+	for buildID, members := range state.Members {
+		saved := state.Revisions[buildID]
+		if saved == nil {
+			return nil, fmt.Errorf("grouped build %q has members but no saved settings", buildID)
+		}
+		for name := range members {
+			if name != PrimaryMember && !slices.ContainsFunc(saved.Spec.AdditionalDeployments, func(member temporaliov1alpha1.AdditionalDeployment) bool { return member.Name == name }) {
+				return nil, fmt.Errorf("grouped build %q has unknown member %q", buildID, name)
+			}
+		}
+	}
 	return state, nil
 }
 
@@ -164,6 +201,15 @@ func ComputeBuildID(w *temporaliov1alpha1.WorkerDeployment) string {
 		// Fall through to default hash-based generation if buildID is invalid after cleaning
 	}
 
+	if len(w.Spec.AdditionalDeployments) > 0 {
+		data, err := json.Marshal(w.Spec)
+		if err != nil {
+			// Kubernetes has already decoded this specification as valid JSON.
+			// A marshal failure means an internal caller constructed invalid data.
+			panic(fmt.Errorf("encode grouped worker specification: %w", err))
+		}
+		return "group-" + HashString(string(data))[:32]
+	}
 	depSpec := w.Spec.DeploymentSpec()
 
 	if containers := depSpec.Template.Spec.Containers; len(containers) > 0 {

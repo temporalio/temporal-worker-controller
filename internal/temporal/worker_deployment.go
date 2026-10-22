@@ -19,7 +19,6 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
-	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -30,7 +29,9 @@ type VersionInfo struct {
 	Status         temporaliov1alpha1.VersionStatus
 	DrainedSince   *time.Time
 	TaskQueues     []temporaliov1alpha1.TaskQueue
-	TestWorkflows  []temporaliov1alpha1.WorkflowExecution
+	// RegisteredTaskQueues includes workflow and activity queues observed on this exact build.
+	RegisteredTaskQueues []temporaliov1alpha1.ExpectedTaskQueue
+	TestWorkflows        []temporaliov1alpha1.WorkflowExecution
 
 	// True if all task queues in this version have at least one unversioned poller.
 	// False could just mean unknown / not checked / not checked successfully.
@@ -75,14 +76,16 @@ type TemporalWorkerState struct {
 	ManagerIdentity      string
 }
 
-// GetWorkerDeploymentState queries Temporal to get the state of a worker deployment
+// GetWorkerDeploymentState queries Temporal for routing and version state.
+// knownBuildIDs includes both live Deployments and saved grouped builds, so an
+// interrupted cleanup still confirms a missing summary against the exact version.
 func GetWorkerDeploymentState(
 	ctx context.Context,
 	l logr.Logger,
 	client temporalClient.Client,
 	workerDeploymentName string,
 	namespace string,
-	k8sDeployments map[string]*appsv1.Deployment,
+	knownBuildIDs map[string]struct{},
 	targetBuildID string,
 	strategy temporaliov1alpha1.DefaultVersionUpdateStrategy,
 	controllerIdentity string,
@@ -173,7 +176,7 @@ func GetWorkerDeploymentState(
 	// that are present. For versions that are known to TWC but absent from the Worker Deployment
 	// description's version summaries, double-check their state before allowing them to map to
 	// NotRegistered and get scaled down.
-	for buildID := range k8sDeployments {
+	for buildID := range knownBuildIDs {
 		if _, exists := state.Versions[buildID]; exists {
 			continue
 		}
@@ -378,7 +381,22 @@ func GetTestWorkflowStatus(
 		return nil, fmt.Errorf("unable to describe worker deployment version for buildID %q: %w", buildID, err)
 	}
 
-	// Check test workflows for each task queue
+	// Record every queue kind before checking gate workflows. A missing gate
+	// execution does not mean a later activity queue failed to register.
+	for _, tq := range versionResp.Info.TaskQueuesInfos {
+		var kind temporaliov1alpha1.TaskQueueKind
+		switch tq.Type {
+		case temporalClient.TaskQueueTypeWorkflow:
+			kind = temporaliov1alpha1.TaskQueueWorkflow
+		case temporalClient.TaskQueueTypeActivity:
+			kind = temporaliov1alpha1.TaskQueueActivity
+		}
+		if kind != "" {
+			versionInfo.RegisteredTaskQueues = append(versionInfo.RegisteredTaskQueues, temporaliov1alpha1.ExpectedTaskQueue{Name: tq.Name, Kinds: []temporaliov1alpha1.TaskQueueKind{kind}})
+		}
+	}
+
+	// Check test workflows for each workflow task queue.
 	for _, tq := range versionResp.Info.TaskQueuesInfos {
 		// Skip non-workflow task queues
 		if tq.Type != temporalClient.TaskQueueTypeWorkflow {

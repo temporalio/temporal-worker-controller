@@ -17,6 +17,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -340,4 +342,56 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("exactly one of deployment or template must be set"))
 	})
+	It("validates grouped worker configuration in the API server", func() {
+		for _, test := range []struct {
+			name   string
+			change func(*WorkerDeployment)
+			valid  bool
+		}{
+			{"valid-group", func(*WorkerDeployment) {}, true},
+			{"single-queue-declaration", func(w *WorkerDeployment) { w.Spec.AdditionalDeployments = nil }, false},
+			{"missing-count", func(w *WorkerDeployment) { w.Spec.Deployment.Replicas = nil }, false},
+			{"zero-count", func(w *WorkerDeployment) { w.Spec.Deployment.Replicas = ptr(int32(0)) }, false},
+			{"missing-queues", func(w *WorkerDeployment) { w.Spec.ExpectedTaskQueues = nil }, false},
+			{"zero-member", func(w *WorkerDeployment) { w.Spec.AdditionalDeployments[0].Replicas = 0 }, false},
+			{"reserved-name", func(w *WorkerDeployment) { w.Spec.AdditionalDeployments[0].Name = "primary" }, false},
+			{"duplicate-name", func(w *WorkerDeployment) {
+				w.Spec.AdditionalDeployments = append(w.Spec.AdditionalDeployments, w.Spec.AdditionalDeployments[0])
+			}, false},
+			{"invalid-kind", func(w *WorkerDeployment) { w.Spec.ExpectedTaskQueues[0].Kinds = []TaskQueueKind{"Other"} }, false},
+			{"shared-drain-count", func(w *WorkerDeployment) {
+				w.Spec.DrainingDeployment = &DrainingDeploymentSpec{Replicas: ptr(int32(1))}
+			}, false},
+		} {
+			worker := baseTWD(test.name)
+			worker.Spec.Deployment.Replicas = ptr(int32(2))
+			worker.Spec.AdditionalDeployments = []AdditionalDeployment{{Name: "activities", Replicas: 3, Template: *worker.Spec.Deployment.Template.DeepCopy()}}
+			worker.Spec.ExpectedTaskQueues = []ExpectedTaskQueue{{Name: "jobs", Kinds: []TaskQueueKind{TaskQueueWorkflow, TaskQueueActivity}}}
+			test.change(worker)
+			err := k8sClient.Create(ctx, worker)
+			if test.valid {
+				Expect(err).NotTo(HaveOccurred(), test.name)
+			} else {
+				Expect(err).To(HaveOccurred(), test.name)
+			}
+		}
+	})
+
+	It("protects saved ControllerRevision data while allowing cleanup metadata", func() {
+		scheme := runtime.NewScheme()
+		Expect(appsv1.AddToScheme(scheme)).To(Succeed())
+		c, err := client.New(cfg, client.Options{Scheme: scheme})
+		Expect(err).NotTo(HaveOccurred())
+		revision := &appsv1.ControllerRevision{ObjectMeta: metav1.ObjectMeta{Name: "saved-group", Namespace: ns}, Revision: 1, Data: runtime.RawExtension{Raw: []byte(`{"template":"first"}`)}}
+		Expect(c.Create(ctx, revision)).To(Succeed())
+		revision.Data.Raw = []byte(`{"template":"changed"}`)
+		err = c.Update(ctx, revision)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("field is immutable"))
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(revision), revision)).To(Succeed())
+		before := revision.DeepCopy()
+		revision.Annotations = map[string]string{"example.invalid/cleanup": "requested"}
+		Expect(c.Patch(ctx, revision, client.MergeFrom(before))).To(Succeed())
+	})
+
 })

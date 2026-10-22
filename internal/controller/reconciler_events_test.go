@@ -688,8 +688,8 @@ func TestReconcile_ConnectionUnhealthy(t *testing.T) {
 	}
 }
 
-// TestReconcile_PlanGenerationFailed_EmitsEvent injects a List failure on the second call.
-// The first List (in worker_controller.go) succeeds; the second (inside generatePlan) fails,
+// TestReconcile_PlanGenerationFailed_EmitsEvent fails the second Deployment list.
+// The initial state read succeeds; the Deployment read inside generatePlan fails,
 // which causes Reconcile to emit ReasonPlanGenerationFailed.
 func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 	k8sNamespace := "default"
@@ -701,9 +701,11 @@ func TestReconcile_PlanGenerationFailed_EmitsEvent(t *testing.T) {
 	listCallCount := 0
 	r, recorder := newTestReconcilerWithInterceptors([]client.Object{twd, tc}, interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-			listCallCount++
-			if listCallCount > 1 {
-				return fmt.Errorf("simulated List failure on call #%d", listCallCount)
+			if _, deployments := list.(*appsv1.DeploymentList); deployments {
+				listCallCount++
+				if listCallCount > 1 {
+					return fmt.Errorf("simulated Deployment list failure on call #%d", listCallCount)
+				}
 			}
 			return c.List(ctx, list, opts...)
 		},
@@ -930,9 +932,9 @@ func TestExecuteK8sOperations_EmitsEventOnFailure(t *testing.T) {
 				},
 			},
 			makePlan: func(ns string) *plan {
-				return &plan{CreateDeployment: &appsv1.Deployment{
+				return &plan{CreateDeployments: []*appsv1.Deployment{{
 					ObjectMeta: metav1.ObjectMeta{Name: "new-deploy", Namespace: ns},
-				}}
+				}}}
 			},
 			expectedReason: ReasonDeploymentCreateFailed,
 		},
