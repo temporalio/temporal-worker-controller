@@ -56,6 +56,21 @@ jobs:
           helm template test-release helm/temporal-worker-controller \
             --set 'rbac.restrictWatchNamespaces={ns-a,ns-b}'
 
+      - name: Template with topologySpreadConstraints
+        run: |
+          set -euo pipefail
+          rendered=$(helm template test-release helm/temporal-worker-controller \
+            --show-only templates/manager.yaml \
+            --set 'topologySpreadConstraints[0].maxSkew=1' \
+            --set 'topologySpreadConstraints[0].topologyKey=topology.kubernetes.io/zone' \
+            --set 'topologySpreadConstraints[0].whenUnsatisfiable=ScheduleAnyway')
+          echo "$rendered" | grep -q 'topologyKey: topology.kubernetes.io/zone'
+          # the default podAntiAffinity is skipped when spread constraints are set
+          if echo "$rendered" | grep -q 'podAntiAffinity'; then
+            echo "default podAntiAffinity rendered alongside topologySpreadConstraints"
+            exit 1
+          fi
+
       - name: Template with stripped WRT HPA matchLabel prefixes
         run: |
           set -euo pipefail
