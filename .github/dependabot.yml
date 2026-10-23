@@ -7,7 +7,6 @@ updates:
     directories:
       - "/"
       - "/internal/demo"
-      - "/internal/tests"
     schedule:
       interval: weekly
     cooldown:
@@ -23,24 +22,16 @@ updates:
       # rebase conflicts.
       - dependency-name: "k8s.io/*"
       - dependency-name: "sigs.k8s.io/*"
+      # We are deliberate about updating the OTEL Go dependencies because
+      # dependabot cannot figure out that the OTEL Go package versions should
+      # be pinned to what the temporal server Go package requires.
+      - dependency-name: "go.opentelemetry.io/otel/*"
     groups:
       go-modules:
         applies-to: version-updates
         patterns:
           - "*"
         group-by: dependency-name
-
-  - package-ecosystem: helm
-    directory: "/helm/temporal-worker-controller"
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 14
-    ignore:
-      # We are deliberate about updating cert-manager dependency in our Helm
-      # chart. Keep this at >=1.0.0 and instruct dependabot to ignore this
-      # dependency in our Chart.yaml file.
-      - dependency-name: "cert-manager"
 
   - package-ecosystem: github-actions
     directory: "/"
