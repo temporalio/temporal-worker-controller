@@ -494,7 +494,7 @@ func TestReconcile_ClusterConnectionNamespaceScoped(t *testing.T) {
 		cc := makeClusterConnection("conn", "h:7233")
 		wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
 		r, recorder := newTestReconciler([]client.Object{cc, wd})
-		r.DisableClusterConnections = true
+		r.Config.DisableClusterConnections = true
 
 		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key(wd)})
 		require.NoError(t, err)
@@ -523,7 +523,7 @@ func TestReconcile_ClusterConnectionNamespaceScoped(t *testing.T) {
 	t.Run("namespacedRef_unaffected", func(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "missing", "Connection")
 		r, recorder := newTestReconciler([]client.Object{wd})
-		r.DisableClusterConnections = true
+		r.Config.DisableClusterConnections = true
 
 		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key(wd)})
 		require.Error(t, err, "expected the usual ConnectionNotFound failure")
@@ -552,7 +552,7 @@ func TestReleaseConnectionFinalizerIfUnused_NamespaceScoped(t *testing.T) {
 	controllerutil.AddFinalizer(cc, finalizerName)
 	wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
 	r, _ := newTestReconciler([]client.Object{cc, wd})
-	r.DisableClusterConnections = true
+	r.Config.DisableClusterConnections = true
 
 	require.NoError(t, r.releaseConnectionFinalizerIfUnused(
 		context.Background(), logr.Discard(), wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace, wd.Name))

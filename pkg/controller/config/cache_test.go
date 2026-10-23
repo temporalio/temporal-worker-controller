@@ -2,19 +2,20 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package controller
+package config_test
 
 import (
 	"reflect"
 	"testing"
 
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
+	"github.com/temporalio/temporal-worker-controller/pkg/controller/config"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
 func TestNewCacheOptionsScopesDeploymentsByWorkerLabel(t *testing.T) {
-	opts, err := NewCacheOptions(nil)
+	opts, err := config.NewCacheOptions(nil)
 	if err != nil {
 		t.Fatalf("NewCacheOptions returned error: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestNewCacheOptionsScopesDeploymentsByWorkerLabel(t *testing.T) {
 }
 
 func TestNewCacheOptionsScopesToWatchNamespaces(t *testing.T) {
-	opts, err := NewCacheOptions([]string{"ns-a", "ns-b"})
+	opts, err := config.NewCacheOptions([]string{"ns-a", "ns-b"})
 	if err != nil {
 		t.Fatalf("NewCacheOptions returned error: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestNewCacheOptionsScopesToWatchNamespaces(t *testing.T) {
 }
 
 func TestNewCacheOptionsWatchesAllNamespacesWhenEmpty(t *testing.T) {
-	opts, err := NewCacheOptions(nil)
+	opts, err := config.NewCacheOptions(nil)
 	if err != nil {
 		t.Fatalf("NewCacheOptions returned error: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestParseWatchNamespaces(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ParseWatchNamespaces(tt.raw)
+			got := config.ParseWatchNamespaces(tt.raw)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("ParseWatchNamespaces(%q) = %#v, want %#v", tt.raw, got, tt.want)
 			}

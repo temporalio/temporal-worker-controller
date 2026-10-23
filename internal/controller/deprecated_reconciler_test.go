@@ -410,10 +410,10 @@ func TestReconcileWithoutDeprecatedCRDs(t *testing.T) {
 		WithObjects(wd).
 		Build()
 	r := &WorkerDeploymentReconciler{
-		Client:               fakeClient,
-		Scheme:               scheme,
-		DisableDeprecatedTWD: true,
+		Client: fakeClient,
+		Scheme: scheme,
 	}
+	r.Config.DisableDeprecatedTWD = true
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: wd.Name, Namespace: wd.Namespace},
