@@ -816,7 +816,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty mTLS secret")
 	})
 
-	t.Run("different API key secrets produce different hashes", func(t *testing.T) {
+	t.Run("old style - different API key secrets produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
@@ -835,7 +835,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEqual(t, hash1, hash2, "Different API key secrets should produce different hashes")
 	})
 
-	t.Run("empty API key secret vs non-empty produce different hashes", func(t *testing.T) {
+	t.Run("old style - empty API key secret vs non-empty produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort:        "localhost:7233",
 			APIKeySecretRef: nil,
@@ -853,7 +853,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty API key secret")
 	})
 
-	t.Run("same API key secret name produce the same hash", func(t *testing.T) {
+	t.Run("old style - same API key secret name produce the same hash", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
@@ -873,7 +873,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.Equal(t, hash1, hash2, "Same API key secret name should produce the same hash")
 	})
 
-	t.Run("different CA cert secrets produce different hashes", func(t *testing.T) {
+	t.Run("old style - different CA cert secrets produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
@@ -899,7 +899,7 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEqual(t, hash1, hash2, "Different CA cert secrets should produce different hashes")
 	})
 
-	t.Run("empty CA cert secret vs non-empty produce different hashes", func(t *testing.T) {
+	t.Run("old style - empty CA cert secret vs non-empty produce different hashes", func(t *testing.T) {
 		spec1 := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "localhost:7233",
 			APIKeySecretRef: &corev1.SecretKeySelector{
@@ -920,6 +920,204 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		hash2 := k8s.ComputeConnectionSpecHash(spec2)
 
 		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty CA cert secret should produce different hashes")
+	})
+
+	t.Run("new style - different API key secrets produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret1"},
+					Key:                  "api-key1"},
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret2"},
+					Key:                  "api-key2"},
+			},
+		}
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different API key secrets should produce different hashes")
+	})
+
+	t.Run("new style - empty API key secret vs non-empty produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey:   nil,
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+		}
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty API key secret should produce different hashes")
+		assert.NotEmpty(t, hash1, "Hash should still be generated even with empty API key secret")
+	})
+
+	t.Run("new style - same API key secret name produce the same hash", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.Equal(t, hash1, hash2, "Same API key secret name should produce the same hash")
+	})
+
+	t.Run("new style - different CA cert secrets produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-1"},
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-2"},
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different CA cert secrets should produce different hashes")
+	})
+
+	t.Run("new style - empty CA cert secret vs non-empty produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret"},
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty CA cert secret should produce different hashes")
+	})
+
+	t.Run("new style - same API key path produce the same hash", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				Path: "api-key",
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				Path: "api-key",
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.Equal(t, hash1, hash2, "Same API key secret name should produce the same hash")
+	})
+
+	t.Run("new style - different CA cert secrets with same API key paths produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				Path: "api-key",
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-1"},
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				Path: "api-key",
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-2"},
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different CA cert secrets should produce different hashes")
+	})
+
+	t.Run("new style - API key path versus API key secret produce different hashes", func(t *testing.T) {
+		spec1 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				Path: "api-key",
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-1"},
+			},
+		}
+		spec2 := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "localhost:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret"},
+					Key:                  "api-key"},
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "ca-secret-1"},
+			},
+		}
+
+		hash1 := k8s.ComputeConnectionSpecHash(spec1)
+		hash2 := k8s.ComputeConnectionSpecHash(spec2)
+
+		assert.NotEqual(t, hash1, hash2, "Different API key path versus secret should produce different hashes")
 	})
 
 }
@@ -955,7 +1153,7 @@ func TestApplyControllerPodSpecModifications(t *testing.T) {
 		return corev1.Volume{}, false
 	}
 
-	t.Run("API key auth with CA cert mounts the CA secret and sets TLS env vars", func(t *testing.T) {
+	t.Run("old style - API key auth with CA cert mounts the CA secret and sets TLS env vars", func(t *testing.T) {
 		podSpec := newPodSpec()
 		connection := temporaliov1alpha1.ConnectionSpec{
 			HostPort: "temporal.internal:7233",
@@ -989,6 +1187,79 @@ func TestApplyControllerPodSpecModifications(t *testing.T) {
 		// API key env var must still be present alongside the CA config.
 		_, ok = getEnv(c, "TEMPORAL_API_KEY")
 		assert.True(t, ok)
+	})
+
+	t.Run("new style - API key auth with CA cert mounts the CA secret and sets TLS env vars", func(t *testing.T) {
+		podSpec := newPodSpec()
+		connection := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal.internal:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				SecretRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+					Key:                  "api-key",
+				},
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-ca-secret"},
+			},
+		}
+
+		k8s.ApplyControllerPodSpecModifications(podSpec, connection, "test-namespace", "test-worker", "v1")
+		c := podSpec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok, "TEMPORAL_TLS must be set when a CA cert is configured")
+		assert.Equal(t, "true", e.Value)
+
+		e, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		require.True(t, ok, "TEMPORAL_TLS_SERVER_CA_CERT_PATH must be set")
+		assert.Equal(t, "/etc/temporal/tls-ca/ca.crt", e.Value)
+
+		assert.True(t, hasMount(c, "temporal-tls-ca"), "worker pod must mount the CA secret")
+
+		vol, ok := hasVolume(podSpec, "temporal-tls-ca")
+		require.True(t, ok, "pod spec must have the CA cert volume")
+		require.NotNil(t, vol.Secret)
+		assert.Equal(t, "my-ca-secret", vol.Secret.SecretName)
+
+		// API key env var must still be present alongside the CA config.
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.True(t, ok)
+	})
+
+	t.Run("new style - API key path with CA cert mounts the CA secret and sets TLS env vars", func(t *testing.T) {
+		podSpec := newPodSpec()
+		connection := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal.internal:7233",
+			APIKey: &temporaliov1alpha1.APIKeyConfig{
+				Path: "api-key",
+			},
+			TLS: &temporaliov1alpha1.ConnectionTLSConfig{
+				CACertSecretRef: &temporaliov1alpha1.SecretReference{Name: "my-ca-secret"},
+			},
+		}
+
+		k8s.ApplyControllerPodSpecModifications(podSpec, connection, "test-namespace", "test-worker", "v1")
+		c := podSpec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok, "TEMPORAL_TLS must be set when a CA cert is configured")
+		assert.Equal(t, "true", e.Value)
+
+		e, ok = getEnv(c, "TEMPORAL_TLS_SERVER_CA_CERT_PATH")
+		require.True(t, ok, "TEMPORAL_TLS_SERVER_CA_CERT_PATH must be set")
+		assert.Equal(t, "/etc/temporal/tls-ca/ca.crt", e.Value)
+
+		assert.True(t, hasMount(c, "temporal-tls-ca"), "worker pod must mount the CA secret")
+
+		vol, ok := hasVolume(podSpec, "temporal-tls-ca")
+		require.True(t, ok, "pod spec must have the CA cert volume")
+		require.NotNil(t, vol.Secret)
+		assert.Equal(t, "my-ca-secret", vol.Secret.SecretName)
+
+		// API key env var should not present when using APIKey.Path
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.False(t, ok)
 	})
 
 	t.Run("no-credentials auth with CA cert still enables TLS", func(t *testing.T) {
@@ -1313,12 +1584,23 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 			},
 			namespace: "test-namespace-with-tls",
 		},
-		"with API key": {
+		"with APIKeySecretRef": {
 			connection: temporaliov1alpha1.ConnectionSpec{
 				HostPort: "test.temporal.example:9999",
 				APIKeySecretRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "test-api-key-secret"},
+					LocalObjectReference: corev1.LocalObjectReference{Name: "test-api-key-secret-ref"},
 					Key:                  "api-key"},
+			},
+			namespace: "test-namespace-with-api-key-secret-ref",
+		},
+		"with APIKey.SecretRef": {
+			connection: temporaliov1alpha1.ConnectionSpec{
+				HostPort: "test.temporal.example:9999",
+				APIKey: &temporaliov1alpha1.APIKeyConfig{
+					SecretRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "test-api-key-secret"},
+						Key:                  "api-key"},
+				},
 			},
 			namespace: "test-namespace-with-api-key",
 		},
@@ -1355,7 +1637,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 			container := deployment.Spec.Template.Spec.Containers[0]
 
 			// Infer whether TLS is expected from connection spec
-			expectTLS := tt.connection.MutualTLSSecretRef != nil || tt.connection.APIKeySecretRef != nil
+			expectTLS := tt.connection.MutualTLSSecretRef != nil || (tt.connection.APIKeySecretRef != nil || (tt.connection.APIKey != nil && tt.connection.APIKey.SecretRef != nil))
 
 			if expectTLS {
 				// Create temporary test certificate files
@@ -1373,7 +1655,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 						container.Env[i].Value = keyPath
 					}
 				}
-			} else if tt.connection.APIKeySecretRef != nil {
+			} else if tt.connection.APIKeySecretRef != nil || (tt.connection.APIKey != nil && tt.connection.APIKey.SecretRef != nil) {
 				for i := range container.Env {
 					if container.Env[i].Name == "TEMPORAL_API_KEY" {
 						assert.Equal(t, tt.connection.APIKeySecretRef.Name, container.Env[i].ValueFrom.SecretKeyRef.Name, "API key secret name should match")
@@ -1400,7 +1682,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 			// Verify that the parsed client options match our expectations
 			assert.Equal(t, tt.connection.HostPort, clientOptions.HostPort, "HostPort should be parsed from TEMPORAL_ADDRESS")
 			assert.Equal(t, tt.namespace, clientOptions.Namespace, "Namespace should be parsed from TEMPORAL_NAMESPACE")
-			if tt.connection.APIKeySecretRef != nil {
+			if tt.connection.APIKeySecretRef != nil || (tt.connection.APIKey != nil && tt.connection.APIKey.SecretRef != nil) {
 				assert.Equal(t, "test-api-key-value", os.Getenv("TEMPORAL_API_KEY"), "API key should be parsed from TEMPORAL_API_KEY")
 			}
 
@@ -1412,7 +1694,7 @@ func TestNewDeploymentWithOwnerRef_EnvConfigSDKCompatibility(t *testing.T) {
 
 			if expectTLS {
 				assert.NotNil(t, clientOptions.ConnectionOptions.TLS, "TLS should be configured for mTLS connection")
-			} else if tt.connection.APIKeySecretRef != nil {
+			} else if tt.connection.APIKeySecretRef != nil || (tt.connection.APIKey != nil && tt.connection.APIKey.SecretRef != nil) {
 				// An empty TLS config is configured when an API key is used without mTLS secrets
 				assert.Equal(t, clientOptions.ConnectionOptions.TLS, &tls.Config{}, "Empty TLS config should be configured for API key connection")
 			} else {

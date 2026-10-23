@@ -49,8 +49,33 @@ type ConnectionTLSConfig struct {
 	CACertSecretRef *SecretReference `json:"caCertSecretRef,omitempty"`
 }
 
+// APIKeyConfig contains desired state for a Connection that uses Temporal API
+// Keys for authentication.
+//
+// See: https://docs.temporal.io/cloud/api-keys
+//
+// You can populate the API Key via a Kubernetes Secret using the `secretRef`
+// field. Alternately, you can write the API Key to a file in the Pod and use
+// the `path` field to tell the controller about that API Key file.
+// +kubebuilder:validation:XValidation:rule="has(self.secretRef) != has(self.path)",message="Only one of secretRef or path may be set"
+type APIKeyConfig struct {
+	// SecretRef selects the Secret key that contains the API key used for
+	// authentication. The Secret must be `type: kubernetes.io/opaque` and
+	// exist in the same Kubernetes namespace as the Connection resource.
+	//
+	// This is a corev1.SecretKeySelector and encodes both:
+	//   - LocalObjectReference.Name: the name of the Secret resource
+	//   - Key: the data key within Secret.Data whose value is the API key token
+	// +optional
+	SecretRef *corev1.SecretKeySelector `json:"secretRef,omitempty"`
+	// Path is the file path in the Pod where the API Key can be found.
+	// +optional
+	Path string `json:"path,omitempty"`
+}
+
 // ConnectionSpec defines the desired state of Connection
-// +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))",message="Only one of mutualTLSSecretRef or apiKeySecretRef may be set"
+// +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && (has(self.apiKeySecretRef) || has(self.apiKey)))",message="Only one of mutualTLSSecretRef, apiKeySecretRef or apiKey may be set"
+// +kubebuilder:validation:XValidation:rule="(has(self.mutualTLSSecretRef) || (!(has(self.apiKeySecretRef) && has(self.apiKey))))",message="Only one of apiKeySecretRef or apiKey may be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.mutualTLSSecretRef) && has(self.tls) && has(self.tls.caCertSecretRef))",message="tls.caCertSecretRef cannot be combined with mutualTLSSecretRef; bundle the CA into that secret's own ca.crt key instead"
 type ConnectionSpec struct {
 	// HostPort is the Temporal server endpoint. Accepts a host:port (e.g.
@@ -81,7 +106,13 @@ type ConnectionSpec struct {
 	//   - LocalObjectReference.Name: the name of the Secret resource
 	//   - Key: the data key within Secret.Data whose value is the API key token
 	// +optional
+	// Deprecated: Use apiKey.secretRef instead
 	APIKeySecretRef *corev1.SecretKeySelector `json:"apiKeySecretRef,omitempty"`
+
+	// APIKey contains configuration when authenticating to the Temporal API
+	// using API Keys.
+	// +optional
+	APIKey *APIKeyConfig `json:"apiKey,omitempty"`
 }
 
 // Validate returns an error if the ConnectionSpec is not valid.
@@ -92,8 +123,21 @@ func (s ConnectionSpec) Validate() error {
 			return errors.New("TLS secret name is not set")
 		}
 	case AuthModeAPIKey:
-		if s.APIKeySecretRef == nil || s.APIKeySecretRef.Name == "" {
-			return errors.New("API key secret name is not set")
+		if s.APIKeySecretRef != nil {
+			if s.APIKeySecretRef.Name == "" {
+				return errors.New("API key secret name is not set")
+			}
+			return nil
+		}
+		// CEL validation ensures either APIKey or APIKeySecretRef is non-nil.
+		if s.APIKey.SecretRef != nil {
+			if s.APIKey.SecretRef.Name == "" {
+				return errors.New("API key secret name is not set")
+			}
+		} else {
+			if s.APIKey.Path == "" {
+				return errors.New("API key path is not set")
+			}
 		}
 	}
 	return nil
@@ -104,7 +148,7 @@ func (s ConnectionSpec) AuthMode() AuthMode {
 	switch {
 	case s.MutualTLSSecretRef != nil:
 		return AuthModeTLS
-	case s.APIKeySecretRef != nil:
+	case s.APIKeySecretRef != nil || s.APIKey != nil:
 		return AuthModeAPIKey
 	default:
 		return AuthModeNoCredentials
@@ -112,22 +156,44 @@ func (s ConnectionSpec) AuthMode() AuthMode {
 }
 
 // SecretName extracts the secret name from the ConnectionSpec, returning an
-// empty string authentication mode does not requires it.
+// empty string if authentication mode does not requires it.
 func (s ConnectionSpec) SecretName() string {
 	switch s.AuthMode() {
+	case AuthModeNoCredentials:
+		return ""
 	case AuthModeTLS:
 		if s.MutualTLSSecretRef == nil {
 			return ""
 		}
 		return s.MutualTLSSecretRef.Name
 	case AuthModeAPIKey:
-		if s.APIKeySecretRef == nil {
-			return ""
+		if s.APIKeySecretRef != nil {
+			return s.APIKeySecretRef.Name
 		}
-		return s.APIKeySecretRef.Name
+		// CEL validation ensures either APIKey or APIKeySecretRef is non-nil,
+		// however we still need to check whether APIKey.SecretRef is nil,
+		// since the user may have specified Path instead.
+		if s.APIKey.SecretRef != nil {
+			return s.APIKey.SecretRef.Name
+		}
+		return ""
 	default:
 		return ""
 	}
+}
+
+// SecretKeySelector returns the corev1.SecretKeySelector that is configured for
+// the ConnectionSpec, or nil if either not using API Key authentication *or*
+// using the path-based APIKey configuration.
+func (s ConnectionSpec) SecretKeySelector() *corev1.SecretKeySelector {
+	if s.AuthMode() != AuthModeAPIKey {
+		return nil
+	}
+	if s.APIKeySecretRef != nil {
+		return s.APIKeySecretRef
+	}
+	// CEL validation ensures either APIKey or APIKeySecretRef is non-nil,
+	return s.APIKey.SecretRef
 }
 
 func (s ConnectionSpec) TLSServerName() string {
