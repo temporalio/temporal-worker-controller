@@ -385,10 +385,9 @@ func runKstatusTests(
 		// Now we change the WD's connection to point to a yet-to-exist
 		// connection B, check that the WD goes to Reconciling=True state and
 		// that the observed connection ref continues to point to connection A.
-		twd.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{Name: connBName}
-		if err := k8sClient.Update(ctx, &twd); err != nil {
-			t.Fatalf("failed to update WD to Connection B: %v", err)
-		}
+		twd = updateWorkerDeployment(t, ctx, k8sClient, types.NamespacedName{Name: twd.Name, Namespace: twd.Namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
+			w.Spec.WorkerOptions.ConnectionRef = temporaliov1alpha1.ConnectionReference{Name: connBName}
+		})
 
 		waitForCondition(t, ctx, k8sClient, twd.Name, twd.Namespace,
 			temporaliov1alpha1.ConditionReconciling,

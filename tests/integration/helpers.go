@@ -29,8 +29,10 @@ import (
 	"go.temporal.io/server/temporaltest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
@@ -474,4 +476,30 @@ func validateManagerIdentity(expected string) func(t *testing.T, ctx context.Con
 			t.Errorf("expected manager identity to be %q, got %q", expected, desc.Info.ManagerIdentity)
 		}
 	}
+}
+
+// updateWorkerDeployment applies mutate to a freshly fetched copy of the WorkerDeployment and
+// updates it, then returns the updated object. The controller adds finalizers and writes status on
+// the same object, so a bare Get followed by Update can lose that race and fail with a conflict;
+// retry on conflict and re-apply mutate to the latest version instead. mutate can run more than once.
+func updateWorkerDeployment(
+	t *testing.T,
+	ctx context.Context,
+	k8sClient client.Client,
+	key types.NamespacedName,
+	mutate func(*temporaliov1alpha1.WorkerDeployment),
+) temporaliov1alpha1.WorkerDeployment {
+	t.Helper()
+	var updated temporaliov1alpha1.WorkerDeployment
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := k8sClient.Get(ctx, key, &updated); err != nil {
+			return err
+		}
+		mutate(&updated)
+		return k8sClient.Update(ctx, &updated)
+	})
+	if err != nil {
+		t.Fatalf("failed to update WorkerDeployment %s: %v", key, err)
+	}
+	return updated
 }
