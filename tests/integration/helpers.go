@@ -33,7 +33,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/config"
+	ctrlrtconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -247,7 +247,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 		Scheme: scheme.Scheme,
 		// Each top-level test starts and stops its own manager. Controller-runtime
 		// keeps its controller-name registry for the lifetime of the test process.
-		Controller: config.Controller{SkipNameValidation: new(true)},
+		Controller: ctrlrtconfig.Controller{SkipNameValidation: new(true)},
 	})
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
