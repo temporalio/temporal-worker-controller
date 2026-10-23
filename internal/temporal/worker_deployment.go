@@ -159,7 +159,9 @@ func GetWorkerDeploymentState(
 				BuildID: version.DeploymentVersion.BuildId,
 			})
 			if descErr == nil {
-				versionInfo.TaskQueuesWithoutPollers, versionInfo.TaskQueueDescribeError = getTaskQueuesWithNoPollers(ctx, client, currentDesc.Info.TaskQueuesInfos)
+				versionInfo.TaskQueuesWithoutPollers, versionInfo.TaskQueueDescribeError = getTaskQueuesWithNoPollers(
+					ctx, client, version.DeploymentVersion.DeploymentName, version.DeploymentVersion.BuildId, currentDesc.Info.TaskQueuesInfos,
+				)
 			} else {
 				versionInfo.TaskQueueDescribeError = descErr
 			}
@@ -485,8 +487,26 @@ func getPollers(ctx context.Context,
 	return resp.GetPollers(), nil
 }
 
+// pollersForVersion returns the pollers whose deployment options identify the given
+// Worker Deployment name and build ID. DescribeTaskQueue returns the pollers of the
+// default queue and of every versioned queue merged, so without this filter a poller
+// from a different version (for example a Draining one) would be counted. A poller that
+// reports no deployment options cannot be attributed to the version, so it is not counted.
+func pollersForVersion(pollers []*taskqueuepb.PollerInfo, deploymentName, buildID string) []*taskqueuepb.PollerInfo {
+	var matching []*taskqueuepb.PollerInfo
+	for _, p := range pollers {
+		opts := p.GetDeploymentOptions()
+		if opts.GetDeploymentName() == deploymentName && opts.GetBuildId() == buildID {
+			matching = append(matching, p)
+		}
+	}
+	return matching
+}
+
 // getTaskQueuesWithNoPollers reports the names of task queues, among tqs, that were
-// confirmed to have no active poller. It stops and returns an error on the first
+// confirmed to have no active poller for the version identified by deploymentName and
+// buildID. Pollers belonging to other versions of the deployment, or reporting no
+// deployment options, are not counted. It stops and returns an error on the first
 // DescribeTaskQueue failure rather than continuing on to the remaining task
 // queues: such an error is most likely a rate limit or a network
 // partition/connectivity failure, and continuing to hammer Temporal with more
@@ -499,6 +519,7 @@ func getPollers(ctx context.Context,
 func getTaskQueuesWithNoPollers(
 	ctx context.Context,
 	client temporalClient.Client,
+	deploymentName, buildID string,
 	tqs []temporalClient.WorkerDeploymentTaskQueueInfo,
 ) (taskQueuesWithoutPollers []string, err error) {
 	taskQueuesWithoutPollers = make([]string, 0, len(tqs))
@@ -507,7 +528,7 @@ func getTaskQueuesWithNoPollers(
 		if err != nil {
 			return taskQueuesWithoutPollers, err
 		}
-		if len(pollers) == 0 {
+		if len(pollersForVersion(pollers, deploymentName, buildID)) == 0 {
 			taskQueuesWithoutPollers = append(taskQueuesWithoutPollers, tqInfo.Name)
 		}
 	}
