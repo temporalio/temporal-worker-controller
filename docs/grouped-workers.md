@@ -68,6 +68,22 @@ The controller injects the same Temporal deployment name and build ID into every
 member using the existing worker environment variables. Configure each worker's
 SDK to use those values and poll its intended queue kinds.
 
+## Member resource names
+
+New grouped member Deployments start with up to 25 characters of the member name,
+then up to 10 DNS-safe characters of the build ID, then a 10-character hash of the
+complete WorkerDeployment name, member name, and build ID. Names stay within the
+controller's existing 47-character Deployment allowance. For example, an
+`activities` member with build `release-1` starts with `activities-release-1-`.
+The hash distinguishes groups and builds whose readable prefixes are the same.
+
+A controller upgrade preserves existing Deployment names, UIDs, and pods. The
+controller finds members by their owner and build/member labels, so old and new
+name formats can coexist in one retained build. If a member Deployment is
+missing, the controller restores its saved settings using the new readable name.
+Generated resource names are not a stable caller contract; use the labels and
+observed status references described below. Single-Deployment naming is unchanged.
+
 ## Readiness and promotion
 
 Before starting configured gate workflows, the controller waits for all members
