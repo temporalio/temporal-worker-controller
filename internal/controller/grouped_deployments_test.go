@@ -499,6 +499,8 @@ func TestGroupedCandidateCSupersedesPartiallyCreatedBWithoutReplacingAOrB(t *tes
 	require.NoError(t, r.planGroupedDeployments(c, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, true))
 	require.Len(t, p.CreateRevisions, 1)
 	assert.Equal(t, "build-c", p.CreateRevisions[0].Labels[k8s.BuildIDLabel])
+	require.Len(t, p.CreateDeployments, 2, "obsolete B waits for its retirement observation")
+	require.NoError(t, planGroupRetirements(context.Background(), approvedRetirements(t, p, nil), p))
 	require.Len(t, p.CreateDeployments, 3)
 	for _, deployment := range p.CreateDeployments {
 		switch deployment.Labels[k8s.BuildIDLabel] {
