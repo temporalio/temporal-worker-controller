@@ -194,6 +194,14 @@ its normal readiness status; other obsolete groups can still retire. A process s
 between assignment and removal can resume from the approved build's observed
 zero-percent assignment without an extra saved phase record.
 
+An obsolete group's member changes are planned only after its retirement checks
+succeed. An error reading approval or readiness, or completing routing
+maintenance, leaves its existing member objects and replica counts unchanged;
+it does not restore an already stopped group. A successful observation that still
+needs workers restores missing members and their saved counts. Other groups
+continue independently. Shared connection updates still apply to observed
+members while preserving their actual replica counts.
+
 A grouped version keeps every saved member count until its application workflow
 has succeeded, its controller-created readiness workflows have closed, and
 Temporal reports it globally `Drained`. Temporal's drainage check includes

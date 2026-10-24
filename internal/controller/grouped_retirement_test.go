@@ -121,7 +121,11 @@ func retirementPlan(t *testing.T, versionStatus v1alpha1.VersionStatus) (*plan, 
 	p.WorkerDeploymentName = "test-workers"
 	p.allowGroupedDrainage = true
 	p.TemporalNamespace = "test-namespace"
-	p.groupRetirements = []groupRetirement{{buildID: "build-b", saved: saved, actual: members, desired: members, version: &temporal.VersionInfo{BuildID: "build-b", Status: versionStatus}}}
+	desired := make(map[string]*appsv1.Deployment, len(members))
+	for name, member := range members {
+		desired[name] = member.DeepCopy()
+	}
+	p.groupRetirements = []groupRetirement{{buildID: "build-b", saved: saved, actual: members, desired: desired, version: &temporal.VersionInfo{BuildID: "build-b", Status: versionStatus}}}
 	h := &retirementRoutingHandle{description: sdkclient.WorkerDeploymentDescribeResponse{ConflictToken: []byte("before"), Info: sdkclient.WorkerDeploymentInfo{RoutingConfig: sdkclient.WorkerDeploymentRoutingConfig{CurrentVersion: &worker.WorkerDeploymentVersion{DeploymentName: p.WorkerDeploymentName, BuildID: "build-c"}}}}}
 	return p, h
 }
@@ -271,7 +275,6 @@ func TestGroupedDrainedDelayDoesNotRestoreAlreadyStoppedMembers(t *testing.T) {
 	for _, member := range g.actual {
 		zero := int32(0)
 		member.Spec.Replicas = &zero
-		p.ScaleDeployments[k8s.NewObjectRef(member)] = 3
 	}
 	c := approvedRetirements(t, p, newStubTemporalClientWithHandle(h))
 	require.NoError(t, planGroupRetirements(context.Background(), c, p))

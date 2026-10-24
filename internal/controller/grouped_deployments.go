@@ -82,34 +82,29 @@ func (r *WorkerDeploymentReconciler) planGroupedDeployments(
 		}
 		version := temporalState.Versions[buildID]
 		markedForDeletion := saved.Object.Annotations[k8s.GroupDeletionAnnotation] == "true"
-		deleting := markedForDeletion
 		if markedForDeletion && (buildID == target || buildID == temporalState.CurrentBuildID || buildID == temporalState.RampingBuildID) {
 			return fmt.Errorf("grouped build %q already entered retirement; use a new build ID", buildID)
 		}
-		if !markedForDeletion && buildID != target && buildID != temporalState.CurrentBuildID && (buildID != temporalState.RampingBuildID || temporalState.RampPercentage == 0) {
+		if markedForDeletion {
+			for name := range members {
+				if actual := state.Members[buildID][name]; actual != nil {
+					p.DeleteDeployments = append(p.DeleteDeployments, actual)
+				}
+			}
+			if len(state.Members[buildID]) == 0 {
+				p.DeleteRevisions = append(p.DeleteRevisions, saved.Object)
+			}
+			continue
+		}
+		if buildID != target && buildID != temporalState.CurrentBuildID && (buildID != temporalState.RampingBuildID || temporalState.RampPercentage == 0) {
 			p.groupRetirements = append(p.groupRetirements, groupRetirement{
 				buildID: buildID, saved: saved, actual: state.Members[buildID], desired: members, version: version,
 			})
+			// Obsolete members wait for their retirement reads before any
+			// creation or replica change is added to this reconciliation.
+			continue
 		}
-		for name, desired := range members {
-			actual := state.Members[buildID][name]
-			if deleting {
-				if actual != nil {
-					p.DeleteDeployments = append(p.DeleteDeployments, actual)
-				}
-				continue
-			}
-			if actual == nil {
-				p.CreateDeployments = append(p.CreateDeployments, desired)
-				continue
-			}
-			if actual.Spec.Replicas == nil || *actual.Spec.Replicas != *desired.Spec.Replicas {
-				p.ScaleDeployments[k8s.NewObjectRef(actual)] = uint32(*desired.Spec.Replicas)
-			}
-		}
-		if deleting && len(state.Members[buildID]) == 0 {
-			p.DeleteRevisions = append(p.DeleteRevisions, saved.Object)
-		}
+		planGroupMembers(p, state.Members[buildID], members)
 	}
 	if saved := state.Revisions[target]; saved != nil {
 		p.targetGroup = saved
@@ -133,6 +128,22 @@ func (r *WorkerDeploymentReconciler) planGroupedDeployments(
 		}
 	}
 	return nil
+}
+
+// planGroupMembers creates missing members and adjusts observed replica counts
+// to the selected templates. Callers choose those counts only after the reads
+// that authorize active restoration or obsolete-group retirement succeed.
+func planGroupMembers(p *plan, actual, desired map[string]*appsv1.Deployment) {
+	for name, member := range desired {
+		observed := actual[name]
+		if observed == nil {
+			p.CreateDeployments = append(p.CreateDeployments, member)
+			continue
+		}
+		if observed.Spec.Replicas == nil || *observed.Spec.Replicas != *member.Spec.Replicas {
+			p.ScaleDeployments[k8s.NewObjectRef(observed)] = uint32(*member.Spec.Replicas)
+		}
+	}
 }
 
 // applyGroupedStatus reports health only after every saved member has its exact

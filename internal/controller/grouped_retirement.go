@@ -79,13 +79,14 @@ func planGroupRetirements(ctx context.Context, c sdkclient.Client, p *plan) erro
 
 // planGroupRetirement keeps one obsolete group's saved pod counts until its
 // application approval, readiness workflow closure, and Temporal drainage permit
-// retirement. A failed check changes no worker plan for this group.
+// retirement. A failed check adds no member creation, scaling or deletion.
 func planGroupRetirement(ctx context.Context, c sdkclient.Client, p *plan, group groupRetirement) error {
 	approved, err := completedRetirement(ctx, c, p, group)
 	if err != nil {
 		return err
 	}
 	if !approved {
+		planGroupMembers(p, group.actual, group.desired)
 		return nil
 	}
 	closed, err := groupReadinessGatesClosed(ctx, c, p.WorkerDeploymentName, group)
@@ -93,6 +94,7 @@ func planGroupRetirement(ctx context.Context, c sdkclient.Client, p *plan, group
 		return err
 	}
 	if !closed {
+		planGroupMembers(p, group.actual, group.desired)
 		return nil
 	}
 	if group.version == nil || group.version.Status == v1alpha1.VersionStatusNotRegistered || group.version.Status == v1alpha1.VersionStatusInactive || group.version.Status == v1alpha1.VersionStatusCreated || group.version.Status == v1alpha1.VersionStatusRamping {
@@ -101,35 +103,28 @@ func planGroupRetirement(ctx context.Context, c sdkclient.Client, p *plan, group
 				return err
 			}
 		}
+		planGroupMembers(p, group.actual, group.desired)
 		return nil
 	}
 	if group.version.Status != v1alpha1.VersionStatusDrained || group.version.DrainedSince == nil {
+		planGroupMembers(p, group.actual, group.desired)
 		return nil
 	}
 	elapsed := time.Since(*group.version.DrainedSince)
 	if elapsed <= group.saved.Spec.SunsetStrategy.ScaledownDelay.Duration {
+		planGroupMembers(p, group.actual, group.desired)
 		return nil
 	}
 	deleting := elapsed > group.saved.Spec.SunsetStrategy.ScaledownDelay.Duration+group.saved.Spec.SunsetStrategy.DeleteDelay.Duration && groupStopped(group.actual, group.desired)
-	for _, desired := range p.CreateDeployments {
-		if desired.Labels[k8s.BuildIDLabel] == group.buildID {
-			zero := int32(0)
-			desired.Spec.Replicas = &zero
-		}
+	for _, desired := range group.desired {
+		zero := int32(0)
+		desired.Spec.Replicas = &zero
 	}
-	for _, actual := range group.actual {
-		for ref := range p.ScaleDeployments {
-			if ref.Name == actual.Name && ref.Namespace == actual.Namespace {
-				delete(p.ScaleDeployments, ref)
-			}
-		}
-		if deleting {
-			p.DeleteDeployments = append(p.DeleteDeployments, actual)
-		} else if actual.Spec.Replicas == nil || *actual.Spec.Replicas != 0 {
-			p.ScaleDeployments[k8s.NewObjectRef(actual)] = 0
-		}
-	}
+	planGroupMembers(p, group.actual, group.desired)
 	if deleting {
+		for _, actual := range group.actual {
+			p.DeleteDeployments = append(p.DeleteDeployments, actual)
+		}
 		p.MarkRevisionsForDeletion = append(p.MarkRevisionsForDeletion, group.saved.Object)
 	}
 	return nil
