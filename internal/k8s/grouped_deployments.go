@@ -127,13 +127,25 @@ func (g *GroupRevision) Deployments(
 		if err != nil {
 			return nil, err
 		}
-		deployment.Name = ComputeVersionedDeploymentName(w.Name+"-"+member.Name, buildID)
+		deployment.Name = computeGroupedDeploymentName(w.Name, member.Name, buildID)
 		deployment.Labels[MemberLabel] = member.Name
 		deployment.Spec.Selector.MatchLabels[MemberLabel] = member.Name
 		deployment.Spec.Template.Labels[MemberLabel] = member.Name
 		result[member.Name] = deployment
 	}
 	return result, nil
+}
+
+// computeGroupedDeploymentName puts the member and build prefixes before a hash
+// of the complete owner, member, and build. The returned name fits the existing
+// Deployment name allowance, leaving room for Kubernetes to append pod suffixes.
+func computeGroupedDeploymentName(ownerName, memberName, buildID string) string {
+	const buildPrefixLen = 10
+	const hashLen = 10
+	const memberPrefixLen = MaxDeploymentNameLen - buildPrefixLen - hashLen - 2
+	hash := HashString(ownerName + "\x00" + memberName + "\x00" + buildID)[:hashLen]
+	return TruncateString(memberName, memberPrefixLen) + "-" +
+		CleanStringForDNS(TruncateString(buildID, buildPrefixLen)) + "-" + hash
 }
 
 // validateSavedGroup checks the JSON loaded from ControllerRevision Data before
