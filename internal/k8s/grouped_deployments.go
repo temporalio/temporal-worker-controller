@@ -113,7 +113,7 @@ func (g *GroupRevision) Deployments(
 	scheme *runtime.Scheme,
 ) (map[string]*appsv1.Deployment, error) {
 	result := make(map[string]*appsv1.Deployment)
-	members := append([]v1alpha1.AdditionalDeployment{{Name: PrimaryMember}}, g.Spec.AdditionalDeployments...)
+	members := append([]v1alpha1.AdditionalDeployment{{Name: PrimaryMember, DeploymentNamePrefix: g.Spec.DeploymentNamePrefix}}, g.Spec.AdditionalDeployments...)
 	for _, member := range members {
 		copy := w.DeepCopy()
 		copy.Spec = *g.Spec.DeepCopy()
@@ -127,7 +127,7 @@ func (g *GroupRevision) Deployments(
 		if err != nil {
 			return nil, err
 		}
-		deployment.Name = computeGroupedDeploymentName(w.Name, member.Name, buildID)
+		deployment.Name = computeGroupedDeploymentName(w.Name, member.Name, member.DeploymentNamePrefix, buildID)
 		deployment.Labels[MemberLabel] = member.Name
 		deployment.Spec.Selector.MatchLabels[MemberLabel] = member.Name
 		deployment.Spec.Template.Labels[MemberLabel] = member.Name
@@ -136,16 +136,18 @@ func (g *GroupRevision) Deployments(
 	return result, nil
 }
 
-// computeGroupedDeploymentName puts the member and build prefixes before a hash
-// of the complete owner, member, and build. The returned name fits the existing
-// Deployment name allowance, leaving room for Kubernetes to append pod suffixes.
-func computeGroupedDeploymentName(ownerName, memberName, buildID string) string {
+// computeGroupedDeploymentName adds a release suffix to a configured prefix.
+// Without a prefix, the existing naming function uses the owner and member names.
+// Complete identities keep separate groups and members distinct even when callers
+// choose the same readable prefix.
+func computeGroupedDeploymentName(ownerName, memberName, prefix, buildID string) string {
+	if prefix == "" {
+		return ComputeVersionedDeploymentName(ownerName+"-"+memberName, buildID)
+	}
 	const buildPrefixLen = 10
 	const hashLen = 10
-	const memberPrefixLen = MaxDeploymentNameLen - buildPrefixLen - hashLen - 2
 	hash := HashString(ownerName + "\x00" + memberName + "\x00" + buildID)[:hashLen]
-	return TruncateString(memberName, memberPrefixLen) + "-" +
-		CleanStringForDNS(TruncateString(buildID, buildPrefixLen)) + "-" + hash
+	return prefix + "-" + CleanStringForDNS(TruncateString(buildID, buildPrefixLen)) + "-" + hash
 }
 
 // validateSavedGroup checks the JSON loaded from ControllerRevision Data before
@@ -162,8 +164,14 @@ func validateSavedGroup(ctx context.Context, spec *v1alpha1.WorkerDeploymentSpec
 	if spec.GroupRetirementWorkflow == nil || spec.GroupRetirementWorkflow.WorkflowType == "" || spec.GroupRetirementWorkflow.TaskQueue == "" {
 		return fmt.Errorf("group retirement workflow type and task queue are required")
 	}
+	if err := validateSavedDeploymentNamePrefix(spec.DeploymentNamePrefix); err != nil {
+		return fmt.Errorf("primary member: %w", err)
+	}
 	members := map[string]bool{PrimaryMember: true}
 	for _, member := range spec.AdditionalDeployments {
+		if err := validateSavedDeploymentNamePrefix(member.DeploymentNamePrefix); err != nil {
+			return fmt.Errorf("member %q: %w", member.Name, err)
+		}
 		if members[member.Name] || len(validation.IsDNS1123Label(member.Name)) > 0 || member.Replicas < 1 {
 			return fmt.Errorf("member %q needs a unique valid name and a positive replica count", member.Name)
 		}
@@ -182,6 +190,17 @@ func validateSavedGroup(ctx context.Context, spec *v1alpha1.WorkerDeploymentSpec
 			}
 			kinds[kind] = true
 		}
+	}
+	return nil
+}
+
+// validateSavedDeploymentNamePrefix checks settings read from saved build JSON.
+// Kubernetes validates new resources against the schema, but does not validate
+// these stored bytes when the controller loads a historical build.
+func validateSavedDeploymentNamePrefix(prefix string) error {
+	const prefixMaxLen = MaxDeploymentNameLen - 10 - 10 - 2
+	if prefix != "" && (len(prefix) > prefixMaxLen || len(validation.IsDNS1123Label(prefix)) > 0) {
+		return fmt.Errorf("deploymentNamePrefix must be a DNS label of at most %d characters", prefixMaxLen)
 	}
 	return nil
 }
