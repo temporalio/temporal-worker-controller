@@ -349,6 +349,23 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 			valid  bool
 		}{
 			{"valid-group", func(*WorkerDeployment) {}, true},
+			{"prefix-without-group", func(w *WorkerDeployment) {
+				w.Spec.DeploymentNamePrefix = "workflow-worker"
+				w.Spec.AdditionalDeployments = nil
+				w.Spec.ExpectedTaskQueues = nil
+				w.Spec.GroupRetirementWorkflow = nil
+			}, false},
+			{"configured-prefixes", func(w *WorkerDeployment) {
+				w.Spec.DeploymentNamePrefix = "workflow-worker"
+				w.Spec.AdditionalDeployments[0].DeploymentNamePrefix = "activity-worker"
+			}, true},
+			{"prefix-at-limit", func(w *WorkerDeployment) { w.Spec.DeploymentNamePrefix = "abcdefghijklmnopqrstuvwxy" }, true},
+			{"primary-prefix-too-long", func(w *WorkerDeployment) { w.Spec.DeploymentNamePrefix = "abcdefghijklmnopqrstuvwxyz" }, false},
+			{"member-prefix-too-long", func(w *WorkerDeployment) {
+				w.Spec.AdditionalDeployments[0].DeploymentNamePrefix = "abcdefghijklmnopqrstuvwxyz"
+			}, false},
+			{"invalid-primary-prefix", func(w *WorkerDeployment) { w.Spec.DeploymentNamePrefix = "Workflow" }, false},
+			{"invalid-member-prefix", func(w *WorkerDeployment) { w.Spec.AdditionalDeployments[0].DeploymentNamePrefix = "activity worker" }, false},
 			{"missing-retirement", func(w *WorkerDeployment) { w.Spec.GroupRetirementWorkflow = nil }, false},
 			{"empty-retirement-type", func(w *WorkerDeployment) { w.Spec.GroupRetirementWorkflow.WorkflowType = "" }, false},
 			{"empty-retirement-queue", func(w *WorkerDeployment) { w.Spec.GroupRetirementWorkflow.TaskQueue = "" }, false},
@@ -372,9 +389,13 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 			worker.Spec.GroupRetirementWorkflow = &GroupRetirementWorkflowConfig{WorkflowType: "RetireBuild", TaskQueue: "management"}
 			worker.Spec.ExpectedTaskQueues = []ExpectedTaskQueue{{Name: "jobs", Kinds: []TaskQueueKind{TaskQueueWorkflow, TaskQueueActivity}}}
 			test.change(worker)
+			requested := worker.DeepCopy()
 			err := k8sClient.Create(ctx, worker)
 			if test.valid {
 				Expect(err).NotTo(HaveOccurred(), test.name)
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(worker), worker)).To(Succeed())
+				Expect(worker.Spec.DeploymentNamePrefix).To(Equal(requested.Spec.DeploymentNamePrefix))
+				Expect(worker.Spec.AdditionalDeployments[0].DeploymentNamePrefix).To(Equal(requested.Spec.AdditionalDeployments[0].DeploymentNamePrefix))
 			} else {
 				Expect(err).To(HaveOccurred(), test.name)
 			}

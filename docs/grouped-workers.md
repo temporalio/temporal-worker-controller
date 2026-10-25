@@ -24,6 +24,7 @@ spec:
       name: temporal
     temporalNamespace: default
     unsafeCustomBuildID: release-1
+  deploymentNamePrefix: workflow-worker
   deployment:
     replicas: 2
     template:
@@ -34,6 +35,7 @@ spec:
             image: example.invalid/workflow-worker:release-1
   additionalDeployments:
     - name: activities
+      deploymentNamePrefix: activity-worker
       replicas: 3
       template:
         spec:
@@ -70,19 +72,27 @@ SDK to use those values and poll its intended queue kinds.
 
 ## Member resource names
 
-New grouped member Deployments start with up to 25 characters of the member name,
-then up to 10 DNS-safe characters of the build ID, then a 10-character hash of the
-complete WorkerDeployment name, member name, and build ID. Names stay within the
-controller's existing 47-character Deployment allowance. For example, an
-`activities` member with build `release-1` starts with `activities-release-1-`.
-The hash distinguishes groups and builds whose readable prefixes are the same.
+Applications can set `spec.deploymentNamePrefix` for the primary member and
+`spec.additionalDeployments[].deploymentNamePrefix` for each additional member.
+These fields name Kubernetes Deployments; `name` remains the stable member
+identity used in labels and status. For example, a primary prefix of
+`workflow-worker` produces a name starting with `workflow-worker-release-1-`
+for build `release-1`.
 
-A controller upgrade preserves existing Deployment names, UIDs, and pods. The
-controller finds members by their owner and build/member labels, so old and new
-name formats can coexist in one retained build. If a member Deployment is
-missing, the controller restores its saved settings using the new readable name.
-Generated resource names are not a stable caller contract; use the labels and
-observed status references described below. Single-Deployment naming is unchanged.
+A prefix may contain lowercase letters, digits and internal dashes, with at most
+25 characters, inclusive. It must start and end with a letter or digit.
+The controller reserves the remaining 22 characters of its existing
+47-character Deployment allowance for two separators, up to 10 characters of
+the build ID and a 10-character hash of the complete group, member and build
+identities. Two members may use the same prefix without sharing a Deployment.
+Omitting a prefix keeps the original naming behavior based on group and member
+names. Single-Deployment naming is unchanged.
+
+Prefixes are saved with each build's other settings. Changing a prefix requires
+a new build ID. A controller upgrade preserves existing Deployment names, UIDs
+and pods; missing members are restored using their saved prefix, not the newest
+resource settings. Generated names are not a stable caller contract. Use the
+owner, build/member labels and observed status references described below.
 
 ## Readiness and promotion
 
@@ -118,6 +128,12 @@ for example in its gate workflow. The controller
 owns Temporal routing and worker lifecycle, not application request routing.
 
 ## Upgrade order
+
+Install the prefix fields in the resource definitions and upgrade the controller
+before an application configures them. Keep a controller that understands those
+fields while any saved build contains a prefix. An older binary cannot recreate
+that build's names from its saved settings. Before prefixes are used, the prior
+group-capable controller remains a valid rollback target.
 
 Install the updated CRDs and controller RBAC, then complete the controller upgrade
 before applying grouped specifications. Older controller versions do not understand

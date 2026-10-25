@@ -53,6 +53,7 @@ type WorkerOptions struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.expectedTaskQueues) || size(self.expectedTaskQueues) == 0 || (has(self.additionalDeployments) && size(self.additionalDeployments) > 0)",message="expectedTaskQueues is only supported for grouped workers"
 // +kubebuilder:validation:XValidation:rule="!has(self.additionalDeployments) || size(self.additionalDeployments) == 0 || has(self.groupRetirementWorkflow)",message="grouped workers require groupRetirementWorkflow"
 // +kubebuilder:validation:XValidation:rule="!has(self.groupRetirementWorkflow) || (has(self.additionalDeployments) && size(self.additionalDeployments) > 0)",message="groupRetirementWorkflow is only supported for grouped workers"
+// +kubebuilder:validation:XValidation:rule="!has(self.deploymentNamePrefix) || (has(self.additionalDeployments) && size(self.additionalDeployments) > 0)",message="deploymentNamePrefix is only supported for grouped workers"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -105,6 +106,15 @@ type WorkerDeploymentSpec struct {
 	// `make manifests` removes selector from this field's required schema list.
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
+
+	// DeploymentNamePrefix supplies the readable name of the primary grouped
+	// Deployment. The controller adds a release suffix; member identity is unchanged.
+	// Omit it to use the WorkerDeployment and member names. A new value requires
+	// a new grouped build ID because saved build settings are immutable.
+	// +optional
+	// +kubebuilder:validation:MaxLength=25
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	DeploymentNamePrefix string `json:"deploymentNamePrefix,omitempty"`
 
 	// AdditionalDeployments run separate worker pods in the same Temporal build.
 	// Each member keeps its own credentials, resources, and fixed replica count.
@@ -179,6 +189,13 @@ type (
 		// +kubebuilder:validation:MaxLength=63
 		// +kubebuilder:validation:XValidation:rule="self != 'primary'",message="primary is reserved"
 		Name string `json:"name"`
+		// DeploymentNamePrefix supplies this member's readable Deployment name.
+		// The controller adds a release suffix. Omit it to use the WorkerDeployment
+		// and member names; Name still identifies the member across builds.
+		// +optional
+		// +kubebuilder:validation:MaxLength=25
+		// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+		DeploymentNamePrefix string `json:"deploymentNamePrefix,omitempty"`
 		// Replicas is the fixed number of pods for this member.
 		// +kubebuilder:validation:Minimum=1
 		Replicas int32 `json:"replicas"`

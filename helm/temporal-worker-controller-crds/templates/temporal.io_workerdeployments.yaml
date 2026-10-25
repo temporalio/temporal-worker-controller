@@ -49,6 +49,10 @@ spec:
               additionalDeployments:
                 items:
                   properties:
+                    deploymentNamePrefix:
+                      maxLength: 25
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
                     name:
                       maxLength: 63
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
@@ -7777,6 +7781,10 @@ spec:
                     are managed by the controller
                   rule: '!(''temporal.io/build-id'' in self) && !(''temporal.io/deployment-name''
                     in self) && !(''temporal.io/member'' in self)'
+              deploymentNamePrefix:
+                maxLength: 25
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               drainingDeployment:
                 properties:
                   replicas:
@@ -11822,6 +11830,9 @@ spec:
                 == 0 || has(self.groupRetirementWorkflow)'
             - message: groupRetirementWorkflow is only supported for grouped workers
               rule: '!has(self.groupRetirementWorkflow) || (has(self.additionalDeployments)
+                && size(self.additionalDeployments) > 0)'
+            - message: deploymentNamePrefix is only supported for grouped workers
+              rule: '!has(self.deploymentNamePrefix) || (has(self.additionalDeployments)
                 && size(self.additionalDeployments) > 0)'
           status:
             properties:

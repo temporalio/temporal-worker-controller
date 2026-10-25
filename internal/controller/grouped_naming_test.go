@@ -39,6 +39,8 @@ func TestGroupedNamingUpgradePreservesExistingAndRestoresMissingMembers(t *testi
 				}
 			}
 			next := groupedWorker("release-2")
+			next.Spec.DeploymentNamePrefix = "new-workflow-worker"
+			next.Spec.AdditionalDeployments[0].DeploymentNamePrefix = "new-activity-worker"
 			next.Spec.AdditionalDeployments[0].Template.Spec.ServiceAccountName = "new-activity-account"
 			ts := registeredGroup(old.Spec.WorkerOptions.UnsafeCustomBuildID)
 			ts.CurrentBuildID = old.Spec.WorkerOptions.UnsafeCustomBuildID
@@ -56,7 +58,7 @@ func TestGroupedNamingUpgradePreservesExistingAndRestoresMissingMembers(t *testi
 				require.Len(t, p.CreateDeployments, 1)
 				restored := p.CreateDeployments[0]
 				assert.Equal(t, missing, restored.Labels[k8s.MemberLabel])
-				assert.NotEqual(t, members[missing].Name, restored.Name)
+				assert.Equal(t, members[missing].Name, restored.Name)
 				assert.Equal(t, members[missing].Spec, restored.Spec)
 				assert.Equal(t, members[missing].OwnerReferences, restored.OwnerReferences)
 			}
@@ -121,4 +123,40 @@ func TestGroupedNamingUpgradeRetirementUsesObservedNames(t *testing.T) {
 	require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, false))
 	require.NoError(t, planGroupRetirements(context.Background(), approvedRetirements(t, p, nil), p))
 	assert.ElementsMatch(t, []*appsv1.Deployment{members[k8s.PrimaryMember], members["activities"]}, p.DeleteDeployments)
+}
+
+// TestGroupedNamingRestorationUsesSavedPrefixes checks that a newer release's
+// names cannot change the settings used to restore an older missing worker.
+func TestGroupedNamingRestorationUsesSavedPrefixes(t *testing.T) {
+	ctx := context.Background()
+	r, _ := newTestReconciler(nil)
+	old := groupedWorker("release-1")
+	old.Spec.DeploymentNamePrefix = "workflow-worker"
+	old.Spec.AdditionalDeployments[0].DeploymentNamePrefix = "activity-worker"
+	saved, members := savedGroup(t, r, old)
+	require.NoError(t, r.Create(ctx, saved.Object))
+	require.NoError(t, r.Create(ctx, members[k8s.PrimaryMember]))
+	next := groupedWorker("release-2")
+	next.Spec.DeploymentNamePrefix = "new-workflow-worker"
+	next.Spec.AdditionalDeployments[0].DeploymentNamePrefix = "new-activity-worker"
+	ts := registeredGroup(old.Spec.WorkerOptions.UnsafeCustomBuildID)
+	ts.CurrentBuildID = old.Spec.WorkerOptions.UnsafeCustomBuildID
+	state, err := k8s.GetDeploymentState(ctx, r.Client, old.Namespace, old.Name, old.UID)
+	require.NoError(t, err)
+	p := groupPlan()
+	require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, false))
+	require.Len(t, p.CreateDeployments, 1)
+	assert.Equal(t, members["activities"].Name, p.CreateDeployments[0].Name)
+	assert.Contains(t, p.CreateDeployments[0].Name, "activity-worker-release-1-")
+	assert.Empty(t, p.UpdateDeployments)
+	assert.Empty(t, p.ScaleDeployments)
+	assert.Empty(t, p.DeleteDeployments)
+	_, err = r.executeK8sOperations(ctx, logr.Discard(), next, p)
+	require.NoError(t, err)
+	state, err = k8s.GetDeploymentState(ctx, r.Client, old.Namespace, old.Name, old.UID)
+	require.NoError(t, err)
+	p = groupPlan()
+	require.NoError(t, r.planGroupedDeployments(next, v1alpha1.ConnectionSpec{HostPort: "test:7233"}, ts, state, p, false))
+	assert.Empty(t, p.CreateDeployments)
+	assert.Equal(t, members[k8s.PrimaryMember].Name, state.Members[ts.CurrentBuildID][k8s.PrimaryMember].Name)
 }
