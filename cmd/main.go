@@ -47,6 +47,7 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var webhookPort int
 	var watchNamespaces string
 	var webhookCertDir string
 	var webhookCertName string
@@ -55,6 +56,7 @@ func main() {
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.IntVar(&webhookPort, "webhook-port", 9443, "The port the webhook server binds to (1-65535).")
 	flag.StringVar(&watchNamespaces, "watch-namespaces", "",
 		"Comma-separated list of namespaces the controller watches. "+
 			"If empty, the controller watches all namespaces.")
@@ -104,6 +106,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	webhookOptions, err := newWebhookOptions(webhookPort, webhookCertDir, webhookCertName, webhookKeyName)
+	if err != nil {
+		setupLog.Error(err, "invalid webhook port")
+		os.Exit(1)
+	}
+
 	managerOptions := ctrl.Options{
 		Scheme: scheme,
 		Cache:  cacheOptions,
@@ -126,13 +134,7 @@ func main() {
 		// LeaderElectionReleaseOnCancel: true,
 	}
 
-	if webhookCertDir != "" {
-		managerOptions.WebhookServer = webhook.NewServer(webhook.Options{
-			CertDir:  webhookCertDir,
-			CertName: webhookCertName,
-			KeyName:  webhookKeyName,
-		})
-	}
+	managerOptions.WebhookServer = webhook.NewServer(webhookOptions)
 
 	cfg := ctrl.GetConfigOrDie()
 	mgr, err := ctrl.NewManager(cfg, managerOptions)
@@ -242,4 +244,18 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func newWebhookOptions(port int, certDir, certName, keyName string) (webhook.Options, error) {
+	if port < 1 || port > 65535 {
+		return webhook.Options{}, fmt.Errorf("webhook port must be between 1 and 65535, got %d", port)
+	}
+
+	options := webhook.Options{Port: port}
+	if certDir != "" {
+		options.CertDir = certDir
+		options.CertName = certName
+		options.KeyName = keyName
+	}
+	return options, nil
 }
