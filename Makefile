@@ -1,7 +1,7 @@
 # Image URL to use all building/pushing image targets
 IMG ?= temporal-worker-controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.29.0
+ENVTEST_K8S_VERSION = 1.36.0
 
 MAIN_BRANCH = main
 ALL_TEST_TAGS = integration
@@ -36,8 +36,8 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 TEMPORAL ?= temporal
 
 ## Tool Versions
-HELM_VERSION ?= v3.14.3
-CONTROLLER_TOOLS_VERSION ?= v0.19.0
+HELM_VERSION ?= v3.22.1
+CONTROLLER_TOOLS_VERSION ?= v0.22.0
 
 ##### Tools #####
 print-go-version:
