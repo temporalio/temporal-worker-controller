@@ -10,7 +10,7 @@ For a request involving an existing cluster, use read-only checks before choosin
 2. Read the controller release's values with `helm get values <release> -n <namespace> --all` to check `certmanager.install`. Check its manifest if the values do not show whether the release owns cert-manager.
 3. Check which `temporal.io` CRDs exist. Query old Kind resources only if their CRDs exist.
 
-If cluster access is unavailable or the user requests a plan without commands, ask for the relevant results rather than running checks. For a fresh install, first check whether a TWC release or CRDs already exist, then follow [Install](#install).
+If cluster access is unavailable, ask for the relevant results. If the user requests a plan only, do not run cluster commands. For a fresh install, first check whether a TWC release or CRDs already exist, then follow [Install](#install).
 
 ## Before changing a cluster
 
@@ -46,10 +46,10 @@ Check `helm version --short`. The OCI chart commands below require Helm v3.8 or 
 
 ### Prepare webhook TLS
 
-The controller always needs a TLS Secret for its WorkerResourceTemplate webhook. Choose one path before installing the controller. If cluster access is available, inspect the relevant prerequisite. Otherwise, tell the user what is required and ask for the check result.
+Choose a certificate source before installing the controller:
 
-- Default: independently install and verify cert-manager and its CRDs first; use [cert-manager](#cert-manager). The TWC chart then creates the Issuer and Certificate.
-- User-provided certificate: create the TLS Secret in the controller release namespace and configure `certmanager.enabled: false`, `webhook.certSecretName`, and `certmanager.caBundle`; use [Webhook TLS](#webhook-tls).
+- **cert-manager:** Install and verify cert-manager and its CRDs first; use [cert-manager](#cert-manager). The TWC chart then creates the Issuer and Certificate.
+- **Your own certificate:** Create the TLS Secret in the controller release namespace and set `certmanager.enabled: false`, `webhook.certSecretName`, and `certmanager.caBundle`; use [Webhook TLS](#webhook-tls).
 
 ### Install the charts
 
