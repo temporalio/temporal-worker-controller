@@ -477,8 +477,8 @@ func validateManagerIdentity(expected string) func(t *testing.T, ctx context.Con
 // the same object, so a bare Get followed by Update can lose that race and fail with a conflict;
 // retry on conflict and re-apply mutate to the latest version instead. mutate can run more than once.
 func updateWorkerDeployment(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	k8sClient client.Client,
 	key types.NamespacedName,
 	mutate func(*temporaliov1alpha1.WorkerDeployment),

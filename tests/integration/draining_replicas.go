@@ -92,7 +92,7 @@ func testDrainingDeploymentReplicas(t *testing.T, k8sClient client.Client, ts *t
 
 	key := types.NamespacedName{Name: twd.Name, Namespace: namespace}
 	var buildIDv2 string
-	next := updateWorkerDeployment(t, ctx, k8sClient, key, func(w *temporaliov1alpha1.WorkerDeployment) {
+	next := updateWorkerDeployment(ctx, t, k8sClient, key, func(w *temporaliov1alpha1.WorkerDeployment) {
 		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 		buildIDv2 = k8s.ComputeBuildID(w)
 	})

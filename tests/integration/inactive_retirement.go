@@ -95,7 +95,7 @@ func testInactiveVersionRetirement(t *testing.T, k8sClient client.Client, ts *te
 	// Replace the target before ever making v1 current or ramping.
 	key := types.NamespacedName{Name: twd.Name, Namespace: namespace}
 	var newBuildID string
-	next := updateWorkerDeployment(t, ctx, k8sClient, key, func(w *temporaliov1alpha1.WorkerDeployment) {
+	next := updateWorkerDeployment(ctx, t, k8sClient, key, func(w *temporaliov1alpha1.WorkerDeployment) {
 		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 		newBuildID = k8s.ComputeBuildID(w)
 	})

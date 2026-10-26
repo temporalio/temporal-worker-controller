@@ -213,7 +213,7 @@ func testMissingSummaryVersionIsDescribedBeforeDeletion(
 	}()
 
 	var buildIDv2 string
-	updateWorkerDeployment(t, ctx, k8sClient, types.NamespacedName{Name: twd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
+	updateWorkerDeployment(ctx, t, k8sClient, types.NamespacedName{Name: twd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
 		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 		buildIDv2 = k8s.ComputeBuildID(w)
 	})

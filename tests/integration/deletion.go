@@ -128,7 +128,7 @@ func testDeletionSetsCurrentToUnversioned(
 	// Update the WD to target v2.0, creating a second version to use as a ramping version.
 	// This exercises the ramping-version clear path in handleDeletion.
 	var buildIDv2 string
-	updateWorkerDeployment(t, ctx, k8sClient, types.NamespacedName{Name: wd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
+	updateWorkerDeployment(ctx, t, k8sClient, types.NamespacedName{Name: wd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
 		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 		buildIDv2 = k8s.ComputeBuildID(w)
 	})
@@ -422,7 +422,7 @@ func testDrainedVersionPrunedOnSunset(
 
 	// Roll out v2.0 and make it current, so v1.0 becomes deprecated and starts draining.
 	var buildIDv2 string
-	updateWorkerDeployment(t, ctx, k8sClient, types.NamespacedName{Name: twd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
+	updateWorkerDeployment(ctx, t, k8sClient, types.NamespacedName{Name: twd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
 		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
 		buildIDv2 = k8s.ComputeBuildID(w)
 	})
