@@ -33,6 +33,78 @@ jobs:
       - name: Template with default values
         run: helm template test-release helm/temporal-worker-controller
 
+      - name: Check default and custom network settings
+        run: |
+          set -euo pipefail
+          expect() {
+            if ! grep -Fq -- "$1" <<< "$rendered"; then
+              echo "missing $configuration setting: $1" >&2
+              exit 1
+            fi
+          }
+
+          for configuration in default custom; do
+            args=()
+            webhook_port=9443
+            metrics_port=8080
+            health_port=8081
+            proxy_port=8443
+            dns_policy=ClusterFirst
+            if [[ "$configuration" == custom ]]; then
+              webhook_port=10443
+              metrics_port=18080
+              health_port=18081
+              proxy_port=18443
+              dns_policy=ClusterFirstWithHostNet
+              args=(--set hostNetwork=true --set dnsPolicy="$dns_policy"
+                --set webhook.port="$webhook_port" --set metrics.port="$metrics_port"
+                --set metrics.healthPort="$health_port" --set kubeRBACProxy.port="$proxy_port")
+            fi
+            rendered=$(helm template test-release helm/temporal-worker-controller "${args[@]}")
+            expect "\"--webhook-port=$webhook_port\""
+            expect "containerPort: $webhook_port"
+            expect "targetPort: $webhook_port"
+            expect "\"--metrics-bind-address=127.0.0.1:$metrics_port\""
+            expect "--upstream=http://127.0.0.1:$metrics_port/"
+            expect "\"--health-probe-bind-address=:$health_port\""
+            if [[ $(grep -Ec "^[[:space:]]+port: $health_port$" <<< "$rendered") -ne 2 ]]; then
+              echo "both $configuration health probes must use port $health_port" >&2
+              exit 1
+            fi
+            expect "\"--secure-listen-address=0.0.0.0:$proxy_port\""
+            expect "containerPort: $proxy_port"
+            expect "name: https"
+            expect "targetPort: https"
+            expect "dnsPolicy: $dns_policy"
+            if [[ "$configuration" == custom ]]; then
+              expect "hostNetwork: true"
+            elif grep -Fq 'hostNetwork: true' <<< "$rendered"; then
+              echo "host networking must be disabled by default" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check port schema boundaries
+        run: |
+          set -euo pipefail
+          for key in webhook.port metrics.port metrics.healthPort kubeRBACProxy.port; do
+            for port in 1 65535; do
+              helm template test-release helm/temporal-worker-controller \
+                --set "$key=$port" > /dev/null
+            done
+            for port in -1 0 65536 not-a-port; do
+              if output=$(helm template test-release helm/temporal-worker-controller \
+                --set "$key=$port" 2>&1); then
+                echo "expected schema validation to reject $key=$port" >&2
+                exit 1
+              fi
+              if ! grep -Fq "${key#*.}" <<< "$output"; then
+                echo "unexpected validation error for $key=$port: $output" >&2
+                exit 1
+              fi
+            done
+          done
+
       - name: Template with namespace creation
         run: |
           helm template test-release helm/temporal-worker-controller \
