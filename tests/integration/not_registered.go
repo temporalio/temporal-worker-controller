@@ -212,16 +212,12 @@ func testMissingSummaryVersionIsDescribedBeforeDeletion(
 		)
 	}()
 
-	var twdV2 temporaliov1alpha1.WorkerDeployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: twd.Name, Namespace: namespace}, &twdV2); err != nil {
-		t.Fatalf("failed to get WorkerDeployment for v2 update: %v", err)
-	}
-	twdV2.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
-	buildIDv2 := k8s.ComputeBuildID(&twdV2)
+	var buildIDv2 string
+	updateWorkerDeployment(ctx, t, k8sClient, types.NamespacedName{Name: twd.Name, Namespace: namespace}, func(w *temporaliov1alpha1.WorkerDeployment) {
+		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
+		buildIDv2 = k8s.ComputeBuildID(w)
+	})
 	deploymentNameV2 := k8s.ComputeVersionedDeploymentName(twd.Name, buildIDv2)
-	if err := k8sClient.Update(ctx, &twdV2); err != nil {
-		t.Fatalf("failed to update WorkerDeployment to v2: %v", err)
-	}
 	eventually(t, 30*time.Second, time.Second, func() error {
 		var deployment appsv1.Deployment
 		return k8sClient.Get(ctx, types.NamespacedName{Name: deploymentNameV2, Namespace: namespace}, &deployment)

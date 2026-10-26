@@ -101,16 +101,12 @@ func testInactiveVersionRetirement(t *testing.T, k8sClient client.Client, ts *te
 	}
 
 	// Replace the target before ever making v1 current or ramping.
-	var next temporaliov1alpha1.WorkerDeployment
 	key := types.NamespacedName{Name: twd.Name, Namespace: namespace}
-	if err := k8sClient.Get(ctx, key, &next); err != nil {
-		t.Fatal(err)
-	}
-	next.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
-	newBuildID := k8s.ComputeBuildID(&next)
-	if err := k8sClient.Update(ctx, &next); err != nil {
-		t.Fatal(err)
-	}
+	var newBuildID string
+	next := updateWorkerDeployment(ctx, t, k8sClient, key, func(w *temporaliov1alpha1.WorkerDeployment) {
+		w.Spec.Deployment.Template.Spec.Containers[0].Image = "v2.0"
+		newBuildID = k8s.ComputeBuildID(w)
+	})
 	newKey := types.NamespacedName{Name: k8s.ComputeVersionedDeploymentName(twd.Name, newBuildID), Namespace: namespace}
 	eventually(t, 30*time.Second, time.Second, func() error {
 		var dep appsv1.Deployment
