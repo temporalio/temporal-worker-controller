@@ -3,7 +3,49 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "properties": {
     "affinity": {
-      "description": "Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager\npods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.\nThe default is not rendered when topologySpreadConstraints is set.",
+      "description": "Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager\npods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.\nThe value is rendered with tpl, so it can reference the release (e.g. {{ .Release.Name }}).\nHelm merges maps with the defaults below: to drop the default podAntiAffinity, set\naffinity.podAntiAffinity to null (e.g. --set affinity.podAntiAffinity=null); to render no\naffinity at all, set affinity to null.",
+      "properties": {
+        "podAntiAffinity": {
+          "properties": {
+            "preferredDuringSchedulingIgnoredDuringExecution": {
+              "items": {
+                "properties": {
+                  "podAffinityTerm": {
+                    "properties": {
+                      "labelSelector": {
+                        "properties": {
+                          "matchLabels": {
+                            "properties": {
+                              "app.kubernetes.io/instance": {
+                                "type": "string"
+                              },
+                              "app.kubernetes.io/name": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "topologyKey": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "weight": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "authProxy": {
@@ -358,7 +400,7 @@
       "type": "array"
     },
     "topologySpreadConstraints": {
-      "description": "Topology spread constraints for the manager pods, e.g. to spread replicas across\nnodes and zones. When set and affinity is empty, the default podAntiAffinity is\nskipped so the two do not overlap.",
+      "description": "Topology spread constraints for the manager pods, e.g. to spread replicas across\nnodes and zones. Can be combined with affinity; see above to drop the default\npodAntiAffinity.",
       "type": "array"
     },
     "webhook": {

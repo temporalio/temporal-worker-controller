@@ -59,15 +59,24 @@ jobs:
       - name: Template with topologySpreadConstraints
         run: |
           set -euo pipefail
+          spread=(
+            --set 'topologySpreadConstraints[0].maxSkew=1'
+            --set 'topologySpreadConstraints[0].topologyKey=topology.kubernetes.io/zone'
+            --set 'topologySpreadConstraints[0].whenUnsatisfiable=ScheduleAnyway'
+          )
+          # the default podAntiAffinity is kept alongside topologySpreadConstraints
           rendered=$(helm template test-release helm/temporal-worker-controller \
-            --show-only templates/manager.yaml \
-            --set 'topologySpreadConstraints[0].maxSkew=1' \
-            --set 'topologySpreadConstraints[0].topologyKey=topology.kubernetes.io/zone' \
-            --set 'topologySpreadConstraints[0].whenUnsatisfiable=ScheduleAnyway')
+            --show-only templates/manager.yaml "${spread[@]}")
           echo "$rendered" | grep -q 'topologyKey: topology.kubernetes.io/zone'
-          # the default podAntiAffinity is skipped when spread constraints are set
-          if echo "$rendered" | grep -q 'podAntiAffinity'; then
-            echo "default podAntiAffinity rendered alongside topologySpreadConstraints"
+          echo "$rendered" | grep -q 'podAntiAffinity'
+          echo "$rendered" | grep -q "app.kubernetes.io/instance: 'test-release'"
+          # and can be dropped by setting it to null
+          rendered=$(helm template test-release helm/temporal-worker-controller \
+            --show-only templates/manager.yaml "${spread[@]}" \
+            --set affinity.podAntiAffinity=null)
+          echo "$rendered" | grep -q 'topologyKey: topology.kubernetes.io/zone'
+          if echo "$rendered" | grep -q 'affinity:'; then
+            echo "affinity rendered after setting affinity.podAntiAffinity=null"
             exit 1
           fi
 
