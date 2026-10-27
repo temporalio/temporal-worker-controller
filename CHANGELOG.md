@@ -5,6 +5,51 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
+## [1.14.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.13.0...v1.14.0) - 2026-10-27
+
+### Features
+
+- support custom labels on versioned Deployments ([#639](https://github.com/temporalio/temporal-worker-controller/pull/639)) ([`68e8bba`](https://github.com/temporalio/temporal-worker-controller/commit/68e8bba3bc541b86cdc0ebb018a7a938a7c67646))
+- enable setting value for number of draining deployment replicas ([#646](https://github.com/temporalio/temporal-worker-controller/pull/646)) ([`8ece977`](https://github.com/temporalio/temporal-worker-controller/commit/8ece9779577348a1436c58b9b3e8dc47af62114a))
+
+### Bug Fixes
+
+- **controller:** scope the active-poller check to the current version ([#673](https://github.com/temporalio/temporal-worker-controller/pull/673)) ([`c0af3a8`](https://github.com/temporalio/temporal-worker-controller/commit/c0af3a8d8fbabfd7e4ab0229164d45fcf72afb72))
+- **planner:** hash template before controller changes ([#662](https://github.com/temporalio/temporal-worker-controller/pull/662)) ([`7f26c4c`](https://github.com/temporalio/temporal-worker-controller/commit/7f26c4c610c61c5c1bcd1616f0519d5cb2594d17))
+- remove delete-protection finalizer from migrated deprecated reso… ([#648](https://github.com/temporalio/temporal-worker-controller/pull/648)) ([`e635d5c`](https://github.com/temporalio/temporal-worker-controller/commit/e635d5c17f8ceb3b4f5771a93346d4a1edf71aa7))
+- **controller:** grant get, list and watch on ConfigMaps for gate inputFrom ([#650](https://github.com/temporalio/temporal-worker-controller/pull/650)) ([`94ce9d8`](https://github.com/temporalio/temporal-worker-controller/commit/94ce9d891f975173c688df8891cf661bc1fa0591))
+
+### Documentation
+
+- **changelog:** update changelog for v1.13.0 ([#647](https://github.com/temporalio/temporal-worker-controller/pull/647)) ([`07529e8`](https://github.com/temporalio/temporal-worker-controller/commit/07529e84555e7e32a5cdf3107493d7850716bca7))
+
+### Tests
+
+- **integration:** retry WorkerDeployment updates on conflict ([#663](https://github.com/temporalio/temporal-worker-controller/pull/663)) ([`1578064`](https://github.com/temporalio/temporal-worker-controller/commit/15780640c74d62c12a843e0b8f53875443c438a0))
+- **integration:** isolate worker deployment rate-limit scenario ([#664](https://github.com/temporalio/temporal-worker-controller/pull/664)) ([`faea800`](https://github.com/temporalio/temporal-worker-controller/commit/faea8002742645b920565a09eb4ac28d12d9eb38))
+- **planner:** regression tests for reviving drained zero-replica versions ([#653](https://github.com/temporalio/temporal-worker-controller/pull/653)) ([`1eef4df`](https://github.com/temporalio/temporal-worker-controller/commit/1eef4dfc13c8e9e7ca5ef16917a4529b2a229023))
+- **e2e:** check the controller can read gate inputs, and document the inputFrom trust boundary ([#660](https://github.com/temporalio/temporal-worker-controller/pull/660)) ([`4fb4f3b`](https://github.com/temporalio/temporal-worker-controller/commit/4fb4f3b5084a230e55f98b81685a56ba00ce2ba6))
+- add E2E upgrade workflow ([#640](https://github.com/temporalio/temporal-worker-controller/pull/640)) ([`49ef31d`](https://github.com/temporalio/temporal-worker-controller/commit/49ef31d3bbbc9baa5954077929830e466e087a1d))
+
+### Chores
+
+- **deps:** bump goreleaser/goreleaser-action from 7.2.3 to 7.3.0 ([#677](https://github.com/temporalio/temporal-worker-controller/pull/677)) ([`b456e88`](https://github.com/temporalio/temporal-worker-controller/commit/b456e88a71dee86618d8bcd276bdac9168d7c8cf))
+- **deps:** bump github.com/onsi/ginkgo/v2 in / ([#679](https://github.com/temporalio/temporal-worker-controller/pull/679)) ([`c515ff9`](https://github.com/temporalio/temporal-worker-controller/commit/c515ff996985366a8e135350865c0dae7cb202b0))
+- **deps:** bump actions/create-github-app-token from 3.1.1 to 3.3.0 ([#676](https://github.com/temporalio/temporal-worker-controller/pull/676)) ([`9dbe09b`](https://github.com/temporalio/temporal-worker-controller/commit/9dbe09b6d3260fde0cdf1b6843029546c888788a))
+- **deps:** bump github.com/prometheus/client_golang in / ([#665](https://github.com/temporalio/temporal-worker-controller/pull/665)) ([`25c20ef`](https://github.com/temporalio/temporal-worker-controller/commit/25c20ef71c06c81a478f9d0693e2d6b467dd4428))
+- **deps:** bump actions/upload-artifact from 4.6.2 to 7.0.2 ([#667](https://github.com/temporalio/temporal-worker-controller/pull/667)) ([`e2692f8`](https://github.com/temporalio/temporal-worker-controller/commit/e2692f8febd3add8af20b1cf39f7cb626e58ee23))
+- **deps:** bump helm/kind-action from 1.15.0 to 1.15.1 ([#670](https://github.com/temporalio/temporal-worker-controller/pull/670)) ([`5e69191`](https://github.com/temporalio/temporal-worker-controller/commit/5e69191492b0a7091e935614d42ae87a60bdbbc6))
+- **deps:** bump github.com/onsi/gomega in / ([#652](https://github.com/temporalio/temporal-worker-controller/pull/652)) ([`4d0da4b`](https://github.com/temporalio/temporal-worker-controller/commit/4d0da4b01828187172a99a84f60bb3a5102012b3))
+
+### Other Changes
+
+- Add TWC install and upgrade agent skill ([#643](https://github.com/temporalio/temporal-worker-controller/pull/643)) ([`56318aa`](https://github.com/temporalio/temporal-worker-controller/commit/56318aa53962a8f7127bf07e9e3d31c855cb593b))
+- exclude OTEL from dependabot, uplift ctrl-tools ([#675](https://github.com/temporalio/temporal-worker-controller/pull/675)) ([`e91c898`](https://github.com/temporalio/temporal-worker-controller/commit/e91c898be91d71a1bb94c908f6e90e45b47d8941))
+- fix shadowed import in integration test helpers.go ([#674](https://github.com/temporalio/temporal-worker-controller/pull/674)) ([`52350d9`](https://github.com/temporalio/temporal-worker-controller/commit/52350d90c1f29154724d2d1ae5402bdcd26cf12a))
+- introduce pkg/controller/config package ([#661](https://github.com/temporalio/temporal-worker-controller/pull/661)) ([`8c2de92`](https://github.com/temporalio/temporal-worker-controller/commit/8c2de92e4dbab05dc533a886f94a3ca01aa36990))
+- clean up Connection handling helpers ([#657](https://github.com/temporalio/temporal-worker-controller/pull/657)) ([`d3dff65`](https://github.com/temporalio/temporal-worker-controller/commit/d3dff65a9386e774c4c32d50432b6816165e3054))
+- Bump chart version to 0.32.0 [skip ci] ([`ea866b2`](https://github.com/temporalio/temporal-worker-controller/commit/ea866b2f84db7cbc3a3fcd4097ac7dda65c9c0be))
+
 ## [1.13.0](https://github.com/temporalio/temporal-worker-controller/compare/v1.12.0...v1.13.0) - 2026-10-13
 
 ### Features
