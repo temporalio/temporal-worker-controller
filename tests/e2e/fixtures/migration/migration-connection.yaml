@@ -1,0 +1,9 @@
+# New-kind replacement for v1.6-tc.yaml: same name and spec. Its existence
+# is what lets DeprecatedTCReconciler release the old TemporalConnection.
+apiVersion: temporal.io/v1alpha1
+kind: Connection
+metadata:
+  name: test-connection
+  namespace: temporal-system
+spec:
+  hostPort: "temporal.invalid:7233"

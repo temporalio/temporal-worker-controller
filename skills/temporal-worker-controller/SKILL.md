@@ -5,12 +5,17 @@ description: Operate Temporal Worker Controller (TWC) on Kubernetes. Use for ins
 
 # Temporal Worker Controller
 
-Match the user's task to a row below. Read that reference's opening checks and the sections relevant to the request.
+Match the user's task below. Read the reference's opening checks, then the linked section and any sections it points to.
 
 ## Routing to reference files
 
-| User intent | Reference file |
+| User intent | Start at |
 | --- | --- |
-| Install, upgrade, roll back, or uninstall TWC; manage the controller and CRDs charts, CRD migrations, cert-manager, or webhook TLS; diagnose controller Pod startup or webhook errors during those tasks | [install-upgrade-controller.md](references/install-upgrade-controller.md) |
-
-This skill does not yet cover other TWC tasks, such as diagnosing a stuck WorkerDeployment, image update automation, or autoscaling. For an uncovered request, say the skill has no procedure for it and suggest asking in the [Temporal Slack community](https://temporalio.slack.com/archives/C07MDJ6S3HP).
+| Understand the controller chart, CRDs chart, or webhooks | [Concepts](references/install-upgrade-controller.md#concepts) |
+| Install TWC | [Install](references/install-upgrade-controller.md#install) |
+| Install or check cert-manager for TWC | [Cert-manager](references/install-upgrade-controller.md#cert-manager) |
+| Configure webhook TLS or diagnose a missing serving Secret | [Webhook TLS](references/install-upgrade-controller.md#webhook-tls) |
+| Upgrade or roll back TWC | [Upgrade and rollback](references/install-upgrade-controller.md#upgrade-and-rollback) |
+| Migrate legacy CRDs or the cert-manager subchart | [Legacy CRD migrations](references/install-upgrade-controller.md#legacy-crd-migrations) or [cert-manager subchart migration](references/install-upgrade-controller.md#cert-manager-subchart-migration) |
+| Uninstall TWC or its CRDs chart | [Uninstall](references/install-upgrade-controller.md#uninstall) |
+| Diagnose an install, upgrade, or webhook error | [Common issues](references/install-upgrade-controller.md#common-issues) |

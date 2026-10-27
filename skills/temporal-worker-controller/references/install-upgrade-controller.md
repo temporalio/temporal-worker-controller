@@ -72,7 +72,7 @@ Pass the selected TLS values to the controller install. The defaults use cert-ma
 
 ### Verify
 
-Check both releases and their chart versions with `helm list -n <namespace>`. Check controller Pod readiness and that the configured webhook TLS Secret exists. When using cert-manager, also check the TWC Certificate is Ready. When using a supplied certificate, check the CA bundle on the validating webhook configurations. For failures, use the **Common issues** section of [upgrade](#upgrade-and-rollback).
+Check both releases and their chart versions with `helm list -n <namespace>`. Check controller Pod readiness and that the configured webhook TLS Secret exists. When using cert-manager, also check the TWC Certificate is Ready. When using a supplied certificate, check the CA bundle on the validating webhook configurations. For failures, see [Common issues](#common-issues).
 
 ## Cert-manager
 
@@ -80,7 +80,7 @@ Read this when TWC uses chart-managed webhook certificates (`certmanager.enabled
 
 ### Determine ownership
 
-Check whether cert-manager is already installed and healthy. On an existing TWC release, Read `helm get values <twc-release> -n <namespace> -o yaml`. If `certmanager.install: true`, cert-manager belongs to the old TWC subchart; use [subchart migration](#cert-manager-subchart-migration) when upgrading across v0.30.0. Do not install another cert-manager release over those resources.
+Check whether cert-manager is already installed and healthy. For an existing TWC release, read its values with `helm get values <twc-release> -n <namespace> -o yaml`. If `certmanager.install: true`, cert-manager belongs to the old TWC subchart; use [subchart migration](#cert-manager-subchart-migration) when upgrading across v0.30.0. Do not install another cert-manager release over those resources.
 
 ### Independent installation
 
