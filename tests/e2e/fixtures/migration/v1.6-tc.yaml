@@ -1,0 +1,10 @@
+# Old-kind TemporalConnection, applied while controller v1.6 (chart 0.25.0)
+# is running. v1.6 adds temporal.io/delete-protection to it before dialing
+# Temporal, so the unreachable hostPort is enough to reproduce #644.
+apiVersion: temporal.io/v1alpha1
+kind: TemporalConnection
+metadata:
+  name: test-connection
+  namespace: temporal-system
+spec:
+  hostPort: "temporal.invalid:7233"
