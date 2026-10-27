@@ -127,9 +127,12 @@ Controls how old versions are scaled down and cleaned up after they're no longer
 
 ```yaml
 sunset:
-  scaledownDelay: 1h    # Wait 1 hour after draining before scaling to 0
-  deleteDelay: 24h      # Wait 24 hours after draining before deleting
+  scaledownDelay: 1h    # Wait 1 hour after the version is Drained before scaling to 0
+  deleteDelay: 24h      # Wait 24 hours after the version is Drained before deleting
 ```
+
+A Draining version keeps its replica count. To run Draining versions at fewer
+replicas, see [Draining version Deployment configuration](#draining-version-deployment-configuration).
 
 ### Sunset Configuration Examples
 
@@ -167,7 +170,8 @@ workerOptions:
 
 ### Connection Configuration
 
-Reference a `Connection` resource that defines server details. You can use either mutual TLS (mTLS) or API key authentication, but not both. If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname. `hostPort` accepts a host:port (e.g. `production.abc123.tmprl.cloud:7233`) or a gRPC resolver target URI (e.g. `dns:///production.abc123.tmprl.cloud:7233`, `xds://example.dest`).
+Reference a `Connection` resource that defines server details. To share one connection definition across namespaces, use a [`ClusterConnection`](cluster-connection.md) instead; it takes the same `spec`. You can use either mutual TLS (mTLS) or API key authentication, but not both.
+If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname. `hostPort` accepts a host:port (e.g. `production.abc123.tmprl.cloud:7233`) or a gRPC resolver target URI (e.g. `dns:///production.abc123.tmprl.cloud:7233`, `xds://example.dest`).
 
 **Using mTLS Authentication:**
 
@@ -405,6 +409,8 @@ Gate workflow input details:
 - `input` accepts any JSON object and is passed as the first parameter to the gate workflow.
 - `inputFrom` reads a JSON document from the specified `ConfigMap` or `Secret` key.
 - The target workflow should declare a single argument matching the JSON shape (e.g., a struct or `json.RawMessage`).
+- The `ConfigMap` or `Secret` is read from the WorkerDeployment's own namespace, using the controller's ServiceAccount. The chart grants it `get`, `list` and `watch` on both.
+- The contents are sent to the gate workflow as its input over the WorkerDeployment's connection. Anyone who can create a WorkerDeployment in a namespace can therefore read any `ConfigMap` or `Secret` in that namespace through `inputFrom`. This is the same trust boundary as a pod template, which can already mount those Secrets, so only let people create WorkerDeployments in namespaces whose ConfigMaps and Secrets they are trusted to read.
 
 ### Gate Input Encoding
 
@@ -543,6 +549,81 @@ spec:
   rollout:
     strategy: Progressive
 ```
+
+### Draining version Deployment configuration
+
+A Draining version receives no new workflow executions. It only serves the
+executions pinned to it, so it often needs fewer replicas than the Current
+version. Set `spec.drainingDeployment` to override settings on the Kubernetes
+Deployments of Draining versions. Fields left unset keep the behavior that
+applies without `spec.drainingDeployment`.
+
+```yaml
+spec:
+  deployment:
+    replicas: 4
+  drainingDeployment:
+    replicas: 1
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 24h
+```
+
+With this configuration, versions are scaled as follows:
+
+| Version status | Replicas |
+|----------------|----------|
+| Current and Target | `deployment.replicas` (4) |
+| Draining | `drainingDeployment.replicas` (1) |
+| Drained, before `scaledownDelay` | Unchanged (1) |
+| Drained, after `scaledownDelay` | 0 |
+
+`drainingDeployment.replicas`:
+
+- Applies only when the controller manages replicas, that is when
+  `spec.deployment.replicas` is set. When an autoscaler manages replicas, the
+  field is ignored and the webhook returns a warning. See
+  [#608](https://github.com/temporalio/temporal-worker-controller/issues/608)
+  for per-version autoscaler configuration.
+- Must be at least 1, so a Draining version keeps a poller for its pinned
+  executions. This holds even when `deployment.replicas` is 0.
+- When unset, the controller leaves Draining versions at their current replica
+  count, and only scales one back up if it reaches 0.
+
+A Draining version that becomes the Target or Current version again, for
+example after a rollback, scales back to `deployment.replicas`.
+
+> **NOTE**: Scaling down terminates pods that may be running in-flight tasks,
+> which a versioned rollout otherwise avoids. Before you set
+> `drainingDeployment.replicas`, make sure workers stop gracefully on
+> SIGTERM, with a stop timeout that fits inside
+> `terminationGracePeriodSeconds`. Long-running activities should heartbeat so
+> they resume on another pod.
+
+### Labels on versioned Deployments
+
+Labels in `spec.deployment.template.metadata.labels` go on the pods. To label the
+versioned Kubernetes Deployment objects themselves, set `spec.deploymentLabels`.
+Use this for tools that act on the Deployment rather than its pods, such as
+admission webhooks that opt workloads in or out by label, or cost allocation.
+
+```yaml
+spec:
+  deploymentLabels:
+    team: payments
+    example.com/instrumentation: "false"
+```
+
+The controller keeps these labels in sync on the Deployments of every version it
+manages, including Draining ones. A change is applied in place: it doesn't create
+a new Build ID or restart pods. Removing a key from `spec.deploymentLabels` removes
+it from the Deployments. Labels that other tools add to the Deployments are left
+alone; the controller tracks the keys it applied in the
+`temporal.io/managed-deployment-labels` annotation.
+
+`temporal.io/build-id` and `temporal.io/deployment-name` are managed by the
+controller and cannot be set. Keys and values must be valid Kubernetes labels;
+the validating webhook rejects invalid ones.
 
 ### Environment-Specific Configurations
 

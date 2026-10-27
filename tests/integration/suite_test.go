@@ -1015,16 +1015,9 @@ func TestIntegration(t *testing.T) {
 	// Version-summary divergence safety test
 	runNotRegisteredVersionTests(t, k8sClient, clientPool, ts, testNamespace.Name)
 
-	// Rate limit test: uses a dedicated server to avoid interfering with the tests above.
-	// Ten TWDs in the same Temporal namespace produce 10 concurrent DescribeWorkerDeployment
-	// calls per second against a 1 RPS limit, reliably triggering ResourceExhausted errors.
-	dcRateLimit := dynamicconfig.NewMemoryClient()
-	dcRateLimit.OverrideValue(dynamicconfig.MakeKey("frontend.globalNamespaceWorkerDeploymentReadRPS"), 1)
-	tsRateLimit := temporaltest.NewServer(
-		temporaltest.WithT(t),
-		temporaltest.WithBaseServerOptions(temporal.WithDynamicConfigClient(dcRateLimit)),
-	)
-	runRateLimitTest(t, k8sClient, tsRateLimit, testNamespace.Name)
+	t.Run("draining-deployment-replicas", func(t *testing.T) {
+		testDrainingDeploymentReplicas(t, k8sClient, ts, testNamespace.Name)
+	})
 
 	// Deletion cleanup tests — use short poller TTL server so active pollers expire
 	// in 1s rather than the default 5 minutes, keeping test runtime reasonable.

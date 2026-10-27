@@ -622,6 +622,11 @@ func updateDeploymentWithPodTemplateSpec(
 	connection temporaliov1alpha1.ConnectionSpec,
 ) {
 	wdDepSpec := spec.DeploymentSpec()
+	// Hash the user template, excluding controller-managed fields.
+	podTemplateSpecHash := k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	// DeploymentSpec() shares the template with spec on the legacy spec.template path;
+	// copy so the modifications below don't mutate spec.
+	wdDepSpec.Template = *wdDepSpec.Template.DeepCopy()
 
 	// Extract the build ID from the deployment's labels (with nil safety)
 	var buildID string
@@ -659,8 +664,7 @@ func updateDeploymentWithPodTemplateSpec(
 		podAnnotations[k] = v
 	}
 	podAnnotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
-	// Store the new pod template spec hash
-	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
+	podAnnotations[k8s.PodTemplateSpecHashAnnotation] = podTemplateSpecHash
 
 	// Preserve existing pod labels and add/update required labels
 	podLabels := make(map[string]string)
@@ -705,6 +709,23 @@ func checkAndUpdateDeploymentStrategy(
 	}
 
 	existingDeployment.Spec.Strategy = desired
+	return existingDeployment
+}
+
+// checkAndUpdateDeploymentLabels updates an owned Deployment when its labels
+// differ from spec.deploymentLabels.
+func checkAndUpdateDeploymentLabels(
+	buildID string,
+	k8sState *k8s.DeploymentState,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) *appsv1.Deployment {
+	existingDeployment, exists := k8sState.Deployments[buildID]
+	if !exists {
+		return nil
+	}
+	if !k8s.ApplyDeploymentLabels(existingDeployment, spec.DeploymentLabels) {
+		return nil
+	}
 	return existingDeployment
 }
 
@@ -758,6 +779,22 @@ func getUpdateDeployments(
 			continue
 		}
 		if deployment := checkAndUpdateDeploymentStrategy(buildID, k8sState, spec); deployment != nil {
+			updateDeployments = append(updateDeployments, deployment)
+			updatedBuildIDs[buildID] = true
+		}
+	}
+
+	// Sync deployment labels the same way, after the strategy sync, so a
+	// Kubernetes Deployment already queued for update picks up label changes in
+	// the same write.
+	for _, buildID := range ownedBuildIDs(status) {
+		if updatedBuildIDs[buildID] {
+			if deployment, exists := k8sState.Deployments[buildID]; exists {
+				k8s.ApplyDeploymentLabels(deployment, spec.DeploymentLabels)
+			}
+			continue
+		}
+		if deployment := checkAndUpdateDeploymentLabels(buildID, k8sState, spec); deployment != nil {
 			updateDeployments = append(updateDeployments, deployment)
 			updatedBuildIDs[buildID] = true
 		}
@@ -932,17 +969,23 @@ func getScaleDeployments(
 				}
 			}
 		case temporaliov1alpha1.VersionStatusDraining:
-			// A draining version with 0 replicas has no pollers, so it will never finish
-			// draining and will never be retired. We detect and repair this scenario
-			// here. Any other non-zero count still has pollers and will drain on its own.
-			if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+			// When drainingDeployment.replicas is set, keep the version at that count.
+			// This also repairs a draining version that was scaled to 0.
+			if replicas, ok := spec.DrainingReplicas(); ok {
+				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
+					scaleDeployments[version.Deployment] = uint32(replicas)
+				}
+			} else if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+				// A draining version with 0 replicas has no pollers, so it will never finish
+				// draining and will never be retired. We detect and repair this scenario
+				// here. Any other non-zero count still has pollers and will drain on its own.
 				replicas := int32(1)
 				// If the controller manages the replicas we set it to the spec's value. If a
 				// scaler manages them, we explicitly set it to 1 to unblock drainage.
-				if spec.Replicas != nil {
-					replicas = *spec.Replicas
+				if wdDepSpec.Replicas != nil {
+					replicas = *wdDepSpec.Replicas
 				}
-				// spec.Replicas may legitimately be 0, so we guard it.
+				// The spec's replicas may legitimately be 0, so we guard it.
 				if replicas != 0 {
 					l.Info("scaling draining version back up from 0 replicas",
 						"buildID", version.BuildID,

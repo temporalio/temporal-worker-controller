@@ -13,35 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-// ConnectionReference identifies a connection resource to use. Exactly one of
-// Name or ObjectRef must be set.
-//
-// Name is a shorthand that selects a namespaced Connection in the
-// WorkerDeployment's own namespace. ObjectRef is the general form carrying full
-// type information (apiGroup + kind + name) and selects either a namespaced
-// Connection or a cluster-scoped ClusterConnection.
-//
-// The authentication secret is always in the WorkerDeployment's own
-// namespace regardless of which connection is referenced. Cross-namespace
-// connection is not yet implemented, so objectRef.namespace must NOT
-// be set.
-// +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.objectRef)",message="exactly one of name or objectRef must be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || self.objectRef.kind in ['Connection','ClusterConnection']",message="objectRef.kind must be Connection or ClusterConnection"
-// +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || self.objectRef.apiGroup == 'temporal.io'",message="objectRef.apiGroup must be temporal.io"
-// +kubebuilder:validation:XValidation:rule="!has(self.objectRef) || !has(self.objectRef.__namespace__)",message="objectRef.namespace is not supported yet"
-type ConnectionReference struct {
-	// Name of a namespaced Connection in the WorkerDeployment's namespace.
-	// Shorthand for objectRef: {apiGroup: temporal.io, kind: Connection, name: <name>}.
-	// +optional
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Name string `json:"name,omitempty"`
-	// ObjectRef references the connection resource by full type information.
-	// kind must be "Connection" or "ClusterConnection", apiGroup must be
-	// "temporal.io", and namespace must not be set (not yet supported).
-	// +optional
-	ObjectRef *corev1.TypedObjectReference `json:"objectRef,omitempty"`
-}
-
 type WorkerOptions struct {
 	// ConnectionRef selects the connection resource for this worker. By default
 	// it names a Connection in the same namespace; set connectionRef.kind to
@@ -126,6 +97,22 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
+	// DrainingDeployment overrides settings on the Kubernetes Deployments of
+	// draining versions. Unset fields keep the behavior that applies without
+	// this field.
+	// +optional
+	DrainingDeployment *DrainingDeploymentSpec `json:"drainingDeployment,omitempty"`
+
+	// DeploymentLabels are added to the metadata of each versioned Kubernetes
+	// Deployment that the controller creates. Pod labels belong in the pod
+	// template instead. Use this for tools that act on the Deployment object
+	// itself, such as admission webhooks that opt workloads in or out by label.
+	// Changes are applied in place to the Deployments of existing versions,
+	// without restarting their pods.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="!('temporal.io/build-id' in self) && !('temporal.io/deployment-name' in self)",message="temporal.io/build-id and temporal.io/deployment-name are managed by the controller"
+	DeploymentLabels map[string]string `json:"deploymentLabels,omitempty"`
+
 	// How to rollout new workflow executions to the target version.
 	RolloutStrategy RolloutStrategy `json:"rollout"`
 
@@ -158,6 +145,34 @@ func (s WorkerDeploymentSpec) DeploymentSpec() appsv1.DeploymentSpec {
 		depSpec.Strategy = DefaultDeploymentStrategy()
 	}
 	return depSpec
+}
+
+// DrainingReplicas returns the replica count the controller keeps draining
+// versions at. ok is false when DrainingDeployment.Replicas is unset or when
+// the controller does not manage replicas because an autoscaler owns them.
+func (s WorkerDeploymentSpec) DrainingReplicas() (replicas int32, ok bool) {
+	if s.DrainingDeployment == nil || s.DrainingDeployment.Replicas == nil {
+		return 0, false
+	}
+	if s.DeploymentSpec().Replicas == nil {
+		return 0, false
+	}
+	return *s.DrainingDeployment.Replicas, true
+}
+
+// DrainingDeploymentSpec overrides settings on the Kubernetes Deployments of
+// draining versions.
+type DrainingDeploymentSpec struct {
+	// Replicas is the number of pods for each draining version's Deployment.
+	// A draining version only serves its pinned executions, so it often needs
+	// fewer pods than the current version.
+	//
+	// Applies only when the controller manages replicas (deployment.replicas
+	// is set). When unset, the controller leaves draining versions at their
+	// current count.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Replicas *int32 `json:"replicas,omitempty"`
 }
 
 // DefaultDeploymentStrategy returns the default appsv1.DeploymentStrategy

@@ -18,6 +18,8 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/planner"
+	"github.com/temporalio/temporal-worker-controller/pkg/controller/config"
+	"github.com/temporalio/temporal-worker-controller/pkg/controller/version"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -303,7 +305,7 @@ func (r *WorkerDeploymentReconciler) shouldClaimManagerIdentity(vcfg *planner.Ve
 
 	// Handle Worker Deployments that were controller-managed before we
 	// started recording the cluster-UID in the manager identity
-	if existing == getDeprecatedControllerIdentity() {
+	if existing == config.GetDeprecatedControllerIdentity() {
 		return true
 	}
 	return false
@@ -316,14 +318,14 @@ func (r *WorkerDeploymentReconciler) claimManagerIdentity(
 	deploymentHandler sdkclient.WorkerDeploymentHandle,
 	vcfg *planner.VersionConfig,
 ) error {
-	identity := getControllerIdentity()
+	identity := config.GetControllerIdentity()
 	if identity == "" {
 		// Passing an empty identity to SetManagerIdentity clears the field on the
 		// Worker Deployment, leaving it ownerless. Refuse rather than cause that.
 		// This should never happen, but this is the extra fallback in case somehow
 		// the check in main() and Reconcile() are not sufficient.
 		return errors.New(fmt.Sprintf("%s and %s are not set; refusing to call SetManagerIdentity to avoid clearing the manager identity field",
-			IdentityEnvKey, IdentitySuffixEnvKey))
+			config.IdentityEnvKey, config.IdentitySuffixEnvKey))
 	}
 	resp, err := deploymentHandler.SetManagerIdentity(ctx, sdkclient.WorkerDeploymentSetManagerIdentityOptions{
 		Self:          true,
@@ -359,7 +361,7 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 		if _, err := deploymentHandler.SetCurrentVersion(ctx, sdkclient.WorkerDeploymentSetCurrentVersionOptions{
 			BuildID:       vcfg.BuildID,
 			ConflictToken: vcfg.ConflictToken,
-			Identity:      getControllerIdentity(),
+			Identity:      config.GetControllerIdentity(),
 		}); err != nil {
 			l.Error(err, "unable to set current deployment version", "buildID", vcfg.BuildID)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonVersionPromotionFailed,
@@ -382,7 +384,7 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 			BuildID:       vcfg.BuildID,
 			Percentage:    float32(vcfg.RampPercentage),
 			ConflictToken: vcfg.ConflictToken,
-			Identity:      getControllerIdentity(),
+			Identity:      config.GetControllerIdentity(),
 		}); err != nil {
 			l.Error(err, "unable to set ramping deployment version", "buildID", vcfg.BuildID, "percentage", vcfg.RampPercentage)
 			r.Recorder.Eventf(workerDeploy, corev1.EventTypeWarning, ReasonVersionPromotionFailed,
@@ -406,8 +408,8 @@ func (r *WorkerDeploymentReconciler) updateVersionConfig(ctx context.Context, l 
 		},
 		MetadataUpdate: sdkclient.WorkerDeploymentMetadataUpdate{
 			UpsertEntries: map[string]interface{}{
-				IdentityMetadataKey: getControllerIdentity(),
-				VersionMetadataKey:  getControllerVersion(),
+				IdentityMetadataKey: config.GetControllerIdentity(),
+				VersionMetadataKey:  version.GetControllerVersion(),
 			},
 		},
 	}); err != nil { // would be cool to do this atomically with the update
@@ -818,7 +820,7 @@ func (r *WorkerDeploymentReconciler) deleteDeprecatedVersions(
 	temporalClient sdkclient.Client,
 	p *plan,
 ) {
-	identity := getControllerIdentity()
+	identity := config.GetControllerIdentity()
 	markedForDeletion := make([]*appsv1.Deployment, 0, len(p.DeleteDeployments))
 	for _, d := range p.DeleteDeployments {
 		buildID, ok := d.GetLabels()[k8s.BuildIDLabel]

@@ -15,6 +15,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	internalcontroller "github.com/temporalio/temporal-worker-controller/internal/controller"
 	"github.com/temporalio/temporal-worker-controller/pkg/controller"
+	"github.com/temporalio/temporal-worker-controller/pkg/controller/config"
 	"go.temporal.io/sdk/log"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -22,9 +23,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	_ "k8s.io/client-go/plugin/pkg/client/auth" // Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) to ensure that exec-entrypoint and run can make use of them.
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -52,7 +51,7 @@ func main() {
 	var webhookCertDir string
 	var webhookCertName string
 	var webhookKeyName string
-	wrtHPAMatchLabelsStripTemporalPrefix := internalcontroller.GetWRTHPAMatchLabelsStripTemporalPrefix()
+	wrtHPAMatchLabelsStripTemporalPrefix := config.GetWRTHPAMatchLabelsStripTemporalPrefix()
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -84,7 +83,7 @@ func main() {
 	if watchNamespaces == "" {
 		watchNamespaces = os.Getenv("WATCH_NAMESPACES")
 	}
-	namespaces := internalcontroller.ParseWatchNamespaces(watchNamespaces)
+	namespaces := config.ParseWatchNamespaces(watchNamespaces)
 
 	if webhookCertDir == "" {
 		webhookCertDir = os.Getenv("WEBHOOK_CERT_DIR")
@@ -99,7 +98,7 @@ func main() {
 		setupLog.Info("skipping ClusterConnection watches")
 	}
 
-	cacheOptions, err := internalcontroller.NewCacheOptions(namespaces)
+	cacheOptions, err := config.NewCacheOptions(namespaces)
 	if err != nil {
 		setupLog.Error(err, "unable to build manager cache options")
 		os.Exit(1)
@@ -135,21 +134,21 @@ func main() {
 		})
 	}
 
-	config := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(config, managerOptions)
+	cfg := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(cfg, managerOptions)
 
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	detectionClient, err := dynamic.NewForConfig(config)
+	detectionClient, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		setupLog.Error(err, "unable to create deprecated CRD detection client")
 		os.Exit(1)
 	}
 	detectionCtx, cancelDetection := context.WithTimeout(context.Background(), 10*time.Second)
-	deprecatedCRDWatches, err := internalcontroller.DetectDeprecatedCRDWatches(detectionCtx, detectionClient, namespaces)
+	deprecatedCRDWatches, err := config.DetectDeprecatedCRDWatches(detectionCtx, detectionClient, namespaces)
 	cancelDetection()
 	if err != nil {
 		setupLog.Error(err, "unable to detect deprecated CRD watches")
@@ -223,7 +222,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if os.Getenv(internalcontroller.IdentityEnvKey) == "" {
+	if os.Getenv(config.IdentityEnvKey) == "" {
 		setupLog.Error(nil, "CONTROLLER_IDENTITY environment variable must be set")
 		os.Exit(1)
 	}
@@ -233,8 +232,8 @@ func main() {
 		setupLog.Error(err, "unable to fetch namespace UID for controller identity suffix")
 		os.Exit(1)
 	}
-	if err := os.Setenv(internalcontroller.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
-		setupLog.Error(err, fmt.Sprintf("unable to set %s", internalcontroller.IdentitySuffixEnvKey))
+	if err := os.Setenv(config.IdentitySuffixEnvKey, string(ns.UID)); err != nil {
+		setupLog.Error(err, fmt.Sprintf("unable to set %s", config.IdentitySuffixEnvKey))
 		os.Exit(1)
 	}
 

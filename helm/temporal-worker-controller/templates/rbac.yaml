@@ -77,18 +77,19 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - events
-    verbs:
-      - create
-      - patch
-  - apiGroups:
-      - ""
-    resources:
+      - configmaps
       - secrets
     verbs:
       - get
       - list
       - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
   - apiGroups:
       - apps
     resources:
@@ -183,6 +184,15 @@ rules:
   - apiGroups:
       - ""
     resources:
+      - configmaps
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
       - events
     verbs:
       - create
@@ -193,14 +203,6 @@ rules:
       - namespaces
     verbs:
       - get
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    verbs:
-      - get
-      - list
-      - watch
   - apiGroups:
       - apps
     resources:

@@ -20,6 +20,7 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	"github.com/temporalio/temporal-worker-controller/internal/k8s"
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
+	"github.com/temporalio/temporal-worker-controller/pkg/controller/config"
 	"go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalClient "go.temporal.io/sdk/client"
@@ -28,10 +29,13 @@ import (
 	"go.temporal.io/server/temporaltest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlrtconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -200,14 +204,14 @@ func getRepoRoot(t *testing.T) string {
 func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Manager, *clientpool.ClientPool, func()) {
 	// Set faster reconcile interval for testing
 	t.Setenv("RECONCILE_INTERVAL", "1s")
-	t.Setenv(controller.IdentityEnvKey, testControllerIdentityPrefix)
-	t.Setenv(controller.IdentitySuffixEnvKey, testControllerIdentitySuffix)
+	t.Setenv(config.IdentityEnvKey, testControllerIdentityPrefix)
+	t.Setenv(config.IdentitySuffixEnvKey, testControllerIdentitySuffix)
 	if kubeAssets := os.Getenv("KUBEBUILDER_ASSETS"); kubeAssets == "" {
 		t.Skip("Skipping because KUBEBUILDER_ASSETS not set")
 	}
 
 	// set max versions value for testing
-	t.Setenv(controller.MaxDeploymentVersionsIneligibleForDeletionEnvKey, fmt.Sprintf("%d", testMaxVersionsIneligibleForDeletion))
+	t.Setenv(config.MaxDeploymentVersionsIneligibleForDeletionEnvKey, fmt.Sprintf("%d", testMaxVersionsIneligibleForDeletion))
 
 	// Setup kubebuilder assets for IDE testing
 	if err := setupKubebuilderAssets(); err != nil {
@@ -243,6 +247,9 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	// Create manager
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
+		// Each top-level test starts and stops its own manager. Controller-runtime
+		// keeps its controller-name registry for the lifetime of the test process.
+		Controller: ctrlrtconfig.Controller{SkipNameValidation: new(true)},
 	})
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
@@ -257,14 +264,15 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 
 	// Set up controller
 	reconciler := &controller.WorkerDeploymentReconciler{
-		Client:              mgr.GetClient(),
-		Scheme:              mgr.GetScheme(),
-		TemporalClientPool:  clientPool,
-		Recorder:            mgr.GetEventRecorderFor("temporal-worker-controller"),
-		DisableRecoverPanic: true,
-		MaxDeploymentVersionsIneligibleForDeletion: controller.GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
-		WRTHPAMatchLabelsStripTemporalPrefix:       controller.GetWRTHPAMatchLabelsStripTemporalPrefix(),
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		TemporalClientPool: clientPool,
+		//nolint:staticcheck // SA1019 when we update to controller-runtime@v.0.25.2 this should change to GetEventRecorder.
+		Recorder: mgr.GetEventRecorderFor("temporal-worker-controller"),
 	}
+	reconciler.Config.DisableRecoverPanic = true
+	reconciler.Config.MaxDeploymentVersionsIneligibleForDeletion = config.GetControllerMaxDeploymentVersionsIneligibleForDeletion()
+	reconciler.Config.WRTHPAMatchLabelsStripTemporalPrefix = config.GetWRTHPAMatchLabelsStripTemporalPrefix()
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {
 		t.Fatalf("failed to set up controller: %v", err)
@@ -468,4 +476,30 @@ func validateManagerIdentity(expected string) func(t *testing.T, ctx context.Con
 			t.Errorf("expected manager identity to be %q, got %q", expected, desc.Info.ManagerIdentity)
 		}
 	}
+}
+
+// updateWorkerDeployment applies mutate to a freshly fetched copy of the WorkerDeployment and
+// updates it, then returns the updated object. The controller adds finalizers and writes status on
+// the same object, so a bare Get followed by Update can lose that race and fail with a conflict;
+// retry on conflict and re-apply mutate to the latest version instead. mutate can run more than once.
+func updateWorkerDeployment(
+	ctx context.Context,
+	t *testing.T,
+	k8sClient client.Client,
+	key types.NamespacedName,
+	mutate func(*temporaliov1alpha1.WorkerDeployment),
+) temporaliov1alpha1.WorkerDeployment {
+	t.Helper()
+	var updated temporaliov1alpha1.WorkerDeployment
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := k8sClient.Get(ctx, key, &updated); err != nil {
+			return err
+		}
+		mutate(&updated)
+		return k8sClient.Update(ctx, &updated)
+	})
+	if err != nil {
+		t.Fatalf("failed to update WorkerDeployment %s: %v", key, err)
+	}
+	return updated
 }

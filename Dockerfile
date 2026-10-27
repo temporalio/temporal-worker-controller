@@ -9,6 +9,7 @@ RUN go mod download
 
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
+COPY pkg/ pkg/
 COPY internal/k8s internal/k8s
 COPY internal/temporal internal/temporal
 COPY internal/controller internal/controller

@@ -862,6 +862,41 @@ func TestGetDeleteDeployments(t *testing.T) {
 			expectDeletes:             0,
 			foundDeploymentInTemporal: false,
 		},
+		{
+			// A drained version that was scaled to zero and then became Draining again
+			// (e.g. workflows moved onto it with a Versioning Override) must not be deleted,
+			// even if a DrainedSince from its earlier drain is older than the sunset delays.
+			name: "draining version at 0 replicas with stale DrainedSince is not deleted",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"123": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "123",
+							Status:     temporaliov1alpha1.VersionStatusDraining,
+							Deployment: &corev1.ObjectReference{Name: "test-123"},
+						},
+						DrainedSince: &metav1.Time{
+							Time: time.Now().Add(-24 * time.Hour),
+						},
+						EligibleForDeletion: true,
+					},
+				},
+			},
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: time.Hour},
+					DeleteDelay:    &metav1.Duration{Duration: 4 * time.Hour},
+				},
+				Replicas: func() *int32 { r := int32(1); return &r }(),
+			},
+			expectDeletes:             0,
+			foundDeploymentInTemporal: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1068,6 +1103,105 @@ func TestGetScaleDeployments(t *testing.T) {
 				Replicas: func() *int32 { r := int32(0); return &r }(),
 			},
 			expectScales: map[string]uint32{},
+		},
+		{
+			name: "draining version at 0 replicas is scaled back up to deployment.replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment: &appsv1.DeploymentSpec{Replicas: int32Ptr(3)},
+			},
+			expectScales: map[string]uint32{"test-old": 3},
+		},
+		{
+			name: "draining version at 0 is left alone when deployment.replicas is 0",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment: &appsv1.DeploymentSpec{Replicas: int32Ptr(0)},
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "draining version is scaled to drainingDeployment.replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"new": createDeploymentWithDefaultConnectionSpecHash(3),
+					"old": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{Replicas: int32Ptr(3)},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{"test-old": 1},
+		},
+		{
+			name: "draining version is scaled to drainingDeployment.replicas with deprecated spec.replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(3),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas:           int32Ptr(3),
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{"test-old": 1},
+		},
+		{
+			name: "draining version stays at drainingDeployment.replicas when the WD is scaled to 0",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(1),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{Replicas: int32Ptr(0)},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
+			name: "drainingDeployment.replicas is ignored when a scaler manages replicas",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(4),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(1)},
+			},
+			expectScales: map[string]uint32{},
+		},
+		{
+			// drainingDeployment.replicas must not turn off the scale-from-0 repair
+			// when a scaler manages replicas.
+			name: "draining version at 0 is scaled to 1 when a scaler manages replicas and drainingDeployment.replicas is set",
+			k8sState: &k8s.DeploymentState{
+				Deployments: map[string]*appsv1.Deployment{
+					"old": createDeploymentWithDefaultConnectionSpecHash(0),
+				},
+			},
+			status: drainingVersionStatus(),
+			spec: &temporaliov1alpha1.WorkerDeploymentSpec{
+				Deployment:         &appsv1.DeploymentSpec{},
+				DrainingDeployment: &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: int32Ptr(2)},
+			},
+			expectScales: map[string]uint32{"test-old": 1},
 		},
 		{
 			name: "inactive non-target version needs scaling down",
@@ -3254,7 +3388,9 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				k8sState.Deployments[buildID] = tt.existingDeployment
 			}
 
+			originalSpec := tt.newSpec.DeepCopy()
 			result := checkAndUpdateDeploymentPodTemplateSpec(buildID, k8sState, tt.newSpec, tt.connection)
+			assert.Equal(t, originalSpec, tt.newSpec, "Controller modifications must not mutate the worker spec")
 
 			if !tt.expectUpdate {
 				assert.Nil(t, result, "Expected no update, but got deployment")
@@ -3281,6 +3417,9 @@ func TestCheckAndUpdateDeploymentPodTemplateSpec(t *testing.T) {
 				}
 			}
 			assert.True(t, found, "Should find TEMPORAL_WORKER_BUILD_ID environment variable")
+
+			assert.Nil(t, checkAndUpdateDeploymentPodTemplateSpec(buildID, k8sState, tt.newSpec, tt.connection),
+				"An unchanged pod template should not trigger another update")
 		})
 	}
 }
@@ -3472,6 +3611,29 @@ func createDeploymentWithoutHashAnnotation(replicas int32, buildID string, image
 
 func int32Ptr(v int32) *int32 {
 	return &v
+}
+
+// drainingVersionStatus returns a status with current version "new" and
+// draining version "old".
+func drainingVersionStatus() *temporaliov1alpha1.WorkerDeploymentStatus {
+	return &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+				BuildID:    "new",
+				Status:     temporaliov1alpha1.VersionStatusCurrent,
+				Deployment: &corev1.ObjectReference{Name: "test-new"},
+			},
+		},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{
+				BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+					BuildID:    "old",
+					Status:     temporaliov1alpha1.VersionStatusDraining,
+					Deployment: &corev1.ObjectReference{Name: "test-old"},
+				},
+			},
+		},
+	}
 }
 
 func float32Ptr(v float32) *float32 {
@@ -4913,6 +5075,7 @@ func TestGetDeleteWorkerResources_SunsetBuildIDs(t *testing.T) {
 func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 	const (
 		drained  = temporaliov1alpha1.VersionStatusDrained
+		draining = temporaliov1alpha1.VersionStatusDraining
 		inactive = temporaliov1alpha1.VersionStatusInactive
 		ramping  = temporaliov1alpha1.VersionStatusRamping
 		current  = temporaliov1alpha1.VersionStatusCurrent
@@ -4978,6 +5141,14 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 			expect:         nil,
 		},
 		{
+			// A version that drained, was sunset, and is now Draining again must have its
+			// autoscalers restored, so it must not stay in the sunset set.
+			name:           "draining again after a drain is excluded even with a stale DrainedSince",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-a", draining, ago(24*time.Hour))},
+			scaledownDelay: time.Hour,
+			expect:         nil,
+		},
+		{
 			name: "only the qualifying versions of a mixed set",
 			versions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
 				ver("build-old", drained, ago(2*time.Hour)),
@@ -5023,6 +5194,124 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 	}
 }
 
+// TestDrainedVersionRevivedWhenDrainingAgain walks a version through the sunset lifecycle:
+// it drains, is scaled to zero after scaledownDelay, and then becomes Draining again before
+// deleteDelay expires (e.g. workflows are moved onto it with a Versioning Override). The
+// retained Deployment must be scaled back up, kept, and have its autoscalers restored.
+func TestDrainedVersionRevivedWhenDrainingAgain(t *testing.T) {
+	const (
+		buildID        = "old"
+		deploymentName = "test-old"
+	)
+
+	for _, tc := range []struct {
+		name            string
+		specReplicas    *int32
+		initialReplicas int32
+		revivedReplicas uint32
+	}{
+		{
+			name:            "controller-managed replicas",
+			specReplicas:    func() *int32 { r := int32(3); return &r }(),
+			initialReplicas: 3,
+			revivedReplicas: 3,
+		},
+		{
+			name:            "scaler-managed replicas",
+			specReplicas:    nil,
+			initialReplicas: 2,
+			revivedReplicas: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+				Replicas: tc.specReplicas,
+				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
+					ScaledownDelay: &metav1.Duration{Duration: time.Hour},
+					DeleteDelay:    &metav1.Duration{Duration: 4 * time.Hour},
+				},
+			}
+
+			k8sStateWith := func(replicas int32) *k8s.DeploymentState {
+				return &k8s.DeploymentState{
+					Deployments: map[string]*appsv1.Deployment{
+						buildID: createDeploymentWithDefaultConnectionSpecHash(replicas),
+					},
+				}
+			}
+			statusWith := func(versionStatus temporaliov1alpha1.VersionStatus, drainedSince *metav1.Time) *temporaliov1alpha1.WorkerDeploymentStatus {
+				return &temporaliov1alpha1.WorkerDeploymentStatus{
+					TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+						BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+							BuildID:    "new",
+							Status:     temporaliov1alpha1.VersionStatusCurrent,
+							Deployment: &corev1.ObjectReference{Name: "test-new"},
+						},
+					},
+					DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+						{
+							BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+								BuildID:    buildID,
+								Status:     versionStatus,
+								Deployment: &corev1.ObjectReference{Name: deploymentName},
+							},
+							DrainedSince:        drainedSince,
+							EligibleForDeletion: true,
+						},
+					},
+				}
+			}
+			scalesByName := func(k8sState *k8s.DeploymentState, status *temporaliov1alpha1.WorkerDeploymentStatus) map[string]uint32 {
+				out := map[string]uint32{}
+				for ref, replicas := range getScaleDeployments(logr.Discard(), k8sState, status, spec) {
+					out[ref.Name] = replicas
+				}
+				return out
+			}
+			assertNotDeleted := func(k8sState *k8s.DeploymentState, status *temporaliov1alpha1.WorkerDeploymentStatus) {
+				assert.Empty(t, getDeleteDeployments(k8sState, status, spec, true), "deployment must not be deleted")
+			}
+			inSunsetSet := func(status *temporaliov1alpha1.WorkerDeploymentStatus) bool {
+				_, ok := getSunsetScaleDownBuildIDs(status, spec)[buildID]
+				return ok
+			}
+
+			// 1. Drained past scaledownDelay: the controller scales the Deployment to zero.
+			drainedAt := &metav1.Time{Time: time.Now().Add(-2 * time.Hour)}
+			k8sState := k8sStateWith(tc.initialReplicas)
+			status := statusWith(temporaliov1alpha1.VersionStatusDrained, drainedAt)
+			assert.Equal(t, map[string]uint32{deploymentName: 0}, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+			assert.True(t, inSunsetSet(status), "drained version past scaledownDelay should be held at zero")
+
+			// 2. Retained at zero replicas, still within deleteDelay: nothing changes.
+			k8sState = k8sStateWith(0)
+			assert.Empty(t, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+
+			// 3. The version becomes Draining again. DrainedSince is only reported for Drained
+			//    versions, so it is cleared. The Deployment is scaled back up and kept.
+			status = statusWith(temporaliov1alpha1.VersionStatusDraining, nil)
+			assert.Equal(t, map[string]uint32{deploymentName: tc.revivedReplicas}, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+			assert.False(t, inSunsetSet(status), "draining version must have its autoscalers restored")
+
+			// Even a stale DrainedSince past every delay must not cause scale-down or deletion.
+			staleStatus := statusWith(temporaliov1alpha1.VersionStatusDraining, &metav1.Time{Time: time.Now().Add(-24 * time.Hour)})
+			assert.Equal(t, map[string]uint32{deploymentName: tc.revivedReplicas}, scalesByName(k8sState, staleStatus))
+			assertNotDeleted(k8sState, staleStatus)
+			assert.False(t, inSunsetSet(staleStatus))
+
+			// 4. Once scaled up and drained again, the sunset delays restart from the new drain.
+			k8sState = k8sStateWith(int32(tc.revivedReplicas))
+			status = statusWith(temporaliov1alpha1.VersionStatusDrained, &metav1.Time{Time: time.Now()})
+			assert.Empty(t, scalesByName(k8sState, status))
+			assertNotDeleted(k8sState, status)
+			assert.False(t, inSunsetSet(status))
+		})
+	}
+}
+
 func TestGetDeleteDeployments_Inactive(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -5063,5 +5352,60 @@ func TestGetDeleteDeployments_Inactive(t *testing.T) {
 			assert.Equal(t, tc.wantDelete, len(deleted) == 1)
 			assert.Empty(t, getDeleteDeployments(state, s, &temporaliov1alpha1.WorkerDeploymentSpec{}, false))
 		})
+	}
+}
+
+func TestGetUpdateDeployments_DeploymentLabelsReconcile(t *testing.T) {
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{
+		DeploymentLabels: map[string]string{"team": "payments"},
+	}
+	newDeployment := func(name string) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: appsv1.DeploymentSpec{
+				Strategy: spec.DeploymentSpec().Strategy,
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			},
+		}
+	}
+	target := newDeployment("worker-v2")
+	deprecated := newDeployment("worker-v1")
+
+	status := &temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+			BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v2"},
+		},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{BuildID: "v1"}},
+		},
+	}
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{"v1": deprecated, "v2": target},
+	}
+
+	// A connection change queues the target Deployment first; its labels must land in the same write.
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "temporal:7233"}
+	updates := getUpdateDeployments(k8sState, status, spec, connection)
+	require.Len(t, updates, 2)
+	assert.Equal(t, map[string]string{"team": "payments"}, target.Labels)
+	assert.Equal(t, map[string]string{"team": "payments"}, deprecated.Labels)
+
+	assert.Empty(t, getUpdateDeployments(k8sState, status, spec, connection), "no update once labels are in sync")
+
+	// A strategy change and a label change on the same Deployment go out in one update.
+	maxSurge := intstr.FromInt32(0)
+	changed := &temporaliov1alpha1.WorkerDeploymentSpec{
+		DeploymentLabels: map[string]string{"team": "billing"},
+		Deployment: &appsv1.DeploymentSpec{Strategy: appsv1.DeploymentStrategy{
+			Type:          appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{MaxSurge: &maxSurge},
+		}},
+	}
+	updates = getUpdateDeployments(k8sState, status, changed, connection)
+	require.Len(t, updates, 2)
+	for _, d := range updates {
+		assert.Equal(t, "billing", d.Labels["team"], d.Name)
+		require.NotNil(t, d.Spec.Strategy.RollingUpdate, d.Name)
+		assert.Equal(t, maxSurge, *d.Spec.Strategy.RollingUpdate.MaxSurge, d.Name)
 	}
 }

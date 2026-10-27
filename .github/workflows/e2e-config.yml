@@ -36,7 +36,7 @@ jobs:
 
 
       - name: Create Kind cluster
-        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa
         with:
           cluster_name: twc-e2e
 
@@ -155,14 +155,34 @@ jobs:
             exit 1
           fi
           echo "No error logs detected"
+          # We sleep a little longer here because of transient context deadline
+          # exceeded when trying to apply the fixture.
+          sleep 10
 
       - name: Apply test WorkerDeployment
-        run: kubectl apply -f test/e2e/fixtures/basic-wd.yaml
+        run: kubectl apply -f tests/e2e/fixtures/basic-wd.yaml
 
       - name: Verify WorkerDeployment accepted
         run: |
           kubectl get workerdeployment test-worker -n temporal-system
           echo "WorkerDeployment accepted by webhook"
+
+      # A rollout gate's inputFrom.configMapKeyRef / secretKeyRef is read with the controller's own
+      # ServiceAccount. The envtest suites run as admin, so they cannot catch missing RBAC; check it
+      # against the chart as installed in this mode. The namespace "default" is watched in every mode.
+      - name: Verify controller can read gate input ConfigMaps and Secrets
+        run: |
+          SA="system:serviceaccount:temporal-system:temporal-worker-controller-service-account"
+          for resource in configmaps secrets; do
+            for verb in get list watch; do
+              answer=$(kubectl auth can-i "$verb" "$resource" --namespace default --as="$SA" || true)
+              if [ "$answer" != "yes" ]; then
+                echo "FAIL: controller ServiceAccount cannot $verb $resource in namespace default"
+                exit 1
+              fi
+            done
+          done
+          echo "Controller can get, list and watch ConfigMaps and Secrets in the watched namespace"
 
       - name: Diagnostics on failure
         if: failure()

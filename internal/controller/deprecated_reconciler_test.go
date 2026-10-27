@@ -160,7 +160,7 @@ func TestDeprecatedTWDReconciler_AllowsDeletionWhenMigratedLabel(t *testing.T) {
 		deprecatedTWDMigratedLabel: "true",
 	})
 	twd.DeletionTimestamp = &now
-	twd.Finalizers = []string{deprecatedMigrationFinalizer}
+	twd.Finalizers = []string{deprecatedMigrationFinalizer, finalizerName}
 	r := newDeprecatedTWDReconciler(twd)
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -171,6 +171,29 @@ func TestDeprecatedTWDReconciler_AllowsDeletionWhenMigratedLabel(t *testing.T) {
 	var got temporaliov1alpha1.TemporalWorkerDeployment
 	err = r.Get(context.Background(), types.NamespacedName{Name: "my-worker", Namespace: "default"}, &got)
 	assert.True(t, apierrors.IsNotFound(err), "object must be gone once finalizer is removed")
+}
+
+func TestDeprecatedTWDReconciler_UnsticksDeletionWithOnlyDeleteProtection(t *testing.T) {
+	// Regression: An earlier v1.7+ controller released migration-guard
+	// but left delete-protection behind. DeletionTimestamp set, only
+	// delete-protection present, migrated label present so finalizer must be
+	// removed so the stuck object can finish deleting.
+	now := metav1.Now()
+	twd := makeTWDStub("my-worker", "default", map[string]string{
+		deprecatedTWDMigratedLabel: "true",
+	})
+	twd.DeletionTimestamp = &now
+	twd.Finalizers = []string{finalizerName}
+	r := newDeprecatedTWDReconciler(twd)
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "my-worker", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	var got temporaliov1alpha1.TemporalWorkerDeployment
+	err = r.Get(context.Background(), types.NamespacedName{Name: "my-worker", Namespace: "default"}, &got)
+	assert.True(t, apierrors.IsNotFound(err), "object must be gone once delete-protection is removed")
 }
 
 func TestDeprecatedTWDReconciler_NotFound(t *testing.T) {
@@ -387,10 +410,10 @@ func TestReconcileWithoutDeprecatedCRDs(t *testing.T) {
 		WithObjects(wd).
 		Build()
 	r := &WorkerDeploymentReconciler{
-		Client:               fakeClient,
-		Scheme:               scheme,
-		DisableDeprecatedTWD: true,
+		Client: fakeClient,
+		Scheme: scheme,
 	}
+	r.Config.DisableDeprecatedTWD = true
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: wd.Name, Namespace: wd.Namespace},
