@@ -25,7 +25,7 @@ updates:
       # We are deliberate about updating the OTEL Go dependencies because
       # dependabot cannot figure out that the OTEL Go package versions should
       # be pinned to what the temporal server Go package requires.
-      - dependency-name: "go.opentelemetry.io/otel/*"
+      - dependency-name: "go.opentelemetry.io/*"
     groups:
       go-modules:
         applies-to: version-updates
