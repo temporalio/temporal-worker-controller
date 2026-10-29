@@ -113,6 +113,7 @@ authProxy:
 metrics:
   enabled: true
   port: 8080 # @schema minimum:1; maximum:65535
+  healthPort: 8081 # @schema minimum:1; maximum:65535
   # Set to true if you want your controller-manager to expose the /metrics
   # endpoint w/o any authn/z.
   #
@@ -201,6 +202,15 @@ prometheus:
 
 nodeSelector: {}
 
+# Change `hostNetwork` to `true` when you want the pod to share its host's network namespace.
+# Useful for situations like when you end up dealing with a custom CNI over Amazon EKS.
+hostNetwork: false
+
+# `dnsPolicy` determines the manner in which DNS resolution happens in the cluster.
+# In case of `hostNetwork: true`, usually, the `dnsPolicy` is suitable to be `ClusterFirstWithHostNet`.
+# For further reference: https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-s-dns-policy.
+dnsPolicy: ClusterFirst # @schema type:string; enum:["ClusterFirst","ClusterFirstWithHostNet","Default"]
+
 tolerations: []
 
 # extraEnv adds Kubernetes EnvVar entries to the manager container. Each entry
@@ -261,6 +271,7 @@ kubeRBACProxy:
   # Overrides the global containerSecurityContext for this sidecar only.
   # When empty, the global containerSecurityContext remains the fallback.
   containerSecurityContext: {}
+  port: 8443 # @schema minimum:1; maximum:65535
   resources:
     limits:
       cpu: 500m
