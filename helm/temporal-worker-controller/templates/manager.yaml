@@ -35,19 +35,9 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      {{- if .Values.affinity }}
+      {{- with .Values.affinity }}
       affinity:
-{{ toYaml .Values.affinity | nindent 8 }}
-      {{- else }}
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-{{ include "temporal-worker-controller.selectorLabels" . | nindent 20 }}
-                topologyKey: kubernetes.io/hostname
+        {{- tpl (toYaml .) $ | nindent 8 }}
       {{- end }}
       {{- if .Values.podSecurityContext }}
       securityContext:
@@ -209,5 +199,9 @@ spec:
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}

@@ -100,7 +100,25 @@ containerSecurityContext: {}
 
 # Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager
 # pods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.
-affinity: {}
+# The value is rendered with tpl, so it can reference the release (e.g. {{ .Release.Name }}).
+# Helm merges maps with the defaults below: to drop the default podAntiAffinity, set
+# affinity.podAntiAffinity to null (e.g. --set affinity.podAntiAffinity=null); to render no
+# affinity at all, set affinity to null.
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: temporal-worker-controller
+              app.kubernetes.io/instance: "{{ .Release.Name }}"
+          topologyKey: kubernetes.io/hostname
+
+# Topology spread constraints for the manager pods, e.g. to spread replicas across
+# nodes and zones. Can be combined with affinity; see above to drop the default
+# podAntiAffinity.
+topologySpreadConstraints: []
 
 # More than one replica is required for high availability.
 replicas: 2
