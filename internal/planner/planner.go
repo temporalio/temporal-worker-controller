@@ -57,11 +57,12 @@ type Plan struct {
 	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []WorkerResourceApply
 	// DeleteWorkerResources lists rendered WRT resource copies to delete explicitly.
-	// Populated when a versioned Deployment is being deleted (version sunset) and for
-	// WRT status entries whose build ID no longer has a Deployment (retry of a delete
-	// that was not confirmed). Rendered resources are owned by the WRT (not the
-	// Deployment) and therefore are not GC'd automatically when the Deployment is
-	// removed. See getDeleteWorkerResources.
+	// Populated when a versioned Deployment is being deleted (version sunset), when a
+	// WRT no longer selects the version status of a build ID, and for WRT status
+	// entries whose build ID no longer has a Deployment (retry of a delete that was
+	// not confirmed). Rendered resources are owned by the WRT (not the Deployment)
+	// and therefore are not GC'd automatically when the Deployment is removed. See
+	// getDeleteWorkerResources.
 	DeleteWorkerResources []WorkerResourceRef
 	// EnsureWRTOwnerRefs holds (base, patched) pairs for WRTs that need a
 	// controller owner reference added, ready for client.MergeFrom patching.
@@ -184,6 +185,13 @@ func GeneratePlan(
 	// not exist while that's true
 	sunsetBuildIDs := getSunsetScaleDownBuildIDs(status, spec)
 
+	// Without Temporal state every version reads as NotRegistered, so leave the version
+	// statuses unknown instead of acting on them.
+	var versionStatuses map[string]temporaliov1alpha1.VersionStatus
+	if foundDeploymentInTemporal {
+		versionStatuses = getVersionStatusByBuildID(status)
+	}
+
 	plan.ApplyWorkerResources = getWorkerResourceApplies(
 		l,
 		wrts,
@@ -191,17 +199,20 @@ func GeneratePlan(
 		spec.WorkerOptions.TemporalNamespace,
 		plan.DeleteDeployments,
 		sunsetBuildIDs,
+		versionStatuses,
 		config.WRTHPAMatchLabelsStripTemporalPrefix,
 	)
-	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs)
+	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs, versionStatuses)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
 
 	return plan, nil
 }
 
-// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID) pair.
-// Pairs that fail to render are included with RenderError set so the failure is surfaced in the
-// WRT status and Ready condition; they do not block the rest.
+// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID) pair
+// where the WRT selects the version status of the Build ID. A Build ID missing from
+// versionStatuses has an unknown status, which a WRT with VersionStatuses does not select.
+// Pairs that fail to render are included with RenderError set so the failure is surfaced in
+// the WRT status and Ready condition; they do not block the rest.
 func getWorkerResourceApplies(
 	l logr.Logger,
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
@@ -209,6 +220,7 @@ func getWorkerResourceApplies(
 	temporalNamespace string,
 	deleteDeployments []*appsv1.Deployment,
 	sunsetBuildIDs map[string]struct{},
+	versionStatuses map[string]temporaliov1alpha1.VersionStatus,
 	stripTemporalMetricLabelPrefix bool,
 ) []WorkerResourceApply {
 	// Build a set of deployment names that are scheduled for deletion so we can
@@ -235,6 +247,9 @@ func getWorkerResourceApplies(
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for buildID, deployment := range k8sState.Deployments {
 			if _, deleting := deletingDeployments[deployment.Name]; deleting {
+				continue
+			}
+			if !wrt.Spec.SelectsVersionStatus(versionStatuses[buildID]) {
 				continue
 			}
 			if hasScaleTarget {
@@ -335,10 +350,13 @@ func getWRTOwnerRefPatches(
 // deleted by the controller, along with the (WRT, build ID) identity the controller needs to
 // prune the matching status entry once a delete is confirmed. Since rendered resources are
 // owned by the WRT (not the Deployment), they are not GC'd automatically and must be deleted
-// by the controller. Deletion candidates come from two sources:
+// by the controller. Deletion candidates come from these sources:
 //
 //  1. Versioned Deployments being deleted this cycle (version sunset).
-//  2. WRT status entries whose build ID no longer has a versioned Deployment (orphaned
+//  2. WRT status entries whose build ID still has a versioned Deployment, but whose version
+//     status the WRT no longer selects (see WorkerResourceTemplateSpec.VersionStatuses).
+//     A build ID missing from versionStatuses has an unknown status, and its copy is kept.
+//  3. WRT status entries whose build ID no longer has a versioned Deployment (orphaned
 //     entries). Entries are pruned from WRT status only after a confirmed delete, so an
 //     entry that outlives its Deployment means the rendered resource's deletion has not
 //     been confirmed yet — e.g. the delete failed after the Deployment was already gone.
@@ -350,6 +368,7 @@ func getDeleteWorkerResources(
 	deleteDeployments []*appsv1.Deployment,
 	k8sState *k8s.DeploymentState,
 	sunsetBuildIDs map[string]struct{},
+	versionStatuses map[string]temporaliov1alpha1.VersionStatus,
 ) []WorkerResourceRef {
 	if len(wrts) == 0 {
 		return nil
@@ -379,8 +398,8 @@ func getDeleteWorkerResources(
 			continue
 		}
 
-		// Union of builds being sunset this cycle, orphaned status entries and builds
-		// pinned to zero (autoscalers only)
+		// Union of builds being sunset this cycle, orphaned status entries, builds whose
+		// version status the WRT no longer selects and builds pinned to zero (autoscalers only)
 		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
 		buildIDs = append(buildIDs, deletingBuildIDs...)
 
@@ -391,6 +410,10 @@ func getDeleteWorkerResources(
 			}
 			if k8sState != nil {
 				if _, live := k8sState.Deployments[v.BuildID]; live {
+					if status, known := versionStatuses[v.BuildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
+						buildIDs = append(buildIDs, v.BuildID)
+						continue
+					}
 					if hasScaleTarget {
 						// Remove the autoscaler as soon as the controller starts holding
 						// replicas at zero. The k8s Deployment outlives it by deleteDelay.
@@ -1022,6 +1045,21 @@ func getSunsetScaleDownBuildIDs(
 		}
 	}
 	return buildIDs
+}
+
+// getVersionStatusByBuildID returns the version status of each build ID in status.
+func getVersionStatusByBuildID(status *temporaliov1alpha1.WorkerDeploymentStatus) map[string]temporaliov1alpha1.VersionStatus {
+	statuses := make(map[string]temporaliov1alpha1.VersionStatus, len(status.DeprecatedVersions)+2)
+	for _, version := range status.DeprecatedVersions {
+		statuses[version.BuildID] = version.Status
+	}
+	if status.TargetVersion.BuildID != "" {
+		statuses[status.TargetVersion.BuildID] = status.TargetVersion.Status
+	}
+	if status.CurrentVersion != nil {
+		statuses[status.CurrentVersion.BuildID] = status.CurrentVersion.Status
+	}
+	return statuses
 }
 
 // shouldCreateDeployment determines if a new deployment needs to be created

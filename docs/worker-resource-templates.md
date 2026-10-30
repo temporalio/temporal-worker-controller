@@ -14,8 +14,8 @@ This is also the recommended mechanism for metric-based or backlog-based autosca
 
 1. You create a `WorkerResourceTemplate` that references a `WorkerDeployment` and contains the resource spec in `spec.template`.
 2. The validating webhook checks that you have permission to manage that resource type yourself (SubjectAccessReview), and that the resource kind is on the allowed list (see below).
-3. On each reconcile loop, the controller renders one copy of `spec.template` per worker version with a running Deployment, injects fields (see below), and applies it via Server-Side Apply.
-4. Each per-version copy is deleted by the controller when its corresponding Kubernetes Deployment is deleted per the sunset policy.
+3. On each reconcile loop, the controller renders one copy of `spec.template` per worker version with a running Deployment, injects fields (see below), and applies it via Server-Side Apply. If you set `spec.versionStatuses`, only versions with a listed status get a copy (see [Selecting versions by status](#selecting-versions-by-status)).
+4. Each per-version copy is deleted by the controller when its corresponding Kubernetes Deployment is deleted per the sunset policy, or when its version changes to a status that `spec.versionStatuses` does not list.
 5. `WorkerResourceTemplate.status.versions` is updated with the applied/failed status for each version.
 
 ## Auto-injection
@@ -58,6 +58,114 @@ The values are the same ones appended to `spec.metrics[*].external.metric.select
 When `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix` is enabled, the tokens are `{{worker_deployment_name}}`, `{{worker_build_id}}`, and `{{namespace}}`, matching the injected matchLabels.
 
 Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `datadog`, `dynatrace`, and others) so each ScaledObject filters metrics to one worker version. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
+
+## Selecting versions by status
+
+By default, a `WorkerResourceTemplate` renders a copy for every version with a running Deployment, whatever its status. A Current version and a version that drains for days behind pinned workflows then get the same policy.
+
+Set `spec.versionStatuses` to render copies only for versions with one of the listed [version statuses](concepts.md#version-states): `NotRegistered`, `Created`, `Inactive`, `Ramping`, `Current`, `Draining`, or `Drained`. If you leave it unset, every status is selected.
+
+Two templates for the same `WorkerDeployment` get different resource names, so you can split the statuses between them.
+
+For example, a strict PodDisruptionBudget for versions that receive new workflows, and none for past versions, so that a Draining version at one replica does not block node drains:
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: my-worker-pdb
+  namespace: my-namespace
+spec:
+  workerDeploymentRef:
+    name: my-worker
+  versionStatuses: [Current, Ramping]
+  template:
+    apiVersion: policy/v1
+    kind: PodDisruptionBudget
+    spec:
+      minAvailable: 1
+      selector:
+        matchLabels: {}
+```
+
+Or two HPAs: one that scales versions that receive new workflows on backlog, and one that keeps past versions small while they finish their pinned workflows:
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: my-worker-hpa-current
+  namespace: my-namespace
+spec:
+  workerDeploymentRef:
+    name: my-worker
+  versionStatuses: [Inactive, Ramping, Current]
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      scaleTargetRef: {}
+      minReplicas: 3
+      maxReplicas: 50
+      metrics:
+        - type: External
+          external:
+            metric:
+              name: temporal_approximate_backlog_count
+              selector:
+                matchLabels: {}
+            target:
+              type: AverageValue
+              averageValue: "10"
+---
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: my-worker-hpa-past
+  namespace: my-namespace
+spec:
+  workerDeploymentRef:
+    name: my-worker
+  versionStatuses: [Draining, Drained]
+  template:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    spec:
+      scaleTargetRef: {}
+      minReplicas: 1
+      maxReplicas: 2
+      metrics:
+        - type: External
+          external:
+            metric:
+              name: temporal_approximate_backlog_count
+              selector:
+                matchLabels: {}
+            target:
+              type: AverageValue
+              averageValue: "10"
+```
+
+### How copies follow status changes
+
+The controller reads the version statuses from Temporal on each reconcile, about every 10 seconds.
+
+- When a version changes to a status that is not listed, the controller deletes its copy. When the version changes back, for example after a rollback, the controller renders the copy again.
+- A new version gets no copy until it reaches a listed status. During a rollout, the new version is `NotRegistered` or `Inactive` before it becomes `Ramping` or `Current`.
+- A copy follows a status change in the next reconcile, not at the same moment. After a promotion, it can take up to about 10 seconds before the new Current version gets its copy and the previous Current version loses its copy.
+- In each reconcile, the controller deletes copies before it applies new ones. When a version moves from one template to the other, it loses the old copy before it gets the new one, so both copies do not exist at the same time. If a delete fails, both copies exist until the controller retries the delete and it succeeds.
+- If Temporal returns no worker deployment state, the controller cannot tell the version statuses. Templates with `spec.versionStatuses` then keep their existing copies, and create no new ones, until the statuses are known again.
+- A template that matches no live version has an empty `status.versions` and reports `Ready=True`.
+
+### Splitting autoscalers by status
+
+When an autoscaler such as an HPA or a KEDA ScaledObject manages replicas (`spec.deployment.replicas` is unset), follow these rules:
+
+- **List `Inactive` in the template for new versions.** A new versioned Deployment starts at 1 replica. If its autoscaler copy only appears when the version is `Ramping` or `Current`, the version takes new workflows at 1 replica until the copy is applied and the autoscaler reacts. With `Inactive` listed, the copy exists before the promotion.
+- **Cover `Draining` and `Drained` in another autoscaler template.** The controller does not scale Draining versions when an autoscaler manages replicas, and it ignores `spec.drainingDeployment.replicas`. A version that loses its autoscaler keeps its last replica count until the sunset scale-down.
+- **Do not let two autoscaler templates select the same status.** Two autoscalers that target the same Deployment fight over its replica count.
+
+Even when a template lists `Drained`, the controller removes the autoscaler copy of a Drained version when it scales that version to zero after `sunset.scaledownDelay`.
 
 ## Resource naming
 

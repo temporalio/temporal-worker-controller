@@ -71,8 +71,9 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		}
 	}
 
-	// Delete rendered WRT resources whose versioned Deployment is being sunset, or whose
-	// WRT status entry is orphaned (its build ID has no versioned Deployment anymore).
+	// Delete rendered WRT resources whose versioned Deployment is being sunset, whose
+	// version status the WRT no longer selects, or whose WRT status entry is orphaned
+	// (its build ID has no versioned Deployment anymore).
 	// Rendered resources are owned by the WRT (not the Deployment), so k8s GC does not
 	// clean them up when the Deployment is deleted; the controller does it here instead.
 	// Errors are logged and skipped: the WRT status entry for the build ID is only pruned
@@ -574,6 +575,21 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	for key := range deletedBuildIDs {
 		statusKeys[key] = struct{}{}
 	}
+	// A WRT that renders no copy this cycle (no live version it selects) has no apply
+	// result and usually no delete. Still record its generation and Ready condition when
+	// they are behind, or kstatus reports it InProgress until a copy is rendered.
+	for i := range p.WorkerResourceTemplates {
+		wrt := &p.WorkerResourceTemplates[i]
+		key := wrtKey{wrt.Namespace, wrt.Name}
+		if _, ok := statusKeys[key]; ok {
+			continue
+		}
+		ready := apimeta.FindStatusCondition(wrt.Status.Conditions, temporaliov1alpha1.ConditionReady)
+		if wrt.Status.ObservedGeneration == wrt.Generation && ready != nil && ready.ObservedGeneration == wrt.Generation {
+			continue
+		}
+		statusKeys[key] = struct{}{}
+	}
 
 	var applyErrs, statusErrs []error
 	for key := range statusKeys {
@@ -593,7 +609,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				break
 			}
 		}
-		if allSkipped && len(deleted) == 0 {
+		// allSkipped is also true with no results at all. Those WRTs render no copy and
+		// still need the conditions below.
+		if len(results) > 0 && allSkipped && len(deleted) == 0 {
 			// Every apply was a no-op and nothing was deleted, so the per-Build-ID
 			// status and conditions are already correct. The one thing that can still
 			// be stale is status.observedGeneration.

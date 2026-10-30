@@ -1040,6 +1040,11 @@ func (in *WorkerResourceTemplateSpec) DeepCopyInto(out *WorkerResourceTemplateSp
 		*out = new(WorkerDeploymentReference)
 		**out = **in
 	}
+	if in.VersionStatuses != nil {
+		in, out := &in.VersionStatuses, &out.VersionStatuses
+		*out = make([]VersionStatus, len(*in))
+		copy(*out, *in)
+	}
 	in.Template.DeepCopyInto(&out.Template)
 }
 
