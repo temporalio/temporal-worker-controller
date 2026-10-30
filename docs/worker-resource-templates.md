@@ -106,6 +106,8 @@ When you create or update a `WorkerResourceTemplate`, the webhook performs Subje
 
 If either check fails, the request is rejected. This prevents privilege escalation — you cannot use `WorkerResourceTemplate` to create resources you don't already have permission to create yourself.
 
+The webhook makes the same checks with the `delete` verb when you delete a `WorkerResourceTemplate`, because deleting it removes every resource rendered from it. For that check to cover those resources, the embedded resource's group and kind cannot change after creation. Changing the API version within the same group, such as `autoscaling/v1` to `autoscaling/v2`, is allowed. To switch to a different resource type, create a new `WorkerResourceTemplate`.
+
 Users who create `WorkerResourceTemplates` need RBAC permission to manage the embedded resource type directly. For example, to let a team create `WorkerResourceTemplates` that embed HPAs, they need the standard `autoscaling` permissions in their namespace.
 
 ## Webhook TLS

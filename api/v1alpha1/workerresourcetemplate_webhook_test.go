@@ -851,6 +851,51 @@ func TestWorkerResourceTemplate_ValidateUpdate_DeprecatedFieldImmutability(t *te
 	}
 }
 
+func TestWorkerResourceTemplate_ValidateUpdate_TemplateGroupKindImmutability(t *testing.T) {
+	hpaV1 := validHPAObject()
+	hpaV1["apiVersion"] = "autoscaling/v1"
+	pdb := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"spec": map[string]interface{}{
+			"minAvailable": float64(1),
+			"selector":     map[string]interface{}{"matchLabels": map[string]interface{}{}},
+		},
+	}
+	tests := map[string]struct {
+		oldObj  map[string]interface{}
+		newObj  map[string]interface{}
+		wantErr string
+	}{
+		"kind change is forbidden": {
+			oldObj:  validHPAObject(),
+			newObj:  pdb,
+			wantErr: "resource type is immutable (HorizontalPodAutoscaler.autoscaling cannot change to PodDisruptionBudget.policy)",
+		},
+		"version change within the same group and kind is valid": {
+			oldObj: validHPAObject(),
+			newObj: hpaV1,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			v := newValidatorNoAPI()
+			v.RESTMapper = newFakeRESTMapper(
+				schema.GroupVersionKind{Group: "autoscaling", Version: "v1", Kind: "HorizontalPodAutoscaler"},
+				schema.GroupVersionKind{Group: "autoscaling", Version: "v2", Kind: "HorizontalPodAutoscaler"},
+				schema.GroupVersionKind{Group: "policy", Version: "v1", Kind: "PodDisruptionBudget"},
+			)
+			_, err := v.ValidateUpdate(context.Background(), newWRT("wrt", "worker", tc.oldObj), newWRT("wrt", "worker", tc.newObj))
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestWorkerResourceTemplate_MultipleErrors(t *testing.T) {
 	ctx := context.Background()
 	v := newValidatorNoAPI()
