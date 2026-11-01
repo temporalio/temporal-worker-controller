@@ -43,6 +43,30 @@ jobs:
           helm template test-release helm/temporal-worker-controller \
             --set metrics.disableAuth=true
 
+      - name: Template with metrics disabled adds no kube-rbac-proxy
+        run: |
+          rendered=$(helm template test-release helm/temporal-worker-controller \
+            --set metrics.enabled=false)
+          ! echo "$rendered" | grep -q 'name: kube-rbac-proxy'
+
+      - name: Template with ServiceMonitor behind the auth proxy
+        run: |
+          rendered=$(helm template test-release helm/temporal-worker-controller \
+            --set prometheus.enabled=true \
+            --set prometheus.labels.release=prometheus)
+          echo "$rendered" | grep -q 'kind: ServiceMonitor'
+          echo "$rendered" | grep -q 'scheme: https'
+          echo "$rendered" | grep -q 'release: prometheus'
+
+      - name: Template with ServiceMonitor and auth proxy disabled
+        run: |
+          rendered=$(helm template test-release helm/temporal-worker-controller \
+            --set prometheus.enabled=true \
+            --set metrics.disableAuth=true)
+          echo "$rendered" | grep -q 'kind: ServiceMonitor'
+          echo "$rendered" | grep -q 'scheme: http$'
+          echo "$rendered" | grep -q 'name: test-release-metrics-service'
+
       - name: Template with kube-rbac-proxy image override
         run: |
           helm template test-release helm/temporal-worker-controller \

@@ -197,7 +197,11 @@ certmanager:
 
 # Not yet supported
 prometheus:
+  # enabled creates a ServiceMonitor for the metrics endpoint. Needs metrics.enabled
+  # and the Prometheus Operator CRDs.
   enabled: false
+  # labels are added to the ServiceMonitor, so a Prometheus serviceMonitorSelector can match it.
+  labels: {} # @schema additionalProperties.type:string
 
 nodeSelector: {}
 

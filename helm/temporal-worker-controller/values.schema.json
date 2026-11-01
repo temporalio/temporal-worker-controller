@@ -258,7 +258,15 @@
       "description": "Not yet supported",
       "properties": {
         "enabled": {
+          "description": "enabled creates a ServiceMonitor for the metrics endpoint. Needs metrics.enabled\nand the Prometheus Operator CRDs.",
           "type": "boolean"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "labels are added to the ServiceMonitor, so a Prometheus serviceMonitorSelector can match it.",
+          "type": "object"
         }
       },
       "type": "object"
