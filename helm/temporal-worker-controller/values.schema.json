@@ -255,17 +255,16 @@
       "type": "string"
     },
     "prometheus": {
-      "description": "Not yet supported",
       "properties": {
         "enabled": {
-          "description": "enabled creates a ServiceMonitor for the metrics endpoint. Needs metrics.enabled\nand the Prometheus Operator CRDs.",
+          "description": "enabled creates a Prometheus ServiceMonitor for the metrics endpoint.\nNeeds metrics.enabled and Prometheus Operator installed.\nA Prometheus ServiceMonitor is a Custom Resource Definition (CRD) provided\nby the Prometheus Operator that defines how Prometheus should discover\nand scrape metrics from Kubernetes Services.\n\nRef: https://prometheus-operator.dev/docs/developer/getting-started/",
           "type": "boolean"
         },
         "labels": {
           "additionalProperties": {
             "type": "string"
           },
-          "description": "labels are added to the ServiceMonitor, so a Prometheus serviceMonitorSelector can match it.",
+          "description": "labels are added to the ServiceMonitor, so a Prometheus serviceMonitorSelector can match it.\nNone by default. kube-prometheus-stack, for example, selects on its release name,\nso set release: \u003cyour kube-prometheus-stack release name\u003e.",
           "type": "object"
         }
       },

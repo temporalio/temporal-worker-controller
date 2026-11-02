@@ -195,12 +195,18 @@ certmanager:
       name: ca-injector
       key: ca.crt
 
-# Not yet supported
 prometheus:
-  # enabled creates a ServiceMonitor for the metrics endpoint. Needs metrics.enabled
-  # and the Prometheus Operator CRDs.
+  # enabled creates a Prometheus ServiceMonitor for the metrics endpoint.
+  # Needs metrics.enabled and Prometheus Operator installed.
+  # A Prometheus ServiceMonitor is a Custom Resource Definition (CRD) provided
+  # by the Prometheus Operator that defines how Prometheus should discover
+  # and scrape metrics from Kubernetes Services.
+  #
+  # Ref: https://prometheus-operator.dev/docs/developer/getting-started/
   enabled: false
   # labels are added to the ServiceMonitor, so a Prometheus serviceMonitorSelector can match it.
+  # None by default. kube-prometheus-stack, for example, selects on its release name,
+  # so set release: <your kube-prometheus-stack release name>.
   labels: {} # @schema additionalProperties.type:string
 
 nodeSelector: {}
