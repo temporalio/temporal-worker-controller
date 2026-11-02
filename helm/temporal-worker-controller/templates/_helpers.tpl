@@ -20,6 +20,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+ServiceMonitor labels from values, so a Prometheus serviceMonitorSelector can match it.
+*/}}
+{{- define "temporal-worker-controller.prometheus.labels" -}}
+{{- with .Values.prometheus.labels }}{{ toYaml . }}{{- end }}
+{{- end }}
+
+{{/*
 kube-rbac-proxy image reference. A digest takes precedence over a tag when set.
 */}}
 {{- define "temporal-worker-controller.kubeRBACProxyImage" -}}
