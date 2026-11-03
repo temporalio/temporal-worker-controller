@@ -56,6 +56,10 @@
       "description": "containerSecurityContext overrides the default container-level securityContext for both\nthe manager and kube-rbac-proxy containers when set. If empty (default), the chart uses\nthe legacy behavior (allowPrivilegeEscalation: false + capabilities.drop: ALL).\nExample for restricted Pod Security Standards / Kyverno compliance:\n  containerSecurityContext:\n    allowPrivilegeEscalation: false\n    readOnlyRootFilesystem: true\n    runAsGroup: 65532\n    seccompProfile:\n      type: RuntimeDefault\n    capabilities:\n      drop:\n        - \"ALL\"",
       "type": "object"
     },
+    "dnsPolicy": {
+      "description": "`dnsPolicy` determines the manner in which DNS resolution happens in the cluster.\nIn case of `hostNetwork: true`, usually, the `dnsPolicy` is suitable to be `ClusterFirstWithHostNet`.\nFor further reference: https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-s-dns-policy.",
+      "type": "string"
+    },
     "extraEnv": {
       "description": "extraEnv adds Kubernetes EnvVar entries to the manager container. Each entry\nneeds a name and either a literal value or a valueFrom source\n(secretKeyRef / configMapKeyRef). The Go runtime, gRPC (Temporal SDK), and\nnet/http (controller-runtime / client-go) honor standard proxy variables.\n\nUse extraVolumes/extraVolumeMounts together with SSL_CERT_FILE to trust a\nprivate CA. The controller verifies the Temporal server certificate against\nthe system trust store; Go reads SSL_CERT_FILE.\n\nextraEnv:\n  - name: HTTP_PROXY\n    value: \"http://proxy.corp.example.com:8080\"\n  - name: HTTPS_PROXY\n    value: \"http://proxy.corp.example.com:8080\"\n  - name: NO_PROXY\n    value: \"localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8\"\n  - name: SSL_CERT_FILE\n    value: /etc/ssl/custom-ca/ca.crt\n  - name: API_TOKEN\n    valueFrom:\n      secretKeyRef:\n        name: controller-secrets\n        key: api-token",
       "items": {
@@ -94,6 +98,10 @@
         "type": "object"
       },
       "type": "array"
+    },
+    "hostNetwork": {
+      "description": "Change `hostNetwork` to `true` when you want the pod to share its host's network namespace.\nUseful for situations like when you end up dealing with a custom CNI over Amazon EKS.",
+      "type": "boolean"
     },
     "image": {
       "properties": {
@@ -169,6 +177,11 @@
           },
           "type": "object"
         },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
         "resources": {
           "properties": {
             "limits": {
@@ -214,6 +227,11 @@
         },
         "enabled": {
           "type": "boolean"
+        },
+        "healthPort": {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
         },
         "port": {
           "maximum": 65535,
