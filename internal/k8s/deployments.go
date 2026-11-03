@@ -401,7 +401,6 @@ func ApplyDeploymentLabels(deployment *appsv1.Deployment, desired map[string]str
 	return changed
 }
 
-// TODO (Shivam): Change hash when secret name is updated as well.
 func ComputeConnectionSpecHash(connection temporaliov1alpha1.ConnectionSpec) string {
 	// HostPort is required, but MutualTLSSecret can be empty for non-mTLS connections
 	if connection.HostPort == "" {
@@ -418,6 +417,12 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.ConnectionSpec) str
 		_, _ = hasher.Write([]byte(connection.MutualTLSSecretRef.Name))
 	} else if connection.APIKeySecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.APIKeySecretRef.Name))
+	} else if connection.APIKey != nil {
+		if connection.APIKey.Path != "" {
+			_, _ = hasher.Write([]byte(connection.APIKey.Path))
+		} else {
+			_, _ = hasher.Write([]byte(connection.APIKey.SecretRef.Name))
+		}
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil))
@@ -508,13 +513,13 @@ func ApplyControllerPodSpecModifications(
 				},
 			},
 		})
-	} else if connection.APIKeySecretRef != nil {
+	} else if connection.SecretKeySelector() != nil {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
 					Name: EnvTemporalAPIKey,
 					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: connection.APIKeySecretRef,
+						SecretKeyRef: connection.SecretKeySelector(),
 					},
 				},
 			)
