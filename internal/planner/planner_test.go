@@ -5382,6 +5382,12 @@ func TestGetDeleteWorkerResources_VersionStatuses(t *testing.T) {
 			expectRefs: nil,
 		},
 		{
+			// The CRD rejects an empty list, but Go code can still build one.
+			name:       "empty selector keeps every live copy, like an unset one",
+			wrt:        withStatus(withVersionStatuses(pdb, []temporaliov1alpha1.VersionStatus{}...), "build-cur", "build-drain"),
+			expectRefs: nil,
+		},
+		{
 			// The copy exists without an entry when the status write after its apply failed.
 			name:       "unselected version with no status entry is still deleted",
 			wrt:        withStatus(withVersionStatuses(pdb, current, ramping), "build-cur"),
