@@ -5037,9 +5037,16 @@ func TestGetDeleteWorkerResources_SunsetBuildIDs(t *testing.T) {
 			expectRefs:     []WorkerResourceRef{hpaRef("build-b")},
 		},
 		{
-			name:           "autoscaler with no status entry has nothing to delete",
+			// The copy exists without an entry when the status write after its apply failed.
+			name:           "autoscaler with no status entry is still deleted",
 			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{hpa},
 			sunsetBuildIDs: map[string]struct{}{"build-b": {}},
+			expectRefs:     []WorkerResourceRef{hpaRef("build-b")},
+		},
+		{
+			name:           "sunsetting build ID without a Deployment is not deleted again",
+			wrts:           []temporaliov1alpha1.WorkerResourceTemplate{hpa},
+			sunsetBuildIDs: map[string]struct{}{"build-gone": {}},
 			expectRefs:     nil,
 		},
 		{

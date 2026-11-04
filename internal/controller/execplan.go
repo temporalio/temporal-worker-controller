@@ -98,8 +98,8 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 				"wrt", res.WRTName, "buildID", res.BuildID)
 		} else {
 			deletedWorkerResources = append(deletedWorkerResources, res)
-			// The copy of an unselected version is deleted in every cycle, so NotFound is
-			// the usual result and is not logged.
+			// Some copies are deleted in every cycle (see getDeleteWorkerResources), so
+			// NotFound is the usual result and is not logged.
 			if err == nil {
 				l.Info("deleted rendered worker resource",
 					"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name,
@@ -597,9 +597,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			continue
 		}
 
-		// The copy of an unselected version is deleted in every cycle, and a NotFound
-		// delete is confirmed too. Only a delete that prunes a status entry changes the
-		// status, so count only those.
+		// Some copies are deleted in every cycle (see getDeleteWorkerResources), and a
+		// NotFound delete is confirmed too. Only a delete that prunes a status entry
+		// changes the status, so count only those.
 		deleted := make(map[string]struct{})
 		for _, v := range wrt.Status.Versions {
 			if _, ok := deletedBuildIDs[key][v.BuildID]; ok {

@@ -368,7 +368,9 @@ func getWRTOwnerRefPatches(
 //     WRT has a status entry for them: a copy has no entry when the status write after its
 //     apply failed. The delete is NotFound when there is no copy. A build ID missing from
 //     versionStatuses has an unknown status, and its copy is kept.
-//  3. WRT status entries whose build ID no longer has a versioned Deployment (orphaned
+//  3. For autoscaler WRTs, versioned Deployments that the controller holds at zero replicas
+//     (sunsetBuildIDs), also in every cycle and whether or not the WRT has an entry.
+//  4. WRT status entries whose build ID no longer has a versioned Deployment (orphaned
 //     entries). Entries are pruned from WRT status only after a confirmed delete, so an
 //     entry that outlives its Deployment means the rendered resource's deletion has not
 //     been confirmed yet — e.g. the delete failed after the Deployment was already gone.
@@ -415,30 +417,31 @@ func getDeleteWorkerResources(
 		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
 		buildIDs = append(buildIDs, deletingBuildIDs...)
 
+		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		if k8sState != nil {
 			for buildID := range k8sState.Deployments {
 				if status, known := versionStatuses[buildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
 					buildIDs = append(buildIDs, buildID)
+					continue
+				}
+				if hasScaleTarget {
+					// Remove the autoscaler as soon as the controller starts holding
+					// replicas at zero. The k8s Deployment outlives it by deleteDelay.
+					// Any other rendered resource is cleaned up with the Deployment
+					if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+						buildIDs = append(buildIDs, buildID)
+					}
 				}
 			}
 		}
 
-		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for _, v := range wrt.Status.Versions {
 			if v.BuildID == "" {
 				continue
 			}
 			if k8sState != nil {
 				if _, live := k8sState.Deployments[v.BuildID]; live {
-					if hasScaleTarget {
-						// Remove the autoscaler as soon as the controller starts holding
-						// replicas at zero. The k8s Deployment outlives it by deleteDelay.
-						// Any other rendered resource is cleaned up with the Deployment
-						if _, sunsetting := sunsetBuildIDs[v.BuildID]; sunsetting {
-							buildIDs = append(buildIDs, v.BuildID)
-						}
-					}
-					continue // build still has a Deployment; its resource is managed by applies
+					continue // build still has a Deployment; handled above and by applies
 				}
 			}
 			buildIDs = append(buildIDs, v.BuildID)
