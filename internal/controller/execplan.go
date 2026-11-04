@@ -93,12 +93,14 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 		obj.SetName(res.Name)
 		// A NotFound result counts as a successful delete: the resource is confirmed gone.
 		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
-			l.Error(err, "unable to delete worker resource on version sunset",
-				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
+			l.Error(err, "unable to delete rendered worker resource",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name,
+				"wrt", res.WRTName, "buildID", res.BuildID)
 		} else {
 			deletedWorkerResources = append(deletedWorkerResources, res)
-			l.Info("deleted worker resource on version sunset",
-				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name)
+			l.Info("deleted rendered worker resource",
+				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name,
+				"wrt", res.WRTName, "buildID", res.BuildID)
 		}
 	}
 
