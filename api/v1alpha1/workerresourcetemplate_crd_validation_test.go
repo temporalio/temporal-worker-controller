@@ -36,6 +36,15 @@ var _ = Describe("WorkerResourceTemplate CRD schema validation", func() {
 		Expect(err.Error()).To(ContainSubstring("Unsupported value"))
 	})
 
+	It("rejects NotRegistered", func() {
+		wrt := makeWRTForWebhook("not-registered", ns, "my-worker", hpaObjForIntegration())
+		wrt.Spec.VersionStatuses = []VersionStatus{VersionStatusCurrent, VersionStatusNotRegistered}
+		err := k8sClient.Create(ctx, wrt)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.versionStatuses[1]"))
+		Expect(err.Error()).To(ContainSubstring("Unsupported value"))
+	})
+
 	It("rejects an empty versionStatuses list", func() {
 		wrt := makeWRTForWebhook("empty-statuses", ns, "my-worker", hpaObjForIntegration())
 		wrt.SetGroupVersionKind(GroupVersion.WithKind("WorkerResourceTemplate"))

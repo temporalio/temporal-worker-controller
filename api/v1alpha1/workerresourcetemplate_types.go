@@ -38,10 +38,14 @@ type WorkerResourceTemplateSpec struct {
 	// Use two WorkerResourceTemplates for the same WorkerDeployment to give versions
 	// that receive new workflows (Current, Ramping) a different policy from versions
 	// that only finish pinned workflows (Draining).
+	//
+	// NotRegistered is not allowed. Before the workers of the first version register,
+	// Temporal has no worker deployment, so the controller cannot tell that status from
+	// a missing state, and the selector would match on later rollouts only.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:Enum=NotRegistered;Created;Inactive;Ramping;Current;Draining;Drained
+	// +kubebuilder:validation:items:Enum=Created;Inactive;Ramping;Current;Draining;Drained
 	VersionStatuses []VersionStatus `json:"versionStatuses,omitempty"`
 
 	// Template is the Kubernetes resource template applied per active Build ID.

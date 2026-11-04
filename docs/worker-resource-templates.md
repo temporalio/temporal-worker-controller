@@ -63,7 +63,9 @@ Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `d
 
 By default, a `WorkerResourceTemplate` renders a copy for every version with a running Deployment, whatever its status. A Current version and a version that drains for days behind pinned workflows then get the same policy.
 
-Set `spec.versionStatuses` to render copies only for versions with one of the listed [version statuses](concepts.md#version-states): `NotRegistered`, `Created`, `Inactive`, `Ramping`, `Current`, `Draining`, or `Drained`. If you leave it unset, every status is selected.
+Set `spec.versionStatuses` to render copies only for versions with one of the listed [version statuses](concepts.md#version-states): `Created`, `Inactive`, `Ramping`, `Current`, `Draining`, or `Drained`. If you leave it unset, every status is selected.
+
+You cannot list `NotRegistered`. Before the workers of the first version register, Temporal has no worker deployment, so the controller cannot tell a `NotRegistered` version from missing Temporal state. Such a template would get a copy on later rollouts, but not for the first version. To get a copy before the promotion, list `Inactive`.
 
 Two templates for the same `WorkerDeployment` get different resource names, so you can split the statuses between them.
 
@@ -151,7 +153,7 @@ spec:
 The controller reads the version statuses from Temporal on each reconcile, about every 10 seconds.
 
 - When a version changes to a status that is not listed, the controller deletes its copy. When the version changes back, for example after a rollback, the controller renders the copy again.
-- A new version gets no copy until it reaches a listed status. During a rollout, the new version is `NotRegistered` or `Inactive` before it becomes `Ramping` or `Current`.
+- A new version gets no copy until it reaches a listed status. During a rollout, the new version is `NotRegistered` until its workers register, and then `Inactive` before it becomes `Ramping` or `Current`.
 - A copy follows a status change in the next reconcile, not at the same moment. After a promotion, it can take up to about 10 seconds before the new Current version gets its copy and the previous Current version loses its copy.
 - In each reconcile, the controller deletes copies before it applies new ones. When a version moves from one template to the other, it loses the old copy before it gets the new one, so both copies do not exist at the same time. If a delete fails, both copies exist until the controller retries the delete and it succeeds.
 - If Temporal returns no worker deployment state, the controller cannot tell the version statuses. Templates with `spec.versionStatuses` then keep their existing copies, and create no new ones, until the statuses are known again. They also keep their conditions and `status.observedGeneration`, so a spec change shows as in progress until then.
