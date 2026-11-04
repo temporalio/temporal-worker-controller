@@ -1047,8 +1047,9 @@ func getScaleDeployments(
 	return scaleDeployments
 }
 
-// getSunsetScaleDownBuildIDs returns the build IDs of drained versions the controller has
-// begun forcing to zero.
+// getSunsetScaleDownBuildIDs returns the build IDs of the versions getScaleDeployments forces
+// to zero: drained versions after the scale-down delay, and inactive versions that are not the
+// rollout target.
 func getSunsetScaleDownBuildIDs(
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
@@ -1057,6 +1058,9 @@ func getSunsetScaleDownBuildIDs(
 	for _, version := range status.DeprecatedVersions {
 		if version.Status == temporaliov1alpha1.VersionStatusDrained &&
 			version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
+			buildIDs[version.BuildID] = struct{}{}
+		}
+		if version.Status == temporaliov1alpha1.VersionStatusInactive && version.BuildID != status.TargetVersion.BuildID {
 			buildIDs[version.BuildID] = struct{}{}
 		}
 	}

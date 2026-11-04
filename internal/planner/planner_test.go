@@ -5071,8 +5071,8 @@ func TestGetDeleteWorkerResources_SunsetBuildIDs(t *testing.T) {
 	}
 }
 
-// TestGetSunsetScaleDownBuildIDs covers which drained versions the controller has begun
-// forcing to zero.
+// TestGetSunsetScaleDownBuildIDs covers which versions the controller forces to zero: drained
+// versions after the scale-down delay, and inactive versions that are not the rollout target.
 func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 	const (
 		drained  = temporaliov1alpha1.VersionStatusDrained
@@ -5102,6 +5102,7 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 	testCases := []struct {
 		name           string
 		versions       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion
+		targetBuildID  string
 		scaledownDelay time.Duration
 		expect         []string
 	}{
@@ -5132,12 +5133,27 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 			expect:         []string{"build-a"},
 		},
 		{
-			name: "non-drained statuses are excluded however old the timestamp",
+			name: "draining, ramping and current statuses are excluded however old the timestamp",
 			versions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
-				ver("build-inactive", inactive, ago(24*time.Hour)),
+				ver("build-draining", draining, ago(24*time.Hour)),
 				ver("build-ramping", ramping, ago(24*time.Hour)),
 				ver("build-current", current, ago(24*time.Hour)),
 			},
+			scaledownDelay: time.Hour,
+			expect:         nil,
+		},
+		{
+			// A newer build replaced it before promotion, and getScaleDeployments scales it to zero.
+			name:           "inactive version that is not the target is included",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-inactive", inactive, nil)},
+			targetBuildID:  "build-new",
+			scaledownDelay: time.Hour,
+			expect:         []string{"build-inactive"},
+		},
+		{
+			name:           "inactive target is excluded",
+			versions:       []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{ver("build-inactive", inactive, nil)},
+			targetBuildID:  "build-inactive",
 			scaledownDelay: time.Hour,
 			expect:         nil,
 		},
@@ -5158,8 +5174,9 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 				ver("build-no-ts", drained, nil),
 				ver("build-older", drained, ago(48*time.Hour)),
 			},
+			targetBuildID:  "build-new",
 			scaledownDelay: time.Hour,
-			expect:         []string{"build-old", "build-older"},
+			expect:         []string{"build-old", "build-older", "build-inactive"},
 		},
 		{
 			name:           "drained version with no Deployment is still included",
@@ -5178,6 +5195,7 @@ func TestGetSunsetScaleDownBuildIDs(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			status := &temporaliov1alpha1.WorkerDeploymentStatus{DeprecatedVersions: tc.versions}
+			status.TargetVersion.BuildID = tc.targetBuildID
 			spec := &temporaliov1alpha1.WorkerDeploymentSpec{
 				SunsetStrategy: temporaliov1alpha1.SunsetStrategy{
 					ScaledownDelay: &metav1.Duration{Duration: tc.scaledownDelay},

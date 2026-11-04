@@ -165,7 +165,7 @@ When an autoscaler such as an HPA or a KEDA ScaledObject manages replicas (`spec
 - **Cover `Draining` and `Drained` in another autoscaler template.** The controller does not scale Draining versions when an autoscaler manages replicas, and it ignores `spec.drainingDeployment.replicas`. A version that loses its autoscaler keeps its last replica count until the sunset scale-down.
 - **Do not let two autoscaler templates select the same status.** Two autoscalers that target the same Deployment fight over its replica count.
 
-Even when a template lists `Drained`, the controller removes the autoscaler copy of a Drained version when it scales that version to zero after `sunset.scaledownDelay`.
+The controller removes the autoscaler copy of a version that it holds at zero replicas, even when a template lists the status of that version. Otherwise the autoscaler would scale the version up again. This applies to a Drained version after `sunset.scaledownDelay`, and to an Inactive version that is no longer the rollout target, for example because a newer build replaced it before its promotion.
 
 ## Resource naming
 
