@@ -580,6 +580,62 @@ func TestExecutePlan_UnselectedCopyWithoutStatusEntry_IsDeleted(t *testing.T) {
 	require.True(t, apierrors.IsNotFound(getRenderedHPA(r, namespace, hpaA.GetName())), "the copy of the Draining version must be deleted")
 }
 
+// TestExecutePlan_LaterStepFails_StillPrunesDeletedCopyEntries covers a cycle that deletes a copy
+// and then fails before executeWRTOperations, here on a Deployment scale. The status entry of the
+// deleted copy must still be pruned. Otherwise its LastAppliedHash skips the apply that recreates
+// the copy when the version is selected again before a cycle succeeds.
+func TestExecutePlan_LaterStepFails_StillPrunesDeletedCopyEntries(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	ctx := context.Background()
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 1, connection)
+	depB := makeVersionedDeployment(twd, buildB, 1, connection)
+	wrt := makeExecplanWRT("my-hpa", twd)
+	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
+	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
+	}
+
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, depA, depB, wrt, hpaA}, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if subResourceName == "scale" {
+				return errors.New("simulated scale failure")
+			}
+			return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+		},
+	})
+
+	// build-a is Inactive and no longer the target, so the controller scales it to zero and
+	// deletes its autoscaler copy in the same cycle.
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion:  temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusInactive)},
+		},
+	}
+	temporalState := &temporal.TemporalWorkerState{
+		CurrentBuildID: buildB,
+		Versions: map[string]*temporal.VersionInfo{
+			buildA: {BuildID: buildA, Status: temporaliov1alpha1.VersionStatusInactive},
+			buildB: {BuildID: buildB, Status: temporaliov1alpha1.VersionStatusCurrent},
+		},
+	}
+	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
+	require.NoError(t, err)
+	require.NotEmpty(t, p.ScaleDeployments)
+	require.ErrorContains(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p), "simulated scale failure")
+
+	require.True(t, apierrors.IsNotFound(getRenderedHPA(r, namespace, hpaA.GetName())), "the autoscaler copy of build-a must be deleted")
+	require.NotContains(t, getWRTVersionStatuses(t, r, namespace, wrt.Name), buildA, "the status entry of the deleted copy must be pruned")
+}
+
 // ─── Version prune regression tests ──────────────────────────────────────────
 
 // drainedVersion builds a drained, deletion eligible DeprecatedVersions entry for buildID.

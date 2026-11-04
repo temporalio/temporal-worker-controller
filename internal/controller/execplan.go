@@ -791,6 +791,44 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	return errors.Join(append(applyErrs, statusErrs...)...)
 }
 
+// pruneWRTStatusEntries removes the WRT status entries of the rendered resources in deleted,
+// whose delete was confirmed, and leaves the rest of each WRT status unchanged.
+func (r *WorkerDeploymentReconciler) pruneWRTStatusEntries(ctx context.Context, deleted []planner.WorkerResourceRef) error {
+	buildIDsByWRT := make(map[types.NamespacedName]map[string]struct{})
+	for _, ref := range deleted {
+		if ref.WRTName == "" || ref.BuildID == "" {
+			continue
+		}
+		key := types.NamespacedName{Namespace: ref.Namespace, Name: ref.WRTName}
+		if buildIDsByWRT[key] == nil {
+			buildIDsByWRT[key] = make(map[string]struct{})
+		}
+		buildIDsByWRT[key][ref.BuildID] = struct{}{}
+	}
+
+	var errs []error
+	for key, buildIDs := range buildIDsByWRT {
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
+		if err := r.Get(ctx, key, wrt); err != nil {
+			errs = append(errs, fmt.Errorf("get WRT %s to prune status entries: %w", key, err))
+			continue
+		}
+		n := len(wrt.Status.Versions)
+		wrt.Status.Versions = slices.DeleteFunc(wrt.Status.Versions, func(v temporaliov1alpha1.WorkerResourceTemplateVersionStatus) bool {
+			_, ok := buildIDs[v.BuildID]
+			return ok
+		})
+		// Most confirmed deletes are NotFound for a copy that never had an entry.
+		if len(wrt.Status.Versions) == n {
+			continue
+		}
+		if err := r.Status().Update(ctx, wrt); err != nil {
+			errs = append(errs, fmt.Errorf("prune status entries of WRT %s: %w", key, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // isTerminalWorkerResourceError reports whether a WorkerResourceTemplate failure can
 // only be resolved by a human changing something, and so should be surfaced through the
 // kstatus Stalled condition (making kstatus report Failed) rather than left looking
@@ -1006,16 +1044,17 @@ func (r *WorkerDeploymentReconciler) executePlan(
 	// on the next reconcile instead of orphaning the record; see deleteDeprecatedVersions.
 	r.deleteDeprecatedVersions(ctx, l, workerDeploy, deploymentHandler, temporalClient, p)
 	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
+	if err == nil {
+		err = r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p)
+	}
+	if err == nil {
+		err = r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p)
+	}
 	if err != nil {
-		return err
-	}
-
-	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
-		return err
-	}
-
-	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
-		return err
+		// executeWRTOperations does not run, so prune the status entries of the copies
+		// deleted above here. If the version of such a copy is selected again before a
+		// cycle succeeds, its stale LastAppliedHash would skip the apply that recreates it.
+		return errors.Join(err, r.pruneWRTStatusEntries(ctx, deletedWorkerResources))
 	}
 
 	r.ensureWRTOwnerRefs(ctx, l, p)
