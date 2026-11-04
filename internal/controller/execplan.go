@@ -42,7 +42,7 @@ import (
 
 // executeK8sOperations executes the Kubernetes operations contained in the plan: creating,
 // deleting, scaling, and updating Deployments, and deleting the rendered WRT resources of
-// sunset or orphaned build IDs. It returns the refs from p.DeleteWorkerResources whose
+// sunset, unselected, or orphaned build IDs. It returns the refs from p.DeleteWorkerResources whose
 // delete was confirmed this cycle — the delete succeeded or the resource was already gone
 // (NotFound). executePlan prunes the WRT status entries matching the returned refs; entries
 // for unconfirmed deletes are retained so the planner re-derives and retries the delete on
@@ -98,9 +98,13 @@ func (r *WorkerDeploymentReconciler) executeK8sOperations(ctx context.Context, l
 				"wrt", res.WRTName, "buildID", res.BuildID)
 		} else {
 			deletedWorkerResources = append(deletedWorkerResources, res)
-			l.Info("deleted rendered worker resource",
-				"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name,
-				"wrt", res.WRTName, "buildID", res.BuildID)
+			// The copy of an unselected version is deleted in every cycle, so NotFound is
+			// the usual result and is not logged.
+			if err == nil {
+				l.Info("deleted rendered worker resource",
+					"apiVersion", res.APIVersion, "kind", res.Kind, "name", res.Name,
+					"wrt", res.WRTName, "buildID", res.BuildID)
+			}
 		}
 	}
 
@@ -586,12 +590,21 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	var applyErrs, statusErrs []error
 	for key := range statusKeys {
 		results := wrtResults[key]
-		deleted := deletedBuildIDs[key]
 
 		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: key.namespace, Name: key.name}, wrt); err != nil {
 			statusErrs = append(statusErrs, fmt.Errorf("get WRT %s/%s for status update: %w", key.namespace, key.name, err))
 			continue
+		}
+
+		// The copy of an unselected version is deleted in every cycle, and a NotFound
+		// delete is confirmed too. Only a delete that prunes a status entry changes the
+		// status, so count only those.
+		deleted := make(map[string]struct{})
+		for _, v := range wrt.Status.Versions {
+			if _, ok := deletedBuildIDs[key][v.BuildID]; ok {
+				deleted[v.BuildID] = struct{}{}
+			}
 		}
 
 		// While a versioned Deployment has an unknown version status, a WRT that selects

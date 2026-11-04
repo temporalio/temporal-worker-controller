@@ -57,8 +57,8 @@ type Plan struct {
 	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []WorkerResourceApply
 	// DeleteWorkerResources lists rendered WRT resource copies to delete explicitly.
-	// Populated when a versioned Deployment is being deleted (version sunset), when a
-	// WRT no longer selects the version status of a build ID, and for WRT status
+	// Populated when a versioned Deployment is being deleted (version sunset), for each
+	// live build ID whose version status a WRT does not select, and for WRT status
 	// entries whose build ID no longer has a Deployment (retry of a delete that was
 	// not confirmed). Rendered resources are owned by the WRT (not the Deployment)
 	// and therefore are not GC'd automatically when the Deployment is removed. See
@@ -363,9 +363,11 @@ func getWRTOwnerRefPatches(
 // by the controller. Deletion candidates come from these sources:
 //
 //  1. Versioned Deployments being deleted this cycle (version sunset).
-//  2. WRT status entries whose build ID still has a versioned Deployment, but whose version
-//     status the WRT no longer selects (see WorkerResourceTemplateSpec.VersionStatuses).
-//     A build ID missing from versionStatuses has an unknown status, and its copy is kept.
+//  2. Versioned Deployments whose version status the WRT does not select (see
+//     WorkerResourceTemplateSpec.VersionStatuses), in every cycle and whether or not the
+//     WRT has a status entry for them: a copy has no entry when the status write after its
+//     apply failed. The delete is NotFound when there is no copy. A build ID missing from
+//     versionStatuses has an unknown status, and its copy is kept.
 //  3. WRT status entries whose build ID no longer has a versioned Deployment (orphaned
 //     entries). Entries are pruned from WRT status only after a confirmed delete, so an
 //     entry that outlives its Deployment means the rendered resource's deletion has not
@@ -409,9 +411,17 @@ func getDeleteWorkerResources(
 		}
 
 		// Union of builds being sunset this cycle, orphaned status entries, builds whose
-		// version status the WRT no longer selects and builds pinned to zero (autoscalers only)
+		// version status the WRT does not select and builds pinned to zero (autoscalers only)
 		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
 		buildIDs = append(buildIDs, deletingBuildIDs...)
+
+		if k8sState != nil {
+			for buildID := range k8sState.Deployments {
+				if status, known := versionStatuses[buildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
+					buildIDs = append(buildIDs, buildID)
+				}
+			}
+		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for _, v := range wrt.Status.Versions {
@@ -420,10 +430,6 @@ func getDeleteWorkerResources(
 			}
 			if k8sState != nil {
 				if _, live := k8sState.Deployments[v.BuildID]; live {
-					if status, known := versionStatuses[v.BuildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
-						buildIDs = append(buildIDs, v.BuildID)
-						continue
-					}
 					if hasScaleTarget {
 						// Remove the autoscaler as soon as the controller starts holding
 						// replicas at zero. The k8s Deployment outlives it by deleteDelay.

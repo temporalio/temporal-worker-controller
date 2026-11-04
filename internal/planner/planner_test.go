@@ -5309,8 +5309,9 @@ func TestGetDeleteWorkerResources_VersionStatuses(t *testing.T) {
 	depDrain := makeDeployment("worker-build-drain", "build-drain")
 	k8sState := &k8s.DeploymentState{
 		Deployments: map[string]*appsv1.Deployment{
-			"build-cur":   depCur,
-			"build-drain": depDrain,
+			"build-cur":     depCur,
+			"build-drain":   depDrain,
+			"build-unknown": makeDeployment("worker-build-unknown", "build-unknown"),
 		},
 	}
 	versionStatuses := map[string]temporaliov1alpha1.VersionStatus{
@@ -5356,9 +5357,15 @@ func TestGetDeleteWorkerResources_VersionStatuses(t *testing.T) {
 			expectRefs: nil,
 		},
 		{
-			name:       "unselected version with no status entry has nothing to delete",
+			// The copy exists without an entry when the status write after its apply failed.
+			name:       "unselected version with no status entry is still deleted",
 			wrt:        withStatus(withVersionStatuses(pdb, current, ramping), "build-cur"),
-			expectRefs: nil,
+			expectRefs: []WorkerResourceRef{pdbRef("build-drain")},
+		},
+		{
+			name:       "unknown version status keeps the copy",
+			wrt:        withStatus(withVersionStatuses(pdb, current, ramping), "build-cur", "build-unknown"),
+			expectRefs: []WorkerResourceRef{pdbRef("build-drain")},
 		},
 		{
 			name:              "unselected version that is also being deleted produces exactly one ref",

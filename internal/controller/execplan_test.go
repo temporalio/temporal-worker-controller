@@ -381,9 +381,10 @@ func TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite(t *testing
 }
 
 // TestExecutePlan_WRTWithNoCopy_RecordsStatus covers a WRT that selects no live version, so a
-// cycle has no apply and no delete for it. Its observedGeneration and Ready condition must still
-// catch up with a spec change, or kstatus reports it InProgress until a matching version appears.
-// Once they are current, later cycles must not write the status again.
+// cycle has no apply for it, only a delete of the copy it must not have, which is NotFound. Its
+// observedGeneration and Ready condition must still catch up with a spec change, or kstatus
+// reports it InProgress until a matching version appears. Once they are current, later cycles
+// must not write the status again, although the NotFound delete repeats in each cycle.
 func TestExecutePlan_WRTWithNoCopy_RecordsStatus(t *testing.T) {
 	const (
 		namespace = "default"
@@ -416,7 +417,7 @@ func TestExecutePlan_WRTWithNoCopy_RecordsStatus(t *testing.T) {
 		p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
 		require.NoError(t, err)
 		require.Empty(t, p.ApplyWorkerResources)
-		require.Empty(t, p.DeleteWorkerResources)
+		require.Len(t, p.DeleteWorkerResources, 1)
 		require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p))
 	}
 
@@ -487,7 +488,7 @@ func TestExecutePlan_WRTWithNoCopy_ReplacesStaleReadyFalse(t *testing.T) {
 	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
 	require.NoError(t, err)
 	require.Empty(t, p.ApplyWorkerResources)
-	require.Empty(t, p.DeleteWorkerResources)
+	require.Len(t, p.DeleteWorkerResources, 1)
 	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p))
 
 	got := &temporaliov1alpha1.WorkerResourceTemplate{}
@@ -535,6 +536,48 @@ func TestExecutePlan_WRTWithNoCopy_UnknownVersionStatus(t *testing.T) {
 	require.NoError(t, r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: wrt.Name}, after))
 	require.Equal(t, before.ResourceVersion, after.ResourceVersion, "a WRT that cannot be evaluated must not be written")
 	require.Equal(t, int64(2), after.Status.ObservedGeneration)
+}
+
+// TestExecutePlan_UnselectedCopyWithoutStatusEntry_IsDeleted covers a copy that has no status
+// entry, because the WRT status write after its apply failed. Once its version has a status the
+// WRT does not select, the copy must be deleted although no entry points to it.
+func TestExecutePlan_UnselectedCopyWithoutStatusEntry_IsDeleted(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	ctx := context.Background()
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 1, connection)
+	depB := makeVersionedDeployment(twd, buildB, 1, connection)
+	wrt := makeExecplanWRT("current-hpa", twd)
+	wrt.Spec.VersionStatuses = []temporaliov1alpha1.VersionStatus{temporaliov1alpha1.VersionStatusCurrent}
+	hpaA, _ := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
+
+	r, _ := newTestReconciler([]client.Object{twd, depA, depB, wrt, hpaA})
+
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion:  temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusDraining)},
+		},
+	}
+	temporalState := &temporal.TemporalWorkerState{
+		CurrentBuildID: buildB,
+		Versions: map[string]*temporal.VersionInfo{
+			buildA: {BuildID: buildA, Status: temporaliov1alpha1.VersionStatusDraining},
+			buildB: {BuildID: buildB, Status: temporaliov1alpha1.VersionStatusCurrent},
+		},
+	}
+	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
+	require.NoError(t, err)
+	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p))
+
+	require.True(t, apierrors.IsNotFound(getRenderedHPA(r, namespace, hpaA.GetName())), "the copy of the Draining version must be deleted")
 }
 
 // ─── Version prune regression tests ──────────────────────────────────────────
