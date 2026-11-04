@@ -6,7 +6,7 @@ The `internal/demo/` example wires the HPA path described here. The KEDA path is
 
 To size each pod's CPU and memory rather than the number of pods, see [Vertical scaling with VPA](#vertical-scaling-with-vpa).
 
-Without an autoscaler, when the controller manages replicas, you can run Draining versions at fewer replicas than the Current version with `spec.drainingDeployment.replicas`. See [Draining version Deployment configuration](configuration.md#draining-version-deployment-configuration).
+Without an autoscaler, when the controller manages replicas, you can run Draining versions at fewer replicas than the Current version with `spec.drainingDeployment.replicas`. See [Draining version Deployment configuration](configuration.md#draining-version-deployment-configuration). With an autoscaler, give Draining versions their own autoscaler with `spec.versionStatuses`. See [Splitting autoscalers by status](worker-resource-templates.md#splitting-autoscalers-by-status).
 
 ## TL;DR
 
@@ -343,7 +343,7 @@ Each rendered VPA is a separate object with its own usage history and checkpoint
 
 VPA changes the resources of running pods, not the `WorkerDeployment` pod template. A resize does not produce a new Build ID or start a rollout, and the controller does not revert it. The controller removes a rendered VPA when it deletes the versioned Deployment.
 
-The `WorkerResourceTemplate` renders the same VPA for every version, so one `updateMode` applies to the current version and to draining versions alike. [#608](https://github.com/temporalio/temporal-worker-controller/issues/608) tracks selecting a different template per version status.
+By default, the `WorkerResourceTemplate` renders the same VPA for every version, so one `updateMode` applies to the current version and to draining versions alike. To use a different `updateMode` for draining versions, create two templates with different `spec.versionStatuses`. See [Selecting versions by status](worker-resource-templates.md#selecting-versions-by-status).
 
 | `updateMode` | What it does | When to use it for workers |
 |---|---|---|
