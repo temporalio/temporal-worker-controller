@@ -582,8 +582,8 @@ With this configuration, versions are scaled as follows:
 
 - Applies only when the controller manages replicas, that is when
   `spec.deployment.replicas` is set. When an autoscaler manages replicas, the
-  field is ignored and the webhook returns a warning. To give Draining versions
-  their own autoscaler, see
+  field is ignored and the webhook returns a warning. To use a different
+  autoscaler for different version statuses (for example, Draining versions), see
   [Splitting autoscalers by status](worker-resource-templates.md#splitting-autoscalers-by-status).
 - Must be at least 1, so a Draining version keeps a poller for its pinned
   executions. This holds even when `deployment.replicas` is 0.
