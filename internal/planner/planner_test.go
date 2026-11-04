@@ -5391,10 +5391,12 @@ func TestGetVersionStatusByBuildID(t *testing.T) {
 	testCases := []struct {
 		name   string
 		status *temporaliov1alpha1.WorkerDeploymentStatus
+		state  *temporal.TemporalWorkerState
 		expect map[string]temporaliov1alpha1.VersionStatus
 	}{
 		{
-			name: "current, target, and deprecated versions",
+			name:  "current, target, and deprecated versions",
+			state: &temporal.TemporalWorkerState{CurrentBuildID: "build-cur", RampingBuildID: "build-ramp"},
 			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: base("build-cur", temporaliov1alpha1.VersionStatusCurrent),
@@ -5415,7 +5417,8 @@ func TestGetVersionStatusByBuildID(t *testing.T) {
 			},
 		},
 		{
-			name: "target that is also current",
+			name:  "target that is also current",
+			state: &temporal.TemporalWorkerState{CurrentBuildID: "build-cur"},
 			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: base("build-cur", temporaliov1alpha1.VersionStatusCurrent),
@@ -5429,7 +5432,8 @@ func TestGetVersionStatusByBuildID(t *testing.T) {
 			},
 		},
 		{
-			name: "bootstrap with no current version",
+			name:  "bootstrap with no current version",
+			state: &temporal.TemporalWorkerState{},
 			status: &temporaliov1alpha1.WorkerDeploymentStatus{
 				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
 					BaseWorkerDeploymentVersion: base("build-new", temporaliov1alpha1.VersionStatusNotRegistered),
@@ -5441,14 +5445,51 @@ func TestGetVersionStatusByBuildID(t *testing.T) {
 		},
 		{
 			name:   "empty status",
+			state:  &temporal.TemporalWorkerState{},
 			status: &temporaliov1alpha1.WorkerDeploymentStatus{},
 			expect: map[string]temporaliov1alpha1.VersionStatus{},
+		},
+		{
+			// Right after a promotion the summaries can still show the old Current version.
+			name:  "routing config decides Current when the summaries lag",
+			state: &temporal.TemporalWorkerState{CurrentBuildID: "build-new"},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: base("build-new", temporaliov1alpha1.VersionStatusRamping),
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: base("build-new", temporaliov1alpha1.VersionStatusRamping),
+				},
+				DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+					{BaseWorkerDeploymentVersion: base("build-old", temporaliov1alpha1.VersionStatusCurrent)},
+					{BaseWorkerDeploymentVersion: base("build-drain", temporaliov1alpha1.VersionStatusDraining)},
+				},
+			},
+			expect: map[string]temporaliov1alpha1.VersionStatus{
+				"build-new":   temporaliov1alpha1.VersionStatusCurrent,
+				"build-drain": temporaliov1alpha1.VersionStatusDraining,
+			},
+		},
+		{
+			name:  "summary that still says Ramping after the ramp ended is unknown",
+			state: &temporal.TemporalWorkerState{CurrentBuildID: "build-cur"},
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: base("build-cur", temporaliov1alpha1.VersionStatusCurrent),
+				},
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: base("build-ramp", temporaliov1alpha1.VersionStatusRamping),
+				},
+			},
+			expect: map[string]temporaliov1alpha1.VersionStatus{
+				"build-cur": temporaliov1alpha1.VersionStatusCurrent,
+			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expect, getVersionStatusByBuildID(tc.status))
+			assert.Equal(t, tc.expect, getVersionStatusByBuildID(tc.status, tc.state))
 		})
 	}
 }

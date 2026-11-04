@@ -193,7 +193,7 @@ func GeneratePlan(
 	// statuses unknown instead of acting on them.
 	var versionStatuses map[string]temporaliov1alpha1.VersionStatus
 	if foundDeploymentInTemporal {
-		versionStatuses = getVersionStatusByBuildID(status)
+		versionStatuses = getVersionStatusByBuildID(status, temporalState)
 	}
 	for buildID := range k8sState.Deployments {
 		if _, known := versionStatuses[buildID]; !known {
@@ -1063,8 +1063,16 @@ func getSunsetScaleDownBuildIDs(
 	return buildIDs
 }
 
-// getVersionStatusByBuildID returns the version status of each build ID in status.
-func getVersionStatusByBuildID(status *temporaliov1alpha1.WorkerDeploymentStatus) map[string]temporaliov1alpha1.VersionStatus {
+// getVersionStatusByBuildID returns the version status of each build ID in status, but takes
+// Current and Ramping from the routing config. The statuses in status come from the version
+// summaries, which can disagree with the routing config for a short time (see
+// temporal.versionInfoFromVersionSummary). A build ID whose summary says Current or Ramping
+// while the routing config names another version is left out, so its status is unknown until
+// the summary catches up.
+func getVersionStatusByBuildID(
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	temporalState *temporal.TemporalWorkerState,
+) map[string]temporaliov1alpha1.VersionStatus {
 	statuses := make(map[string]temporaliov1alpha1.VersionStatus, len(status.DeprecatedVersions)+2)
 	for _, version := range status.DeprecatedVersions {
 		statuses[version.BuildID] = version.Status
@@ -1074,6 +1082,18 @@ func getVersionStatusByBuildID(status *temporaliov1alpha1.WorkerDeploymentStatus
 	}
 	if status.CurrentVersion != nil {
 		statuses[status.CurrentVersion.BuildID] = status.CurrentVersion.Status
+	}
+	for buildID, s := range statuses {
+		if (s == temporaliov1alpha1.VersionStatusCurrent && buildID != temporalState.CurrentBuildID) ||
+			(s == temporaliov1alpha1.VersionStatusRamping && buildID != temporalState.RampingBuildID) {
+			delete(statuses, buildID)
+		}
+	}
+	if temporalState.CurrentBuildID != "" {
+		statuses[temporalState.CurrentBuildID] = temporaliov1alpha1.VersionStatusCurrent
+	}
+	if temporalState.RampingBuildID != "" {
+		statuses[temporalState.RampingBuildID] = temporaliov1alpha1.VersionStatusRamping
 	}
 	return statuses
 }
