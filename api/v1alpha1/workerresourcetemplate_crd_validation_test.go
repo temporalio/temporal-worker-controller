@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("WorkerResourceTemplate CRD schema validation", func() {
@@ -18,6 +19,22 @@ var _ = Describe("WorkerResourceTemplate CRD schema validation", func() {
 
 	BeforeEach(func() {
 		ns = makeTestNamespace("wrt-schema")
+	})
+
+	It("accepts a WRT without versionStatuses", func() {
+		// A WRT written before spec.versionStatuses existed has no such field: the API
+		// server pruned it as unknown. minItems applies only when the field is present,
+		// so such a WRT still validates against the new schema.
+		grantControllerSAHPACreateAccess(ns)
+		wrt := makeWRTForWebhook("all-statuses", ns, "my-worker", hpaObjForIntegration())
+		Expect(k8sClient.Create(ctx, wrt)).To(Succeed())
+
+		stored := &unstructured.Unstructured{}
+		stored.SetGroupVersionKind(GroupVersion.WithKind("WorkerResourceTemplate"))
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wrt), stored)).To(Succeed())
+		_, found, err := unstructured.NestedFieldNoCopy(stored.Object, "spec", "versionStatuses")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(found).To(BeFalse(), "an unset versionStatuses must not be stored as an empty list")
 	})
 
 	It("accepts versionStatuses with known statuses", func() {
