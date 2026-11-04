@@ -5477,12 +5477,14 @@ func TestGeneratePlan_VersionStatusesWithoutTemporalState(t *testing.T) {
 		state         *temporal.TemporalWorkerState
 		expectApplies []string
 		expectDeletes []string
+		expectUnknown bool
 	}{
 		{
 			name:          "empty Temporal state keeps the copy of a WRT with versionStatuses",
 			state:         &temporal.TemporalWorkerState{},
 			expectApplies: []string{"my-hpa/build-a"},
 			expectDeletes: nil,
+			expectUnknown: true,
 		},
 		{
 			name: "NotRegistered read from Temporal state deletes the copy",
@@ -5515,6 +5517,7 @@ func TestGeneratePlan_VersionStatusesWithoutTemporalState(t *testing.T) {
 			}
 			assert.ElementsMatch(t, tc.expectApplies, applies)
 			assert.ElementsMatch(t, tc.expectDeletes, deletes)
+			assert.Equal(t, tc.expectUnknown, plan.UnknownVersionStatus)
 		})
 	}
 }

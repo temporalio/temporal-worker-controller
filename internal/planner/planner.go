@@ -70,6 +70,10 @@ type Plan struct {
 	// deleted. The controller sets this (rather than the webhook) because the owner
 	// ref requires the TWD's UID, resolved from spec.temporalWorkerDeploymentRef.
 	EnsureWRTOwnerRefs []WRTOwnerRefPatch
+	// UnknownVersionStatus is true when a versioned Deployment has no known version
+	// status this cycle. A WRT with VersionStatuses then cannot tell whether it selects
+	// that version, so the plan neither applies nor deletes its copy of the version.
+	UnknownVersionStatus bool
 }
 
 // WorkerResourceRef identifies a single rendered WRT resource copy to delete.
@@ -190,6 +194,12 @@ func GeneratePlan(
 	var versionStatuses map[string]temporaliov1alpha1.VersionStatus
 	if foundDeploymentInTemporal {
 		versionStatuses = getVersionStatusByBuildID(status)
+	}
+	for buildID := range k8sState.Deployments {
+		if _, known := versionStatuses[buildID]; !known {
+			plan.UnknownVersionStatus = true
+			break
+		}
 	}
 
 	plan.ApplyWorkerResources = getWorkerResourceApplies(

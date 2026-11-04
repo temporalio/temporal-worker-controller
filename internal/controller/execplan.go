@@ -564,33 +564,23 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		deletedBuildIDs[key][ref.BuildID] = struct{}{}
 	}
 
-	// Write per-Build-ID status back to each WRT that had an apply or a confirmed delete.
+	// Write per-Build-ID status back to each WRT that had an apply or a confirmed delete,
+	// and to each WRT that renders no copy but has a status that is behind (see below).
 	// Done after all applies so a single failed apply does not prevent status
 	// updates for the other (WRT, Build ID) pairs.
 	// If every result for a WRT was skipped (hash unchanged since last successful
 	// apply) and none of its rendered resources were deleted, the status is already
 	// correct — skip the status write entirely to avoid unnecessary resourceVersion bumps.
-	statusKeys := make(map[wrtKey]struct{}, len(wrtResults)+len(deletedBuildIDs))
+	statusKeys := make(map[wrtKey]struct{}, len(wrtResults)+len(deletedBuildIDs)+len(p.WorkerResourceTemplates))
 	for key := range wrtResults {
 		statusKeys[key] = struct{}{}
 	}
 	for key := range deletedBuildIDs {
 		statusKeys[key] = struct{}{}
 	}
-	// A WRT that renders no copy this cycle (no live version it selects) has no apply
-	// result and usually no delete. Still record its generation and Ready condition when
-	// they are behind, or kstatus reports it InProgress until a copy is rendered.
 	for i := range p.WorkerResourceTemplates {
 		wrt := &p.WorkerResourceTemplates[i]
-		key := wrtKey{wrt.Namespace, wrt.Name}
-		if _, ok := statusKeys[key]; ok {
-			continue
-		}
-		ready := apimeta.FindStatusCondition(wrt.Status.Conditions, temporaliov1alpha1.ConditionReady)
-		if wrt.Status.ObservedGeneration == wrt.Generation && ready != nil && ready.ObservedGeneration == wrt.Generation {
-			continue
-		}
-		statusKeys[key] = struct{}{}
+		statusKeys[wrtKey{wrt.Namespace, wrt.Name}] = struct{}{}
 	}
 
 	var applyErrs, statusErrs []error
@@ -604,6 +594,12 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			continue
 		}
 
+		// While a versioned Deployment has an unknown version status, a WRT that selects
+		// by status cannot tell whether it selects that version, and the copy it keeps of
+		// the version may be out of date. So the WRT keeps the generation and conditions
+		// of its last full evaluation, unless an apply fails.
+		statusUnknown := p.UnknownVersionStatus && len(wrt.Spec.VersionStatuses) > 0
+
 		allSkipped := true
 		for _, res := range results {
 			if !res.skipped {
@@ -611,9 +607,18 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				break
 			}
 		}
-		// allSkipped is also true with no results at all. Those WRTs render no copy and
-		// still need the conditions below.
-		if len(results) > 0 && allSkipped && len(deleted) == 0 {
+		if len(results) == 0 && len(deleted) == 0 {
+			// The WRT renders no copy this cycle. Record its generation and Ready
+			// condition when they are behind or Ready is not True, for example after
+			// markWRTsWDNotFound ran before the WorkerDeployment existed. Otherwise
+			// kstatus reports the WRT InProgress until a copy is rendered.
+			ready := apimeta.FindStatusCondition(wrt.Status.Conditions, temporaliov1alpha1.ConditionReady)
+			upToDate := wrt.Status.ObservedGeneration == wrt.Generation &&
+				ready != nil && ready.ObservedGeneration == wrt.Generation && ready.Status == metav1.ConditionTrue
+			if statusUnknown || upToDate {
+				continue
+			}
+		} else if allSkipped && len(deleted) == 0 {
 			// Every apply was a no-op and nothing was deleted, so the per-Build-ID
 			// status and conditions are already correct. The one thing that can still
 			// be stale is status.observedGeneration.
@@ -630,7 +635,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			//
 			// The WRT was already fetched from the informer cache above, and the write
 			// only happens when something has actually changed.
-			if wrt.Status.ObservedGeneration != wrt.Generation {
+			if wrt.Status.ObservedGeneration != wrt.Generation && !statusUnknown {
 				wrt.Status.ObservedGeneration = wrt.Generation
 				if err := r.Status().Update(ctx, wrt); err != nil {
 					statusErrs = append(statusErrs, fmt.Errorf("refresh observedGeneration for WRT %s/%s: %w", key.namespace, key.name, err))
@@ -694,69 +699,71 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			versions = append(versions, v)
 		}
 
-		// Compute the top-level Ready condition.
-		// True:  all active Build IDs applied at the current generation (or already current —
-		//        skipped ones carry a non-zero LastAppliedGeneration from their last successful apply).
-		// False: one or more apply calls failed this cycle.
-		condStatus := metav1.ConditionTrue
-		condReason := temporaliov1alpha1.ReasonWRTAllVersionsApplied
-		condMessage := ""
-		if anyFailed {
-			condStatus = metav1.ConditionFalse
-			condReason = temporaliov1alpha1.ReasonWRTApplyFailed
-			// Use the first apply error as the condition message; full per-version details
-			// are available in status.versions[*].applyError.
-			for _, result := range results {
-				if result.err != nil {
-					condMessage = result.err.Error()
-					break
+		if anyFailed || !statusUnknown {
+			// Compute the top-level Ready condition.
+			// True:  all active Build IDs applied at the current generation (or already current —
+			//        skipped ones carry a non-zero LastAppliedGeneration from their last successful apply).
+			// False: one or more apply calls failed this cycle.
+			condStatus := metav1.ConditionTrue
+			condReason := temporaliov1alpha1.ReasonWRTAllVersionsApplied
+			condMessage := ""
+			if anyFailed {
+				condStatus = metav1.ConditionFalse
+				condReason = temporaliov1alpha1.ReasonWRTApplyFailed
+				// Use the first apply error as the condition message; full per-version details
+				// are available in status.versions[*].applyError.
+				for _, result := range results {
+					if result.err != nil {
+						condMessage = result.err.Error()
+						break
+					}
 				}
 			}
-		}
-		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionReady,
-			Status:             condStatus,
-			Reason:             condReason,
-			Message:            condMessage,
-			ObservedGeneration: wrt.Generation,
-		})
+			apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+				Type:               temporaliov1alpha1.ConditionReady,
+				Status:             condStatus,
+				Reason:             condReason,
+				Message:            condMessage,
+				ObservedGeneration: wrt.Generation,
+			})
 
-		// Translate the same outcome into the kstatus abnormal-true conditions, so
-		// Argo Rollouts and Helm --wait can tell a template that will never apply from
-		// one that is still being retried. Ready=False alone reads as InProgress to
-		// kstatus, which is why a bad template used to hang a deploy until timeout.
-		//
-		// Both are always written, and at most one of them is True. kstatus scans
-		// status.conditions in array order and returns on the first match, so an object
-		// carrying both as True would get a verdict decided by insertion order.
-		// Writing the inactive one as False rather than removing it keeps every
-		// condition this controller owns present on every object.
-		stalledStatus, reconcilingStatus := metav1.ConditionFalse, metav1.ConditionFalse
-		switch {
-		case anyTerminal:
-			stalledStatus = metav1.ConditionTrue
-		case anyFailed:
-			reconcilingStatus = metav1.ConditionTrue
-		}
-		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionStalled,
-			Status:             stalledStatus,
-			Reason:             condReason,
-			Message:            condMessage,
-			ObservedGeneration: wrt.Generation,
-		})
-		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
-			Type:               temporaliov1alpha1.ConditionReconciling,
-			Status:             reconcilingStatus,
-			Reason:             condReason,
-			Message:            condMessage,
-			ObservedGeneration: wrt.Generation,
-		})
+			// Translate the same outcome into the kstatus abnormal-true conditions, so
+			// Argo Rollouts and Helm --wait can tell a template that will never apply from
+			// one that is still being retried. Ready=False alone reads as InProgress to
+			// kstatus, which is why a bad template used to hang a deploy until timeout.
+			//
+			// Both are always written, and at most one of them is True. kstatus scans
+			// status.conditions in array order and returns on the first match, so an object
+			// carrying both as True would get a verdict decided by insertion order.
+			// Writing the inactive one as False rather than removing it keeps every
+			// condition this controller owns present on every object.
+			stalledStatus, reconcilingStatus := metav1.ConditionFalse, metav1.ConditionFalse
+			switch {
+			case anyTerminal:
+				stalledStatus = metav1.ConditionTrue
+			case anyFailed:
+				reconcilingStatus = metav1.ConditionTrue
+			}
+			apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+				Type:               temporaliov1alpha1.ConditionStalled,
+				Status:             stalledStatus,
+				Reason:             condReason,
+				Message:            condMessage,
+				ObservedGeneration: wrt.Generation,
+			})
+			apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+				Type:               temporaliov1alpha1.ConditionReconciling,
+				Status:             reconcilingStatus,
+				Reason:             condReason,
+				Message:            condMessage,
+				ObservedGeneration: wrt.Generation,
+			})
 
-		// Record that this generation was processed, whatever the outcome. kstatus
-		// checks this before it looks at any condition, so leaving it behind would
-		// mask both of the conditions set above.
-		wrt.Status.ObservedGeneration = wrt.Generation
+			// Record that this generation was processed, whatever the outcome. kstatus
+			// checks this before it looks at any condition, so leaving it behind would
+			// mask both of the conditions set above.
+			wrt.Status.ObservedGeneration = wrt.Generation
+		}
 
 		// Sort the versions by BuildID for deterministic status output.
 		slices.SortFunc(versions, func(a, b temporaliov1alpha1.WorkerResourceTemplateVersionStatus) int {

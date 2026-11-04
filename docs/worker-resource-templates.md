@@ -154,7 +154,7 @@ The controller reads the version statuses from Temporal on each reconcile, about
 - A new version gets no copy until it reaches a listed status. During a rollout, the new version is `NotRegistered` or `Inactive` before it becomes `Ramping` or `Current`.
 - A copy follows a status change in the next reconcile, not at the same moment. After a promotion, it can take up to about 10 seconds before the new Current version gets its copy and the previous Current version loses its copy.
 - In each reconcile, the controller deletes copies before it applies new ones. When a version moves from one template to the other, it loses the old copy before it gets the new one, so both copies do not exist at the same time. If a delete fails, both copies exist until the controller retries the delete and it succeeds.
-- If Temporal returns no worker deployment state, the controller cannot tell the version statuses. Templates with `spec.versionStatuses` then keep their existing copies, and create no new ones, until the statuses are known again.
+- If Temporal returns no worker deployment state, the controller cannot tell the version statuses. Templates with `spec.versionStatuses` then keep their existing copies, and create no new ones, until the statuses are known again. They also keep their conditions and `status.observedGeneration`, so a spec change shows as in progress until then.
 - A template that matches no live version has an empty `status.versions` and reports `Ready=True`.
 
 ### Splitting autoscalers by status

@@ -54,6 +54,9 @@ type plan struct {
 	// All WRTs that reference the WorkerDeployment, so executePlan can record the status
 	// of a WRT that renders no copy this cycle.
 	WorkerResourceTemplates []temporaliov1alpha1.WorkerResourceTemplate
+
+	// See planner.Plan.UnknownVersionStatus.
+	UnknownVersionStatus bool
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -187,6 +190,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 	plan.WorkerResourceTemplates = wrtList.Items
+	plan.UnknownVersionStatus = planResult.UnknownVersionStatus
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {
