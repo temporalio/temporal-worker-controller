@@ -55,7 +55,6 @@ spec:
               versionStatuses:
                 items:
                   enum:
-                  - Created
                   - Inactive
                   - Ramping
                   - Current

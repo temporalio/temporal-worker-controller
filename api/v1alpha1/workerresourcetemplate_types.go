@@ -41,11 +41,14 @@ type WorkerResourceTemplateSpec struct {
 	//
 	// NotRegistered is not allowed. Before the workers of the first version register,
 	// Temporal has no worker deployment, so the controller cannot tell that status from
-	// a missing state, and the selector would match on later rollouts only.
+	// a missing state, and the selector would match on later rollouts only. Created is
+	// not allowed either. Temporal reports it only for a version made with the
+	// CreateWorkerDeploymentVersion API before any worker polls, and the controller
+	// does not make versions that way.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:Enum=Created;Inactive;Ramping;Current;Draining;Drained
+	// +kubebuilder:validation:items:Enum=Inactive;Ramping;Current;Draining;Drained
 	VersionStatuses []VersionStatus `json:"versionStatuses,omitempty"`
 
 	// Template is the Kubernetes resource template applied per active Build ID.

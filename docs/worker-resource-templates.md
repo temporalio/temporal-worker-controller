@@ -63,9 +63,12 @@ Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `d
 
 By default, a `WorkerResourceTemplate` renders a copy for every version with a running Deployment, whatever its status. A Current version and a version that drains for days behind pinned workflows then get the same policy.
 
-Set `spec.versionStatuses` to render copies only for versions with one of the listed [version statuses](concepts.md#version-states): `Created`, `Inactive`, `Ramping`, `Current`, `Draining`, or `Drained`. If you leave it unset, every status is selected.
+Set `spec.versionStatuses` to render copies only for versions with one of the listed [version statuses](concepts.md#version-states): `Inactive`, `Ramping`, `Current`, `Draining`, or `Drained`. If you leave it unset, every status is selected.
 
-You cannot list `NotRegistered`. Before the workers of the first version register, Temporal has no worker deployment, so the controller cannot tell a `NotRegistered` version from missing Temporal state. Such a template would get a copy on later rollouts, but not for the first version. To get a copy before the promotion, list `Inactive`.
+You cannot list `NotRegistered` or `Created`:
+
+- Before the workers of the first version register, Temporal has no worker deployment, so the controller cannot tell a `NotRegistered` version from missing Temporal state. Such a template would get a copy on later rollouts, but not for the first version. To get a copy before the promotion, list `Inactive`.
+- Temporal reports `Created` only for a version that was made with the `CreateWorkerDeploymentVersion` API before any worker polled. The controller does not make versions that way.
 
 Two templates for the same `WorkerDeployment` get different resource names, so you can split the statuses between them.
 
