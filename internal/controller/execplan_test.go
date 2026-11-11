@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -377,6 +378,262 @@ func TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite(t *testing
 	after := &temporaliov1alpha1.WorkerResourceTemplate{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, after))
 	require.Equal(t, before.ResourceVersion, after.ResourceVersion, "no-op cycle must not write WRT status")
+}
+
+// TestExecutePlan_WRTWithNoCopy_RecordsStatus covers a WRT that selects no live version, so a
+// cycle has no apply for it, only a delete of the copy it must not have, which is NotFound. Its
+// observedGeneration and Ready condition must still catch up with a spec change, or kstatus
+// reports it InProgress until a matching version appears. Once they are current, later cycles
+// must not write the status again, although the NotFound delete repeats in each cycle.
+func TestExecutePlan_WRTWithNoCopy_RecordsStatus(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+	)
+	ctx := context.Background()
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 1, connection)
+	wrt := makeExecplanWRT("draining-hpa", twd)
+	wrt.Spec.VersionStatuses = []temporaliov1alpha1.VersionStatus{temporaliov1alpha1.VersionStatusDraining}
+	wrt.Generation = 3
+	wrt.Status.ObservedGeneration = 2
+
+	r, _ := newTestReconciler([]client.Object{twd, depA, wrt})
+
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion:  temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusCurrent)},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusCurrent)},
+	}
+	temporalState := &temporal.TemporalWorkerState{
+		CurrentBuildID: buildA,
+		Versions: map[string]*temporal.VersionInfo{
+			buildA: {BuildID: buildA, Status: temporaliov1alpha1.VersionStatusCurrent},
+		},
+	}
+	runCycle := func() {
+		t.Helper()
+		p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
+		require.NoError(t, err)
+		require.Empty(t, p.ApplyWorkerResources)
+		require.Len(t, p.DeleteWorkerResources, 1)
+		require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p))
+	}
+
+	runCycle()
+	got := &temporaliov1alpha1.WorkerResourceTemplate{}
+	require.NoError(t, r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: wrt.Name}, got))
+	require.Equal(t, int64(3), got.Status.ObservedGeneration)
+	require.Empty(t, got.Status.Versions)
+	ready := apimeta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, ready)
+	require.Equal(t, metav1.ConditionTrue, ready.Status)
+	require.Equal(t, temporaliov1alpha1.ReasonWRTAllVersionsApplied, ready.Reason)
+	require.Equal(t, int64(3), ready.ObservedGeneration)
+	require.True(t, apimeta.IsStatusConditionFalse(got.Status.Conditions, temporaliov1alpha1.ConditionStalled))
+	require.True(t, apimeta.IsStatusConditionFalse(got.Status.Conditions, temporaliov1alpha1.ConditionReconciling))
+
+	runCycle()
+	again := &temporaliov1alpha1.WorkerResourceTemplate{}
+	require.NoError(t, r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: wrt.Name}, again))
+	require.Equal(t, got.ResourceVersion, again.ResourceVersion, "a current status must not be written again")
+}
+
+// TestExecutePlan_WRTWithNoCopy_ReplacesStaleReadyFalse covers a WRT that renders no copy while
+// its generation is recorded but Ready is False, as markWRTsWDNotFound leaves a WRT created before
+// its WorkerDeployment. Once the WorkerDeployment exists, the cycle must report the WRT as Ready.
+func TestExecutePlan_WRTWithNoCopy_ReplacesStaleReadyFalse(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+	)
+	ctx := context.Background()
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 1, connection)
+	wrt := makeExecplanWRT("draining-hpa", twd)
+	wrt.Spec.VersionStatuses = []temporaliov1alpha1.VersionStatus{temporaliov1alpha1.VersionStatusDraining}
+	wrt.Generation = 3
+	wrt.Status.ObservedGeneration = 3
+	for _, cond := range []struct {
+		condType string
+		status   metav1.ConditionStatus
+	}{
+		{temporaliov1alpha1.ConditionReady, metav1.ConditionFalse},
+		{temporaliov1alpha1.ConditionStalled, metav1.ConditionFalse},
+		{temporaliov1alpha1.ConditionReconciling, metav1.ConditionTrue},
+	} {
+		apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
+			Type:               cond.condType,
+			Status:             cond.status,
+			Reason:             temporaliov1alpha1.ReasonWRTWDNotFound,
+			ObservedGeneration: 3,
+		})
+	}
+
+	r, _ := newTestReconciler([]client.Object{twd, depA, wrt})
+
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion:  temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusCurrent)},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusCurrent)},
+	}
+	temporalState := &temporal.TemporalWorkerState{
+		CurrentBuildID: buildA,
+		Versions: map[string]*temporal.VersionInfo{
+			buildA: {BuildID: buildA, Status: temporaliov1alpha1.VersionStatusCurrent},
+		},
+	}
+	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
+	require.NoError(t, err)
+	require.Empty(t, p.ApplyWorkerResources)
+	require.Len(t, p.DeleteWorkerResources, 1)
+	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p))
+
+	got := &temporaliov1alpha1.WorkerResourceTemplate{}
+	require.NoError(t, r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: wrt.Name}, got))
+	ready := apimeta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, ready)
+	require.Equal(t, metav1.ConditionTrue, ready.Status)
+	require.Equal(t, temporaliov1alpha1.ReasonWRTAllVersionsApplied, ready.Reason)
+	require.True(t, apimeta.IsStatusConditionFalse(got.Status.Conditions, temporaliov1alpha1.ConditionReconciling))
+}
+
+// TestExecutePlan_WRTWithNoCopy_UnknownVersionStatus covers a cycle without Temporal state, so no
+// version status is known. A WRT with versionStatuses cannot tell whether it selects the live
+// version, so it must not record its new generation or report Ready.
+func TestExecutePlan_WRTWithNoCopy_UnknownVersionStatus(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+	)
+	ctx := context.Background()
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 1, connection)
+	wrt := makeExecplanWRT("current-hpa", twd)
+	wrt.Spec.VersionStatuses = []temporaliov1alpha1.VersionStatus{temporaliov1alpha1.VersionStatusCurrent}
+	wrt.Generation = 3
+	wrt.Status.ObservedGeneration = 2
+
+	r, _ := newTestReconciler([]client.Object{twd, depA, wrt})
+	before := &temporaliov1alpha1.WorkerResourceTemplate{}
+	require.NoError(t, r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: wrt.Name}, before))
+
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusNotRegistered)},
+	}
+	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, &temporal.TemporalWorkerState{})
+	require.NoError(t, err)
+	require.True(t, p.UnknownVersionStatus)
+	require.Empty(t, p.ApplyWorkerResources)
+	require.Empty(t, p.DeleteWorkerResources)
+	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p))
+
+	after := &temporaliov1alpha1.WorkerResourceTemplate{}
+	require.NoError(t, r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: wrt.Name}, after))
+	require.Equal(t, before.ResourceVersion, after.ResourceVersion, "a WRT that cannot be evaluated must not be written")
+	require.Equal(t, int64(2), after.Status.ObservedGeneration)
+}
+
+// TestExecutePlan_UnselectedCopyWithoutStatusEntry_IsDeleted covers a copy that has no status
+// entry, because the WRT status write after its apply failed. Once its version has a status the
+// WRT does not select, the copy must be deleted although no entry points to it.
+func TestExecutePlan_UnselectedCopyWithoutStatusEntry_IsDeleted(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	ctx := context.Background()
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 1, connection)
+	depB := makeVersionedDeployment(twd, buildB, 1, connection)
+	wrt := makeExecplanWRT("current-hpa", twd)
+	wrt.Spec.VersionStatuses = []temporaliov1alpha1.VersionStatus{temporaliov1alpha1.VersionStatusCurrent}
+	hpaA, _ := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
+
+	r, _ := newTestReconciler([]client.Object{twd, depA, depB, wrt, hpaA})
+
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion:  temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusDraining)},
+		},
+	}
+	temporalState := &temporal.TemporalWorkerState{
+		CurrentBuildID: buildB,
+		Versions: map[string]*temporal.VersionInfo{
+			buildA: {BuildID: buildA, Status: temporaliov1alpha1.VersionStatusDraining},
+			buildB: {BuildID: buildB, Status: temporaliov1alpha1.VersionStatusCurrent},
+		},
+	}
+	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
+	require.NoError(t, err)
+	require.NoError(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p))
+
+	require.True(t, apierrors.IsNotFound(getRenderedHPA(r, namespace, hpaA.GetName())), "the copy of the Draining version must be deleted")
+}
+
+// TestExecutePlan_LaterStepFails_StillPrunesDeletedCopyEntries covers a cycle that deletes a copy
+// and then fails before executeWRTOperations, here on a Deployment scale. The status entry of the
+// deleted copy must still be pruned. Otherwise its LastAppliedHash skips the apply that recreates
+// the copy when the version is selected again before a cycle succeeds.
+func TestExecutePlan_LaterStepFails_StillPrunesDeletedCopyEntries(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	ctx := context.Background()
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 1, connection)
+	depB := makeVersionedDeployment(twd, buildB, 1, connection)
+	wrt := makeExecplanWRT("my-hpa", twd)
+	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
+	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
+	}
+
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, depA, depB, wrt, hpaA}, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if subResourceName == "scale" {
+				return errors.New("simulated scale failure")
+			}
+			return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+		},
+	})
+
+	// build-a is Inactive and no longer the target, so the controller scales it to zero and
+	// deletes its autoscaler copy in the same cycle.
+	w := twd.DeepCopy()
+	w.Status = temporaliov1alpha1.WorkerDeploymentStatus{
+		TargetVersion:  temporaliov1alpha1.TargetWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		CurrentVersion: &temporaliov1alpha1.CurrentWorkerDeploymentVersion{BaseWorkerDeploymentVersion: baseVersion(buildB, depB, temporaliov1alpha1.VersionStatusCurrent)},
+		DeprecatedVersions: []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{
+			{BaseWorkerDeploymentVersion: baseVersion(buildA, depA, temporaliov1alpha1.VersionStatusInactive)},
+		},
+	}
+	temporalState := &temporal.TemporalWorkerState{
+		CurrentBuildID: buildB,
+		Versions: map[string]*temporal.VersionInfo{
+			buildA: {BuildID: buildA, Status: temporaliov1alpha1.VersionStatusInactive},
+			buildB: {BuildID: buildB, Status: temporaliov1alpha1.VersionStatusCurrent},
+		},
+	}
+	p, err := r.generatePlan(ctx, logr.Discard(), w, connection, temporalState)
+	require.NoError(t, err)
+	require.NotEmpty(t, p.ScaleDeployments)
+	require.ErrorContains(t, r.executePlan(ctx, logr.Discard(), w, newStubTemporalClient(nil), p), "simulated scale failure")
+
+	require.True(t, apierrors.IsNotFound(getRenderedHPA(r, namespace, hpaA.GetName())), "the autoscaler copy of build-a must be deleted")
+	require.NotContains(t, getWRTVersionStatuses(t, r, namespace, wrt.Name), buildA, "the status entry of the deleted copy must be pruned")
 }
 
 // ─── Version prune regression tests ──────────────────────────────────────────
