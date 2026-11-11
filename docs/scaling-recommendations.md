@@ -75,7 +75,7 @@ backlog appears at T0
 
 Per-Worker tunable configuration options is outside the scope of this document.
 
-Please refer to the [documentation](worker-perf) for recommendations on when to use different [slot allocation strategies](slot-alloc-strat) for different workloads.
+Please refer to the [documentation][worker-perf] for recommendations on when to use different [slot allocation strategies][slot-alloc-strat] for different workloads.
 
 Briefly, however, follow this advice:
 
@@ -85,7 +85,7 @@ Briefly, however, follow this advice:
 
 [tc-openmetrics]: https://docs.temporal.io/cloud/metrics/openmetrics
 [worker-perf]: https://docs.temporal.io/develop/worker-performance
-[slot-alloc-strat]: https://docs.temporal.io/develop/worker-performance#choosing-slot-supplier-types
+[slot-alloc-strat]: https://docs.temporal.io/develop/worker-performance/runtime-tuning#choosing-slot-supplier-types
 
 ## HPA strengths
 

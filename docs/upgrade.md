@@ -415,7 +415,7 @@ Not syncing resource as it is not owned by this controller
 
 **Cause:** The Certificate and Issuer resources still carry ownership labels from the old TWC release. The new cert-manager instance ignores them.
 
-**Fix:** Transfer ownership of the Certificate and Issuer (see [Step 4](#step-4-transfer-certificate-and-issuer-ownership) of the migration guide).
+**Fix:** Transfer ownership of the Certificate and Issuer (see [Transfer Certificate and Issuer ownership](#transfer-certificate-and-issuer-ownership) in the migration steps above).
 
 ## Rollback
 

@@ -16,7 +16,7 @@ This guide uses specific terminology that is defined in the [Concepts](concepts.
   - [Step 2: Deploy the Unversioned Worker](#step-2-deploy-the-unversioned-worker)
   - [Step 3: Set Current Version to Unversioned](#step-3-set-current-version-to-unversioned)
 - [Monitoring the Migration](#monitoring-the-migration)
-- [Cleanup and Garbage Collection](#cleanup-and-garbage-collection)
+- [Cleaning up of Temporal Resources](#cleaning-up-of-temporal-resources)
 
 ---
 
