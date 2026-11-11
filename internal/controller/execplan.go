@@ -1044,17 +1044,22 @@ func (r *WorkerDeploymentReconciler) executePlan(
 	// on the next reconcile instead of orphaning the record; see deleteDeprecatedVersions.
 	r.deleteDeprecatedVersions(ctx, l, workerDeploy, deploymentHandler, temporalClient, p)
 	deletedWorkerResources, err := r.executeK8sOperations(ctx, l, workerDeploy, p)
-	if err == nil {
-		err = r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p)
-	}
-	if err == nil {
-		err = r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p)
+	// On error, executeWRTOperations does not run, so prune the status entries of the copies
+	// deleted above here. If the version of such a copy is selected again before a cycle
+	// succeeds, its stale LastAppliedHash would skip the apply that recreates it.
+	pruneOnError := func(err error) error {
+		return errors.Join(err, r.pruneWRTStatusEntries(ctx, deletedWorkerResources))
 	}
 	if err != nil {
-		// executeWRTOperations does not run, so prune the status entries of the copies
-		// deleted above here. If the version of such a copy is selected again before a
-		// cycle succeeds, its stale LastAppliedHash would skip the apply that recreates it.
-		return errors.Join(err, r.pruneWRTStatusEntries(ctx, deletedWorkerResources))
+		return pruneOnError(err)
+	}
+
+	if err := r.startTestWorkflows(ctx, l, workerDeploy, temporalClient, p); err != nil {
+		return pruneOnError(err)
+	}
+
+	if err := r.updateVersionConfig(ctx, l, workerDeploy, deploymentHandler, p); err != nil {
+		return pruneOnError(err)
 	}
 
 	r.ensureWRTOwnerRefs(ctx, l, p)
