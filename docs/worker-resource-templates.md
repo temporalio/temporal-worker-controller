@@ -72,28 +72,7 @@ You cannot list `NotRegistered` or `Created`:
 
 Two templates for the same `WorkerDeployment` get different resource names, so you can split the statuses between them.
 
-For example, a strict PodDisruptionBudget for versions that receive new workflows, and none for past versions, so that a Draining version at one replica does not block node drains:
-
-```yaml
-apiVersion: temporal.io/v1alpha1
-kind: WorkerResourceTemplate
-metadata:
-  name: my-worker-pdb
-  namespace: my-namespace
-spec:
-  workerDeploymentRef:
-    name: my-worker
-  versionStatuses: [Current, Ramping]
-  template:
-    apiVersion: policy/v1
-    kind: PodDisruptionBudget
-    spec:
-      minAvailable: 1
-      selector:
-        matchLabels: {}
-```
-
-Or two HPAs: one that scales versions that receive new workflows on backlog, and one that keeps past versions small while they finish their pinned workflows:
+For example, two HPAs: one that scales versions that receive new workflows on backlog, and one that keeps past versions small while they finish their pinned workflows:
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
