@@ -701,4 +701,4 @@ Common validation errors:
 - Missing required fields (connection, temporalNamespace)
 - Invalid strategy combinations
 
-For more examples and patterns, see the [Migration Guide](migration-guide.md) and [Concepts](concepts.md) documentation.
+For more examples and patterns, see the [Migration Guide](migration-to-versioned.md) and [Concepts](concepts.md) documentation.

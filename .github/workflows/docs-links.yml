@@ -1,0 +1,33 @@
+name: Docs Links
+
+# Pull requests check relative links and fragments only, so a flaky third party
+# site cannot block unrelated changes. The weekly and manual runs also check
+# external URLs.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '.lychee.toml'
+      - '.github/workflows/docs-links.yml'
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check links
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --config .lychee.toml --no-progress ${{ github.event_name == 'pull_request' && '--offline' || '' }} '**/*.md'
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
