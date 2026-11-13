@@ -384,6 +384,11 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Execute the plan, handling any errors
 	if err := r.executePlan(ctx, l, &workerDeploy, temporalClient, plan); err != nil {
+		// A cached read can lag our own preceding status write. Let the normal
+		// error backoff reconcile fresh state without reporting the rollout blocked.
+		if onlyConflicts(err) {
+			return ctrl.Result{}, err
+		}
 		if shouldEvictClient(err) {
 			r.TemporalClientPool.EvictClient(clientPoolKey)
 		}
@@ -431,6 +436,25 @@ func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		// For demo purposes only!
 		//RequeueAfter: 1 * time.Second,
 	}, nil
+}
+
+// onlyConflicts requires every error in an aggregate to be a Kubernetes conflict.
+// WRT execution joins apply and status errors, so finding just one conflict could
+// hide a separate failure that still needs to be reported as blocked.
+func onlyConflicts(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := joined.Unwrap()
+		for _, child := range errs {
+			if !onlyConflicts(child) {
+				return false
+			}
+		}
+		return len(errs) > 0
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		return onlyConflicts(wrapped)
+	}
+	return apierrors.IsConflict(err)
 }
 
 // migrateFromDeprecatedTWD checks for a TemporalWorkerDeployment stub with the

@@ -28,9 +28,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -1139,4 +1141,97 @@ func TestHandleDeletion_EvictsCachedClientOnTemporalFailure(t *testing.T) {
 		require.NotNil(t, cached, "a healthy cached client must remain in the pool after a successful handleDeletion")
 		require.Same(t, healthy, cached)
 	})
+}
+
+// A status write can race the informer cache even when the preceding write came
+// from this same controller. Reconciliation must retry without reporting blocked.
+func TestReconcile_WRTStatusConflicts_RequeueWithoutBlocking(t *testing.T) {
+	ctx := context.Background()
+	conn := makeNoCredsConnection("my-conn", "default", "localhost:7233")
+	wd := makeExecplanTWD("my-worker", conn.Namespace)
+	wd.Status.Conditions = []metav1.Condition{
+		{Type: temporaliov1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: temporaliov1alpha1.ReasonWaitingForPollers, ObservedGeneration: wd.Generation},
+		{Type: temporaliov1alpha1.ConditionProgressing, Status: metav1.ConditionTrue, Reason: temporaliov1alpha1.ReasonWaitingForPollers, ObservedGeneration: wd.Generation},
+	}
+	wrtA := makeExecplanWRT("scaling-a", wd)
+	wrtB := makeExecplanWRT("scaling-b", wd)
+	wrtA.Generation, wrtB.Generation = 1, 1
+	injectConflict := true
+	var conflicts []error
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{wd, conn, wrtA, wrtB}, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, subresource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if _, ok := obj.(*temporaliov1alpha1.WorkerResourceTemplate); ok && subresource == "status" && injectConflict {
+				var latest temporaliov1alpha1.WorkerResourceTemplate
+				require.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(obj), &latest))
+				latest.Annotations = map[string]string{"test/conflict": "intervening-write"}
+				require.NoError(t, c.Update(ctx, &latest))
+				err := c.Status().Update(ctx, obj, opts...)
+				require.True(t, apierrors.IsConflict(err), "stale status write must conflict")
+				conflicts = append(conflicts, err)
+				return err
+			}
+			return c.SubResource(subresource).Update(ctx, obj, opts...)
+		},
+	})
+	r.TemporalClientPool.SetClientForTesting(
+		noCredsPoolKey(conn.Spec.HostPort, wd.Spec.WorkerOptions.TemporalNamespace), newStubTemporalClient(nil),
+	)
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(wd)}
+
+	_, err := r.Reconcile(ctx, req)
+	require.Len(t, conflicts, 2)
+	for _, conflict := range conflicts {
+		require.ErrorIs(t, err, conflict, "return the original conflict for controller-runtime to requeue")
+	}
+	var updated temporaliov1alpha1.WorkerDeployment
+	require.NoError(t, r.Get(ctx, req.NamespacedName, &updated))
+	assert.Equal(t, wd.Status.Conditions, updated.Status.Conditions, "conflicts must not overwrite progressing status with blocked conditions")
+
+	injectConflict = false
+	_, err = r.Reconcile(ctx, req)
+	require.NoError(t, err, "the next reconciliation must recover once the read is current")
+	for _, wrt := range []*temporaliov1alpha1.WorkerResourceTemplate{wrtA, wrtB} {
+		var applied temporaliov1alpha1.WorkerResourceTemplate
+		require.NoError(t, r.Get(ctx, client.ObjectKeyFromObject(wrt), &applied))
+		require.Len(t, applied.Status.Versions, 1)
+		assert.Equal(t, applied.Generation, applied.Status.Versions[0].LastAppliedGeneration)
+	}
+}
+
+func TestReconcile_WRTStatusConflict_DoesNotHideOtherFailures(t *testing.T) {
+	ctx := context.Background()
+	conn := makeNoCredsConnection("my-conn", "default", "localhost:7233")
+	wd := makeExecplanTWD("my-worker", conn.Namespace)
+	wrtA := makeExecplanWRT("scaling-a", wd)
+	wrtB := makeExecplanWRT("scaling-b", wd)
+	resource := schema.GroupResource{Group: "temporal.io", Resource: "workerresourcetemplates"}
+	conflict := apierrors.NewConflict(resource, wrtA.Name, errors.New("object has been modified"))
+	forbidden := apierrors.NewForbidden(resource, wrtB.Name, errors.New("status update denied"))
+	r, _ := newTestReconcilerWithInterceptors([]client.Object{wd, conn, wrtA, wrtB}, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, subresource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if _, ok := obj.(*temporaliov1alpha1.WorkerResourceTemplate); ok && subresource == "status" {
+				if obj.GetName() == wrtA.Name {
+					return conflict
+				}
+				return forbidden
+			}
+			return c.SubResource(subresource).Update(ctx, obj, opts...)
+		},
+	})
+	r.TemporalClientPool.SetClientForTesting(
+		noCredsPoolKey(conn.Spec.HostPort, wd.Spec.WorkerOptions.TemporalNamespace), newStubTemporalClient(nil),
+	)
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(wd)}
+
+	_, err := r.Reconcile(ctx, req)
+	require.ErrorIs(t, err, conflict)
+	require.ErrorIs(t, err, forbidden)
+	var updated temporaliov1alpha1.WorkerDeployment
+	require.NoError(t, r.Get(ctx, req.NamespacedName, &updated))
+	for _, conditionType := range []string{temporaliov1alpha1.ConditionReady, temporaliov1alpha1.ConditionProgressing} {
+		cond := meta.FindStatusCondition(updated.Status.Conditions, conditionType)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, ReasonPlanExecutionFailed, cond.Reason)
+	}
 }
