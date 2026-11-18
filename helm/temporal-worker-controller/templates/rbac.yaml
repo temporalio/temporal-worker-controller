@@ -91,6 +91,15 @@ rules:
       - create
       - patch
   - apiGroups:
+      - ""
+    resourceNames:
+      - temporal-api-key
+    resources:
+      - secrets
+    verbs:
+      - patch
+      - update
+  - apiGroups:
       - apps
     resources:
       - deployments
@@ -203,6 +212,15 @@ rules:
       - namespaces
     verbs:
       - get
+  - apiGroups:
+      - ""
+    resourceNames:
+      - temporal-api-key
+    resources:
+      - secrets
+    verbs:
+      - patch
+      - update
   - apiGroups:
       - apps
     resources:

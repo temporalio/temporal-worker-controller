@@ -60,6 +60,13 @@
       "description": "Render the default podAntiAffinity when affinity is empty. Set to false to render no\naffinity at all, e.g. when relying on topologySpreadConstraints only.",
       "type": "boolean"
     },
+    "extraContainers": {
+      "description": "Add containers to the manager pod after the manager and metrics proxy. Each item uses Kubernetes Container fields.",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
     "extraEnv": {
       "description": "extraEnv adds Kubernetes EnvVar entries to the manager container. Each entry\nneeds a name and either a literal value or a valueFrom source\n(secretKeyRef / configMapKeyRef). The Go runtime, gRPC (Temporal SDK), and\nnet/http (controller-runtime / client-go) honor standard proxy variables.\n\nUse extraVolumes/extraVolumeMounts together with SSL_CERT_FILE to trust a\nprivate CA. The controller verifies the Temporal server certificate against\nthe system trust store; Go reads SSL_CERT_FILE.\n\nextraEnv:\n  - name: HTTP_PROXY\n    value: \"http://proxy.corp.example.com:8080\"\n  - name: HTTPS_PROXY\n    value: \"http://proxy.corp.example.com:8080\"\n  - name: NO_PROXY\n    value: \"localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8\"\n  - name: SSL_CERT_FILE\n    value: /etc/ssl/custom-ca/ca.crt\n  - name: API_TOKEN\n    valueFrom:\n      secretKeyRef:\n        name: controller-secrets\n        key: api-token",
       "items": {

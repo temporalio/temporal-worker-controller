@@ -266,6 +266,8 @@ extraVolumes: [] # @schema items.type:object
 #     readOnly: true
 extraVolumeMounts: [] # @schema items.type:object
 
+extraContainers: []
+
 # Configure the kube-rbac-proxy sidecar that protects the controller metrics
 # endpoint. The sidecar is enabled unless metrics.disableAuth is true.
 kubeRBACProxy:

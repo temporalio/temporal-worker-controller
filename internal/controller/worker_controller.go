@@ -96,14 +96,7 @@ type WorkerDeploymentReconciler struct {
 // +kubebuilder:rbac:groups=temporal.io,resources=workerresourcetemplates/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// The loop runs on a regular interval, or every time one of the watched resources listed above changes.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
-//
-//nolint:revive // cyclomatic complexity acceptable for a top-level reconcile loop
+// Reconcile processes the desired WorkerDeployment state.
 func (r *WorkerDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// TODO(Shivam): Monitor if the time taken for a successful reconciliation loop is closing in on 5 minutes. If so, we
 	// may need to increase the timeout value.

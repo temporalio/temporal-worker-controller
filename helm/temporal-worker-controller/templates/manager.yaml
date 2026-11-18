@@ -198,6 +198,9 @@ spec:
         resources:
           {{- toYaml .Values.kubeRBACProxy.resources | nindent 10 }}
       {{- end }}
+      {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 6 }}
+      {{- end }}
       volumes:
         - name: cert
           secret:

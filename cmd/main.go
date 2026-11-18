@@ -10,10 +10,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	internalcontroller "github.com/temporalio/temporal-worker-controller/internal/controller"
+	"github.com/temporalio/temporal-worker-controller/internal/ststokenrefresher"
 	"github.com/temporalio/temporal-worker-controller/pkg/controller"
 	"github.com/temporalio/temporal-worker-controller/pkg/controller/config"
 	"go.temporal.io/sdk/log"
@@ -44,6 +47,16 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "sts-token-refresher" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := ststokenrefresher.RunCommand(ctx, os.Args[2:]); err != nil {
+			slog.Error("STS token refresher stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string

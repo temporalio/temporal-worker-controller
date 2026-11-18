@@ -33,6 +33,17 @@ jobs:
       - name: Template with default values
         run: helm template test-release helm/temporal-worker-controller
 
+      - name: Template with extra manager containers
+        run: |
+          set -euo pipefail
+          rendered=$(helm template test-release helm/temporal-worker-controller \
+            --set-string 'extraContainers[0].name=sts-token-refresher' \
+            --set-string 'extraContainers[0].image=example.invalid/sts-token-refresher:test' \
+            --set-string 'extraContainers[0].command[0]=/refresher')
+          echo "$rendered" | grep -q 'name: sts-token-refresher'
+          echo "$rendered" | grep -q 'image: example.invalid/sts-token-refresher:test'
+          echo "$rendered" | grep -q '/refresher'
+
       - name: Template with namespace creation
         run: |
           helm template test-release helm/temporal-worker-controller \
