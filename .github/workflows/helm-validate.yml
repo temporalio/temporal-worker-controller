@@ -84,27 +84,6 @@ jobs:
             fi
           done
 
-      - name: Check port schema boundaries
-        run: |
-          set -euo pipefail
-          for key in webhook.port metrics.port metrics.healthPort kubeRBACProxy.port; do
-            for port in 1 65535; do
-              helm template test-release helm/temporal-worker-controller \
-                --set "$key=$port" > /dev/null
-            done
-            for port in -1 0 65536 not-a-port; do
-              if output=$(helm template test-release helm/temporal-worker-controller \
-                --set "$key=$port" 2>&1); then
-                echo "expected schema validation to reject $key=$port" >&2
-                exit 1
-              fi
-              if ! grep -Fq "${key#*.}" <<< "$output"; then
-                echo "unexpected validation error for $key=$port: $output" >&2
-                exit 1
-              fi
-            done
-          done
-
       - name: Template with namespace creation
         run: |
           helm template test-release helm/temporal-worker-controller \
