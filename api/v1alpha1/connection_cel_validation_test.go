@@ -37,7 +37,7 @@ var _ = Describe("Connection CRD CEL validation", func() {
 	}
 
 	It("accepts a Connection with only apiKeySecretRef set", func() {
-		conn := baseConnection("api-key-only")
+		conn := baseConnection("api-key-secret-ref-only")
 		conn.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
 			Key:                  "apikey",
@@ -45,11 +45,36 @@ var _ = Describe("Connection CRD CEL validation", func() {
 		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
 	})
 
+	It("accepts a Connection with only apiKey set", func() {
+		conn := baseConnection("api-key-only")
+		conn.Spec.APIKey = &APIKeyConfig{
+			SecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+		}
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
 	It("accepts a Connection with apiKeySecretRef and tls.caCertSecretRef set together", func() {
-		conn := baseConnection("api-key-with-ca")
+		conn := baseConnection("api-key-secret-ref-with-ca")
 		conn.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
 			Key:                  "apikey",
+		}
+		conn.Spec.TLS = &ConnectionTLSConfig{
+			CACertSecretRef: &SecretReference{Name: "ca-secret"},
+		}
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
+	It("accepts a Connection with apiKey.SecretRef and tls.caCertSecretRef set together", func() {
+		conn := baseConnection("api-key-with-ca")
+		conn.Spec.APIKey = &APIKeyConfig{
+			SecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
 		}
 		conn.Spec.TLS = &ConnectionTLSConfig{
 			CACertSecretRef: &SecretReference{Name: "ca-secret"},
@@ -66,7 +91,7 @@ var _ = Describe("Connection CRD CEL validation", func() {
 	})
 
 	It("rejects mutualTLSSecretRef and apiKeySecretRef set together", func() {
-		conn := baseConnection("mtls-and-api-key")
+		conn := baseConnection("mtls-and-api-key-secret-ref")
 		conn.Spec.MutualTLSSecretRef = &SecretReference{Name: "mtls-secret"}
 		conn.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
@@ -74,7 +99,21 @@ var _ = Describe("Connection CRD CEL validation", func() {
 		}
 		err := k8sClient.Create(ctx, conn)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("Only one of mutualTLSSecretRef or apiKeySecretRef may be set"))
+		Expect(err.Error()).To(ContainSubstring("Only one of mutualTLSSecretRef, apiKeySecretRef or apiKey may be set"))
+	})
+
+	It("rejects mutualTLSSecretRef and apiKey set together", func() {
+		conn := baseConnection("mtls-and-api-key")
+		conn.Spec.MutualTLSSecretRef = &SecretReference{Name: "mtls-secret"}
+		conn.Spec.APIKey = &APIKeyConfig{
+			SecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+		}
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Only one of mutualTLSSecretRef, apiKeySecretRef or apiKey may be set"))
 	})
 
 	It("rejects mutualTLSSecretRef and tls.caCertSecretRef set together", func() {
@@ -126,5 +165,44 @@ var _ = Describe("Connection CRD CEL validation", func() {
 		err := k8sClient.Create(ctx, conn)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("hostPort"))
+	})
+
+	It("rejects apiKey and apiKeySecretRef set together", func() {
+		conn := baseConnection("api-key-and-api-key-secret-ref")
+		conn.Spec.APIKey = &APIKeyConfig{
+			SecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+		}
+		conn.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+			Key:                  "apikey",
+		}
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Only one of apiKeySecretRef or apiKey may be set"))
+	})
+
+	It("rejects empty apiKey struct", func() {
+		conn := baseConnection("api-key-empty-struct")
+		conn.Spec.APIKey = &APIKeyConfig{}
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Only one of secretRef or path may be set"))
+	})
+
+	It("rejects apiKey.Path and apiKey.SecretRef set together", func() {
+		conn := baseConnection("api-key-path-and-api-key-secret-ref")
+		conn.Spec.APIKey = &APIKeyConfig{
+			SecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+				Key:                  "apikey",
+			},
+			Path: "api-key-path",
+		}
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Only one of secretRef or path may be set"))
 	})
 })
