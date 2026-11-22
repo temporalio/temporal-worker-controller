@@ -546,9 +546,7 @@ spec:
 
 ### Worker groups
 
-To run roles with different pod shapes in one version, use `spec.workerGroups` in place
-of `spec.deployment`. Each group takes the same `appsv1.DeploymentSpec` as
-`spec.deployment`:
+Use `spec.workerGroups` when you require different configurations of workers within a single WorkerDeploymentVersion (Build ID):
 
 ```yaml
 spec:
@@ -563,9 +561,9 @@ spec:
         template: {...}   # activity workers, different resources
 ```
 
-All groups share the Build ID and roll out together. See
+All Worker Groups share the same Build ID and roll out together. See
 [Worker Groups](worker-groups.md) for how rollouts, scaling and custom Build IDs
-work with groups.
+work with Worker Groups.
 
 ### Environment-Specific Configurations
 

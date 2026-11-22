@@ -135,7 +135,7 @@ Defines how Drained versions are cleaned up:
 The pod template used for the target version of this worker deployment. Similar to the pod template used in a standar Kubernetes `Deployment`, but managed by the controller.
 
 ### Worker Groups
-Named groups of workers in one `WorkerDeployment`, set with `spec.workerGroups` in place of `spec.deployment`. Each group has its own Kubernetes `Deployment` spec, so its own pod template, replicas and placement. All groups share the deployment name and Build ID, so their task queues are in one Worker Deployment Version and they roll out together. See [Worker Groups](worker-groups.md).
+Named groups of workers in one `WorkerDeployment`, set with `spec.workerGroups` in place of `spec.deployment`. Each group has its own Kubernetes `Deployment` spec, so its own pod template, replicas and placement. All groups share the Worker Deployment name and Build ID, so they belong to one Worker Deployment Version and roll out together. See [Worker Groups](worker-groups.md).
 
 ## Environment Variables
 

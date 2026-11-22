@@ -17,4 +17,4 @@ Note that the original untruncated deployment name and build ID can always be fo
 
 For transparency, know that the controller will generate these unique short names as follows, but don't depend on this name format because it may change: `trunc(<WorkerDeployment.Name>)-trunc(<BuildID>)-hash(<WorkerDeployment.Name>-<BuildID>)`
 
-Deployments of [worker groups](worker-groups.md) are named `<WorkerDeployment.Name>-<group>-<BuildID>`, shortened so the name fits in 47 characters, followed by a hash of all three. Their group is in the `temporal.io/worker-group` label.
+Kubernetes Deployments associated with a [Worker Group](worker-groups.md) are named `<WorkerDeployment.Name>-<group>-<BuildID>`, shortened so the name fits in 47 characters, followed by a hash of all three. The `group` can also be found in the `temporal.io/worker-group` label.

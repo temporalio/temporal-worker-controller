@@ -1,14 +1,16 @@
 # Worker Groups
 
-One `WorkerDeployment` can run several named worker groups in place of a single `spec.deployment`. Each group gets its own Kubernetes `Deployment` in every version, with its own pod template, replicas, ServiceAccount, resources and placement. All groups share the `WorkerDeployment`'s Temporal deployment name and Build ID. So their task queues are in one Worker Deployment Version, and they ramp, promote, roll back and sunset together. Each group still scales on its own.
+When you require different configurations of workers within a single WorkerDeploymentVersion (Build ID), use Worker Groups.
 
-## When to use groups
+A single `WorkerDeployment` can define several named Worker Groups with the `spec.workerGroups` field. TWC will generate a Kubernetes `Deployment` associated with each named Worker Group for each new Worker Deployment Version (Build ID) in the `WorkerDeployment`. The Kubernetes `Deployment`s have their own pod template, replicas, ServiceAccount, resources and placement.
 
-A Pinned workflow's activities and child workflows stay on its Build ID only when their task queue is in the same Worker Deployment Version. If each worker role is its own `WorkerDeployment`, each role is its own Temporal Worker Deployment. During a ramp, a workflow on the new build then often calls an activity or child on the old one (see [Worker Versioning](https://docs.temporal.io/worker-versioning)).
+All Worker Groups share the same Temporal Worker Deployment name and Build ID. So they belong to one Worker Deployment Version, and they ramp, promote, roll back and sunset together. Each Worker Group still scales on its own.
 
-Use groups when roles release together but need different pod shapes. For example, parent workflows plus child workflows that need more memory, or activities that must run on GPU nodes. All groups are equal: any group can run workflows, child workflows, activities, or a mix.
+## When to use
 
-Use separate `WorkerDeployment` resources when roles should release and roll back on their own.
+Sharing one Worker Deployment Version matters for Pinned workflows. Their activities and child workflows run on the same Worker Deployment Version only when that version is associated with the task queue they are sent to. Two `WorkerDeployment` resources are two Temporal Worker Deployments, so during a ramp a workflow on the new Build ID can have its activities run on the old one (see [Worker Versioning](https://docs.temporal.io/worker-versioning)).
+
+Use separate `WorkerDeployment` resources when each set of Workers should release and roll back on its own.
 
 ## Example
 
@@ -28,7 +30,7 @@ spec:
               - name: worker
                 image: registry.example.com/documents:v42
                 env:
-                  - name: WORKER_ROLE
+                  - name: WORKER_GROUP
                     value: workflows
     - name: parse
       deployment:
@@ -42,7 +44,7 @@ spec:
               - name: worker
                 image: registry.example.com/documents:v42
                 env:
-                  - name: WORKER_ROLE
+                  - name: WORKER_GROUP
                     value: parse
                 resources:
                   requests:
@@ -56,7 +58,7 @@ spec:
               - name: worker
                 image: registry.example.com/documents:v42
                 env:
-                  - name: WORKER_ROLE
+                  - name: WORKER_GROUP
                     value: extract
   rollout:
     strategy: Progressive
@@ -72,7 +74,7 @@ spec:
     temporalNamespace: documents
 ```
 
-A `WorkerDeployment` sets exactly one of `spec.workerGroups` and `spec.deployment`. Your workers decide which task queues each group polls, here from `WORKER_ROLE`. The controller injects the same `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` into every group.
+A `WorkerDeployment` sets exactly one of `spec.workerGroups` and `spec.deployment`. Your workers decide which task queues each group polls, here from `WORKER_GROUP`. The controller injects the same `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` into every group.
 
 A full example is in [examples/worker-groups.yaml](../examples/worker-groups.yaml).
 
@@ -86,7 +88,7 @@ A full example is in [examples/worker-groups.yaml](../examples/worker-groups.yam
 
 A target version with groups counts as healthy only when every group in the spec has a Deployment that is Available with at least one available replica. A group with `replicas: 0` is exempt. The gate workflow waits for that, and so do the promotions the controller makes under `AllAtOnce` and `Progressive`.
 
-Make each worker's readiness probe pass only once the worker is polling Temporal. Otherwise a pod can be Ready before its task queues are in the version.
+Make each worker's readiness probe pass only once the worker is polling Temporal. Otherwise a pod can be Ready before its task queues are associated with the version.
 
 Temporal adds its own check. When the controller sets a new current or ramping version, the server rejects it if the new version is missing a task queue the current version still uses. So a group whose pods have not polled yet blocks the promotion rather than splitting builds. The server skips this check on a WorkerDeployment's first rollout, and for task queues that are new in this version.
 
@@ -96,7 +98,7 @@ Once the target version is registered with Temporal but still waiting on groups,
 
 The gate runs one workflow on each workflow task queue in the target version. It therefore runs on every group that polls workflow queues, and not on activity-only groups. If you use a gate, at least one group must poll a workflow queue, and every group that polls workflows must register the gate workflow type.
 
-Turn off workflow polling in activity-only groups. In Go, set `worker.Options.DisableWorkflowWorker`. By default the SDK polls for workflow tasks even when no workflows are registered, which puts the group's queue in the version as a workflow queue. The gate would then start a workflow there that no worker can run.
+Turn off workflow polling in activity-only groups. In Go, set `worker.Options.DisableWorkflowWorker`. By default the SDK polls for workflow tasks even when no workflows are registered, which associates the group's queue with the version as a workflow queue. The gate would then start a workflow there that no worker can run.
 
 ## Scaling
 
@@ -149,7 +151,7 @@ With `unsafeCustomBuildID` set and unchanged:
 ## Limits
 
 - 1 to 10 groups.
-- Group names are DNS labels of at most 24 characters. `default` is reserved.
+- Group names are DNS labels of at most 24 characters, so the 47-character Deployment name keeps room for the `WorkerDeployment` name and Build ID. `default` is reserved.
 - `spec.workerGroups` can't be combined with `spec.deployment` or the deprecated `spec.template` fields.
 
 ## Downgrading the controller

@@ -7,7 +7,7 @@
 #
 # Every group gets its own Deployment per version and the same TEMPORAL_DEPLOYMENT_NAME
 # and TEMPORAL_WORKER_BUILD_ID, so a Pinned workflow's activities stay on its build.
-# Your worker picks its task queues; here it reads WORKER_ROLE.
+# Your worker picks its task queues; here it reads WORKER_GROUP.
 #
 # Apply:
 #   kubectl apply -f examples/worker-groups.yaml
@@ -32,7 +32,7 @@ spec:
               - name: worker
                 image: registry.example.com/documents:v42
                 env:
-                  - name: WORKER_ROLE
+                  - name: WORKER_GROUP
                     value: workflows
                 readinessProbe:
                   httpGet:
@@ -49,7 +49,7 @@ spec:
               - name: worker
                 image: registry.example.com/documents:v42
                 env:
-                  - name: WORKER_ROLE
+                  - name: WORKER_GROUP
                     value: parse
                 resources:
                   requests:
@@ -70,7 +70,7 @@ spec:
               - name: worker
                 image: registry.example.com/documents:v42
                 env:
-                  - name: WORKER_ROLE
+                  - name: WORKER_GROUP
                     value: extract
                 resources:
                   requests:
