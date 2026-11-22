@@ -482,63 +482,6 @@ func TestReleaseConnectionFinalizerIfUnused_KeepsSharedStillUsed(t *testing.T) {
 		"shared ClusterConnection finalizer must be KEPT while a WD in another namespace references it")
 }
 
-// TestSameConnectionRef verifies that the shorthand (Name) and full (ObjectRef)
-// forms of the same connection compare equal — so re-expressing a ref from
-// shorthand to ObjectRef isn't mistaken for a migration.
-func TestSameConnectionRef(t *testing.T) {
-	// shorthand: namespaced Connection by name
-	short := func(name string) temporaliov1alpha1.ConnectionReference {
-		return temporaliov1alpha1.ConnectionReference{Name: name}
-	}
-	// full form: ObjectRef with explicit kind
-	full := func(name, kind string) temporaliov1alpha1.ConnectionReference {
-		return temporaliov1alpha1.ConnectionReference{
-			ObjectRef: &corev1.TypedObjectReference{
-				APIGroup: ptr("temporal.io"),
-				Kind:     kind,
-				Name:     name,
-			},
-		}
-	}
-
-	tests := []struct {
-		name string
-		a, b temporaliov1alpha1.ConnectionReference
-		want bool
-	}{
-		{
-			name: "shorthand equals ObjectRef Connection form (normalization)",
-			a:    short("foo"),
-			b:    full("foo", "Connection"),
-			want: true,
-		},
-		{
-			name: "Connection differs from ClusterConnection",
-			a:    full("foo", "Connection"),
-			b:    full("foo", "ClusterConnection"),
-			want: false,
-		},
-		{
-			name: "different names differ",
-			a:    short("a"),
-			b:    short("b"),
-			want: false,
-		},
-		{
-			name: "same cluster ref equals itself",
-			a:    full("foo", "ClusterConnection"),
-			b:    full("foo", "ClusterConnection"),
-			want: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, sameConnectionRef(tc.a, tc.b))
-		})
-	}
-}
-
 // TestReconcile_ClusterConnectionNamespaceScoped covers the namespace-scoped controller,
 // which cannot read cluster-scoped resources and so cannot support ClusterConnection.
 func TestReconcile_ClusterConnectionNamespaceScoped(t *testing.T) {
@@ -551,7 +494,7 @@ func TestReconcile_ClusterConnectionNamespaceScoped(t *testing.T) {
 		cc := makeClusterConnection("conn", "h:7233")
 		wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
 		r, recorder := newTestReconciler([]client.Object{cc, wd})
-		r.DisableClusterConnections = true
+		r.Config.DisableClusterConnections = true
 
 		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key(wd)})
 		require.NoError(t, err)
@@ -580,7 +523,7 @@ func TestReconcile_ClusterConnectionNamespaceScoped(t *testing.T) {
 	t.Run("namespacedRef_unaffected", func(t *testing.T) {
 		wd := makeWDWithKind("wd", "default", "missing", "Connection")
 		r, recorder := newTestReconciler([]client.Object{wd})
-		r.DisableClusterConnections = true
+		r.Config.DisableClusterConnections = true
 
 		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key(wd)})
 		require.Error(t, err, "expected the usual ConnectionNotFound failure")
@@ -609,7 +552,7 @@ func TestReleaseConnectionFinalizerIfUnused_NamespaceScoped(t *testing.T) {
 	controllerutil.AddFinalizer(cc, finalizerName)
 	wd := makeWDWithKind("wd", "default", "conn", "ClusterConnection")
 	r, _ := newTestReconciler([]client.Object{cc, wd})
-	r.DisableClusterConnections = true
+	r.Config.DisableClusterConnections = true
 
 	require.NoError(t, r.releaseConnectionFinalizerIfUnused(
 		context.Background(), logr.Discard(), wd.Spec.WorkerOptions.ConnectionRef, wd.Namespace, wd.Name))

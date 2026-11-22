@@ -404,7 +404,7 @@ func TestGetWorkerResourceApplies_Groups(t *testing.T) {
 
 	t.Run("group WRT renders once per build that has the group", func(t *testing.T) {
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", "activities", createTestWRT)}
-		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, false)
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, nil, false)
 
 		targets := map[string]string{}
 		for _, a := range applies {
@@ -415,7 +415,7 @@ func TestGetWorkerResourceApplies_Groups(t *testing.T) {
 
 	t.Run("WRT without a group targets only versions without groups", func(t *testing.T) {
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", "", createTestWRT)}
-		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, false)
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, nil, false)
 
 		targets := map[string]string{}
 		for _, a := range applies {
@@ -429,7 +429,7 @@ func TestGetWorkerResourceApplies_Groups(t *testing.T) {
 		activities.Spec.Selector = &metav1.LabelSelector{MatchLabels: k8s.ComputeWorkerGroupSelectorLabels("wd", "v1", "activities")}
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("pdb", "activities", createTestPDBWRT)}
 
-		applies := getWorkerResourceApplies(logr.Discard(), wrts, k8s.NewDeploymentState(activities), "ns", nil, nil, false)
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, k8s.NewDeploymentState(activities), "ns", nil, nil, nil, false)
 		require.Len(t, applies, 1)
 
 		spec := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -440,7 +440,7 @@ func TestGetWorkerResourceApplies_Groups(t *testing.T) {
 	t.Run("group Deployment being removed is not re-rendered", func(t *testing.T) {
 		removing := state.WorkerGroupDeployments["v1"]["activities"]
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", "activities", createTestWRT)}
-		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", []*appsv1.Deployment{removing}, nil, false)
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", []*appsv1.Deployment{removing}, nil, nil, false)
 
 		require.Len(t, applies, 1)
 		assert.Equal(t, "v2", applies[0].BuildID)
@@ -475,7 +475,7 @@ func TestGetDeleteWorkerResources_Groups(t *testing.T) {
 		}
 		removing := []*appsv1.Deployment{state.WorkerGroupDeployments["v1"]["batch"]}
 
-		assert.Equal(t, map[string][]string{"batch-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, removing, state, nil)))
+		assert.Equal(t, map[string][]string{"batch-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, removing, state, nil, nil)))
 	})
 
 	t.Run("status entry for a build without the group is cleaned up", func(t *testing.T) {
@@ -484,7 +484,7 @@ func TestGetDeleteWorkerResources_Groups(t *testing.T) {
 			withStatus(groupWRT("activities-hpa", "activities", createTestWRT), "v1"),
 		}
 
-		assert.Equal(t, map[string][]string{"gone-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, nil, state, nil)))
+		assert.Equal(t, map[string][]string{"gone-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, nil, state, nil, nil)))
 	})
 }
 

@@ -2,9 +2,13 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2024 Datadog, Inc.
 
-package controller
+package config_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/temporalio/temporal-worker-controller/pkg/controller/config"
+)
 
 func TestGetWRTHPAMatchLabelsStripTemporalPrefix(t *testing.T) {
 	tests := map[string]struct {
@@ -20,8 +24,8 @@ func TestGetWRTHPAMatchLabelsStripTemporalPrefix(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv(WRTHPAMatchLabelsStripTemporalPrefixEnvKey, tc.value)
-			if got := GetWRTHPAMatchLabelsStripTemporalPrefix(); got != tc.want {
+			t.Setenv(config.WRTHPAMatchLabelsStripTemporalPrefixEnvKey, tc.value)
+			if got := config.GetWRTHPAMatchLabelsStripTemporalPrefix(); got != tc.want {
 				t.Fatalf("GetWRTHPAMatchLabelsStripTemporalPrefix() = %t, want %t", got, tc.want)
 			}
 		})

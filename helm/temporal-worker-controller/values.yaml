@@ -100,7 +100,16 @@ containerSecurityContext: {}
 
 # Default podAntiAffinity uses preferredDuringSchedulingIgnoredDuringExecution to spread manager
 # pods across nodes. For strict HA, switch to requiredDuringSchedulingIgnoredDuringExecution.
+# When set, affinity replaces the default podAntiAffinity.
 affinity: {}
+
+# Render the default podAntiAffinity when affinity is empty. Set to false to render no
+# affinity at all, e.g. when relying on topologySpreadConstraints only.
+defaultPodAntiAffinity: true
+
+# Topology spread constraints for the manager pods, e.g. to spread replicas across
+# nodes and zones. Rendered alongside affinity (or the default podAntiAffinity).
+topologySpreadConstraints: []
 
 # More than one replica is required for high availability.
 replicas: 2
@@ -195,9 +204,19 @@ certmanager:
       name: ca-injector
       key: ca.crt
 
-# Not yet supported
 prometheus:
+  # enabled creates a Prometheus ServiceMonitor for the metrics endpoint.
+  # Needs metrics.enabled and Prometheus Operator installed.
+  # A Prometheus ServiceMonitor is a Custom Resource Definition (CRD) provided
+  # by the Prometheus Operator that defines how Prometheus should discover
+  # and scrape metrics from Kubernetes Services.
+  #
+  # Ref: https://prometheus-operator.dev/docs/developer/getting-started/
   enabled: false
+  # labels are added to the ServiceMonitor, so a Prometheus serviceMonitorSelector can match it.
+  # None by default. kube-prometheus-stack, for example, selects on its release name,
+  # so set release: <your kube-prometheus-stack release name>.
+  labels: {} # @schema additionalProperties.type:string
 
 nodeSelector: {}
 

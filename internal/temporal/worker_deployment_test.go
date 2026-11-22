@@ -273,12 +273,91 @@ func TestGetPollersCoversWorkflowActivityAndNexusTaskQueues(t *testing.T) {
 func TestGetTaskQueuesWithNoPollersDoesNotFalsePositiveOnNexus(t *testing.T) {
 	stub := &describeTaskQueueStub{
 		responses: map[enumspb.TaskQueueType]*workflowservice.DescribeTaskQueueResponse{
-			enumspb.TASK_QUEUE_TYPE_NEXUS: {Pollers: []*taskqueuepb.PollerInfo{{Identity: "nexus-poller"}}},
+			enumspb.TASK_QUEUE_TYPE_NEXUS: {Pollers: []*taskqueuepb.PollerInfo{{
+				Identity:          "nexus-poller",
+				DeploymentOptions: &deploymentpb.WorkerDeploymentOptions{DeploymentName: "workers", BuildId: "build-a"},
+			}}},
 		},
 	}
-	withoutPollers, err := getTaskQueuesWithNoPollers(context.Background(), stub, []temporalclient.WorkerDeploymentTaskQueueInfo{
+	withoutPollers, err := getTaskQueuesWithNoPollers(context.Background(), stub, "workers", "build-a", []temporalclient.WorkerDeploymentTaskQueueInfo{
 		{Name: "nexus-tq", Type: temporalclient.TaskQueueTypeNexus},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, withoutPollers, "a Nexus task queue with an active poller must not be reported as having no poller")
+}
+
+// TestGetTaskQueuesWithNoPollersScopesToVersion is a regression test for the bug where
+// getTaskQueuesWithNoPollers counted any poller returned by DescribeTaskQueue, which merges
+// the pollers of every version of the deployment. After a promotion, the Draining version's
+// pollers masked a Current version that had lost all of its workers.
+func TestGetTaskQueuesWithNoPollersScopesToVersion(t *testing.T) {
+	const deploymentName = "workers"
+	poller := func(identity, deployment, buildID string) *taskqueuepb.PollerInfo {
+		return &taskqueuepb.PollerInfo{
+			Identity: identity,
+			DeploymentOptions: &deploymentpb.WorkerDeploymentOptions{
+				DeploymentName:       deployment,
+				BuildId:              buildID,
+				WorkerVersioningMode: enumspb.WORKER_VERSIONING_MODE_VERSIONED,
+			},
+		}
+	}
+
+	for _, tc := range []struct {
+		name        string
+		pollers     []*taskqueuepb.PollerInfo
+		wantNoPolls bool
+	}{
+		{
+			name:        "poller for the version is counted",
+			pollers:     []*taskqueuepb.PollerInfo{poller("a", deploymentName, "build-a")},
+			wantNoPolls: false,
+		},
+		{
+			name:        "no pollers at all",
+			pollers:     nil,
+			wantNoPolls: true,
+		},
+		{
+			name:        "pollers only for another build ID are not counted",
+			pollers:     []*taskqueuepb.PollerInfo{poller("b1", deploymentName, "build-b"), poller("b2", deploymentName, "build-b")},
+			wantNoPolls: true,
+		},
+		{
+			name:        "poller with same build ID in another deployment is not counted",
+			pollers:     []*taskqueuepb.PollerInfo{poller("other", "other-workers", "build-a")},
+			wantNoPolls: true,
+		},
+		{
+			name:        "pollers without deployment options are not counted",
+			pollers:     []*taskqueuepb.PollerInfo{{Identity: "unversioned"}},
+			wantNoPolls: true,
+		},
+		{
+			name: "matching poller among pollers of other versions is counted",
+			pollers: []*taskqueuepb.PollerInfo{
+				poller("b", deploymentName, "build-b"),
+				{Identity: "unversioned"},
+				poller("a", deploymentName, "build-a"),
+			},
+			wantNoPolls: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &describeTaskQueueStub{
+				responses: map[enumspb.TaskQueueType]*workflowservice.DescribeTaskQueueResponse{
+					enumspb.TASK_QUEUE_TYPE_WORKFLOW: {Pollers: tc.pollers},
+				},
+			}
+			withoutPollers, err := getTaskQueuesWithNoPollers(context.Background(), stub, deploymentName, "build-a", []temporalclient.WorkerDeploymentTaskQueueInfo{
+				{Name: "tq", Type: temporalclient.TaskQueueTypeWorkflow},
+			})
+			require.NoError(t, err)
+			if tc.wantNoPolls {
+				assert.Equal(t, []string{"tq"}, withoutPollers)
+			} else {
+				assert.Empty(t, withoutPollers)
+			}
+		})
+	}
 }

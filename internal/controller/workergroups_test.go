@@ -193,7 +193,9 @@ func TestExecutePlan_WRTWithMissingGroup_SetsWorkerGroupNotFound(t *testing.T) {
 		"the group may still be added, so kstatus must not report Failed")
 
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: activities.Name}, &got))
-	assert.Nil(t, meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady),
+	cond = meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, cond)
+	assert.Equal(t, temporaliov1alpha1.ReasonWRTAllVersionsApplied, cond.Reason,
 		"a declared group without a Deployment yet is not missing")
 }
 
@@ -284,12 +286,14 @@ func TestExecutePlan_WorkerGroupNotFound_ClearedOnceTheGroupIsDeclared(t *testin
 	require.NoError(t, r.Status().Update(context.Background(), wrt))
 
 	// The version cap holds back the new version, so the declared group has no Deployment yet.
-	r.MaxDeploymentVersionsIneligibleForDeletion = 0
+	r.Config.MaxDeploymentVersionsIneligibleForDeletion = 0
 	runPlanCycle(t, r, twd, connection, temporaliov1alpha1.WorkerDeploymentStatus{})
 
 	var got temporaliov1alpha1.WorkerResourceTemplate
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, &got))
-	assert.Nil(t, meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady),
+	ready := meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, ready)
+	assert.Equal(t, temporaliov1alpha1.ReasonWRTAllVersionsApplied, ready.Reason,
 		"a stale WorkerGroupNotFound must not outlive the missing group")
 }
 

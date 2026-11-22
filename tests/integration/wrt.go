@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -272,6 +273,84 @@ func wrtTestCases() []testCase {
 					waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, env.K8sClient, twd.Namespace, hpaNameV1, depNameV1, 30*time.Second)
 					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv0, 30*time.Second)
 					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv1, 30*time.Second)
+				}),
+		},
+
+		// spec.versionStatuses end-to-end.
+		// With v0=Current and v1.0=Ramping, a PDB WRT that selects Current and Ramping renders a
+		// copy for both versions. Narrowing the selection to Current must delete the v1.0 copy
+		// and prune its status entry, and keep the v0 copy.
+		{
+			name: "wrt-version-statuses",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewWorkerDeploymentBuilder().
+						WithProgressiveStrategy(testhelpers.ProgressiveStep(5, time.Hour)).
+						WithTargetTemplate("v1.0").
+						WithStatus(
+							testhelpers.NewStatusBuilder().
+								WithTargetVersion("v0", temporaliov1alpha1.VersionStatusCurrent, -1, true, true).
+								WithCurrentVersion("v0", true, true),
+						),
+				).
+				WithExistingDeployments(
+					testhelpers.NewDeploymentInfo("v0", 1),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusRamping, 5, true, false).
+						WithCurrentVersion("v0", true, true),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildIDv1 := k8s.ComputeBuildID(twd)
+					buildIDv0 := testhelpers.MakeBuildID(twd.Name, "v0", "", nil)
+					wrtName := "status-pdb"
+					wrtKey := types.NamespacedName{Name: wrtName, Namespace: twd.Namespace}
+
+					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
+						"apiVersion": "policy/v1",
+						"kind": "PodDisruptionBudget",
+						"spec": {
+							"minAvailable": 1,
+							"selector": {
+								"matchLabels": {}
+							}
+						}
+					}`))
+					wrt.Spec.VersionStatuses = []temporaliov1alpha1.VersionStatus{
+						temporaliov1alpha1.VersionStatusCurrent,
+						temporaliov1alpha1.VersionStatusRamping,
+					}
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
+					}
+
+					pdbNameV0 := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildIDv0)
+					pdbNameV1 := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildIDv1)
+					waitForPDBWithInjectedMatchLabels(t, ctx, env.K8sClient, twd.Namespace, pdbNameV0, twd.Name, buildIDv0, 30*time.Second)
+					waitForPDBWithInjectedMatchLabels(t, ctx, env.K8sClient, twd.Namespace, pdbNameV1, twd.Name, buildIDv1, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv0, 30*time.Second)
+					waitForWRTStatusApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildIDv1, 30*time.Second)
+
+					// The controller writes the WRT status between our read and write, so retry on conflict.
+					if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+						var latest temporaliov1alpha1.WorkerResourceTemplate
+						if err := env.K8sClient.Get(ctx, wrtKey, &latest); err != nil {
+							return err
+						}
+						latest.Spec.VersionStatuses = []temporaliov1alpha1.VersionStatus{temporaliov1alpha1.VersionStatusCurrent}
+						return env.K8sClient.Update(ctx, &latest)
+					}); err != nil {
+						t.Fatalf("failed to narrow WRT versionStatuses: %v", err)
+					}
+
+					waitForWRTCopyDeleted(ctx, t, env.K8sClient, twd.Namespace, wrtName, buildIDv1, pdbNameV1, &policyv1.PodDisruptionBudget{}, 30*time.Second)
+
+					var pdb policyv1.PodDisruptionBudget
+					if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: pdbNameV0, Namespace: twd.Namespace}, &pdb); err != nil {
+						t.Fatalf("PDB %s of the Current version must be kept: %v", pdbNameV0, err)
+					}
 				}),
 		},
 

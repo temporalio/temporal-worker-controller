@@ -18,7 +18,7 @@ builds:
     dir: cmd
     binary: temporal-worker-controller
     ldflags:
-      - -s -w -X github.com/temporalio/temporal-worker-controller/internal/controller.Version={{.Version}}
+      - -s -w -X github.com/temporalio/temporal-worker-controller/pkg/controller/version.Version={{.Version}}
     goarch:
       - amd64
       - arm64

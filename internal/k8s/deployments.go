@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -48,6 +49,11 @@ const (
 	ConnectionSpecHashAnnotation                   = "temporal.io/connection-spec-hash"
 	PodTemplateSpecHashAnnotation                  = "temporal.io/pod-template-spec-hash"
 	groupsBuildIDHashLen                           = 10
+
+	// ManagedDeploymentLabelsAnnotation lists the spec.deploymentLabels keys the controller
+	// applied, so a key removed from the spec can be removed without touching labels that
+	// other tools put on the Deployment.
+	ManagedDeploymentLabelsAnnotation = "temporal.io/managed-deployment-labels"
 
 	// Environment variables read by the Temporal Go SDK's envconfig package
 	// (go.temporal.io/sdk/contrib/envconfig) to configure the worker's connection.
@@ -484,13 +490,13 @@ func NewWorkerGroupDeploymentWithOwnerRef(
 	)
 	depSpec.Template.Spec = *podSpec
 
-	return &appsv1.Deployment{
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:                       name,
 			Namespace:                  objectMeta.Namespace,
 			DeletionGracePeriodSeconds: nil,
-			Labels:                     selectorLabels,
-			Annotations:                depSpec.Template.Annotations,
+			Labels:                     maps.Clone(selectorLabels),
+			Annotations:                maps.Clone(depSpec.Template.Annotations),
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         typeMeta.APIVersion,
 				Kind:               typeMeta.Kind,
@@ -503,7 +509,64 @@ func NewWorkerGroupDeploymentWithOwnerRef(
 			//                 deleting deployments that are still reachable.
 		},
 		Spec: depSpec,
-	}, nil
+	}
+	ApplyDeploymentLabels(deployment, spec.DeploymentLabels)
+	return deployment, nil
+}
+
+// ApplyDeploymentLabels brings the Deployment's labels in line with spec.deploymentLabels
+// and reports whether anything changed. It removes only keys it applied earlier, so labels
+// added by other tools survive, and it never changes the selector labels.
+func ApplyDeploymentLabels(deployment *appsv1.Deployment, desired map[string]string) bool {
+	isSelectorLabel := func(key string) bool {
+		if deployment.Spec.Selector == nil {
+			return false
+		}
+		_, ok := deployment.Spec.Selector.MatchLabels[key]
+		return ok
+	}
+
+	changed := false
+	for _, key := range strings.Split(deployment.Annotations[ManagedDeploymentLabelsAnnotation], ",") {
+		if _, keep := desired[key]; keep || key == "" || isSelectorLabel(key) {
+			continue
+		}
+		if _, ok := deployment.Labels[key]; ok {
+			delete(deployment.Labels, key)
+			changed = true
+		}
+	}
+
+	managed := make([]string, 0, len(desired))
+	for key, value := range desired {
+		if isSelectorLabel(key) {
+			continue
+		}
+		managed = append(managed, key)
+		if current, ok := deployment.Labels[key]; ok && current == value {
+			continue
+		}
+		if deployment.Labels == nil {
+			deployment.Labels = map[string]string{}
+		}
+		deployment.Labels[key] = value
+		changed = true
+	}
+
+	sort.Strings(managed)
+	managedValue := strings.Join(managed, ",")
+	if deployment.Annotations[ManagedDeploymentLabelsAnnotation] != managedValue {
+		if managedValue == "" {
+			delete(deployment.Annotations, ManagedDeploymentLabelsAnnotation)
+		} else {
+			if deployment.Annotations == nil {
+				deployment.Annotations = map[string]string{}
+			}
+			deployment.Annotations[ManagedDeploymentLabelsAnnotation] = managedValue
+		}
+		changed = true
+	}
+	return changed
 }
 
 // TODO (Shivam): Change hash when secret name is updated as well.

@@ -38,7 +38,7 @@ spec:
       {{- if .Values.affinity }}
       affinity:
 {{ toYaml .Values.affinity | nindent 8 }}
-      {{- else }}
+      {{- else if .Values.defaultPodAntiAffinity }}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -126,6 +126,11 @@ spec:
           - containerPort: {{ .Values.webhook.port }}
             name: webhook-server
             protocol: TCP
+          {{- if and .Values.metrics.enabled .Values.metrics.disableAuth }}
+          - containerPort: {{ .Values.metrics.port }}
+            name: metrics
+            protocol: TCP
+          {{- end }}
         volumeMounts:
           - mountPath: {{ .Values.webhook.certDir }}
             name: cert
@@ -157,7 +162,7 @@ spec:
           periodSeconds: 10
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
-      {{- if not .Values.metrics.disableAuth }}
+      {{- if and .Values.metrics.enabled (not .Values.metrics.disableAuth) }}
       - name: kube-rbac-proxy
         {{- if .Values.kubeRBACProxy.containerSecurityContext }}
         securityContext:
@@ -209,5 +214,9 @@ spec:
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}

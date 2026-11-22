@@ -44,11 +44,12 @@ type plan struct {
 	// WorkerResourceTemplates to apply via Server-Side Apply, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []planner.WorkerResourceApply
 
-	// Rendered WRT resource copies to delete explicitly, on version sunset or as a
-	// retry for a previously unconfirmed delete (derived from WRT status entries whose
-	// build ID has no Deployment). Rendered resources are owned by the WRT (not the
-	// Deployment), so they are not GC'd when the Deployment is deleted; the controller
-	// deletes them here instead.
+	// Rendered WRT resource copies to delete explicitly, on version sunset, for each live
+	// build ID whose version status a WRT does not select, or as a retry for a previously
+	// unconfirmed delete (derived from WRT status entries whose build ID has no
+	// Deployment). Rendered resources are owned by the WRT (not the Deployment), so
+	// they are not GC'd when the Deployment is deleted; the controller deletes them
+	// here instead.
 	DeleteWorkerResources []planner.WorkerResourceRef
 
 	// WRTs that need a controller owner reference added, as (base, patched) pairs
@@ -59,6 +60,13 @@ type plan struct {
 	WRTsWithMissingWorkerGroup []string
 	// WRTsWithStaleWorkerGroupNotFound names WRTs still marked WorkerGroupNotFound whose group is known again.
 	WRTsWithStaleWorkerGroupNotFound []string
+
+	// All WRTs that reference the WorkerDeployment, so executePlan can record the status
+	// of a WRT that renders no copy this cycle.
+	WorkerResourceTemplates []temporaliov1alpha1.WorkerResourceTemplate
+
+	// See planner.Plan.UnknownVersionStatus.
+	UnknownVersionStatus bool
 }
 
 // startWorkflowConfig defines a workflow to be started
@@ -147,7 +155,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	// Generate the plan using the planner package
 	plannerConfig := &planner.Config{
 		RolloutStrategy:                      rolloutStrategy,
-		WRTHPAMatchLabelsStripTemporalPrefix: r.WRTHPAMatchLabelsStripTemporalPrefix,
+		WRTHPAMatchLabelsStripTemporalPrefix: r.Config.WRTHPAMatchLabelsStripTemporalPrefix,
 	}
 
 	// Fetch all WorkerResourceTemplates that reference this TWD so that the planner
@@ -169,7 +177,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 		connection,
 		plannerConfig,
 		workerDeploymentName,
-		r.MaxDeploymentVersionsIneligibleForDeletion,
+		r.Config.MaxDeploymentVersionsIneligibleForDeletion,
 		gateInput,
 		isGateInputSecret,
 		wrtList.Items,
@@ -195,6 +203,9 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
 	plan.WRTsWithMissingWorkerGroup = planResult.WRTsWithMissingWorkerGroup
 	plan.WRTsWithStaleWorkerGroupNotFound = planResult.WRTsWithStaleWorkerGroupNotFound
+
+	plan.WorkerResourceTemplates = wrtList.Items
+	plan.UnknownVersionStatus = planResult.UnknownVersionStatus
 
 	// Convert test workflows
 	for _, wf := range planResult.TestWorkflows {

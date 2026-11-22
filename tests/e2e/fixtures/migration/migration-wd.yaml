@@ -1,0 +1,26 @@
+# TODO: Replace busybox sleeper with a real Temporal worker image
+# to verify end-to-end functionality after upgrade (see PR #640 review).
+# New-kind replacement for v1.6-twd.yaml: same name and spec. Its reconcile
+# labels the old TemporalWorkerDeployment temporal.io/migrated-to-wd=true.
+apiVersion: temporal.io/v1alpha1
+kind: WorkerDeployment
+metadata:
+  name: test-worker
+  namespace: temporal-system
+spec:
+  rollout:
+    strategy: AllAtOnce
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 2h
+  deployment:
+    template:
+      spec:
+        containers:
+          - name: main
+            image: busybox:latest
+            command: ["sleep", "infinity"]
+  workerOptions:
+    connectionRef:
+      name: test-connection
+    temporalNamespace: default

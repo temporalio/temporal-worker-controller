@@ -214,4 +214,51 @@ var _ = Describe("WorkerResourceTemplate webhook integration", func() {
 		Expect(err.Error()).To(ContainSubstring("workerDeploymentRef.name"))
 		Expect(err.Error()).To(ContainSubstring("immutable"))
 	})
+
+	// Switching the template's kind would let a user who may not delete the original kind
+	// delete the WRT anyway: the delete check only sees the new kind, while resources
+	// rendered from the old kind stay owned by the WRT and are garbage collected.
+	It("rejects a template kind change that would bypass the delete check", func() {
+		ns := makeTestNamespace("wh-kind-switch")
+		grantControllerSAHPACreateAccess(ns)
+
+		const username = "webhook-test-carol"
+		grantUserWRTCreateAccess(ns, username)
+		Expect(k8sClient.Create(ctx, &rbacv1.Role{
+			ObjectMeta: metav1.ObjectMeta{Name: "pdb-editor", Namespace: ns},
+			Rules: []rbacv1.PolicyRule{{
+				APIGroups: []string{"policy"},
+				Resources: []string{"poddisruptionbudgets"},
+				Verbs:     []string{"update", "delete"},
+			}},
+		})).To(Succeed())
+		// Bind the controller SA too, so the update passes every SAR and only the
+		// immutability check can reject it.
+		Expect(k8sClient.Create(ctx, &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "pdb-editor-rb", Namespace: ns},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: "pdb-editor"},
+			Subjects: []rbacv1.Subject{
+				{Kind: "User", Name: username},
+				{Kind: "ServiceAccount", Name: "test-controller", Namespace: "test-system"},
+			},
+		})).To(Succeed())
+		// Intentionally do NOT grant carol HPA delete permission.
+
+		Expect(k8sClient.Create(ctx, makeWRTForWebhook("t19-kind-switch", ns, "my-worker", hpaObjForIntegration()))).To(Succeed())
+
+		carolClient := impersonatedClient(username)
+		key := types.NamespacedName{Name: "t19-kind-switch", Namespace: ns}
+		var wrt WorkerResourceTemplate
+		Expect(carolClient.Get(ctx, key, &wrt)).To(Succeed())
+		wrt.Spec.Template.Raw = []byte(`{"apiVersion":"policy/v1","kind":"PodDisruptionBudget",` +
+			`"spec":{"minAvailable":1,"selector":{"matchLabels":{}}}}`)
+		err := carolClient.Update(ctx, &wrt)
+		Expect(err).To(HaveOccurred(), "webhook must reject a template kind change")
+		Expect(err.Error()).To(ContainSubstring("resource type is immutable"))
+
+		Expect(carolClient.Get(ctx, key, &wrt)).To(Succeed())
+		err = carolClient.Delete(ctx, &wrt)
+		Expect(err).To(HaveOccurred(), "carol still cannot delete the HPA-backed WRT")
+		Expect(err.Error()).To(ContainSubstring("not authorized to delete HorizontalPodAutoscaler"))
+	})
 })

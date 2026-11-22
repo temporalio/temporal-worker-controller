@@ -52,6 +52,18 @@ spec:
                 required:
                 - name
                 type: object
+              versionStatuses:
+                items:
+                  enum:
+                  - Inactive
+                  - Ramping
+                  - Current
+                  - Draining
+                  - Drained
+                  type: string
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
               workerDeploymentRef:
                 properties:
                   name:

@@ -1,24 +1,51 @@
-{{- if .Values.prometheus.enabled }}
-{{ fail "prometheus isn't supported yet" }}
-# Prometheus Monitor Service (Metrics)
+{{- if and .Values.prometheus.enabled .Values.metrics.enabled }}
+{{- if .Values.metrics.disableAuth }}
+# Without the auth proxy, the manager serves metrics over plain HTTP, and nothing else
+# exposes that port as a Service.
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: metrics
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-metrics-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: http
+      port: {{ .Values.metrics.port }}
+      protocol: TCP
+      targetPort: metrics
+  selector:
+    {{- include "temporal-worker-controller.selectorLabels" . | nindent 4 }}
+---
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
     app.kubernetes.io/component: metrics
-    {{ include "temporal-worker-controller.labels" $ | indent 4 }}
+    {{- include "temporal-worker-controller.labels" . | nindent 4 }}
+    {{- include "temporal-worker-controller.prometheus.labels" . | nindent 4 }}
   name: {{ .Release.Name }}-metrics-monitor
   namespace: {{ .Release.Namespace }}
 spec:
   endpoints:
+    {{- if .Values.metrics.disableAuth }}
+    - path: /metrics
+      port: http
+      scheme: http
+    {{- else }}
+    # The scraper's service account needs the metrics-reader ClusterRole.
     - path: /metrics
       port: https
       scheme: https
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
         insecureSkipVerify: true
+    {{- end }}
   selector:
     matchLabels:
-      {{- include "temporal-worker-controller.selectorLabels" $ | nindent 6 }}
----
+      app.kubernetes.io/component: metrics
+      {{- include "temporal-worker-controller.selectorLabels" . | nindent 6 }}
 {{- end }}

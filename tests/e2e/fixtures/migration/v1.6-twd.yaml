@@ -1,0 +1,26 @@
+# TODO: Replace busybox sleeper with a real Temporal worker image
+# to verify end-to-end functionality after upgrade (see PR #640 review).
+# Old-kind TemporalWorkerDeployment, applied while controller v1.6 (chart
+# 0.25.0) is running. Uses the v1.6 schema, where the pod template sits
+# directly under spec. v1.6 adds temporal.io/delete-protection to it.
+apiVersion: temporal.io/v1alpha1
+kind: TemporalWorkerDeployment
+metadata:
+  name: test-worker
+  namespace: temporal-system
+spec:
+  rollout:
+    strategy: AllAtOnce
+  sunset:
+    scaledownDelay: 1h
+    deleteDelay: 2h
+  template:
+    spec:
+      containers:
+        - name: main
+          image: busybox:latest
+          command: ["sleep", "infinity"]
+  workerOptions:
+    connectionRef:
+      name: test-connection
+    temporalNamespace: default

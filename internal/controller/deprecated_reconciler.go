@@ -19,10 +19,13 @@ const (
 	// deprecatedMigrationFinalizer is placed on TemporalWorkerDeployment and
 	// TemporalConnection resources by the deprecated reconcilers. It prevents
 	// garbage collection until migration to the new CRD kind is confirmed.
-	// The deprecated reconcilers are the only actors that add or remove it.
-	// This is intentionally distinct from the existing "temporal.io/delete-protection"
-	// finalizer, which lives on WorkerDeployment/Connection and triggers Temporal
-	// server-side cleanup — the two finalizers have unrelated lifecycles.
+	// The deprecated reconcilers are the only actors that add it.
+	//
+	// It is distinct from "temporal.io/delete-protection" (finalizerName), which
+	// the current controller places on WorkerDeployment/Connection. Pre-v1.7
+	// controllers also placed delete-protection on TemporalWorkerDeployment and
+	// TemporalConnection, and nothing in this controller can satisfy it there, so
+	// the deprecated reconcilers remove both finalizers once migration is confirmed.
 	deprecatedMigrationFinalizer = "temporal.io/migration-guard"
 )
 
@@ -49,12 +52,19 @@ func (r *DeprecatedTWDReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion: if the resource is being deleted and we hold the
-	// migration-guard finalizer, only release it once migration is confirmed
-	// (i.e. the WorkerDeploymentReconciler has set the migrated label).
-	if !twd.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(&twd, deprecatedMigrationFinalizer) {
+	// Handle deletion: if the resource is being deleted and holds the
+	// migration-guard or a leftover delete-protection finalizer, only release
+	// them once migration is confirmed (i.e. the WorkerDeploymentReconciler has
+	// set the migrated label). delete-protection must also be checked on its own,
+	// so objects already stuck with only that finalizer get unstuck.
+	if !twd.DeletionTimestamp.IsZero() &&
+		(controllerutil.ContainsFinalizer(&twd, deprecatedMigrationFinalizer) || controllerutil.ContainsFinalizer(&twd, finalizerName)) {
 		if twd.Labels[deprecatedTWDMigratedLabel] == "true" {
+			// delete-protection was added by pre-v1.7 controllers to trigger Temporal
+			// server-side cleanup. The WorkerDeployment now owns that state and has
+			// its own delete-protection, so it protects nothing here.
 			controllerutil.RemoveFinalizer(&twd, deprecatedMigrationFinalizer)
+			controllerutil.RemoveFinalizer(&twd, finalizerName)
 			if err := r.Update(ctx, &twd); err != nil {
 				return ctrl.Result{}, err
 			}

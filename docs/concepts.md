@@ -91,7 +91,7 @@ Gradually increases the percentage of new workflow executions routed to the new 
 
 ### Worker Options
 Configuration for the controller's Temporal connection and worker-version identity:
-- **connectionRef**: A reference to a `Connection` custom resource. This object contains a `name` field to specify the `Connection` resource.
+- **connectionRef**: A reference to the connection resource. Use `name` for a `Connection` in the same namespace, or `objectRef` to reference a `Connection` or a cluster-scoped [`ClusterConnection`](cluster-connection.md).
 - **temporalNamespace**: The Temporal namespace to connect to
 - **unsafeCustomBuildID**: Optionally overrides the auto-generated Build ID. When set, pod template changes trigger rolling updates of the existing version instead of new-version rollouts, so workers running different code can share one Build ID — if workflow code changes while the ID stays constant, Pinned workflows may execute on workers with incompatible code. Only use it with a reliable external change-detection scheme (for example, hashing workflow sources in CI).
 
