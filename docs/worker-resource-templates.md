@@ -61,16 +61,18 @@ Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `d
 
 ## Worker groups
 
-A `WorkerResourceTemplate` targets one [worker group](worker-groups.md). Set `spec.workerGroup` to the group's name; it is required when the `WorkerDeployment` uses groups. The controller renders one copy per version that has that group, pointing at that group's Deployment:
+For a `WorkerDeployment` with [Worker Groups](worker-groups.md), a `WorkerResourceTemplate` renders a copy for each group's Deployment in every version. Each copy points at its own group's Deployment and selects only that group's pods. Set `spec.workerGroups` to limit the template to the listed groups:
 
 ```yaml
 spec:
   workerDeploymentRef:
     name: documents
-  workerGroup: parse
+  workerGroups: [parse, extract]
 ```
 
-Create one `WorkerResourceTemplate` per group you want to autoscale. If no version has the group and the `WorkerDeployment` does not declare it, or `spec.workerGroup` is missing on a `WorkerDeployment` with groups, the `Ready` condition is `False` with reason `WorkerGroupNotFound`. The webhook warns about both.
+Leave `spec.workerGroups` unset to cover every group. This also covers a `WorkerDeployment` without groups, so a template keeps working when its `WorkerDeployment` moves to groups. `default` can't be listed.
+
+Removing a group from the list deletes that group's copies. Each copy has its own entry in `status.versions`, with `workerGroup` set. If a listed group isn't declared by the `WorkerDeployment` and no version has it, the `Ready` condition is `False` with reason `WorkerGroupNotFound`, and the message names the group. The webhook warns about it too.
 
 Backlog metrics are tagged with the deployment name and Build ID, not the group. Add `task_queue` to `matchLabels` so each group scales on its own queue.
 

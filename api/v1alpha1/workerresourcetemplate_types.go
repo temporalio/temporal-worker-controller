@@ -30,12 +30,17 @@ type WorkerResourceTemplateSpec struct {
 	// +optional
 	TemporalWorkerDeploymentRef *WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
 
-	// WorkerGroup names the worker group whose versioned Deployments this template targets.
-	// Required when the WorkerDeployment uses groups; omit it otherwise.
+	// WorkerGroups limits the template to the Deployments of these worker groups. The
+	// controller renders a copy for each listed group's Deployment in every version, and
+	// deletes the copies of a group that is removed from the list. Unset means every
+	// group, and the single Deployment of a WorkerDeployment without groups.
 	// +optional
-	// +kubebuilder:validation:MaxLength=24
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	WorkerGroup string `json:"workerGroup,omitempty"`
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MaxLength=24
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="!self.exists(g, g == 'default')",message="group name default is reserved; leave workerGroups unset to target a WorkerDeployment without groups"
+	WorkerGroups []string `json:"workerGroups,omitempty"`
 
 	// VersionStatuses limits the template to versions with one of these statuses.
 	// The controller does not render a copy for a version with another status, and
@@ -106,6 +111,11 @@ const (
 type WorkerResourceTemplateVersionStatus struct {
 	// BuildID is the Build ID of the versioned Deployment this entry refers to.
 	BuildID string `json:"buildID"`
+
+	// WorkerGroup is the worker group of the versioned Deployment this entry refers to.
+	// It is empty for a WorkerDeployment without groups.
+	// +optional
+	WorkerGroup string `json:"workerGroup,omitempty"`
 
 	// ResourceName is the name of the applied Kubernetes resource.
 	// +optional
@@ -204,12 +214,10 @@ func (s *WorkerResourceTemplateSpec) EffectiveWorkerDeploymentName() string {
 	return ""
 }
 
-// EffectiveWorkerGroup returns the worker group this template targets.
-func (s *WorkerResourceTemplateSpec) EffectiveWorkerGroup() string {
-	if s.WorkerGroup != "" {
-		return s.WorkerGroup
-	}
-	return DefaultWorkerGroupName
+// SelectsWorkerGroup reports whether the template applies to the Deployments of the given
+// worker group. An unset WorkerGroups selects every group.
+func (s *WorkerResourceTemplateSpec) SelectsWorkerGroup(group string) bool {
+	return len(s.WorkerGroups) == 0 || slices.Contains(s.WorkerGroups, group)
 }
 
 // SelectsVersionStatus reports whether the template applies to a version with the

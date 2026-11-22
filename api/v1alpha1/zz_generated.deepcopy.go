@@ -1106,6 +1106,11 @@ func (in *WorkerResourceTemplateSpec) DeepCopyInto(out *WorkerResourceTemplateSp
 		*out = new(WorkerDeploymentReference)
 		**out = **in
 	}
+	if in.WorkerGroups != nil {
+		in, out := &in.WorkerGroups, &out.WorkerGroups
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.VersionStatuses != nil {
 		in, out := &in.VersionStatuses, &out.VersionStatuses
 		*out = make([]VersionStatus, len(*in))

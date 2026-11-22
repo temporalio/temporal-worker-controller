@@ -215,8 +215,8 @@ func TestExecutePlan_SunsetThenRedeploySameBuildID_ReappliesWorkerResource(t *te
 	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
 	hpaB, hashB := renderWRT(t, wrt, depB, buildB, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, hpaB.GetName(), 1, hashB, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, "", hpaA.GetName(), 1, hashA, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, "", hpaB.GetName(), 1, hashB, ""),
 	}
 
 	r, _ := newTestReconciler([]client.Object{twd, depA, depB, wrt, hpaA, hpaB})
@@ -288,8 +288,8 @@ func TestExecutePlan_WRTResourceDeleteFailure_RetriedNextCycle(t *testing.T) {
 	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
 	hpaB, hashB := renderWRT(t, wrt, depB, buildB, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, hpaB.GetName(), 1, hashB, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, "", hpaA.GetName(), 1, hashA, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, "", hpaB.GetName(), 1, hashB, ""),
 	}
 
 	// Fail deletes of rendered HPA copies while failHPADeletes is true; Deployment
@@ -359,7 +359,7 @@ func TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite(t *testing
 
 	hpaB, hashB := renderWRT(t, wrt, depB, buildB, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, hpaB.GetName(), 1, hashB, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, "", hpaB.GetName(), 1, hashB, ""),
 	}
 
 	r, _ := newTestReconciler([]client.Object{twd, depB, wrt, hpaB})
@@ -598,7 +598,7 @@ func TestExecutePlan_LaterStepFails_StillPrunesDeletedCopyEntries(t *testing.T) 
 	wrt := makeExecplanWRT("my-hpa", twd)
 	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, "", hpaA.GetName(), 1, hashA, ""),
 	}
 
 	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, depA, depB, wrt, hpaA}, interceptor.Funcs{

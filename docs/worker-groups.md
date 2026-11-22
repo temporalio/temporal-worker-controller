@@ -119,7 +119,7 @@ spec:
         team: documents
 ```
 
-To autoscale a group, set `workerGroup` on a `WorkerResourceTemplate`. The controller then renders one copy per version for that group's Deployment only. A `WorkerResourceTemplate` for a `WorkerDeployment` with groups must set `workerGroup`.
+A `WorkerResourceTemplate` renders a copy for every group's Deployment in each version. Set `workerGroups` to limit it to some groups. To autoscale one group, list only that group:
 
 ```yaml
 apiVersion: temporal.io/v1alpha1
@@ -129,7 +129,7 @@ metadata:
 spec:
   workerDeploymentRef:
     name: documents
-  workerGroup: parse
+  workerGroups: [parse]
   template:
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler

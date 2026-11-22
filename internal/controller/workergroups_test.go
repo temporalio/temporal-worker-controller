@@ -170,9 +170,9 @@ func TestExecutePlan_WRTWithMissingGroup_SetsWorkerGroupNotFound(t *testing.T) {
 	twd := makeGroupedWD("my-worker", namespace, "activities")
 	buildID := k8s.ComputeBuildID(twd)
 	ghost := makeExecplanWRT("ghost-hpa", twd)
-	ghost.Spec.WorkerGroup = "ghost"
+	ghost.Spec.WorkerGroups = []string{"ghost"}
 	activities := makeExecplanWRT("activities-hpa", twd)
-	activities.Spec.WorkerGroup = "activities"
+	activities.Spec.WorkerGroups = []string{"activities"}
 	r, _ := newTestReconciler([]client.Object{twd, ghost, activities})
 
 	status := temporaliov1alpha1.WorkerDeploymentStatus{
@@ -254,7 +254,7 @@ func TestExecutePlan_WorkerGroupNotFound_SetDespiteOtherApplyFailure(t *testing.
 	buildID := k8s.ComputeBuildID(twd)
 	def := makeVersionedDeployment(twd, buildID, 1, connection)
 	ghost := makeExecplanWRT("ghost-hpa", twd)
-	ghost.Spec.WorkerGroup = "ghost"
+	ghost.Spec.WorkerGroups = []string{"ghost"}
 	broken := makeExecplanWRT("broken", twd)
 	broken.Spec.Template.Raw = []byte(`{"apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler", "spec": "not an object"}`)
 	r, _ := newTestReconciler([]client.Object{twd, def, ghost, broken})
@@ -277,7 +277,7 @@ func TestExecutePlan_WorkerGroupNotFound_ClearedOnceTheGroupIsDeclared(t *testin
 	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
 	twd := makeGroupedWD("my-worker", namespace, "activities")
 	wrt := makeExecplanWRT("activities-hpa", twd)
-	wrt.Spec.WorkerGroup = "activities"
+	wrt.Spec.WorkerGroups = []string{"activities"}
 	wrt.Status.Conditions = []metav1.Condition{{
 		Type: temporaliov1alpha1.ConditionReady, Status: metav1.ConditionFalse,
 		Reason: temporaliov1alpha1.ReasonWRTWorkerGroupNotFound, LastTransitionTime: metav1.Now(),
@@ -297,19 +297,37 @@ func TestExecutePlan_WorkerGroupNotFound_ClearedOnceTheGroupIsDeclared(t *testin
 		"a stale WorkerGroupNotFound must not outlive the missing group")
 }
 
-func TestExecutePlan_WRTWithoutGroupOnGroupedWorkerDeployment_SaysToSetGroup(t *testing.T) {
-	const namespace = "default"
+func TestExecutePlan_WRTWithoutGroups_KeepsAStatusEntryPerGroup(t *testing.T) {
+	const (
+		namespace = "default"
+		buildID   = "v1"
+	)
 	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
-	twd := makeGroupedWD("my-worker", namespace, "workflows")
+	twd := makeGroupedWD("my-worker", namespace, "workflows", "activities")
+	workflows := labelGroup(makeVersionedDeployment(twd, buildID, 1, connection), "workflows")
+	activities := labelGroup(makeVersionedDeployment(twd, buildID, 1, connection), "activities")
 	wrt := makeExecplanWRT("hpa", twd)
-	r, _ := newTestReconciler([]client.Object{twd, wrt})
+	r, _ := newTestReconciler([]client.Object{twd, workflows, activities, wrt})
 
-	runPlanCycle(t, r, twd, connection, temporaliov1alpha1.WorkerDeploymentStatus{})
+	runPlanCycle(t, r, twd, connection, statusWithDeprecated(buildID, workflows))
 
 	var got temporaliov1alpha1.WorkerResourceTemplate
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, &got))
-	cond := meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
-	require.NotNil(t, cond)
-	assert.Equal(t, temporaliov1alpha1.ReasonWRTWorkerGroupNotFound, cond.Reason)
-	assert.Contains(t, cond.Message, "set spec.workerGroup")
+	require.Len(t, got.Status.Versions, 2)
+	assert.Equal(t, "activities", got.Status.Versions[0].WorkerGroup)
+	assert.Equal(t, "workflows", got.Status.Versions[1].WorkerGroup)
+	assert.Equal(t, k8s.ComputeWorkerResourceTemplateGroupName(twd.Name, wrt.Name, "activities", buildID), got.Status.Versions[0].ResourceName)
+	assert.Equal(t, k8s.ComputeWorkerResourceTemplateGroupName(twd.Name, wrt.Name, "workflows", buildID), got.Status.Versions[1].ResourceName)
+	ready := meta.FindStatusCondition(got.Status.Conditions, temporaliov1alpha1.ConditionReady)
+	require.NotNil(t, ready)
+	assert.Equal(t, metav1.ConditionTrue, ready.Status)
+
+	// Dropping a group from the list deletes its copy and prunes its entry.
+	got.Spec.WorkerGroups = []string{"workflows"}
+	require.NoError(t, r.Update(context.Background(), &got))
+	runPlanCycle(t, r, twd, connection, statusWithDeprecated(buildID, workflows))
+
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: wrt.Name}, &got))
+	require.Len(t, got.Status.Versions, 1)
+	assert.Equal(t, "workflows", got.Status.Versions[0].WorkerGroup)
 }

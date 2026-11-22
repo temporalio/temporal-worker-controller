@@ -71,6 +71,29 @@ var _ = Describe("WorkerResourceTemplate CRD schema validation", func() {
 		Expect(err.Error()).To(ContainSubstring("Unsupported value"))
 	})
 
+	It("accepts a list of worker groups", func() {
+		grantControllerSAHPACreateAccess(ns)
+		wrt := makeWRTForWebhook("group-hpa", ns, "my-worker", hpaObjForIntegration())
+		wrt.Spec.WorkerGroups = []string{"workflows", "activities"}
+		Expect(k8sClient.Create(ctx, wrt)).To(Succeed())
+	})
+
+	It("rejects the reserved default group", func() {
+		wrt := makeWRTForWebhook("default-group", ns, "my-worker", hpaObjForIntegration())
+		wrt.Spec.WorkerGroups = []string{"workflows", "default"}
+		err := k8sClient.Create(ctx, wrt)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("group name default is reserved"))
+	})
+
+	It("rejects a worker group name that is not a DNS label", func() {
+		wrt := makeWRTForWebhook("bad-group", ns, "my-worker", hpaObjForIntegration())
+		wrt.Spec.WorkerGroups = []string{"Activities_1"}
+		err := k8sClient.Create(ctx, wrt)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.workerGroups[0]"))
+	})
+
 	It("rejects an empty versionStatuses list", func() {
 		wrt := makeWRTForWebhook("empty-statuses", ns, "my-worker", hpaObjForIntegration())
 		wrt.SetGroupVersionKind(GroupVersion.WithKind("WorkerResourceTemplate"))

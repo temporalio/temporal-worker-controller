@@ -201,21 +201,24 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	return warnings, nil
 }
 
-// groupWarnings warns when the WRT's group is not declared by its WorkerDeployment. It is
-// not an error, since the group may be added to the WorkerDeployment after the WRT.
+// groupWarnings warns about each listed group that the WRT's WorkerDeployment does not declare.
+// It is not an error, since the group may be added to the WorkerDeployment after the WRT.
 func (v *WorkerResourceTemplateValidator) groupWarnings(ctx context.Context, wrt *WorkerResourceTemplate) admission.Warnings {
-	if v.Client == nil {
+	if v.Client == nil || len(wrt.Spec.WorkerGroups) == 0 {
 		return nil
 	}
 	var wd WorkerDeployment
 	key := types.NamespacedName{Namespace: wrt.Namespace, Name: wrt.Spec.EffectiveWorkerDeploymentName()}
-	if err := v.Client.Get(ctx, key, &wd); err != nil || wd.Spec.HasWorkerGroup(wrt.Spec.EffectiveWorkerGroup()) {
+	if err := v.Client.Get(ctx, key, &wd); err != nil {
 		return nil
 	}
-	if wrt.Spec.WorkerGroup == "" {
-		return admission.Warnings{fmt.Sprintf("WorkerDeployment %q uses worker groups; set spec.workerGroup", wd.Name)}
+	var warns admission.Warnings
+	for i, group := range wrt.Spec.WorkerGroups {
+		if !wd.Spec.HasWorkerGroup(group) {
+			warns = append(warns, fmt.Sprintf("spec.workerGroups[%d] %q is not declared by WorkerDeployment %q", i, group, wd.Name))
+		}
 	}
-	return admission.Warnings{fmt.Sprintf("spec.workerGroup %q is not declared by WorkerDeployment %q", wrt.Spec.WorkerGroup, wd.Name)}
+	return warns
 }
 
 // templateGroupKind returns the group and kind of a raw spec.template. ok is false

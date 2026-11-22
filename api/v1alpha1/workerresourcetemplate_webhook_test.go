@@ -934,28 +934,26 @@ func TestWorkerResourceTemplate_ValidateCreate_GroupNotDeclaredWarns(t *testing.
 	v.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(grouped, single).Build()
 
 	for name, tc := range map[string]struct {
-		wdName   string
-		group    string
-		wantWarn string
+		wdName    string
+		groups    []string
+		wantWarns []string
 	}{
-		"declared group":               {wdName: "my-worker", group: "activities"},
-		"no group on a grouped WD":     {wdName: "my-worker", wantWarn: `WorkerDeployment "my-worker" uses worker groups; set spec.workerGroup`},
-		"undeclared group":             {wdName: "my-worker", group: "batch", wantWarn: `spec.workerGroup "batch" is not declared by WorkerDeployment "my-worker"`},
-		"no group on a WD w/o groups":  {wdName: "single"},
-		"group on a WD without groups": {wdName: "single", group: "batch", wantWarn: `spec.workerGroup "batch" is not declared by WorkerDeployment "single"`},
-		"WorkerDeployment not found":   {wdName: "missing", group: "batch"},
+		"declared group":                {wdName: "my-worker", groups: []string{"activities"}},
+		"every group of a grouped WD":   {wdName: "my-worker"},
+		"undeclared group":              {wdName: "my-worker", groups: []string{"activities", "batch"}, wantWarns: []string{`spec.workerGroups[1] "batch" is not declared by WorkerDeployment "my-worker"`}},
+		"no groups on a WD w/o groups":  {wdName: "single"},
+		"groups on a WD without groups": {wdName: "single", groups: []string{"batch", "gpu"}, wantWarns: []string{`spec.workerGroups[0] "batch"`, `spec.workerGroups[1] "gpu"`}},
+		"WorkerDeployment not found":    {wdName: "missing", groups: []string{"batch"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			wrt := newWRT("hpa", tc.wdName, validHPAObject())
-			wrt.Spec.WorkerGroup = tc.group
+			wrt.Spec.WorkerGroups = tc.groups
 
 			warnings, err := v.ValidateCreate(context.Background(), wrt)
 			require.NoError(t, err)
-			if tc.wantWarn != "" {
-				require.Len(t, warnings, 1)
-				assert.Contains(t, warnings[0], tc.wantWarn)
-			} else {
-				assert.Empty(t, warnings)
+			require.Len(t, warnings, len(tc.wantWarns))
+			for i, want := range tc.wantWarns {
+				assert.Contains(t, warnings[i], want)
 			}
 		})
 	}

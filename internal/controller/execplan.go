@@ -5,11 +5,13 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -479,6 +481,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	type wrtKey struct{ namespace, name string }
 	type applyResult struct {
 		buildID      string
+		group        string
 		resourceName string
 		hash         string // rendered hash recorded on successful apply; "" on error
 		err          error
@@ -501,6 +504,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			)
 			wrtResults[key] = append(wrtResults[key], applyResult{
 				buildID:      apply.BuildID,
+				group:        apply.WorkerGroup,
 				err:          apply.RenderError,
 				renderFailed: true,
 			})
@@ -514,6 +518,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		if apply.RenderedHash != "" && apply.RenderedHash == apply.LastAppliedHash {
 			wrtResults[key] = append(wrtResults[key], applyResult{
 				buildID:      apply.BuildID,
+				group:        apply.WorkerGroup,
 				resourceName: apply.Resource.GetName(),
 				hash:         apply.RenderedHash,
 				skipped:      true,
@@ -556,6 +561,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		}
 		wrtResults[key] = append(wrtResults[key], applyResult{
 			buildID:      apply.BuildID,
+			group:        apply.WorkerGroup,
 			resourceName: apply.Resource.GetName(),
 			hash:         appliedHash,
 			err:          applyErr,
@@ -568,16 +574,16 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	// surviving entry is what makes the planner re-derive the delete next cycle, and
 	// pruning it on success is what allows a later redeploy of the same build ID to be
 	// re-applied instead of being skipped against a stale hash.
-	deletedBuildIDs := make(map[wrtKey]map[string]struct{})
+	deletedCopies := make(map[wrtKey]map[k8s.WorkerResourceCopy]struct{})
 	for _, ref := range deletedWorkerResources {
 		if ref.WRTName == "" || ref.BuildID == "" {
 			continue
 		}
 		key := wrtKey{ref.Namespace, ref.WRTName}
-		if deletedBuildIDs[key] == nil {
-			deletedBuildIDs[key] = make(map[string]struct{})
+		if deletedCopies[key] == nil {
+			deletedCopies[key] = make(map[k8s.WorkerResourceCopy]struct{})
 		}
-		deletedBuildIDs[key][ref.BuildID] = struct{}{}
+		deletedCopies[key][ref.Copy()] = struct{}{}
 	}
 
 	// Write per-Build-ID status back to each WRT that had an apply or a confirmed delete,
@@ -587,11 +593,11 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 	// If every result for a WRT was skipped (hash unchanged since last successful
 	// apply) and none of its rendered resources were deleted, the status is already
 	// correct — skip the status write entirely to avoid unnecessary resourceVersion bumps.
-	statusKeys := make(map[wrtKey]struct{}, len(wrtResults)+len(deletedBuildIDs)+len(p.WorkerResourceTemplates))
+	statusKeys := make(map[wrtKey]struct{}, len(wrtResults)+len(deletedCopies)+len(p.WorkerResourceTemplates))
 	for key := range wrtResults {
 		statusKeys[key] = struct{}{}
 	}
-	for key := range deletedBuildIDs {
+	for key := range deletedCopies {
 		statusKeys[key] = struct{}{}
 	}
 	for i := range p.WorkerResourceTemplates {
@@ -599,9 +605,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		statusKeys[wrtKey{wrt.Namespace, wrt.Name}] = struct{}{}
 	}
 	// WRTs with a missing or recovered group get no applies, so nothing else rewrites their Ready condition.
-	missingGroup := make(map[wrtKey]bool, len(p.WRTsWithMissingWorkerGroup))
-	for _, name := range p.WRTsWithMissingWorkerGroup {
-		missingGroup[wrtKey{workerDeploy.Namespace, name}] = true
+	missingGroups := make(map[wrtKey][]string, len(p.WRTsWithMissingWorkerGroups))
+	for name, groups := range p.WRTsWithMissingWorkerGroups {
+		missingGroups[wrtKey{workerDeploy.Namespace, name}] = groups
 	}
 	staleGroup := make(map[wrtKey]bool, len(p.WRTsWithStaleWorkerGroupNotFound))
 	for _, name := range p.WRTsWithStaleWorkerGroupNotFound {
@@ -623,12 +629,13 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		// Some copies are deleted in every cycle (see getDeleteWorkerResources), and a
 		// NotFound delete is confirmed too. Only a delete that prunes a status entry
 		// changes the status, so count only those.
-		deleted := make(map[string]struct{})
+		deleted := make(map[k8s.WorkerResourceCopy]struct{})
 		for _, v := range wrt.Status.Versions {
-			if _, ok := deletedBuildIDs[key][v.BuildID]; ok {
-				deleted[v.BuildID] = struct{}{}
+			if _, ok := deletedCopies[key][k8s.WorkerResourceCopyOf(v)]; ok {
+				deleted[k8s.WorkerResourceCopyOf(v)] = struct{}{}
 			}
 		}
+		_, missingGroup := missingGroups[key]
 
 		// While a versioned Deployment has an unknown version status, a WRT that selects
 		// by status cannot tell whether it selects that version, and the copy it keeps of
@@ -643,7 +650,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				break
 			}
 		}
-		if len(results) == 0 && len(deleted) == 0 && !missingGroup[key] {
+		if len(results) == 0 && len(deleted) == 0 && !missingGroup {
 			// The WRT renders no copy this cycle. Record its generation and Ready
 			// condition when they are behind or Ready is not True, for example after
 			// markWRTsWDNotFound ran before the WorkerDeployment existed, or after its
@@ -655,7 +662,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			if statusUnknown || upToDate {
 				continue
 			}
-		} else if allSkipped && len(deleted) == 0 && !missingGroup[key] && !staleGroup[key] {
+		} else if allSkipped && len(deleted) == 0 && !missingGroup && !staleGroup[key] {
 			// Every apply was a no-op and nothing was deleted, so the per-Build-ID
 			// status and conditions are already correct. The one thing that can still
 			// be stale is status.observedGeneration.
@@ -681,23 +688,24 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			continue
 		}
 
-		// Build the new per-Build-ID version list.
-		// For BuildIDs whose apply was skipped (rendered hash unchanged), we copy the
+		// Build the new per-copy version list.
+		// For copies whose apply was skipped (rendered hash unchanged), we copy the
 		// existing status entry verbatim — the stored LastAppliedHash and
 		// LastTransitionTime must not be overwritten with a no-op entry.
-		existingByBuildID := make(map[string]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
+		existingByCopy := make(map[k8s.WorkerResourceCopy]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
 		for _, v := range wrt.Status.Versions {
-			existingByBuildID[v.BuildID] = v
+			existingByCopy[k8s.WorkerResourceCopyOf(v)] = v
 		}
 
 		versions := make([]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, 0, len(results))
-		coveredByApply := make(map[string]struct{}, len(results))
+		coveredByApply := make(map[k8s.WorkerResourceCopy]struct{}, len(results))
 		anyFailed := false
 		anyTerminal := false
 		for _, result := range results {
-			coveredByApply[result.buildID] = struct{}{}
+			c := k8s.WorkerResourceCopy{BuildID: result.buildID, WorkerGroup: cmp.Or(result.group, temporaliov1alpha1.DefaultWorkerGroupName)}
+			coveredByApply[c] = struct{}{}
 			if result.skipped {
-				if existing, ok := existingByBuildID[result.buildID]; ok {
+				if existing, ok := existingByCopy[c]; ok {
 					versions = append(versions, existing)
 				}
 				continue
@@ -718,7 +726,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 				appliedGeneration = wrt.Generation
 			}
 			versions = append(versions, k8s.WorkerResourceTemplateVersionStatusForBuildID(
-				result.buildID, result.resourceName, appliedGeneration, result.hash, applyErr,
+				result.buildID, result.group, result.resourceName, appliedGeneration, result.hash, applyErr,
 			))
 		}
 
@@ -727,17 +735,17 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 		// neither applied nor confirmed-deleted (e.g. the resource delete failed this
 		// cycle) are retained so the planner keeps retrying the delete.
 		for _, v := range wrt.Status.Versions {
-			if _, ok := coveredByApply[v.BuildID]; ok {
+			if _, ok := coveredByApply[k8s.WorkerResourceCopyOf(v)]; ok {
 				continue
 			}
-			if _, ok := deleted[v.BuildID]; ok {
+			if _, ok := deleted[k8s.WorkerResourceCopyOf(v)]; ok {
 				continue
 			}
 			versions = append(versions, v)
 		}
 
 		var condChanged bool
-		if anyFailed || !statusUnknown || missingGroup[key] {
+		if anyFailed || !statusUnknown || missingGroup {
 			// Compute the top-level Ready condition.
 			// True:  all active Build IDs applied at the current generation (or already current —
 			//        skipped ones carry a non-zero LastAppliedGeneration from their last successful apply).
@@ -746,13 +754,14 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			condReason := temporaliov1alpha1.ReasonWRTAllVersionsApplied
 			condMessage := ""
 			switch {
-			case missingGroup[key]:
+			case missingGroup:
 				condStatus = metav1.ConditionFalse
 				condReason = temporaliov1alpha1.ReasonWRTWorkerGroupNotFound
-				condMessage = fmt.Sprintf("WorkerDeployment %q has no group %q", workerDeploy.Name, wrt.Spec.WorkerGroup)
-				if wrt.Spec.WorkerGroup == "" {
-					condMessage = fmt.Sprintf("WorkerDeployment %q uses worker groups; set spec.workerGroup", workerDeploy.Name)
+				quoted := make([]string, 0, len(missingGroups[key]))
+				for _, group := range missingGroups[key] {
+					quoted = append(quoted, strconv.Quote(group))
 				}
+				condMessage = fmt.Sprintf("WorkerDeployment %q has no group %s", workerDeploy.Name, strings.Join(quoted, ", "))
 			case anyFailed:
 				condStatus = metav1.ConditionFalse
 				condReason = temporaliov1alpha1.ReasonWRTApplyFailed
@@ -790,7 +799,7 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			switch {
 			case anyTerminal:
 				stalledStatus = metav1.ConditionTrue
-			case anyFailed, missingGroup[key]:
+			case anyFailed, missingGroup:
 				reconcilingStatus = metav1.ConditionTrue
 			}
 			if apimeta.SetStatusCondition(&wrt.Status.Conditions, metav1.Condition{
@@ -825,9 +834,9 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 			continue
 		}
 
-		// Sort the versions by BuildID for deterministic status output.
+		// Sort the versions by BuildID and group for deterministic status output.
 		slices.SortFunc(versions, func(a, b temporaliov1alpha1.WorkerResourceTemplateVersionStatus) int {
-			return strings.Compare(a.BuildID, b.BuildID)
+			return cmp.Or(strings.Compare(a.BuildID, b.BuildID), strings.Compare(a.WorkerGroup, b.WorkerGroup))
 		})
 		wrt.Status.Versions = versions
 		if err := r.Status().Update(ctx, wrt); err != nil {
@@ -841,20 +850,20 @@ func (r *WorkerDeploymentReconciler) executeWRTOperations(
 // pruneWRTStatusEntries removes the WRT status entries of the rendered resources in deleted,
 // whose delete was confirmed, and leaves the rest of each WRT status unchanged.
 func (r *WorkerDeploymentReconciler) pruneWRTStatusEntries(ctx context.Context, deleted []planner.WorkerResourceRef) error {
-	buildIDsByWRT := make(map[types.NamespacedName]map[string]struct{})
+	copiesByWRT := make(map[types.NamespacedName]map[k8s.WorkerResourceCopy]struct{})
 	for _, ref := range deleted {
 		if ref.WRTName == "" || ref.BuildID == "" {
 			continue
 		}
 		key := types.NamespacedName{Namespace: ref.Namespace, Name: ref.WRTName}
-		if buildIDsByWRT[key] == nil {
-			buildIDsByWRT[key] = make(map[string]struct{})
+		if copiesByWRT[key] == nil {
+			copiesByWRT[key] = make(map[k8s.WorkerResourceCopy]struct{})
 		}
-		buildIDsByWRT[key][ref.BuildID] = struct{}{}
+		copiesByWRT[key][ref.Copy()] = struct{}{}
 	}
 
 	var errs []error
-	for key, buildIDs := range buildIDsByWRT {
+	for key, copies := range copiesByWRT {
 		wrt := &temporaliov1alpha1.WorkerResourceTemplate{}
 		if err := r.Get(ctx, key, wrt); err != nil {
 			errs = append(errs, fmt.Errorf("get WRT %s to prune status entries: %w", key, err))
@@ -862,7 +871,7 @@ func (r *WorkerDeploymentReconciler) pruneWRTStatusEntries(ctx context.Context, 
 		}
 		n := len(wrt.Status.Versions)
 		wrt.Status.Versions = slices.DeleteFunc(wrt.Status.Versions, func(v temporaliov1alpha1.WorkerResourceTemplateVersionStatus) bool {
-			_, ok := buildIDs[v.BuildID]
+			_, ok := copies[k8s.WorkerResourceCopyOf(v)]
 			return ok
 		})
 		// Most confirmed deletes are NotFound for a copy that never had an entry.

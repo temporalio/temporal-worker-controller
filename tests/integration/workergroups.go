@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/server/temporaltest"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -253,6 +254,20 @@ func (s *groupScenario) assertSunsetTogether(ctx context.Context, v *groupVersio
 
 // cleanup deletes the scenario's objects and waits for them to be gone, so later tests on
 // the same server and namespace start clean.
+func (s *groupScenario) waitForGroupPDB(ctx context.Context, name, group string) {
+	s.t.Helper()
+	eventually(s.t, 30*time.Second, time.Second, func() error {
+		var pdb policyv1.PodDisruptionBudget
+		if err := s.k8sClient.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: name}, &pdb); err != nil {
+			return err
+		}
+		if pdb.Spec.Selector == nil || pdb.Spec.Selector.MatchLabels[k8s.WorkerGroupLabel] != group {
+			return fmt.Errorf("PDB %s selector = %v, want group %q", name, pdb.Spec.Selector, group)
+		}
+		return nil
+	})
+}
+
 func (s *groupScenario) cleanup(ctx context.Context, objs ...client.Object) {
 	s.t.Helper()
 	for _, obj := range objs {
@@ -286,14 +301,19 @@ func testWorkerGroupsLifecycle(t *testing.T, k8sClient client.Client, ts *tempor
 		Spec:       temporaliov1alpha1.ConnectionSpec{HostPort: ts.GetFrontendHostPort()},
 	}
 	wrt := makeHPAWRT(s.name+"-activities-hpa", namespace, s.name)
-	wrt.Spec.WorkerGroup = activitiesGroup
-	for _, obj := range []client.Object{connection, wrt, twd} {
+	wrt.Spec.WorkerGroups = []string{activitiesGroup}
+	pdb := makeWRTWithRaw(s.name+"-pdb", namespace, s.name, []byte(`{
+		"apiVersion": "policy/v1",
+		"kind": "PodDisruptionBudget",
+		"spec": {"minAvailable": 1, "selector": {"matchLabels": {}}}
+	}`))
+	for _, obj := range []client.Object{connection, wrt, pdb, twd} {
 		if err := k8sClient.Create(ctx, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Deferred first so it runs after every worker is stopped.
-	defer s.cleanup(ctx, twd, wrt, connection)
+	defer s.cleanup(ctx, twd, wrt, pdb, connection)
 
 	t.Log("Every group of v1 gets its own Deployment with a group selector")
 	v1 := s.waitForVersionDeployments(ctx, k8s.ComputeBuildID(twd))
@@ -315,8 +335,13 @@ func testWorkerGroupsLifecycle(t *testing.T, k8sClient client.Client, ts *tempor
 	s.assertTaskQueuesInOneVersion(ctx, v1.buildID)
 
 	t.Log("The activities WRT targets only the activities group's Deployment")
-	v1HPA := k8s.ComputeWorkerResourceTemplateName(s.name, wrt.Name, v1.buildID)
+	v1HPA := k8s.ComputeWorkerResourceTemplateGroupName(s.name, wrt.Name, activitiesGroup, v1.buildID)
 	waitForOwnedHPAWithInjectedScaleTargetRef(t, ctx, k8sClient, namespace, v1HPA, v1.activities.Name, 30*time.Second)
+
+	t.Log("A WRT without groups gets a copy per group that selects only that group's pods")
+	for _, group := range []string{workflowsGroup, activitiesGroup} {
+		s.waitForGroupPDB(ctx, k8s.ComputeWorkerResourceTemplateGroupName(s.name, pdb.Name, group, v1.buildID), group)
+	}
 
 	t.Log("A new image rolls out as v2 across both groups")
 	v2 := s.waitForVersionDeployments(ctx, s.updateImage(ctx, "v2.0"))

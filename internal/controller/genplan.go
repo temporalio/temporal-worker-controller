@@ -56,8 +56,9 @@ type plan struct {
 	// ready for client.MergeFrom patching in executePlan.
 	EnsureWRTOwnerRefs []planner.WRTOwnerRefPatch
 
-	// WRTsWithMissingWorkerGroup names WRTs whose group no version has and the spec does not declare.
-	WRTsWithMissingWorkerGroup []string
+	// WRTsWithMissingWorkerGroups maps WRTs that list a group no version has and the spec does not
+	// declare to those groups.
+	WRTsWithMissingWorkerGroups map[string][]string
 	// WRTsWithStaleWorkerGroupNotFound names WRTs still marked WorkerGroupNotFound whose group is known again.
 	WRTsWithStaleWorkerGroupNotFound []string
 
@@ -201,7 +202,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plan.ApplyWorkerResources = planResult.ApplyWorkerResources
 	plan.DeleteWorkerResources = planResult.DeleteWorkerResources
 	plan.EnsureWRTOwnerRefs = planResult.EnsureWRTOwnerRefs
-	plan.WRTsWithMissingWorkerGroup = planResult.WRTsWithMissingWorkerGroup
+	plan.WRTsWithMissingWorkerGroups = planResult.WRTsWithMissingWorkerGroups
 	plan.WRTsWithStaleWorkerGroupNotFound = planResult.WRTsWithStaleWorkerGroupNotFound
 
 	plan.WorkerResourceTemplates = wrtList.Items

@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,8 @@ type WorkerResourceApply struct {
 	WRTName      string
 	WRTNamespace string
 	BuildID      string
+	// WorkerGroup is the worker group of the Deployment the copy targets.
+	WorkerGroup string
 	// RenderError is set when rendering spec.template failed. No SSA apply is attempted;
 	// the error is recorded in the per-BuildID status entry and reflected in the Ready condition.
 	RenderError error
@@ -79,11 +82,11 @@ type Plan struct {
 	// deleted. The controller sets this (rather than the webhook) because the owner
 	// ref requires the TWD's UID, resolved from spec.temporalWorkerDeploymentRef.
 	EnsureWRTOwnerRefs []WRTOwnerRefPatch
-	// WRTsWithMissingWorkerGroup names the WRTs whose group no version has and the spec does
-	// not declare.
-	WRTsWithMissingWorkerGroup []string
-	// WRTsWithStaleWorkerGroupNotFound names the WRTs still marked WorkerGroupNotFound whose group is
-	// known again.
+	// WRTsWithMissingWorkerGroups maps the name of each WRT that lists a group no version has
+	// and the spec does not declare to those groups.
+	WRTsWithMissingWorkerGroups map[string][]string
+	// WRTsWithStaleWorkerGroupNotFound names the WRTs still marked WorkerGroupNotFound whose groups
+	// are all known again.
 	WRTsWithStaleWorkerGroupNotFound []string
 
 	// UnknownVersionStatus is true when a versioned Deployment has no known version
@@ -103,6 +106,13 @@ type WorkerResourceRef struct {
 	Kind       string
 	WRTName    string
 	BuildID    string
+	// WorkerGroup is the worker group of the Deployment the copy targeted.
+	WorkerGroup string
+}
+
+// Copy returns the copy the ref targeted. A ref without a group targeted the default group.
+func (r WorkerResourceRef) Copy() k8s.WorkerResourceCopy {
+	return k8s.WorkerResourceCopy{BuildID: r.BuildID, WorkerGroup: cmp.Or(r.WorkerGroup, temporaliov1alpha1.DefaultWorkerGroupName)}
 }
 
 // WRTOwnerRefPatch holds a WRT pair for a single merge-patch:
@@ -234,16 +244,16 @@ func GeneratePlan(
 	)
 	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, deletingDeployments, k8sState, sunsetBuildIDs, versionStatuses)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
-	plan.WRTsWithMissingWorkerGroup, plan.WRTsWithStaleWorkerGroupNotFound = getWRTGroupProblems(wrts, k8sState, spec)
+	plan.WRTsWithMissingWorkerGroups, plan.WRTsWithStaleWorkerGroupNotFound = getWRTGroupProblems(wrts, k8sState, spec)
 
 	return plan, nil
 }
 
-// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID) pair
-// where the WRT selects the version status of the Build ID. A Build ID missing from
-// versionStatuses has an unknown status, which a WRT with VersionStatuses does not select.
-// Pairs that fail to render are included with RenderError set so the failure is surfaced in
-// the WRT status and Ready condition; they do not block the rest.
+// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID ×
+// worker group) where the WRT selects the version status of the Build ID and the group. A Build
+// ID missing from versionStatuses has an unknown status, which a WRT with VersionStatuses does
+// not select. Copies that fail to render are included with RenderError set so the failure is
+// surfaced in the WRT status and Ready condition; they do not block the rest.
 func getWorkerResourceApplies(
 	l logr.Logger,
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
@@ -270,73 +280,77 @@ func getWorkerResourceApplies(
 			l.Info("skipping WorkerResourceTemplate with empty spec.template", "name", wrt.Name)
 			continue
 		}
-		// Build a map of existing status entries for O(1) lookup by BuildID.
-		existingStatus := make(map[string]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
+		// Build a map of existing status entries for O(1) lookup by copy.
+		existingStatus := make(map[k8s.WorkerResourceCopy]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
 		for _, v := range wrt.Status.Versions {
-			existingStatus[v.BuildID] = v
+			existingStatus[k8s.WorkerResourceCopyOf(v)] = v
 		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		for _, buildID := range buildIDs {
-			deployment, ok := k8sState.VersionDeployments(buildID)[wrt.Spec.EffectiveWorkerGroup()]
-			if !ok {
-				continue
-			}
-			if _, deleting := deletingDeployments[deployment.Name]; deleting {
-				continue
-			}
-			if !wrt.Spec.SelectsVersionStatus(versionStatuses[buildID]) {
-				continue
-			}
-			if hasScaleTarget {
-				// The controller is holding this version's replicas at zero, so
-				// getDeleteWorkerResources removes its autoscaler. We don't want
-				// to render this autoscaler again
-				if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+			for _, deployment := range k8sState.VersionDeploymentList(buildID) {
+				group := k8s.WorkerGroupName(deployment)
+				if !wrt.Spec.SelectsWorkerGroup(group) {
 					continue
 				}
-			}
-			rendered, renderErr := k8s.RenderWorkerResourceTemplate(
-				wrt,
-				deployment,
-				buildID,
-				temporalNamespace,
-				stripTemporalMetricLabelPrefix,
-			)
-			if renderErr != nil {
-				l.Error(renderErr, "failed to render WorkerResourceTemplate",
-					"wrt", wrt.Name,
-					"buildID", buildID,
+				if _, deleting := deletingDeployments[deployment.Name]; deleting {
+					continue
+				}
+				if !wrt.Spec.SelectsVersionStatus(versionStatuses[buildID]) {
+					continue
+				}
+				if hasScaleTarget {
+					// The controller is holding this version's replicas at zero, so
+					// getDeleteWorkerResources removes its autoscaler. We don't want
+					// to render this autoscaler again
+					if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+						continue
+					}
+				}
+				rendered, renderErr := k8s.RenderWorkerResourceTemplate(
+					wrt,
+					deployment,
+					buildID,
+					temporalNamespace,
+					stripTemporalMetricLabelPrefix,
 				)
-				// Record the failure so execplan surfaces it in the WRT status and
-				// Ready condition instead of silently dropping it.
+				if renderErr != nil {
+					l.Error(renderErr, "failed to render WorkerResourceTemplate",
+						"wrt", wrt.Name,
+						"buildID", buildID,
+					)
+					// Record the failure so execplan surfaces it in the WRT status and
+					// Ready condition instead of silently dropping it.
+					applies = append(applies, WorkerResourceApply{
+						RenderError:  renderErr,
+						WRTName:      wrt.Name,
+						WRTNamespace: wrt.Namespace,
+						BuildID:      buildID,
+						WorkerGroup:  group,
+					})
+					continue
+				}
+
+				renderedHash := k8s.ComputeRenderedObjectHash(rendered)
+
+				// Look up the hash recorded by the last successful apply for this BuildID.
+				// A non-empty LastAppliedHash implies the previous apply succeeded;
+				// on error the controller records an empty hash so the next cycle retries.
+				var lastAppliedHash string
+				if prev, ok := existingStatus[k8s.WorkerResourceCopy{BuildID: buildID, WorkerGroup: group}]; ok {
+					lastAppliedHash = prev.LastAppliedHash
+				}
+
 				applies = append(applies, WorkerResourceApply{
-					RenderError:  renderErr,
-					WRTName:      wrt.Name,
-					WRTNamespace: wrt.Namespace,
-					BuildID:      buildID,
+					Resource:        rendered,
+					WRTName:         wrt.Name,
+					WRTNamespace:    wrt.Namespace,
+					BuildID:         buildID,
+					WorkerGroup:     group,
+					RenderedHash:    renderedHash,
+					LastAppliedHash: lastAppliedHash,
 				})
-				continue
 			}
-
-			renderedHash := k8s.ComputeRenderedObjectHash(rendered)
-
-			// Look up the hash recorded by the last successful apply for this BuildID.
-			// A non-empty LastAppliedHash implies the previous apply succeeded;
-			// on error the controller records an empty hash so the next cycle retries.
-			var lastAppliedHash string
-			if prev, ok := existingStatus[buildID]; ok {
-				lastAppliedHash = prev.LastAppliedHash
-			}
-
-			applies = append(applies, WorkerResourceApply{
-				Resource:        rendered,
-				WRTName:         wrt.Name,
-				WRTNamespace:    wrt.Namespace,
-				BuildID:         buildID,
-				RenderedHash:    renderedHash,
-				LastAppliedHash: lastAppliedHash,
-			})
 		}
 	}
 	return applies
@@ -383,21 +397,24 @@ func getWRTOwnerRefPatches(
 }
 
 // getDeleteWorkerResources returns the rendered WRT resource copies that should be explicitly
-// deleted by the controller, along with the (WRT, build ID) identity the controller needs to
-// prune the matching status entry once a delete is confirmed. Since rendered resources are
+// deleted by the controller, along with the (WRT, build ID, group) identity the controller needs
+// to prune the matching status entry once a delete is confirmed. Since rendered resources are
 // owned by the WRT (not the Deployment), they are not GC'd automatically and must be deleted
 // by the controller. Deletion candidates come from these sources:
 //
-//  1. Versioned Deployments being deleted this cycle (version sunset).
-//  2. Versioned Deployments whose version status the WRT does not select (see
+//  1. Versioned Deployments of a group the WRT selects being deleted this cycle (version
+//     sunset, or a group removed from the spec).
+//  2. Versioned Deployments of a group the WRT selects whose version status it does not select (see
 //     WorkerResourceTemplateSpec.VersionStatuses), in every cycle and whether or not the
 //     WRT has a status entry for them: a copy has no entry when the status write after its
 //     apply failed. The delete is NotFound when there is no copy. A build ID missing from
 //     versionStatuses has an unknown status, and its copy is kept.
 //  3. For autoscaler WRTs, versioned Deployments that the controller holds at zero replicas
 //     (sunsetBuildIDs), also in every cycle and whether or not the WRT has an entry.
-//  4. WRT status entries whose build ID no longer has a versioned Deployment (orphaned
-//     entries). Entries are pruned from WRT status only after a confirmed delete, so an
+//  4. WRT status entries whose copy no longer has a versioned Deployment, or whose group the
+//     WRT no longer selects (orphaned entries). A deselected group is not deleted in every
+//     cycle like an unselected status, since a WRT for one group would then delete a missing
+//     copy for every other group of every version on each reconcile. Entries are pruned from WRT status only after a confirmed delete, so an
 //     entry that outlives its Deployment means the rendered resource's deletion has not
 //     been confirmed yet — e.g. the delete failed after the Deployment was already gone.
 //     Re-deriving the delete from the entry retries it until it succeeds, and clears
@@ -414,14 +431,11 @@ func getDeleteWorkerResources(
 		return nil
 	}
 
-	// Collect the groups being deleted, by build ID.
-	deletingGroups := make(map[string]map[string]bool)
+	// Collect the Deployments being deleted, by build ID and group.
+	deleting := make(map[k8s.WorkerResourceCopy]struct{})
 	for _, d := range deleteDeployments {
 		if bid, ok := d.Labels[k8s.BuildIDLabel]; ok && bid != "" {
-			if deletingGroups[bid] == nil {
-				deletingGroups[bid] = make(map[string]bool)
-			}
-			deletingGroups[bid][k8s.WorkerGroupName(d)] = true
+			deleting[k8s.WorkerResourceCopy{BuildID: bid, WorkerGroup: k8s.WorkerGroupName(d)}] = struct{}{}
 		}
 	}
 
@@ -441,33 +455,36 @@ func getDeleteWorkerResources(
 			continue
 		}
 
-		// Union of builds whose group Deployment is deleted this cycle, orphaned status
-		// entries, builds whose version status the WRT does not select and builds pinned
-		// to zero (autoscalers only)
-		group := wrt.Spec.EffectiveWorkerGroup()
-		buildIDs := make([]string, 0, len(deletingGroups)+len(wrt.Status.Versions))
-		for bid, groups := range deletingGroups {
-			if groups[group] {
-				buildIDs = append(buildIDs, bid)
+		// Union of copies whose Deployment is deleted this cycle, orphaned status entries,
+		// copies of version statuses or groups the WRT does not select and copies of builds
+		// pinned to zero (autoscalers only)
+		copies := make([]k8s.WorkerResourceCopy, 0, len(deleting)+len(wrt.Status.Versions))
+		for c := range deleting {
+			if wrt.Spec.SelectsWorkerGroup(c.WorkerGroup) {
+				copies = append(copies, c)
 			}
 		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		if k8sState != nil {
 			for _, buildID := range k8sState.BuildIDs() {
-				if _, ok := k8sState.VersionDeployments(buildID)[group]; !ok {
-					continue
-				}
-				if status, known := versionStatuses[buildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
-					buildIDs = append(buildIDs, buildID)
-					continue
-				}
-				if hasScaleTarget {
-					// Remove the autoscaler as soon as the controller starts holding
-					// replicas at zero. The k8s Deployment outlives it by deleteDelay.
-					// Any other rendered resource is cleaned up with the Deployment
-					if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
-						buildIDs = append(buildIDs, buildID)
+				for group := range k8sState.VersionDeployments(buildID) {
+					// A copy of a group the WRT no longer selects is found through its status entry below.
+					if !wrt.Spec.SelectsWorkerGroup(group) {
+						continue
+					}
+					c := k8s.WorkerResourceCopy{BuildID: buildID, WorkerGroup: group}
+					if status, known := versionStatuses[buildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
+						copies = append(copies, c)
+						continue
+					}
+					if hasScaleTarget {
+						// Remove the autoscaler as soon as the controller starts holding
+						// replicas at zero. The k8s Deployment outlives it by deleteDelay.
+						// Any other rendered resource is cleaned up with the Deployment
+						if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+							copies = append(copies, c)
+						}
 					}
 				}
 			}
@@ -477,47 +494,54 @@ func getDeleteWorkerResources(
 			if v.BuildID == "" {
 				continue
 			}
-			if k8sState != nil {
-				if _, live := k8sState.VersionDeployments(v.BuildID)[group]; live {
-					continue // build still has a Deployment; handled above and by applies
+			c := k8s.WorkerResourceCopyOf(v)
+			if k8sState != nil && wrt.Spec.SelectsWorkerGroup(c.WorkerGroup) {
+				if _, live := k8sState.VersionDeployments(c.BuildID)[c.WorkerGroup]; live {
+					continue // copy still has a Deployment; handled above and by applies
 				}
 			}
-			buildIDs = append(buildIDs, v.BuildID)
+			copies = append(copies, c)
 		}
 		// Sort before Compact: duplicates in the union are usually non-adjacent (a build
 		// sunset this cycle typically still has a status entry), and Compact only collapses
 		// adjacent runs.
-		slices.Sort(buildIDs)
-		buildIDs = slices.Compact(buildIDs)
+		slices.SortFunc(copies, compareWorkerResourceCopies)
+		copies = slices.Compact(copies)
 
-		for _, buildID := range buildIDs {
+		for _, c := range copies {
 			// Compute the resource name deterministically — no status lookup needed.
 			// This ensures cleanup even if the WRT was never successfully applied for this
-			// buildID (e.g. the version was already eligible for deletion when the WRT was
+			// copy (e.g. the version was already eligible for deletion when the WRT was
 			// first created). The Delete call is a no-op if the resource doesn't exist.
-			resourceName := k8s.ComputeWorkerResourceTemplateName(
-				wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, buildID,
+			resourceName := k8s.ComputeWorkerResourceTemplateGroupName(
+				wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, c.WorkerGroup, c.BuildID,
 			)
 			refs = append(refs, WorkerResourceRef{
-				Namespace:  wrt.Namespace,
-				Name:       resourceName,
-				APIVersion: templateMeta.APIVersion,
-				Kind:       templateMeta.Kind,
-				WRTName:    wrt.Name,
-				BuildID:    buildID,
+				Namespace:   wrt.Namespace,
+				Name:        resourceName,
+				APIVersion:  templateMeta.APIVersion,
+				Kind:        templateMeta.Kind,
+				WRTName:     wrt.Name,
+				BuildID:     c.BuildID,
+				WorkerGroup: c.WorkerGroup,
 			})
 		}
 	}
 	return refs
 }
 
-// getWRTGroupProblems returns the names of WRTs whose group no version has and the spec
-// does not declare, and of WRTs still marked WorkerGroupNotFound whose group is known again.
+func compareWorkerResourceCopies(a, b k8s.WorkerResourceCopy) int {
+	return cmp.Or(cmp.Compare(a.BuildID, b.BuildID), cmp.Compare(a.WorkerGroup, b.WorkerGroup))
+}
+
+// getWRTGroupProblems maps each WRT that lists a group no version has and the spec does not
+// declare to those groups, and names the WRTs still marked WorkerGroupNotFound whose groups are
+// all known again.
 func getWRTGroupProblems(
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	k8sState *k8s.DeploymentState,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-) (missing, stale []string) {
+) (missing map[string][]string, stale []string) {
 	known := make(map[string]bool)
 	for _, group := range spec.WorkerGroupNames() {
 		known[group] = true
@@ -529,8 +553,17 @@ func getWRTGroupProblems(
 	}
 	for i := range wrts {
 		wrt := &wrts[i]
-		if !known[wrt.Spec.EffectiveWorkerGroup()] {
-			missing = append(missing, wrt.Name)
+		var absent []string
+		for _, group := range wrt.Spec.WorkerGroups {
+			if !known[group] {
+				absent = append(absent, group)
+			}
+		}
+		if len(absent) > 0 {
+			if missing == nil {
+				missing = make(map[string][]string)
+			}
+			missing[wrt.Name] = absent
 		} else if cond := apimeta.FindStatusCondition(wrt.Status.Conditions, temporaliov1alpha1.ConditionReady); cond != nil &&
 			cond.Reason == temporaliov1alpha1.ReasonWRTWorkerGroupNotFound {
 			stale = append(stale, wrt.Name)

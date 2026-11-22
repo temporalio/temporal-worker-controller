@@ -5031,12 +5031,13 @@ func TestGetDeleteWorkerResources_SunsetBuildIDs(t *testing.T) {
 	}
 	hpaRef := func(buildID string) WorkerResourceRef {
 		return WorkerResourceRef{
-			Namespace:  "default",
-			Name:       k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", buildID),
-			APIVersion: "autoscaling/v2",
-			Kind:       "HorizontalPodAutoscaler",
-			WRTName:    "my-hpa",
-			BuildID:    buildID,
+			Namespace:   "default",
+			Name:        k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", buildID),
+			APIVersion:  "autoscaling/v2",
+			Kind:        "HorizontalPodAutoscaler",
+			WRTName:     "my-hpa",
+			BuildID:     buildID,
+			WorkerGroup: temporaliov1alpha1.DefaultWorkerGroupName,
 		}
 	}
 
@@ -5389,12 +5390,13 @@ func TestGetDeleteWorkerResources_VersionStatuses(t *testing.T) {
 	}
 	pdbRef := func(buildID string) WorkerResourceRef {
 		return WorkerResourceRef{
-			Namespace:  "default",
-			Name:       k8s.ComputeWorkerResourceTemplateName("my-worker", "my-pdb", buildID),
-			APIVersion: "policy/v1",
-			Kind:       "PodDisruptionBudget",
-			WRTName:    "my-pdb",
-			BuildID:    buildID,
+			Namespace:   "default",
+			Name:        k8s.ComputeWorkerResourceTemplateName("my-worker", "my-pdb", buildID),
+			APIVersion:  "policy/v1",
+			Kind:        "PodDisruptionBudget",
+			WRTName:     "my-pdb",
+			BuildID:     buildID,
+			WorkerGroup: temporaliov1alpha1.DefaultWorkerGroupName,
 		}
 	}
 	pdb := createTestPDBWRT("my-pdb", "my-worker")

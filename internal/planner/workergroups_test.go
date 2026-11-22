@@ -381,9 +381,9 @@ func TestGetTestWorkflows_MultiGroupTargetWaitsForHealth(t *testing.T) {
 	assert.Len(t, getTestWorkflows(status, config, "ns/wd", nil, false), 1)
 }
 
-func groupWRT(name, group string, template func(string, string) temporaliov1alpha1.WorkerResourceTemplate) temporaliov1alpha1.WorkerResourceTemplate {
+func groupWRT(name string, template func(string, string) temporaliov1alpha1.WorkerResourceTemplate, groups ...string) temporaliov1alpha1.WorkerResourceTemplate {
 	wrt := template(name, "wd")
-	wrt.Spec.WorkerGroup = group
+	wrt.Spec.WorkerGroups = groups
 	return wrt
 }
 
@@ -401,33 +401,61 @@ func TestGetWorkerResourceApplies_Groups(t *testing.T) {
 		groupDeployment("v2", "activities", 1),
 		groupDeployment("old", "", 1),
 	)
+	targets := func(applies []WorkerResourceApply) map[string]string {
+		out := map[string]string{}
+		for _, a := range applies {
+			out[a.BuildID+"/"+a.WorkerGroup] = renderedScaleTarget(t, a)
+		}
+		return out
+	}
 
-	t.Run("group WRT renders once per build that has the group", func(t *testing.T) {
-		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", "activities", createTestWRT)}
+	t.Run("WRT with one group renders once per build that has the group", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", createTestWRT, "activities")}
 		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, nil, false)
 
-		targets := map[string]string{}
-		for _, a := range applies {
-			targets[a.BuildID] = renderedScaleTarget(t, a)
-		}
-		assert.Equal(t, map[string]string{"v1": "wd-v1-activities", "v2": "wd-v2-activities"}, targets)
+		assert.Equal(t, map[string]string{"v1/activities": "wd-v1-activities", "v2/activities": "wd-v2-activities"}, targets(applies))
 	})
 
-	t.Run("WRT without a group targets only versions without groups", func(t *testing.T) {
-		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", "", createTestWRT)}
+	t.Run("WRT without groups renders a copy for every Deployment of every version", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", createTestWRT)}
 		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, nil, false)
 
-		targets := map[string]string{}
+		assert.Equal(t, map[string]string{
+			"v1/workflows": "wd-v1-workflows", "v1/activities": "wd-v1-activities",
+			"v2/workflows": "wd-v2-workflows", "v2/activities": "wd-v2-activities",
+			"old/default": "wd-old",
+		}, targets(applies))
+		names := map[string]bool{}
 		for _, a := range applies {
-			targets[a.BuildID] = renderedScaleTarget(t, a)
+			names[a.Resource.GetName()] = true
 		}
-		assert.Equal(t, map[string]string{"old": "wd-old"}, targets)
+		assert.Len(t, names, len(applies), "each group's copy gets its own name")
+	})
+
+	t.Run("WRT with two groups renders for both", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", createTestWRT, "workflows", "activities")}
+		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", nil, nil, nil, false)
+
+		assert.Len(t, targets(applies), 4)
+	})
+
+	t.Run("each copy is compared with its own group's status entry", func(t *testing.T) {
+		wrt := groupWRT("hpa", createTestWRT, "workflows", "activities")
+		wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{{BuildID: "v1", WorkerGroup: "activities", LastAppliedHash: "applied"}}
+		applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, state, "ns", nil, nil, nil, false)
+
+		hashes := map[string]string{}
+		for _, a := range applies {
+			hashes[a.BuildID+"/"+a.WorkerGroup] = a.LastAppliedHash
+		}
+		assert.Equal(t, "applied", hashes["v1/activities"])
+		assert.Empty(t, hashes["v1/workflows"])
 	})
 
 	t.Run("PDB selects only its group's pods", func(t *testing.T) {
 		activities := groupDeployment("v1", "activities", 1)
 		activities.Spec.Selector = &metav1.LabelSelector{MatchLabels: k8s.ComputeWorkerGroupSelectorLabels("wd", "v1", "activities")}
-		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("pdb", "activities", createTestPDBWRT)}
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("pdb", createTestPDBWRT, "activities")}
 
 		applies := getWorkerResourceApplies(logr.Discard(), wrts, k8s.NewDeploymentState(activities), "ns", nil, nil, nil, false)
 		require.Len(t, applies, 1)
@@ -439,7 +467,7 @@ func TestGetWorkerResourceApplies_Groups(t *testing.T) {
 
 	t.Run("group Deployment being removed is not re-rendered", func(t *testing.T) {
 		removing := state.WorkerGroupDeployments["v1"]["activities"]
-		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", "activities", createTestWRT)}
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{groupWRT("hpa", createTestWRT, "activities")}
 		applies := getWorkerResourceApplies(logr.Discard(), wrts, state, "ns", []*appsv1.Deployment{removing}, nil, nil, false)
 
 		require.Len(t, applies, 1)
@@ -453,56 +481,71 @@ func TestGetDeleteWorkerResources_Groups(t *testing.T) {
 		groupDeployment("v1", "activities", 1),
 		groupDeployment("v1", "batch", 1),
 	)
-	withStatus := func(wrt temporaliov1alpha1.WorkerResourceTemplate, buildIDs ...string) temporaliov1alpha1.WorkerResourceTemplate {
-		for _, b := range buildIDs {
-			wrt.Status.Versions = append(wrt.Status.Versions, temporaliov1alpha1.WorkerResourceTemplateVersionStatus{BuildID: b})
+	withStatus := func(wrt temporaliov1alpha1.WorkerResourceTemplate, groups ...string) temporaliov1alpha1.WorkerResourceTemplate {
+		for _, g := range groups {
+			wrt.Status.Versions = append(wrt.Status.Versions, temporaliov1alpha1.WorkerResourceTemplateVersionStatus{BuildID: "v1", WorkerGroup: g})
 		}
 		return wrt
 	}
 	refsFor := func(refs []WorkerResourceRef) map[string][]string {
 		out := map[string][]string{}
 		for _, r := range refs {
-			out[r.WRTName] = append(out[r.WRTName], r.BuildID)
+			out[r.WRTName] = append(out[r.WRTName], r.BuildID+"/"+r.WorkerGroup)
 		}
 		return out
 	}
 
 	t.Run("removing one group deletes only that group's WRT copies", func(t *testing.T) {
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
-			withStatus(groupWRT("workflows-hpa", "workflows", createTestWRT), "v1"),
-			withStatus(groupWRT("activities-hpa", "activities", createTestWRT), "v1"),
-			withStatus(groupWRT("batch-hpa", "batch", createTestWRT), "v1"),
+			withStatus(groupWRT("workflows-hpa", createTestWRT, "workflows"), "workflows"),
+			withStatus(groupWRT("activities-hpa", createTestWRT, "activities"), "activities"),
+			withStatus(groupWRT("batch-hpa", createTestWRT, "batch"), "batch"),
+			withStatus(groupWRT("all-hpa", createTestWRT), "workflows", "activities", "batch"),
 		}
 		removing := []*appsv1.Deployment{state.WorkerGroupDeployments["v1"]["batch"]}
 
-		assert.Equal(t, map[string][]string{"batch-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, removing, state, nil, nil)))
+		assert.Equal(t, map[string][]string{"batch-hpa": {"v1/batch"}, "all-hpa": {"v1/batch"}},
+			refsFor(getDeleteWorkerResources(wrts, removing, state, nil, nil)))
 	})
 
 	t.Run("status entry for a build without the group is cleaned up", func(t *testing.T) {
 		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
-			withStatus(groupWRT("gone-hpa", "gone", createTestWRT), "v1"),
-			withStatus(groupWRT("activities-hpa", "activities", createTestWRT), "v1"),
+			withStatus(groupWRT("gone-hpa", createTestWRT, "gone"), "gone"),
+			withStatus(groupWRT("activities-hpa", createTestWRT, "activities"), "activities"),
 		}
 
-		assert.Equal(t, map[string][]string{"gone-hpa": {"v1"}}, refsFor(getDeleteWorkerResources(wrts, nil, state, nil, nil)))
+		assert.Equal(t, map[string][]string{"gone-hpa": {"v1/gone"}}, refsFor(getDeleteWorkerResources(wrts, nil, state, nil, nil)))
+	})
+
+	t.Run("a group removed from the list loses its copies", func(t *testing.T) {
+		wrts := []temporaliov1alpha1.WorkerResourceTemplate{
+			withStatus(groupWRT("hpa", createTestWRT, "workflows"), "workflows", "activities"),
+		}
+
+		refs := getDeleteWorkerResources(wrts, nil, state, nil, nil)
+		assert.Equal(t, map[string][]string{"hpa": {"v1/activities"}}, refsFor(refs))
+		require.Len(t, refs, 1)
+		assert.Equal(t, k8s.ComputeWorkerResourceTemplateGroupName("wd", "hpa", "activities", "v1"), refs[0].Name)
 	})
 }
 
 func TestGetWRTGroupProblems(t *testing.T) {
 	state := k8s.NewDeploymentState(groupDeployment("old", "workflows", 1), groupDeployment("old", "retired", 1))
 	spec := groupedSpec(t, "worker:v1", nil, "activities")
-	recovered := groupWRT("recovered-hpa", "activities", createTestWRT)
+	recovered := groupWRT("recovered-hpa", createTestWRT, "activities")
 	recovered.Status.Conditions = []metav1.Condition{{Type: temporaliov1alpha1.ConditionReady, Reason: temporaliov1alpha1.ReasonWRTWorkerGroupNotFound}}
 	wrts := []temporaliov1alpha1.WorkerResourceTemplate{
-		groupWRT("default-hpa", "", createTestWRT),
-		groupWRT("activities-hpa", "activities", createTestWRT),
-		groupWRT("retired-hpa", "retired", createTestWRT),
-		groupWRT("ghost-hpa", "ghost", createTestWRT),
+		groupWRT("all-hpa", createTestWRT),
+		groupWRT("activities-hpa", createTestWRT, "activities"),
+		groupWRT("retired-hpa", createTestWRT, "retired"),
+		groupWRT("ghost-hpa", createTestWRT, "ghost"),
+		groupWRT("mixed-hpa", createTestWRT, "activities", "ghost", "batch"),
 		recovered,
 	}
 
 	missing, stale := getWRTGroupProblems(wrts, state, spec)
-	assert.Equal(t, []string{"default-hpa", "ghost-hpa"}, missing, "a WRT without a group has nothing to target in a grouped WorkerDeployment")
+	assert.Equal(t, map[string][]string{"ghost-hpa": {"ghost"}, "mixed-hpa": {"ghost", "batch"}}, missing,
+		"a WRT without groups selects every group, and a group of an older version is known")
 	assert.Equal(t, []string{"recovered-hpa"}, stale)
 }
 
