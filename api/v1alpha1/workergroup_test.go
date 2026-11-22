@@ -58,3 +58,49 @@ func TestWorkerDeploymentSpec_WorkerGroupDeploymentSpecDoesNotAlias(t *testing.T
 
 	assert.Equal(t, "alpha:v1", spec.WorkerGroups[0].Deployment.Template.Spec.Containers[0].Image)
 }
+
+func TestWorkerDeploymentSpec_WorkerGroupDrainingAndLabels(t *testing.T) {
+	grouped := WorkerDeploymentSpec{
+		WorkerGroups: []WorkerGroup{
+			{
+				Name:               "managed",
+				Deployment:         appsv1.DeploymentSpec{Replicas: ptr(int32(4)), Template: groupSpecTemplate("managed:v1")},
+				DrainingDeployment: &DrainingDeploymentSpec{Replicas: ptr(int32(1))},
+				DeploymentLabels:   map[string]string{"team": "payments"},
+			},
+			{
+				Name:               "autoscaled",
+				Deployment:         appsv1.DeploymentSpec{Template: groupSpecTemplate("autoscaled:v1")},
+				DrainingDeployment: &DrainingDeploymentSpec{Replicas: ptr(int32(1))},
+			},
+			{Name: "plain", Deployment: appsv1.DeploymentSpec{Replicas: ptr(int32(2)), Template: groupSpecTemplate("plain:v1")}},
+		},
+	}
+
+	replicas, ok := grouped.WorkerGroupDrainingReplicas("managed")
+	assert.True(t, ok)
+	assert.Equal(t, int32(1), replicas)
+	_, ok = grouped.WorkerGroupDrainingReplicas("autoscaled")
+	assert.False(t, ok, "an autoscaler owns the group's replicas")
+	_, ok = grouped.WorkerGroupDrainingReplicas("plain")
+	assert.False(t, ok)
+	_, ok = grouped.WorkerGroupDrainingReplicas("missing")
+	assert.False(t, ok)
+
+	assert.Equal(t, &DrainingDeploymentSpec{Replicas: ptr(int32(1))}, grouped.WorkerGroupDrainingDeploymentSpec("managed"))
+	assert.Nil(t, grouped.WorkerGroupDrainingDeploymentSpec("plain"))
+	assert.Equal(t, map[string]string{"team": "payments"}, grouped.WorkerGroupDeploymentLabels("managed"))
+	assert.Nil(t, grouped.WorkerGroupDeploymentLabels("plain"))
+	assert.Nil(t, grouped.WorkerGroupDeploymentLabels(DefaultWorkerGroupName))
+
+	single := WorkerDeploymentSpec{
+		Deployment:         &appsv1.DeploymentSpec{Replicas: ptr(int32(3)), Template: groupSpecTemplate("default:v1")},
+		DrainingDeployment: &DrainingDeploymentSpec{Replicas: ptr(int32(2))},
+		DeploymentLabels:   map[string]string{"team": "orders"},
+	}
+	replicas, ok = single.WorkerGroupDrainingReplicas(DefaultWorkerGroupName)
+	assert.True(t, ok)
+	assert.Equal(t, int32(2), replicas)
+	assert.Equal(t, single.DrainingDeployment, single.WorkerGroupDrainingDeploymentSpec(DefaultWorkerGroupName))
+	assert.Equal(t, map[string]string{"team": "orders"}, single.WorkerGroupDeploymentLabels(DefaultWorkerGroupName))
+}

@@ -48,6 +48,7 @@ type WorkerOptions struct {
 // +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template) || has(self.workerGroups)",message="one of deployment, template or workerGroups must be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.deployment) && has(self.template))",message="exactly one of deployment or template must be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerGroups) || !(has(self.deployment) || has(self.template))",message="workerGroups cannot be combined with deployment or template"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerGroups) || !(has(self.drainingDeployment) || has(self.deploymentLabels))",message="with workerGroups, set drainingDeployment and deploymentLabels on each worker group"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -152,6 +153,17 @@ type WorkerGroup struct {
 	// Deployment configures this group's Kubernetes Deployment in each version.
 	// Selector is computed by the controller.
 	Deployment appsv1.DeploymentSpec `json:"deployment"`
+
+	// DrainingDeployment overrides settings on this group's Kubernetes Deployments
+	// of draining versions, like spec.drainingDeployment does without groups.
+	// +optional
+	DrainingDeployment *DrainingDeploymentSpec `json:"drainingDeployment,omitempty"`
+
+	// DeploymentLabels are added to the metadata of this group's versioned
+	// Kubernetes Deployments, like spec.deploymentLabels does without groups.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="!('temporal.io/build-id' in self) && !('temporal.io/deployment-name' in self) && !('temporal.io/worker-group' in self)",message="temporal.io/build-id, temporal.io/deployment-name and temporal.io/worker-group are managed by the controller"
+	DeploymentLabels map[string]string `json:"deploymentLabels,omitempty"`
 }
 
 // DefaultWorkerGroupName names the single group of a WorkerDeployment without groups, described
@@ -227,17 +239,58 @@ func (s WorkerDeploymentSpec) DeploymentSpec() appsv1.DeploymentSpec {
 	return depSpec
 }
 
-// DrainingReplicas returns the replica count the controller keeps draining
-// versions at. ok is false when DrainingDeployment.Replicas is unset or when
-// the controller does not manage replicas because an autoscaler owns them.
-func (s WorkerDeploymentSpec) DrainingReplicas() (replicas int32, ok bool) {
-	if s.DrainingDeployment == nil || s.DrainingDeployment.Replicas == nil {
+// workerGroup returns the named group of a spec with groups, or nil.
+func (s WorkerDeploymentSpec) workerGroup(name string) *WorkerGroup {
+	for i := range s.WorkerGroups {
+		if s.WorkerGroups[i].Name == name {
+			return &s.WorkerGroups[i]
+		}
+	}
+	return nil
+}
+
+// WorkerGroupDrainingDeploymentSpec returns the draining overrides of the named group: its own
+// in a spec with groups, or spec.drainingDeployment for the default group of a spec without.
+func (s WorkerDeploymentSpec) WorkerGroupDrainingDeploymentSpec(name string) *DrainingDeploymentSpec {
+	if !s.HasWorkerGroups() {
+		if name != DefaultWorkerGroupName {
+			return nil
+		}
+		return s.DrainingDeployment
+	}
+	if g := s.workerGroup(name); g != nil {
+		return g.DrainingDeployment
+	}
+	return nil
+}
+
+// WorkerGroupDeploymentLabels returns the Deployment labels of the named group: its own in a
+// spec with groups, or spec.deploymentLabels for the default group of a spec without.
+func (s WorkerDeploymentSpec) WorkerGroupDeploymentLabels(name string) map[string]string {
+	if !s.HasWorkerGroups() {
+		if name != DefaultWorkerGroupName {
+			return nil
+		}
+		return s.DeploymentLabels
+	}
+	if g := s.workerGroup(name); g != nil {
+		return g.DeploymentLabels
+	}
+	return nil
+}
+
+// WorkerGroupDrainingReplicas returns the replica count the controller keeps the named group's
+// draining Deployments at. ok is false when the group's drainingDeployment.replicas is unset or
+// when the controller does not manage the group's replicas because an autoscaler owns them.
+func (s WorkerDeploymentSpec) WorkerGroupDrainingReplicas(name string) (replicas int32, ok bool) {
+	draining := s.WorkerGroupDrainingDeploymentSpec(name)
+	if draining == nil || draining.Replicas == nil {
 		return 0, false
 	}
-	if s.DeploymentSpec().Replicas == nil {
+	if depSpec, inSpec := s.WorkerGroupDeploymentSpec(name); !inSpec || depSpec.Replicas == nil {
 		return 0, false
 	}
-	return *s.DrainingDeployment.Replicas, true
+	return *draining.Replicas, true
 }
 
 // DrainingDeploymentSpec overrides settings on the Kubernetes Deployments of

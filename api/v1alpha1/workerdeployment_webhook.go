@@ -84,6 +84,9 @@ func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj ru
 func validateForUpdateOrCreate(dep *WorkerDeployment) (admission.Warnings, error) {
 	allErrs := validateRolloutStrategy(dep.Spec.RolloutStrategy)
 	allErrs = append(allErrs, metav1validation.ValidateLabels(dep.Spec.DeploymentLabels, field.NewPath("spec.deploymentLabels"))...)
+	for i, group := range dep.Spec.WorkerGroups {
+		allErrs = append(allErrs, metav1validation.ValidateLabels(group.DeploymentLabels, field.NewPath("spec.workerGroups").Index(i).Child("deploymentLabels"))...)
+	}
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(dep, allErrs)
 	}
@@ -192,6 +195,9 @@ func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
 	for i, group := range spec.WorkerGroups {
 		if group.Deployment.Selector != nil {
 			warns = append(warns, fmt.Sprintf("spec.workerGroups[%d].deployment.selector is ignored; the controller computes each group's selector", i))
+		}
+		if group.DrainingDeployment != nil && group.DrainingDeployment.Replicas != nil && group.Deployment.Replicas == nil {
+			warns = append(warns, fmt.Sprintf("spec.workerGroups[%d].drainingDeployment.replicas is ignored because spec.workerGroups[%d].deployment.replicas is not set; an autoscaler manages replicas", i, i))
 		}
 	}
 	return warns

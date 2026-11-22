@@ -608,6 +608,29 @@ func TestNewDeploymentWithOwnerRef_Labels(t *testing.T) {
 	}, deployment.Spec.Selector.MatchLabels)
 }
 
+func TestNewWorkerGroupDeploymentWithOwnerRef_GroupLabels(t *testing.T) {
+	template := corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "worker", Image: "worker:v1"}}}}
+	spec := &temporaliov1alpha1.WorkerDeploymentSpec{WorkerGroups: []temporaliov1alpha1.WorkerGroup{
+		{Name: "workflows", Deployment: appsv1.DeploymentSpec{Template: template}, DeploymentLabels: map[string]string{"team": "orders"}},
+		{Name: "activities", Deployment: appsv1.DeploymentSpec{Template: template}},
+	}}
+	build := func(group string) *appsv1.Deployment {
+		d, err := k8s.NewWorkerGroupDeploymentWithOwnerRef(&metav1.TypeMeta{}, &metav1.ObjectMeta{Name: "test-worker", Namespace: "default"},
+			spec, "test-deployment", "build123", group, temporaliov1alpha1.ConnectionSpec{})
+		require.NoError(t, err)
+		return d
+	}
+
+	workflows := build("workflows")
+	assert.Equal(t, "orders", workflows.Labels["team"])
+	assert.Equal(t, "workflows", workflows.Labels[k8s.WorkerGroupLabel])
+	assert.Equal(t, "team", workflows.Annotations[k8s.ManagedDeploymentLabelsAnnotation])
+
+	activities := build("activities")
+	assert.NotContains(t, activities.Labels, "team")
+	assert.NotContains(t, activities.Annotations, k8s.ManagedDeploymentLabelsAnnotation)
+}
+
 func TestApplyDeploymentLabels(t *testing.T) {
 	selector := map[string]string{
 		k8s.WorkerDeploymentNameLabel: "test-worker",

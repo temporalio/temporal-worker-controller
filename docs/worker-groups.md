@@ -104,6 +104,21 @@ Turn off workflow polling in activity-only groups. In Go, set `worker.Options.Di
 
 Set `replicas` on a group to have the controller manage it, or omit it to let an autoscaler own that group. This works the same as `spec.deployment.replicas`.
 
+`drainingDeployment` and `deploymentLabels` also go on each group, and work like `spec.drainingDeployment` and `spec.deploymentLabels` do without groups (see [Configuration](configuration.md#draining-version-deployment-configuration)). For example, to keep only one pod per Draining version for a group that serves Pinned workflows:
+
+```yaml
+spec:
+  workerGroups:
+    - name: workflows
+      deployment:
+        replicas: 4
+        template: {...}
+      drainingDeployment:
+        replicas: 1
+      deploymentLabels:
+        team: documents
+```
+
 To autoscale a group, set `workerGroup` on a `WorkerResourceTemplate`. The controller then renders one copy per version for that group's Deployment only. A `WorkerResourceTemplate` for a `WorkerDeployment` with groups must set `workerGroup`.
 
 ```yaml
@@ -153,6 +168,7 @@ With `unsafeCustomBuildID` set and unchanged:
 - At least 1 group.
 - Group names are DNS labels of at most 24 characters, so the 47-character Deployment name keeps room for the `WorkerDeployment` name and Build ID. `default` is reserved.
 - `spec.workerGroups` can't be combined with `spec.deployment` or the deprecated `spec.template` fields.
+- `spec.drainingDeployment` and `spec.deploymentLabels` can't be combined with `spec.workerGroups`. Set them on each group.
 
 ## Downgrading the controller
 

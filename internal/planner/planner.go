@@ -834,7 +834,11 @@ func getUpdateDeployments(
 	// the same write.
 	for _, buildID := range ownedBuildIDs(status) {
 		for _, d := range k8sState.VersionDeploymentList(buildID) {
-			if k8s.ApplyDeploymentLabels(d, spec.DeploymentLabels) {
+			group := k8s.WorkerGroupName(d)
+			if !spec.HasWorkerGroup(group) {
+				continue
+			}
+			if k8s.ApplyDeploymentLabels(d, spec.WorkerGroupDeploymentLabels(group)) {
 				add(d)
 			}
 		}
@@ -997,7 +1001,7 @@ func getScaleDeployments(
 			var replicas, drainingReplicas *int32
 			if groupSpec, inSpec := spec.WorkerGroupDeploymentSpec(group); inSpec {
 				replicas = groupSpec.Replicas
-				if r, ok := spec.DrainingReplicas(); ok {
+				if r, ok := spec.WorkerGroupDrainingReplicas(group); ok {
 					drainingReplicas = &r
 				}
 			}

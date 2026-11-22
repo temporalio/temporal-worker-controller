@@ -510,7 +510,7 @@ func NewWorkerGroupDeploymentWithOwnerRef(
 		},
 		Spec: depSpec,
 	}
-	ApplyDeploymentLabels(deployment, spec.DeploymentLabels)
+	ApplyDeploymentLabels(deployment, spec.WorkerGroupDeploymentLabels(group))
 	return deployment, nil
 }
 

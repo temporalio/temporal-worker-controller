@@ -376,6 +376,43 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err.Error()).To(ContainSubstring("workerGroups cannot be combined with deployment or template"))
 	})
 
+	It("accepts drainingDeployment and deploymentLabels on a group", func() {
+		twd := groupedTWD("group-draining-labels", group("workflows"))
+		twd.Spec.WorkerGroups[0].DrainingDeployment = &DrainingDeploymentSpec{Replicas: ptr(int32(1))}
+		twd.Spec.WorkerGroups[0].DeploymentLabels = map[string]string{"team": "payments"}
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
+	})
+
+	It("rejects top-level drainingDeployment or deploymentLabels with groups", func() {
+		draining := groupedTWD("groups-and-draining", group("workflows"))
+		draining.Spec.DrainingDeployment = &DrainingDeploymentSpec{Replicas: ptr(int32(1))}
+		labels := groupedTWD("groups-and-labels", group("workflows"))
+		labels.Spec.DeploymentLabels = map[string]string{"team": "payments"}
+		for _, twd := range []*WorkerDeployment{draining, labels} {
+			err := k8sClient.Create(ctx, twd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("set drainingDeployment and deploymentLabels on each worker group"))
+		}
+	})
+
+	It("rejects a group's drainingDeployment.replicas below 1", func() {
+		twd := groupedTWD("group-draining-zero", group("workflows"))
+		twd.Spec.WorkerGroups[0].DrainingDeployment = &DrainingDeploymentSpec{Replicas: ptr(int32(0))}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.workerGroups[0].drainingDeployment.replicas"))
+	})
+
+	It("rejects group deploymentLabels that set controller-managed keys", func() {
+		for i, key := range []string{"temporal.io/build-id", "temporal.io/deployment-name", "temporal.io/worker-group"} {
+			twd := groupedTWD(fmt.Sprintf("group-managed-label-%d", i), group("workflows"))
+			twd.Spec.WorkerGroups[0].DeploymentLabels = map[string]string{key: "user-supplied"}
+			err := k8sClient.Create(ctx, twd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("are managed by the controller"))
+		}
+	})
+
 	It("rejects a group named default", func() {
 		err := k8sClient.Create(ctx, groupedTWD("group-default", group(DefaultWorkerGroupName)))
 		Expect(err).To(HaveOccurred())

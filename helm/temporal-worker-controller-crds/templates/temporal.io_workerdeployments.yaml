@@ -11757,6 +11757,22 @@ spec:
                       required:
                       - template
                       type: object
+                    deploymentLabels:
+                      additionalProperties:
+                        type: string
+                      type: object
+                      x-kubernetes-validations:
+                      - message: temporal.io/build-id, temporal.io/deployment-name
+                          and temporal.io/worker-group are managed by the controller
+                        rule: '!(''temporal.io/build-id'' in self) && !(''temporal.io/deployment-name''
+                          in self) && !(''temporal.io/worker-group'' in self)'
+                    drainingDeployment:
+                      properties:
+                        replicas:
+                          format: int32
+                          minimum: 1
+                          type: integer
+                      type: object
                     name:
                       maxLength: 24
                       minLength: 1
@@ -11828,6 +11844,10 @@ spec:
               rule: '!(has(self.deployment) && has(self.template))'
             - message: workerGroups cannot be combined with deployment or template
               rule: '!has(self.workerGroups) || !(has(self.deployment) || has(self.template))'
+            - message: with workerGroups, set drainingDeployment and deploymentLabels
+                on each worker group
+              rule: '!has(self.workerGroups) || !(has(self.drainingDeployment) ||
+                has(self.deploymentLabels))'
           status:
             properties:
               conditions:

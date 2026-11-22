@@ -516,3 +516,38 @@ func TestCheckAndUpdateGroupPodTemplateSpec_SettlesAfterOneUpdate(t *testing.T) 
 	assert.False(t, checkAndUpdateGroupPodTemplateSpec(d, spec, createDefaultConnectionSpec()),
 		"an updated Deployment must not be seen as drifted again")
 }
+
+func TestGetScaleDeployments_DrainingReplicasPerGroup(t *testing.T) {
+	four, two := int32(4), int32(2)
+	spec := groupedSpec(t, "worker:v1", map[string]*int32{"workflows": &four, "activities": &two, "repaired": &two}, "workflows", "activities", "autoscaled", "repaired")
+	one := int32(1)
+	spec.WorkerGroups[0].DrainingDeployment = &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: &one}
+	spec.WorkerGroups[2].DrainingDeployment = &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: &one}
+	spec.WorkerGroups[3].DrainingDeployment = &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: &one}
+	status := targetStatus("new")
+	status.DeprecatedVersions = []*temporaliov1alpha1.DeprecatedWorkerDeploymentVersion{deprecatedVersion("old", temporaliov1alpha1.VersionStatusDraining, false)}
+	state := k8s.NewDeploymentState(
+		groupDeployment("old", "workflows", 4),
+		groupDeployment("old", "activities", 2),
+		groupDeployment("old", "autoscaled", 3),
+		groupDeployment("old", "repaired", 0),
+	)
+
+	assert.Equal(t, map[string]uint32{"wd-old-workflows": 1, "wd-old-repaired": 1},
+		scaleNames(getScaleDeployments(logr.Discard(), state, status, spec)),
+		"activities sets no draining replicas, and an autoscaler owns autoscaled")
+}
+
+func TestGetUpdateDeployments_DeploymentLabelsPerGroup(t *testing.T) {
+	state := k8s.NewDeploymentState(groupDeployment("v1", "workflows", 1), groupDeployment("v1", "activities", 1), groupDeployment("v1", "retired", 1))
+	state.WorkerGroupDeployments["v1"]["retired"].Annotations = map[string]string{k8s.ManagedDeploymentLabelsAnnotation: "team"}
+	state.WorkerGroupDeployments["v1"]["retired"].Labels["team"] = "old"
+	spec := groupedSpec(t, "worker:v1", nil, "workflows", "activities")
+	spec.WorkerGroups[0].DeploymentLabels = map[string]string{"team": "orders"}
+
+	updates := getUpdateDeployments(state, targetStatus("v1"), spec, createDefaultConnectionSpec())
+
+	require.Equal(t, []string{"wd-v1-workflows"}, names(updates), "activities has no labels and a retired group is left alone")
+	assert.Equal(t, "orders", updates[0].Labels["team"])
+	assert.Equal(t, "old", state.WorkerGroupDeployments["v1"]["retired"].Labels["team"])
+}

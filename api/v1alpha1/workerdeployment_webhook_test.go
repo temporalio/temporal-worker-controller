@@ -150,6 +150,18 @@ func TestWorkerDeployment_ValidateCreate(t *testing.T) {
 			}),
 			errorMsg: `spec.deploymentLabels: Invalid value: "-team"`,
 		},
+		"group deploymentLabels with an invalid value": {
+			obj: testhelpers.ModifyObj(testhelpers.MakeWDWithName("invalid-group-label-value", ""), func(obj *temporaliov1alpha1.WorkerDeployment) *temporaliov1alpha1.WorkerDeployment {
+				obj.Spec.WorkerGroups = []temporaliov1alpha1.WorkerGroup{{
+					Name:             "activities",
+					Deployment:       *obj.Spec.Deployment.DeepCopy(),
+					DeploymentLabels: map[string]string{"team": "foo bar"},
+				}}
+				obj.Spec.Deployment = nil
+				return obj
+			}),
+			errorMsg: `spec.workerGroups[0].deploymentLabels: Invalid value: "foo bar"`,
+		},
 		"invalid object type": {
 			obj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -378,4 +390,25 @@ func TestWorkerDeployment_Default(t *testing.T) {
 			tc.expected(t, obj)
 		})
 	}
+}
+
+func TestWorkerDeployment_GroupDrainingReplicasWarning(t *testing.T) {
+	three, one := int32(3), int32(1)
+	dep := testhelpers.MakeWDWithName("valid-worker", "")
+	managed := *dep.Spec.Deployment.DeepCopy()
+	managed.Replicas = &three
+	autoscaled := *dep.Spec.Deployment.DeepCopy()
+	autoscaled.Replicas = nil
+	draining := &temporaliov1alpha1.DrainingDeploymentSpec{Replicas: &one}
+	dep.Spec.WorkerGroups = []temporaliov1alpha1.WorkerGroup{
+		{Name: "managed", Deployment: managed, DrainingDeployment: draining},
+		{Name: "autoscaled", Deployment: autoscaled, DrainingDeployment: draining},
+	}
+	dep.Spec.Deployment = nil
+
+	warns, err := (&temporaliov1alpha1.WorkerDeployment{}).ValidateCreate(context.Background(), dep)
+
+	require.NoError(t, err)
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "spec.workerGroups[1].drainingDeployment.replicas is ignored because spec.workerGroups[1].deployment.replicas is not set")
 }
