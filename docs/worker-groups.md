@@ -150,7 +150,7 @@ With `unsafeCustomBuildID` set and unchanged:
 
 ## Limits
 
-- 1 to 10 groups.
+- At least 1 group.
 - Group names are DNS labels of at most 24 characters, so the 47-character Deployment name keeps room for the `WorkerDeployment` name and Build ID. `default` is reserved.
 - `spec.workerGroups` can't be combined with `spec.deployment` or the deprecated `spec.template` fields.
 

@@ -138,7 +138,6 @@ type WorkerDeploymentSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=10
 	WorkerGroups []WorkerGroup `json:"workerGroups,omitempty"`
 
 	// How to rollout new workflow executions to the target version.

@@ -11753,7 +11753,6 @@ spec:
                   - deployment
                   - name
                   type: object
-                maxItems: 10
                 minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:

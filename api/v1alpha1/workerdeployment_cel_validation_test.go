@@ -364,16 +364,6 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err.Error()).To(ContainSubstring("Duplicate value"))
 	})
 
-	It("rejects more than 10 groups", func() {
-		twd := groupedTWD("group-too-many")
-		for i := range 11 {
-			twd.Spec.WorkerGroups = append(twd.Spec.WorkerGroups, group(fmt.Sprintf("group-%d", i)))
-		}
-		err := k8sClient.Create(ctx, twd)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("must have at most 10 items"))
-	})
-
 	It("rejects a group name that is not a DNS label", func() {
 		err := k8sClient.Create(ctx, groupedTWD("group-bad-name", group("Activities_1")))
 		Expect(err).To(HaveOccurred())
