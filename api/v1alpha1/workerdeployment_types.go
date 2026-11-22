@@ -155,6 +155,8 @@ type WorkerDeploymentSpec struct {
 // every version of a WorkerDeployment.
 type WorkerGroup struct {
 	// Name identifies the group. "default" is reserved for WorkerDeployments without groups.
+	// It is at most 24 characters so that the group's Deployment name, which is cut to 47
+	// characters, keeps room for the WorkerDeployment name and Build ID.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=24
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
@@ -477,11 +479,13 @@ type BaseWorkerDeploymentVersion struct {
 	// be eligible to receive tasks from the Temporal server.
 	Status VersionStatus `json:"status"`
 
-	// Healthy indicates whether the deployment version is healthy.
+	// HealthySince is when the version's Deployment became available. In a version
+	// with worker groups, it is when the last group's Deployment became available.
 	// +optional
 	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 
-	// A pointer to the version's managed k8s deployment.
+	// A pointer to the version's managed k8s deployment. Unset in a version with
+	// worker groups, which lists each group's Deployment in workerGroups instead.
 	// +optional
 	Deployment *corev1.ObjectReference `json:"deployment,omitempty"`
 
