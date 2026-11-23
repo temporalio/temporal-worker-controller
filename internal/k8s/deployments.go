@@ -563,6 +563,9 @@ func ApplyControllerPodSpecModifications(
 			podSpec.Containers[i] = container
 		}
 		podSpec.Volumes = append(podSpec.Volumes, ServiceAccountTokenVolume(connection.ServiceAccountToken))
+	case temporaliov1alpha1.AuthModeNoCredentials:
+		// No credential env var or volume. Address, namespace, and an optional
+		// private CA are applied around this switch.
 	}
 
 	// Trust a private CA for API-key, service account token, or no-credentials auth.
