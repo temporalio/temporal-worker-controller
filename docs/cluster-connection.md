@@ -63,7 +63,7 @@ spec:
 
 ## Where the secrets live
 
-A `ClusterConnection` has no Namespace, but the Secrets it references to. **Every Secret named in a `ClusterConnection` is looked up in the Namespace of the `WorkerDeployment` that uses it.** That covers `mutualTLSSecretRef`, `apiKeySecretRef` and `tls.caCertSecretRef`.
+A `ClusterConnection` has no Namespace, but the Secrets it references do. **Every Secret named in a `ClusterConnection` is looked up in the Namespace of the `WorkerDeployment` that uses it.** That covers `mutualTLSSecretRef`, `apiKeySecretRef` and `tls.caCertSecretRef`. `serviceAccountToken` does not use a Secret. Each worker pod gets a projected token for its own ServiceAccount, and the controller reads the token file on its own pod.
 
 So for the example above, every Namespace with a `WorkerDeployment` that uses `production-temporal` needs its own `temporal-api-key` Secret with an `api-key` key.
 

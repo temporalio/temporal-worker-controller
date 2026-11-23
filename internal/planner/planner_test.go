@@ -3197,6 +3197,74 @@ func TestUpdateDeploymentWithConnection_AuthModeTransitions(t *testing.T) {
 		assert.True(t, hasMount(c, "temporal-tls-ca"))
 	})
 
+	saTokenConn := func(host, audience string, expiration int64) temporaliov1alpha1.ConnectionSpec {
+		spec := temporaliov1alpha1.ConnectionSpec{
+			HostPort:            host,
+			ServiceAccountToken: &temporaliov1alpha1.ServiceAccountTokenAuth{Audience: audience},
+		}
+		if expiration != 0 {
+			spec.ServiceAccountToken.ExpirationSeconds = &expiration
+		}
+		return spec
+	}
+	saTokenAudience := func(d *appsv1.Deployment) string {
+		for _, v := range d.Spec.Template.Spec.Volumes {
+			if v.Name == "temporal-sa-token" && v.Projected != nil && len(v.Projected.Sources) == 1 && v.Projected.Sources[0].ServiceAccountToken != nil {
+				return v.Projected.Sources[0].ServiceAccountToken.Audience
+			}
+		}
+		return ""
+	}
+
+	t.Run("API key to service account token", func(t *testing.T) {
+		res := run(apiKeyConn(defaultHostPort(), "api-secret", "key"), saTokenConn("sa-host:7233", "temporal", 3600), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_API_KEY_FILE")
+		require.True(t, ok, "TEMPORAL_API_KEY_FILE must be present")
+		assert.Equal(t, "/var/run/secrets/temporal.io/serviceaccount/token", e.Value)
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.False(t, ok, "TEMPORAL_API_KEY must be removed")
+		e, ok = getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok)
+		assert.Equal(t, "true", e.Value)
+		assert.True(t, hasVolume(res, "temporal-sa-token"))
+		assert.Equal(t, "temporal", saTokenAudience(res))
+		assert.True(t, hasMount(c, "temporal-sa-token"))
+		assert.False(t, hasVolume(res, "temporal-tls"))
+		assert.Equal(t, "v1-image:pinned", c.Image)
+	})
+
+	t.Run("service account token to mTLS", func(t *testing.T) {
+		res := run(saTokenConn(defaultHostPort(), "temporal", 0), mtlsConn("mtls-host:7233", "tls-secret"), "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+
+		assert.True(t, hasVolume(res, "temporal-tls"))
+		assert.Equal(t, "tls-secret", tlsSecretName(res))
+		_, ok := getEnv(c, "TEMPORAL_API_KEY_FILE")
+		assert.False(t, ok, "TEMPORAL_API_KEY_FILE must be removed")
+		assert.False(t, hasVolume(res, "temporal-sa-token"))
+		assert.False(t, hasMount(c, "temporal-sa-token"))
+	})
+
+	t.Run("service account token audience change updates the projected volume", func(t *testing.T) {
+		res := run(saTokenConn(defaultHostPort(), "temporal", 3600), saTokenConn(defaultHostPort(), "other-aud", 7200), "v1-image:pinned")
+		assert.Equal(t, "other-aud", saTokenAudience(res))
+		_, ok := getEnv(res.Spec.Template.Spec.Containers[0], "TEMPORAL_API_KEY_FILE")
+		assert.True(t, ok)
+	})
+
+	t.Run("service account token to no credentials removes the token volume", func(t *testing.T) {
+		res := run(saTokenConn(defaultHostPort(), "temporal", 3600), temporaliov1alpha1.ConnectionSpec{HostPort: defaultHostPort()}, "v1-image:pinned")
+		c := res.Spec.Template.Spec.Containers[0]
+		_, ok := getEnv(c, "TEMPORAL_API_KEY_FILE")
+		assert.False(t, ok)
+		_, ok = getEnv(c, "TEMPORAL_TLS")
+		assert.False(t, ok)
+		assert.False(t, hasVolume(res, "temporal-sa-token"))
+		assert.False(t, hasMount(c, "temporal-sa-token"))
+	})
+
 	t.Run("mTLS to CA cert (auth mode switch)", func(t *testing.T) {
 		res := run(mtlsConn(defaultHostPort(), defaultMutualTLSSecret()), caCertConn("private-ca-host:7233", "api-secret", "ca-secret"), "v1-image:pinned")
 		c := res.Spec.Template.Spec.Containers[0]

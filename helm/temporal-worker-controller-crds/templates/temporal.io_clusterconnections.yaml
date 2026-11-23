@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: clusterconnections.temporal.io
 spec:
   group: temporal.io
@@ -59,6 +59,20 @@ spec:
                 required:
                 - name
                 type: object
+              serviceAccountToken:
+                properties:
+                  audience:
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                  expirationSeconds:
+                    format: int64
+                    maximum: 31536000
+                    minimum: 600
+                    type: integer
+                required:
+                - audience
+                type: object
               tls:
                 properties:
                   caCertSecretRef:
@@ -79,6 +93,11 @@ spec:
             x-kubernetes-validations:
             - message: Only one of mutualTLSSecretRef or apiKeySecretRef may be set
               rule: '!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))'
+            - message: Only one of mutualTLSSecretRef or serviceAccountToken may be
+                set
+              rule: '!(has(self.mutualTLSSecretRef) && has(self.serviceAccountToken))'
+            - message: Only one of apiKeySecretRef or serviceAccountToken may be set
+              rule: '!(has(self.apiKeySecretRef) && has(self.serviceAccountToken))'
             - message: tls.caCertSecretRef cannot be combined with mutualTLSSecretRef;
                 bundle the CA into that secret's own ca.crt key instead
               rule: '!(has(self.mutualTLSSecretRef) && has(self.tls) && has(self.tls.caCertSecretRef))'

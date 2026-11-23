@@ -170,7 +170,7 @@ workerOptions:
 
 ### Connection Configuration
 
-Reference a `Connection` resource that defines server details. To share one connection definition across namespaces, use a [`ClusterConnection`](cluster-connection.md) instead; it takes the same `spec`. You can use either mutual TLS (mTLS) or API key authentication, but not both.
+Reference a `Connection` resource that defines server details. To share one connection definition across namespaces, use a [`ClusterConnection`](cluster-connection.md) instead; it takes the same `spec`. You can use mutual TLS (mTLS), an API key, or a Kubernetes ServiceAccount token, but only one of those.
 If the address in `hostPort` differs from the hostname on the server certificate, set `tls.serverName` to the certificate hostname. `hostPort` accepts a host:port (e.g. `production.abc123.tmprl.cloud:7233`) or a gRPC resolver target URI (e.g. `dns:///production.abc123.tmprl.cloud:7233`, `xds://example.dest`).
 
 **Using mTLS Authentication:**
@@ -315,11 +315,60 @@ echo -n "your-api-key-token-here" | base64
 
 **Important Notes:**
 - Both secrets must be created in the same Kubernetes namespace as the `Connection` resource
-- Only one authentication method can be specified per `Connection` (either `mutualTLSSecretRef` or `apiKeySecretRef`)
+- Only one authentication method can be specified per `Connection` (`mutualTLSSecretRef`, `apiKeySecretRef`, or `serviceAccountToken`)
 - The secret name and key in `apiKeySecretRef` must match the actual Secret resource and data key
 - `tls.serverName` affects TLS certificate verification by the controller and is injected into Worker Pods as `TEMPORAL_TLS_SERVER_NAME` for SDK envconfig users.
 - For mTLS secrets, the keys must be named exactly `tls.crt` and `tls.key`
-- `tls.caCertSecretRef` trusts an extra CA for API-key or no-credentials connections (mTLS already covers this via its own secret's `ca.crt` key, and cannot be combined with `tls.caCertSecretRef`). The referenced Secret must have a `ca.crt` key.
+- `tls.caCertSecretRef` trusts an extra CA for API-key, service account token, or no-credentials connections (mTLS already covers this via its own secret's `ca.crt` key, and cannot be combined with `tls.caCertSecretRef`). The referenced Secret must have a `ca.crt` key.
+
+**Using a Kubernetes ServiceAccount token:**
+
+For self-hosted Temporal that validates Kubernetes ServiceAccount JWTs with a ClaimMapper. Temporal Cloud does not accept these tokens. There is no `authMode` field: setting `serviceAccountToken` selects this mode, the same way `apiKeySecretRef` selects API key auth.
+
+```yaml
+apiVersion: temporal.io/v1alpha1
+kind: Connection
+metadata:
+  name: production-temporal
+spec:
+  hostPort: "temporal-frontend.temporal-system:7233"
+  tls:
+    # Optional. Trust a private CA, or set serverName when the certificate
+    # hostname differs from hostPort.
+    serverName: "temporal-frontend.temporal-system"
+  serviceAccountToken:
+    audience: temporal          # ClaimMapper audience
+    expirationSeconds: 3600     # Optional. Defaults to 3600. Minimum 600.
+```
+
+Worker pods get:
+
+- a projected `serviceAccountToken` volume for the pod's own ServiceAccount (`audience` and `expirationSeconds` from the spec)
+- a mount at `/var/run/secrets/temporal.io/serviceaccount`
+- `TEMPORAL_API_KEY_FILE=/var/run/secrets/temporal.io/serviceaccount/token`
+- `TEMPORAL_TLS=true`
+
+Kubelet refreshes the file. Set `serviceAccountName` on the worker pod template when the namespace default ServiceAccount is not the one Temporal should see. The Go SDK envconfig package does not read `TEMPORAL_API_KEY_FILE`. Workers re-read the file on each RPC:
+
+```go
+creds := client.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
+    b, err := os.ReadFile(os.Getenv("TEMPORAL_API_KEY_FILE"))
+    if err != nil {
+        return "", err
+    }
+    return strings.TrimSpace(string(b)), nil
+})
+```
+
+The controller uses its own pod token, not the worker token. By default that file is `/var/run/secrets/kubernetes.io/serviceaccount/token`, whose audience is the Kubernetes API server. When Temporal expects a different audience, project a token onto the controller and pass `--service-account-token-path`. The Helm chart does this when `serviceAccountToken.audience` is set:
+
+```yaml
+serviceAccountToken:
+  audience: temporal
+  expirationSeconds: 3600
+```
+
+The controller re-reads that file on every RPC, so rotation does not require a reconnect. A multi-cluster Temporal deployment must trust each cluster's OIDC issuer. An external process can also keep a JWT file fresh at `--service-account-token-path` (for example an AWS STS or Entra token); worker pods still receive a Kubernetes ServiceAccount token, not that file.
 
 **Using Custom Authentication:**
 
@@ -368,7 +417,7 @@ spec:
 ```
 
 **Important Notes:**
-- Custom auth is derived from the absence of `mutualTLSSecretRef` and `apiKeySecretRef`; there is no `customAuth` field on the `Connection` CRD.
+- Custom auth is derived from the absence of `mutualTLSSecretRef`, `apiKeySecretRef`, and `serviceAccountToken`; there is no `customAuth` field on the `Connection` CRD.
 - `WithCreateClient` and `WithDefaultClient` are mutually exclusive.
 - With `WithCustomizeClientOptions` (inside `WithDefaultClient`), the wrapper should wrap, not replace, the pool's `HeadersProvider` so the `temporal-namespace` header continues to ride every RPC (including system-level RPCs like `GetSystemInfo`).
 - The pool owns the client cache and eviction in both cases. Creation success is determined by the `CreateClientFunc`'s error return — if it returns an error, the client is never cached. On a cache hit, the pool calls the cached client's `IsValid` closure; returning false triggers eviction and re-dial (the built-in path uses this for mTLS cert-expiry invalidation). On transport-class failures the reconciler evicts the cached client as usual so the next reconcile re-dials.

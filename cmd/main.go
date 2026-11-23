@@ -52,6 +52,7 @@ func main() {
 	var webhookCertName string
 	var webhookKeyName string
 	wrtHPAMatchLabelsStripTemporalPrefix := config.GetWRTHPAMatchLabelsStripTemporalPrefix()
+	var serviceAccountTokenPath string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -74,6 +75,10 @@ func main() {
 		wrtHPAMatchLabelsStripTemporalPrefix,
 		"Remove the temporal_ prefix from auto-injected WorkerResourceTemplate HPA external metric matchLabels.",
 	)
+	flag.StringVar(&serviceAccountTokenPath, "service-account-token-path", controller.DefaultServiceAccountTokenPath,
+		"File re-read on each RPC when a Connection uses spec.serviceAccountToken. "+
+			"Defaults to the pod's projected ServiceAccount token. Mount a token with the Temporal audience "+
+			"and set this flag when that default audience is not accepted.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -170,6 +175,7 @@ func main() {
 		controller.WithDisableDeprecatedTWD(!deprecatedCRDWatches.TemporalWorkerDeployments),
 		controller.WithDisableClusterConnections(namespaceScoped),
 		controller.WithWRTHPAMatchLabelsStripTemporalPrefix(wrtHPAMatchLabelsStripTemporalPrefix),
+		controller.WithServiceAccountTokenPath(serviceAccountTokenPath),
 	)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")

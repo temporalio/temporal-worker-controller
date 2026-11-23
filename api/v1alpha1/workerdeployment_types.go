@@ -233,11 +233,12 @@ const (
 	// ClusterConnection is cluster-scoped, so such a controller can never read it.
 	ReasonClusterConnectionUnsupported = "ClusterConnectionUnsupported"
 
-	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the credential
-	// secret referenced by the Connection is misconfigured. This covers:
+	// ReasonAuthSecretInvalid is set on ConditionProgressing=False when the Connection
+	// credentials are misconfigured. This covers:
 	// (1) the secret reference has an empty name, (2) the named Kubernetes Secret
-	// cannot be fetched or has an unexpected type, and (3) the mTLS certificate in
-	// the secret is expired or about to expire.
+	// cannot be fetched or has an unexpected type, (3) the mTLS certificate in
+	// the secret is expired or about to expire, and (4) a serviceAccountToken
+	// audience is missing or the controller's token file is missing or empty.
 	ReasonAuthSecretInvalid = "AuthSecretInvalid"
 
 	// ReasonTemporalClientCreationFailed is set on ConditionProgressing=False when the

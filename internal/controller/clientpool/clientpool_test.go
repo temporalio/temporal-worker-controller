@@ -15,6 +15,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -520,6 +522,86 @@ func TestFetchAPIKey_CredentialClosureReadsLiveSecret(t *testing.T) {
 	token, err = cp.fetchAPIKeyFromSecret(context.Background(), "api-key-secret", "test-ns", "apikey")
 	require.NoError(t, err)
 	assert.Equal(t, "rotated-key", token)
+}
+
+func TestFetchServiceAccountToken_ReadsAndRotatesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(path, []byte(" first-token \n"), 0o600))
+
+	cp := newTestPool()
+	cp.ServiceAccountTokenPath = path
+
+	token, err := cp.fetchServiceAccountToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "first-token", token)
+
+	require.NoError(t, os.WriteFile(path, []byte("second-token"), 0o600))
+	token, err = cp.fetchServiceAccountToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "second-token", token)
+}
+
+func TestFetchServiceAccountToken_MissingOrEmptyFile(t *testing.T) {
+	cp := newTestPool()
+	cp.ServiceAccountTokenPath = filepath.Join(t.TempDir(), "missing")
+	_, err := cp.fetchClientUsingServiceAccountToken(temporaliov1alpha1.ConnectionSpec{
+		HostPort:            "localhost:7233",
+		ServiceAccountToken: &temporaliov1alpha1.ServiceAccountTokenAuth{Audience: "temporal"},
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read service account token file")
+
+	path := filepath.Join(t.TempDir(), "empty")
+	require.NoError(t, os.WriteFile(path, []byte(" \n"), 0o600))
+	cp.ServiceAccountTokenPath = path
+	_, err = cp.fetchServiceAccountToken(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty")
+}
+
+func TestFetchServiceAccountToken_SetsCredentialsAndTLS(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(path, []byte("sa-token"), 0o600))
+	cp := newTestPool()
+	cp.ServiceAccountTokenPath = path
+
+	a, err := cp.fetchClientUsingServiceAccountToken(temporaliov1alpha1.ConnectionSpec{
+		HostPort: "localhost:7233",
+		TLS:      &temporaliov1alpha1.ConnectionTLSConfig{ServerName: "temporal.internal"},
+		ServiceAccountToken: &temporaliov1alpha1.ServiceAccountTokenAuth{
+			Audience: "temporal",
+		},
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, temporaliov1alpha1.AuthModeServiceAccountToken, a.mode)
+	assert.NotNil(t, a.credentials)
+	require.NotNil(t, a.tls)
+	assert.Equal(t, "temporal.internal", a.tls.ServerName)
+	assert.Nil(t, a.tls.RootCAs)
+}
+
+func TestServiceAccountToken_SkipsCheckHealth(t *testing.T) {
+	mock := &mockSDKClient{}
+	cp := newTestPool()
+	auth := clientAuth{mode: temporaliov1alpha1.AuthModeServiceAccountToken}
+	require.NoError(t, cp.healthCheck(mock, auth))
+	assert.False(t, mock.checkHealthCalled)
+}
+
+func TestConnectionSpec_ServiceAccountTokenValidate(t *testing.T) {
+	spec := temporaliov1alpha1.ConnectionSpec{
+		HostPort:            "localhost:7233",
+		ServiceAccountToken: &temporaliov1alpha1.ServiceAccountTokenAuth{},
+	}
+	require.Error(t, spec.Validate())
+	assert.Equal(t, temporaliov1alpha1.AuthModeServiceAccountToken, spec.AuthMode())
+
+	spec.ServiceAccountToken.Audience = "temporal"
+	require.NoError(t, spec.Validate())
+
+	tooSmall := int64(10)
+	spec.ServiceAccountToken.ExpirationSeconds = &tooSmall
+	require.Error(t, spec.Validate())
 }
 
 // ─── Tests: ParseClientSecret ─────────────────────────────────────────────────
