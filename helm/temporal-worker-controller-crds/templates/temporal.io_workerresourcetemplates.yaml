@@ -72,6 +72,18 @@ spec:
                 required:
                 - name
                 type: object
+              workerGroups:
+                items:
+                  maxLength: 24
+                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                  type: string
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
+                x-kubernetes-validations:
+                - message: group name default is reserved; leave workerGroups unset
+                    to target a WorkerDeployment without groups
+                  rule: '!self.exists(g, g == ''default'')'
             required:
             - template
             type: object
@@ -143,6 +155,8 @@ spec:
                       format: date-time
                       type: string
                     resourceName:
+                      type: string
+                    workerGroup:
                       type: string
                   required:
                   - buildID

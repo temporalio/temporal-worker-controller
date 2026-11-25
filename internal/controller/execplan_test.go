@@ -215,8 +215,8 @@ func TestExecutePlan_SunsetThenRedeploySameBuildID_ReappliesWorkerResource(t *te
 	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
 	hpaB, hashB := renderWRT(t, wrt, depB, buildB, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, hpaB.GetName(), 1, hashB, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, "", hpaA.GetName(), 1, hashA, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, "", hpaB.GetName(), 1, hashB, ""),
 	}
 
 	r, _ := newTestReconciler([]client.Object{twd, depA, depB, wrt, hpaA, hpaB})
@@ -288,8 +288,8 @@ func TestExecutePlan_WRTResourceDeleteFailure_RetriedNextCycle(t *testing.T) {
 	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
 	hpaB, hashB := renderWRT(t, wrt, depB, buildB, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, hpaB.GetName(), 1, hashB, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, "", hpaA.GetName(), 1, hashA, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, "", hpaB.GetName(), 1, hashB, ""),
 	}
 
 	// Fail deletes of rendered HPA copies while failHPADeletes is true; Deployment
@@ -359,7 +359,7 @@ func TestExecutePlan_AllAppliesSkippedWithoutDeletes_SkipsStatusWrite(t *testing
 
 	hpaB, hashB := renderWRT(t, wrt, depB, buildB, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, hpaB.GetName(), 1, hashB, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildB, "", hpaB.GetName(), 1, hashB, ""),
 	}
 
 	r, _ := newTestReconciler([]client.Object{twd, depB, wrt, hpaB})
@@ -598,7 +598,7 @@ func TestExecutePlan_LaterStepFails_StillPrunesDeletedCopyEntries(t *testing.T) 
 	wrt := makeExecplanWRT("my-hpa", twd)
 	hpaA, hashA := renderWRT(t, wrt, depA, buildA, testTemporalNamespace)
 	wrt.Status.Versions = []temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
-		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, hpaA.GetName(), 1, hashA, ""),
+		k8s.WorkerResourceTemplateVersionStatusForBuildID(buildA, "", hpaA.GetName(), 1, hashA, ""),
 	}
 
 	r, _ := newTestReconcilerWithInterceptors([]client.Object{twd, depA, depB, wrt, hpaA}, interceptor.Funcs{
@@ -788,6 +788,35 @@ func TestExecutePlan_VersionAlreadyDeletedOnServer_DeletesDeployment(t *testing.
 	require.Equal(t, []string{buildA}, handle.deletedVersions)
 	require.Len(t, p.DeleteDeployments, 1)
 	require.False(t, deploymentExists(t, r, namespace, depA.Name))
+}
+
+func TestExecutePlan_DrainedMultiGroupVersion_DeletesVersionOnceAndEveryGroup(t *testing.T) {
+	const (
+		namespace = "default"
+		buildA    = "build-a"
+		buildB    = "build-b"
+	)
+	connection := temporaliov1alpha1.ConnectionSpec{HostPort: "test:7233"}
+	twd := makeExecplanTWD("my-worker", namespace)
+	depA := makeVersionedDeployment(twd, buildA, 0, connection)
+	depA.Labels[k8s.WorkerGroupLabel] = temporaliov1alpha1.DefaultWorkerGroupName
+	depAActivities := makeVersionedDeployment(twd, buildA, 0, connection)
+	depAActivities.Name += "-activities"
+	depAActivities.Labels[k8s.WorkerGroupLabel] = "activities"
+	depB := makeVersionedDeployment(twd, buildB, 1, connection)
+	r, _ := newTestReconciler([]client.Object{twd, depA, depAActivities, depB})
+
+	handle := newPruneStubHandle(nil)
+	tc := newStubTemporalClientWithHandle(handle)
+
+	drainedSince := metav1.NewTime(time.Now().Add(-time.Hour))
+	status := statusWithDeprecated(buildB, depB, drainedVersion(buildA, depA, drainedSince))
+
+	p := runPlanCycleWith(t, r, twd, connection, status, tc)
+	require.Equal(t, []string{buildA}, handle.deletedVersions)
+	require.Len(t, p.DeleteDeployments, 2)
+	require.False(t, deploymentExists(t, r, namespace, depA.Name))
+	require.False(t, deploymentExists(t, r, namespace, depAActivities.Name))
 }
 
 // ─── gateWorkflowArg tests ───────────────────────────────────────────────────

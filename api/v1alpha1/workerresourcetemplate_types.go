@@ -30,6 +30,18 @@ type WorkerResourceTemplateSpec struct {
 	// +optional
 	TemporalWorkerDeploymentRef *WorkerDeploymentReference `json:"temporalWorkerDeploymentRef,omitempty"`
 
+	// WorkerGroups limits the template to the Deployments of these worker groups. The
+	// controller renders a copy for each listed group's Deployment in every version, and
+	// deletes the copies of a group that is removed from the list. Unset means every
+	// group, and the single Deployment of a WorkerDeployment without groups.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MaxLength=24
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="!self.exists(g, g == 'default')",message="group name default is reserved; leave workerGroups unset to target a WorkerDeployment without groups"
+	WorkerGroups []string `json:"workerGroups,omitempty"`
+
 	// VersionStatuses limits the template to versions with one of these statuses.
 	// The controller does not render a copy for a version with another status, and
 	// deletes the copy of a version that changes to an unlisted status. Unset means
@@ -90,12 +102,20 @@ const (
 	ReasonWRTApplyFailed = "ApplyFailed"
 	// ReasonWRTWDNotFound is the condition reason when the referenced WorkerDeployment does not exist.
 	ReasonWRTWDNotFound = "WorkerDeploymentNotFound"
+	// ReasonWRTWorkerGroupNotFound is the condition reason when no version of the WorkerDeployment has
+	// the referenced group and its spec does not declare it.
+	ReasonWRTWorkerGroupNotFound = "WorkerGroupNotFound"
 )
 
 // WorkerResourceTemplateVersionStatus describes the per-Build-ID apply status of a WorkerResourceTemplate.
 type WorkerResourceTemplateVersionStatus struct {
 	// BuildID is the Build ID of the versioned Deployment this entry refers to.
 	BuildID string `json:"buildID"`
+
+	// WorkerGroup is the worker group of the versioned Deployment this entry refers to.
+	// It is empty for a WorkerDeployment without groups.
+	// +optional
+	WorkerGroup string `json:"workerGroup,omitempty"`
 
 	// ResourceName is the name of the applied Kubernetes resource.
 	// +optional
@@ -192,6 +212,12 @@ func (s *WorkerResourceTemplateSpec) EffectiveWorkerDeploymentName() string {
 		return s.TemporalWorkerDeploymentRef.Name
 	}
 	return ""
+}
+
+// SelectsWorkerGroup reports whether the template applies to the Deployments of the given
+// worker group. An unset WorkerGroups selects every group.
+func (s *WorkerResourceTemplateSpec) SelectsWorkerGroup(group string) bool {
+	return len(s.WorkerGroups) == 0 || slices.Contains(s.WorkerGroups, group)
 }
 
 // SelectsVersionStatus reports whether the template applies to a version with the

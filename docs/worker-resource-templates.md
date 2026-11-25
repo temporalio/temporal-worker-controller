@@ -28,7 +28,7 @@ The controller auto-injects the fields below when you set them to `{}` (empty ob
 |-------|-------|-----------------------------------------------------------------------------------------------------------------------------|
 | `scaleTargetRef` | Anywhere in `spec` (recursive) | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
 | `spec.targetRef` | Only at this exact path | `{apiVersion: apps/v1, kind: Deployment, name: <versioned-deployment-name>}`                                                |
-| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`                                                  |
+| `spec.selector.matchLabels` | Only at this exact path | `{temporal.io/build-id: <buildID>, temporal.io/deployment-name: <wdName>}`, plus `temporal.io/worker-group: <group>` for versions with worker groups |
 | `spec.metrics[*].external.metric.selector.matchLabels` | Each External metric entry where `matchLabels` is present | `{temporal_worker_deployment_name: <ns>_<wd-name>, temporal_worker_build_id: <buildID>, temporal_namespace: <temporal-ns>}` |
 
 `scaleTargetRef` injection is recursive and covers HPAs, WPAs, and other autoscaler CRDs.
@@ -58,6 +58,23 @@ The values are the same ones appended to `spec.metrics[*].external.metric.select
 When `workerResourceTemplate.hpaMatchLabelsStripTemporalPrefix` is enabled, the tokens are `{{worker_deployment_name}}`, `{{worker_build_id}}`, and `{{namespace}}`, matching the injected matchLabels.
 
 Use the tokens in KEDA triggers whose query is a single string (`prometheus`, `datadog`, `dynatrace`, and others) so each ScaledObject filters metrics to one worker version. See [examples/wrt-keda-prometheus.yaml](../examples/wrt-keda-prometheus.yaml).
+
+## Worker groups
+
+For a `WorkerDeployment` with [Worker Groups](worker-groups.md), a `WorkerResourceTemplate` renders a copy for each group's Deployment in every version. Each copy points at its own group's Deployment and selects only that group's pods. Set `spec.workerGroups` to limit the template to the listed groups:
+
+```yaml
+spec:
+  workerDeploymentRef:
+    name: documents
+  workerGroups: [parse, extract]
+```
+
+Leave `spec.workerGroups` unset to cover every group. This also covers a `WorkerDeployment` without groups, so a template keeps working when its `WorkerDeployment` moves to groups. `default` can't be listed.
+
+Removing a group from the list deletes that group's copies. Each copy has its own entry in `status.versions`, with `workerGroup` set. If a listed group isn't declared by the `WorkerDeployment` and no version has it, the `Ready` condition is `False` with reason `WorkerGroupNotFound`, and the message names the group. The webhook warns about it too.
+
+Backlog metrics are tagged with the deployment name and Build ID, not the group. Add `task_queue` to `matchLabels` so each group scales on its own queue.
 
 ## Selecting versions by status
 

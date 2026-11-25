@@ -25,6 +25,23 @@ func expectedWorkerResourceTemplateName(twdName, wrtName, buildID string) string
 	return prefix + "-" + hashSuffix
 }
 
+func TestComputeWorkerResourceTemplateGroupName(t *testing.T) {
+	plain := ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-a")
+	assert.Equal(t, plain, ComputeWorkerResourceTemplateGroupName("my-worker", "my-hpa", temporaliov1alpha1.DefaultWorkerGroupName, "build-a"),
+		"templates of WorkerDeployments without groups keep their copies")
+	assert.Equal(t, plain, ComputeWorkerResourceTemplateGroupName("my-worker", "my-hpa", "", "build-a"))
+
+	workflows := ComputeWorkerResourceTemplateGroupName("my-worker", "my-hpa", "workflows", "build-a")
+	activities := ComputeWorkerResourceTemplateGroupName("my-worker", "my-hpa", "activities", "build-a")
+	assert.True(t, strings.HasPrefix(workflows, "my-worker-my-hpa-workflows-build-a-"), workflows)
+	assert.NotEqual(t, workflows, activities)
+	assert.NotEqual(t, plain, workflows)
+
+	long := ComputeWorkerResourceTemplateGroupName(strings.Repeat("w", 40), strings.Repeat("r", 40), strings.Repeat("g", 24), "build-a")
+	assert.LessOrEqual(t, len(long), 47)
+	assert.NotEqual(t, long, ComputeWorkerResourceTemplateGroupName(strings.Repeat("w", 40), strings.Repeat("r", 40), strings.Repeat("g", 24), "build-b"))
+}
+
 func TestComputeWorkerResourceTemplateName(t *testing.T) {
 	t.Run("short names produce human-readable result with hash suffix", func(t *testing.T) {
 		got := ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "image-abc123")

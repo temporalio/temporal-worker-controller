@@ -84,6 +84,9 @@ func (r *WorkerDeployment) validateForUpdateOrCreate(ctx context.Context, obj ru
 func validateForUpdateOrCreate(dep *WorkerDeployment) (admission.Warnings, error) {
 	allErrs := validateRolloutStrategy(dep.Spec.RolloutStrategy)
 	allErrs = append(allErrs, metav1validation.ValidateLabels(dep.Spec.DeploymentLabels, field.NewPath("spec.deploymentLabels"))...)
+	for i, group := range dep.Spec.WorkerGroups {
+		allErrs = append(allErrs, metav1validation.ValidateLabels(group.DeploymentLabels, field.NewPath("spec.workerGroups").Index(i).Child("deploymentLabels"))...)
+	}
 	if len(allErrs) > 0 {
 		return nil, newInvalidErr(dep, allErrs)
 	}
@@ -161,15 +164,24 @@ func validateRolloutStrategy(s RolloutStrategy) []*field.Error {
 // validateDeploymentSpec examines the supplied WorkerDeploymentSpec structs
 // and returns any warnings about using the deprecated replicas,
 // minReadySeconds and ProgressDeadlineSeconds fields instead of the
-// WorkerDeploymentSpec.Deployment struct field, and about
+// WorkerDeploymentSpec.Deployment struct field, or alongside worker groups,
+// which ignore them, about group selectors the controller ignores, and about
 // drainingDeployment.replicas being ignored while an autoscaler manages
 // replicas.
 func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
 	var warns admission.Warnings
-	if spec.DrainingDeployment != nil && spec.DrainingDeployment.Replicas != nil && spec.DeploymentSpec().Replicas == nil {
+	if !spec.HasWorkerGroups() && spec.DrainingDeployment != nil && spec.DrainingDeployment.Replicas != nil && spec.DeploymentSpec().Replicas == nil {
 		warns = append(warns, "spec.drainingDeployment.replicas is ignored because spec.deployment.replicas is not set; an autoscaler manages replicas")
 	}
-	if spec.Deployment == nil {
+	if spec.HasWorkerGroups() {
+		// progressDeadlineSeconds isn't checked: the CRD defaults it on every spec.
+		if spec.MinReadySeconds > 0 {
+			warns = append(warns, "spec.minReadySeconds is ignored with spec.workerGroups; set deployment.minReadySeconds on each worker group instead")
+		}
+		if spec.Replicas != nil {
+			warns = append(warns, "spec.replicas is ignored with spec.workerGroups; set deployment.replicas on each worker group instead")
+		}
+	} else if spec.Deployment == nil {
 		if spec.MinReadySeconds > 0 {
 			warns = append(warns, "spec.minReadySeconds is deprecated; use spec.deployment.minReadySeconds instead")
 		}
@@ -178,6 +190,14 @@ func validateDeploymentSpec(spec WorkerDeploymentSpec) admission.Warnings {
 		}
 		if spec.Replicas != nil {
 			warns = append(warns, "spec.replicas is deprecated; use spec.deployment.replicas instead")
+		}
+	}
+	for i, group := range spec.WorkerGroups {
+		if group.Deployment.Selector != nil {
+			warns = append(warns, fmt.Sprintf("spec.workerGroups[%d].deployment.selector is ignored; the controller computes each group's selector", i))
+		}
+		if group.DrainingDeployment != nil && group.DrainingDeployment.Replicas != nil && group.Deployment.Replicas == nil {
+			warns = append(warns, fmt.Sprintf("spec.workerGroups[%d].drainingDeployment.replicas is ignored because spec.workerGroups[%d].deployment.replicas is not set; an autoscaler manages replicas", i, i))
 		}
 	}
 	return warns

@@ -52,19 +52,47 @@ const (
 // prefix is truncated. The buildID is therefore always uniquely represented via the hash,
 // regardless of how long wdName or wrtName are.
 func ComputeWorkerResourceTemplateName(wdName, wrtName, buildID string) string {
-	// Hash the full triple first, before any truncation.
-	h := sha256.Sum256([]byte(wdName + wrtName + buildID))
-	hashSuffix := hex.EncodeToString(h[:workerResourceTemplateHashLen/2]) // 4 bytes → 8 hex chars
+	return hashSuffixedName(wdName+wrtName+buildID, wdName+ResourceNameSeparator+wrtName+ResourceNameSeparator+buildID)
+}
 
-	// Build the human-readable prefix and truncate so the total fits in maxLen.
-	// suffixLen = len("-") + workerResourceTemplateHashLen
-	const suffixLen = 1 + workerResourceTemplateHashLen
-	raw := CleanStringForDNS(wdName + ResourceNameSeparator + wrtName + ResourceNameSeparator + buildID)
-	prefix := TruncateString(raw, workerResourceTemplateMaxNameLen-suffixLen)
+// ComputeWorkerResourceTemplateGroupName names the copy of a worker resource template for one
+// worker group's Deployment in a version. The default group keeps the name from
+// ComputeWorkerResourceTemplateName, so templates of WorkerDeployments without groups keep
+// their copies.
+func ComputeWorkerResourceTemplateGroupName(wdName, wrtName, group, buildID string) string {
+	if group == "" || group == temporaliov1alpha1.DefaultWorkerGroupName {
+		return ComputeWorkerResourceTemplateName(wdName, wrtName, buildID)
+	}
+	return hashSuffixedName(
+		wdName+WorkerDeploymentNameSeparator+wrtName+WorkerDeploymentNameSeparator+group+WorkerDeploymentNameSeparator+buildID,
+		wdName+ResourceNameSeparator+wrtName+ResourceNameSeparator+group+ResourceNameSeparator+buildID,
+	)
+}
+
+// WorkerResourceCopy identifies one rendered copy of a worker resource template: the Build ID
+// of a version and the worker group of its Deployment.
+type WorkerResourceCopy struct {
+	BuildID     string
+	WorkerGroup string
+}
+
+// WorkerResourceCopyOf returns the copy a status entry refers to. An entry without a group
+// refers to the default group.
+func WorkerResourceCopyOf(v temporaliov1alpha1.WorkerResourceTemplateVersionStatus) WorkerResourceCopy {
+	group := v.WorkerGroup
+	if group == "" {
+		group = temporaliov1alpha1.DefaultWorkerGroupName
+	}
+	return WorkerResourceCopy{BuildID: v.BuildID, WorkerGroup: group}
+}
+
+// hashSuffixedName returns readable, made DNS-safe and cut to fit in 47 characters,
+// followed by an 8-hex hash of hashInput taken before any truncation.
+func hashSuffixedName(hashInput, readable string) string {
+	suffix := ResourceNameSeparator + HashString(hashInput)[:workerResourceTemplateHashLen]
+	prefix := TruncateString(CleanStringForDNS(readable), workerResourceTemplateMaxNameLen-len(suffix))
 	// Trim any trailing separator that results from truncating mid-segment.
-	prefix = strings.TrimRight(prefix, ResourceNameSeparator)
-
-	return prefix + ResourceNameSeparator + hashSuffix
+	return strings.TrimRight(prefix, ResourceNameSeparator) + suffix
 }
 
 // RenderWorkerResourceTemplate produces the Unstructured object to apply via SSA for a given
@@ -95,6 +123,11 @@ func RenderWorkerResourceTemplate(
 	serverWDName := computeWorkerDeploymentName(wrt.Namespace, wdName)
 
 	selectorLabels := ComputeSelectorLabels(wdName, buildID)
+	if deployment.Spec.Selector != nil {
+		if group, ok := deployment.Spec.Selector.MatchLabels[WorkerGroupLabel]; ok {
+			selectorLabels = ComputeWorkerGroupSelectorLabels(wdName, buildID, group)
+		}
+	}
 
 	// Labels the controller appends to every metrics[*].external.metric.selector.matchLabels
 	// that is present in the template. These identify the exact per-version Prometheus series.
@@ -122,7 +155,7 @@ func RenderWorkerResourceTemplate(
 	}
 
 	// Step 4: set metadata using Unstructured typed methods.
-	resourceName := ComputeWorkerResourceTemplateName(wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, buildID)
+	resourceName := ComputeWorkerResourceTemplateGroupName(wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, WorkerGroupName(deployment), buildID)
 	obj.SetName(resourceName)
 	obj.SetNamespace(wrt.Namespace)
 
@@ -441,13 +474,18 @@ func ComputeRenderedObjectHash(resource *unstructured.Unstructured) string {
 	return hex.EncodeToString(h[:RenderedHashLen/2]) // 8 bytes → 16 hex chars
 }
 
-// WorkerResourceTemplateVersionStatusForBuildID builds a per-Build-ID status entry.
+// WorkerResourceTemplateVersionStatusForBuildID builds a status entry for the copy of one
+// version's Deployment of group; "" or the default group leaves the entry without a group.
 // generation is the WRT metadata.generation at the time of the apply; pass 0 on error
 // to preserve the last-known-good generation. hash is the controller-internal rendered-object
 // hash used for the SSA skip optimisation (pass "" on error).
-func WorkerResourceTemplateVersionStatusForBuildID(buildID, resourceName string, generation int64, hash, applyError string) temporaliov1alpha1.WorkerResourceTemplateVersionStatus {
+func WorkerResourceTemplateVersionStatusForBuildID(buildID, group, resourceName string, generation int64, hash, applyError string) temporaliov1alpha1.WorkerResourceTemplateVersionStatus {
+	if group == temporaliov1alpha1.DefaultWorkerGroupName {
+		group = ""
+	}
 	return temporaliov1alpha1.WorkerResourceTemplateVersionStatus{
 		BuildID:               buildID,
+		WorkerGroup:           group,
 		ResourceName:          resourceName,
 		LastAppliedGeneration: generation,
 		ApplyError:            applyError,

@@ -550,6 +550,27 @@ spec:
     strategy: Progressive
 ```
 
+### Worker groups
+
+Use `spec.workerGroups` when you require different configurations of workers within a single WorkerDeploymentVersion (Build ID):
+
+```yaml
+spec:
+  workerGroups:
+    - name: workflows
+      deployment:
+        replicas: 2
+        template: {...}   # workflow workers
+    - name: activities
+      deployment:
+        replicas: 6
+        template: {...}   # activity workers, different resources
+```
+
+All Worker Groups share the same Build ID and roll out together. See
+[Worker Groups](worker-groups.md) for how rollouts, scaling and custom Build IDs
+work with Worker Groups.
+
 ### Draining version Deployment configuration
 
 A Draining version receives no new workflow executions. It only serves the
@@ -593,6 +614,11 @@ With this configuration, versions are scaled as follows:
 A Draining version that becomes the Target or Current version again, for
 example after a rollback, scales back to `deployment.replicas`.
 
+With [Worker Groups](worker-groups.md), set `drainingDeployment` on each group
+instead. It applies to that group's Deployments when the group's
+`deployment.replicas` is set. `spec.drainingDeployment` can't be combined with
+`spec.workerGroups`.
+
 > **NOTE**: Scaling down terminates pods that may be running in-flight tasks,
 > which a versioned rollout otherwise avoids. Before you set
 > `drainingDeployment.replicas`, make sure workers stop gracefully on
@@ -624,6 +650,11 @@ alone; the controller tracks the keys it applied in the
 `temporal.io/build-id` and `temporal.io/deployment-name` are managed by the
 controller and cannot be set. Keys and values must be valid Kubernetes labels;
 the validating webhook rejects invalid ones.
+
+With [Worker Groups](worker-groups.md), set `deploymentLabels` on each group
+instead. They go on that group's Deployments only, and `temporal.io/worker-group`
+can't be set either. `spec.deploymentLabels` can't be combined with
+`spec.workerGroups`.
 
 ### Environment-Specific Configurations
 

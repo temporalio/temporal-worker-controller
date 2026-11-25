@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -182,6 +183,8 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 		)
 	}
 
+	warnings = append(warnings, v.groupWarnings(ctx, newWRT)...)
+
 	// API-dependent checks (RESTMapper scope + SubjectAccessReview)
 	apiWarnings, apiErrs := v.validateWithAPI(ctx, newWRT, verb)
 	warnings = append(warnings, apiWarnings...)
@@ -196,6 +199,26 @@ func (v *WorkerResourceTemplateValidator) validate(ctx context.Context, oldWRT, 
 	}
 
 	return warnings, nil
+}
+
+// groupWarnings warns about each listed group that the WRT's WorkerDeployment does not declare.
+// It is not an error, since the group may be added to the WorkerDeployment after the WRT.
+func (v *WorkerResourceTemplateValidator) groupWarnings(ctx context.Context, wrt *WorkerResourceTemplate) admission.Warnings {
+	if v.Client == nil || len(wrt.Spec.WorkerGroups) == 0 {
+		return nil
+	}
+	var wd WorkerDeployment
+	key := types.NamespacedName{Namespace: wrt.Namespace, Name: wrt.Spec.EffectiveWorkerDeploymentName()}
+	if err := v.Client.Get(ctx, key, &wd); err != nil {
+		return nil
+	}
+	var warns admission.Warnings
+	for i, group := range wrt.Spec.WorkerGroups {
+		if !wd.Spec.HasWorkerGroup(group) {
+			warns = append(warns, fmt.Sprintf("spec.workerGroups[%d] %q is not declared by WorkerDeployment %q", i, group, wd.Name))
+		}
+	}
+	return warns
 }
 
 // templateGroupKind returns the group and kind of a raw spec.template. ok is false

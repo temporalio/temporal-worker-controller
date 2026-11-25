@@ -5,6 +5,9 @@
 package v1alpha1
 
 import (
+	"slices"
+	"sort"
+
 	"github.com/temporalio/temporal-worker-controller/internal/defaults"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,8 +45,10 @@ type WorkerOptions struct {
 }
 
 // WorkerDeploymentSpec defines the desired state of WorkerDeployment
-// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template)",message="one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="has(self.deployment) || has(self.template) || has(self.workerGroups)",message="one of deployment, template or workerGroups must be set"
 // +kubebuilder:validation:XValidation:rule="!(has(self.deployment) && has(self.template))",message="exactly one of deployment or template must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerGroups) || !(has(self.deployment) || has(self.template))",message="workerGroups cannot be combined with deployment or template"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerGroups) || !(has(self.drainingDeployment) || has(self.deploymentLabels))",message="with workerGroups, set drainingDeployment and deploymentLabels on each worker group"
 type WorkerDeploymentSpec struct {
 
 	// Number of desired pods. When set, the controller manages replicas for all active
@@ -97,6 +102,16 @@ type WorkerDeploymentSpec struct {
 	// +optional
 	Deployment *appsv1.DeploymentSpec `json:"deployment,omitempty"`
 
+	// WorkerGroups runs several named worker groups in one Worker Deployment Version, in
+	// place of Deployment. Each group gets its own Kubernetes Deployment in every
+	// version, with the same deployment name and build ID, so groups roll out
+	// together while each one scales on its own.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
+	WorkerGroups []WorkerGroup `json:"workerGroups,omitempty"`
+
 	// DrainingDeployment overrides settings on the Kubernetes Deployments of
 	// draining versions. Unset fields keep the behavior that applies without
 	// this field.
@@ -123,6 +138,83 @@ type WorkerDeploymentSpec struct {
 	WorkerOptions WorkerOptions `json:"workerOptions"`
 }
 
+// WorkerGroup is a named group of workers with its own Kubernetes Deployment in
+// every version of a WorkerDeployment.
+type WorkerGroup struct {
+	// Name identifies the group. "default" is reserved for WorkerDeployments without groups.
+	// It is at most 24 characters so that the group's Deployment name, which is cut to 47
+	// characters, keeps room for the WorkerDeployment name and Build ID.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=24
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self != 'default'",message="group name default is reserved"
+	Name string `json:"name"`
+
+	// Deployment configures this group's Kubernetes Deployment in each version.
+	// Selector is computed by the controller.
+	Deployment appsv1.DeploymentSpec `json:"deployment"`
+
+	// DrainingDeployment overrides settings on this group's Kubernetes Deployments
+	// of draining versions, like spec.drainingDeployment does without groups.
+	// +optional
+	DrainingDeployment *DrainingDeploymentSpec `json:"drainingDeployment,omitempty"`
+
+	// DeploymentLabels are added to the metadata of this group's versioned
+	// Kubernetes Deployments, like spec.deploymentLabels does without groups.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="!('temporal.io/build-id' in self) && !('temporal.io/deployment-name' in self) && !('temporal.io/worker-group' in self)",message="temporal.io/build-id, temporal.io/deployment-name and temporal.io/worker-group are managed by the controller"
+	DeploymentLabels map[string]string `json:"deploymentLabels,omitempty"`
+}
+
+// DefaultWorkerGroupName names the single group of a WorkerDeployment without groups, described
+// by spec.deployment (or the deprecated spec.template fields).
+const DefaultWorkerGroupName = "default"
+
+// HasWorkerGroups reports whether the spec declares worker groups.
+func (s WorkerDeploymentSpec) HasWorkerGroups() bool {
+	return len(s.WorkerGroups) > 0
+}
+
+// HasWorkerGroup reports whether the spec has a group with the given name.
+func (s WorkerDeploymentSpec) HasWorkerGroup(name string) bool {
+	if !s.HasWorkerGroups() {
+		return name == DefaultWorkerGroupName
+	}
+	return slices.ContainsFunc(s.WorkerGroups, func(p WorkerGroup) bool { return p.Name == name })
+}
+
+// WorkerGroupNames returns the group names, sorted, or the default group alone when the spec
+// has no groups.
+func (s WorkerDeploymentSpec) WorkerGroupNames() []string {
+	if !s.HasWorkerGroups() {
+		return []string{DefaultWorkerGroupName}
+	}
+	names := make([]string, 0, len(s.WorkerGroups))
+	for _, p := range s.WorkerGroups {
+		names = append(names, p.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// WorkerGroupDeploymentSpec returns the DeploymentSpec of the named group, with the
+// default rolling update strategy applied, and whether the group exists.
+func (s WorkerDeploymentSpec) WorkerGroupDeploymentSpec(name string) (appsv1.DeploymentSpec, bool) {
+	if !s.HasWorkerGroups() {
+		return s.DeploymentSpec(), name == DefaultWorkerGroupName
+	}
+	for _, p := range s.WorkerGroups {
+		if p.Name == name {
+			depSpec := *p.Deployment.DeepCopy()
+			if depSpec.Strategy.Type == "" {
+				depSpec.Strategy = DefaultDeploymentStrategy()
+			}
+			return depSpec, true
+		}
+	}
+	return appsv1.DeploymentSpec{}, false
+}
+
 // DeploymentSpec returns the appsv1.DeploymentSpec struct constructed by
 // examining the WorkerDeploymentSpec. If WorkerDeploymentSpec.deployment is
 // non-nil, we return that. Otherwise, we construct an appsv1.DeploymentSpec
@@ -147,17 +239,58 @@ func (s WorkerDeploymentSpec) DeploymentSpec() appsv1.DeploymentSpec {
 	return depSpec
 }
 
-// DrainingReplicas returns the replica count the controller keeps draining
-// versions at. ok is false when DrainingDeployment.Replicas is unset or when
-// the controller does not manage replicas because an autoscaler owns them.
-func (s WorkerDeploymentSpec) DrainingReplicas() (replicas int32, ok bool) {
-	if s.DrainingDeployment == nil || s.DrainingDeployment.Replicas == nil {
+// workerGroup returns the named group of a spec with groups, or nil.
+func (s WorkerDeploymentSpec) workerGroup(name string) *WorkerGroup {
+	for i := range s.WorkerGroups {
+		if s.WorkerGroups[i].Name == name {
+			return &s.WorkerGroups[i]
+		}
+	}
+	return nil
+}
+
+// WorkerGroupDrainingDeploymentSpec returns the draining overrides of the named group: its own
+// in a spec with groups, or spec.drainingDeployment for the default group of a spec without.
+func (s WorkerDeploymentSpec) WorkerGroupDrainingDeploymentSpec(name string) *DrainingDeploymentSpec {
+	if !s.HasWorkerGroups() {
+		if name != DefaultWorkerGroupName {
+			return nil
+		}
+		return s.DrainingDeployment
+	}
+	if g := s.workerGroup(name); g != nil {
+		return g.DrainingDeployment
+	}
+	return nil
+}
+
+// WorkerGroupDeploymentLabels returns the Deployment labels of the named group: its own in a
+// spec with groups, or spec.deploymentLabels for the default group of a spec without.
+func (s WorkerDeploymentSpec) WorkerGroupDeploymentLabels(name string) map[string]string {
+	if !s.HasWorkerGroups() {
+		if name != DefaultWorkerGroupName {
+			return nil
+		}
+		return s.DeploymentLabels
+	}
+	if g := s.workerGroup(name); g != nil {
+		return g.DeploymentLabels
+	}
+	return nil
+}
+
+// WorkerGroupDrainingReplicas returns the replica count the controller keeps the named group's
+// draining Deployments at. ok is false when the group's drainingDeployment.replicas is unset or
+// when the controller does not manage the group's replicas because an autoscaler owns them.
+func (s WorkerDeploymentSpec) WorkerGroupDrainingReplicas(name string) (replicas int32, ok bool) {
+	draining := s.WorkerGroupDrainingDeploymentSpec(name)
+	if draining == nil || draining.Replicas == nil {
 		return 0, false
 	}
-	if s.DeploymentSpec().Replicas == nil {
+	if depSpec, inSpec := s.WorkerGroupDeploymentSpec(name); !inSpec || depSpec.Replicas == nil {
 		return 0, false
 	}
-	return *s.DrainingDeployment.Replicas, true
+	return *draining.Replicas, true
 }
 
 // DrainingDeploymentSpec overrides settings on the Kubernetes Deployments of
@@ -413,20 +546,42 @@ type BaseWorkerDeploymentVersion struct {
 	// be eligible to receive tasks from the Temporal server.
 	Status VersionStatus `json:"status"`
 
-	// Healthy indicates whether the deployment version is healthy.
+	// HealthySince is when the version's Deployment became available. In a version
+	// with worker groups, it is when the last group's Deployment became available.
 	// +optional
 	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 
-	// A pointer to the version's managed k8s deployment.
+	// A pointer to the version's managed k8s deployment. Unset in a version with
+	// worker groups, which lists each group's Deployment in workerGroups instead.
 	// +optional
 	Deployment *corev1.ObjectReference `json:"deployment,omitempty"`
 
 	// TaskQueues is a list of task queues that are associated with this version.
 	TaskQueues []TaskQueue `json:"taskQueues,omitempty"`
 
+	// WorkerGroups lists each worker group's Deployment in a version that uses groups.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	WorkerGroups []WorkerGroupStatus `json:"workerGroups,omitempty"`
+
 	// ManagedBy is the identity of the client that is managing the rollout of this version.
 	// +optional
 	ManagedBy string `json:"managedBy,omitempty"`
+}
+
+// WorkerGroupStatus describes one worker group's Deployment in a version.
+type WorkerGroupStatus struct {
+	// Name of the group.
+	Name string `json:"name"`
+
+	// A pointer to the group's managed k8s deployment.
+	// +optional
+	Deployment *corev1.ObjectReference `json:"deployment,omitempty"`
+
+	// HealthySince is when the group's deployment became available.
+	// +optional
+	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 }
 
 // CurrentWorkerDeploymentVersion represents a worker deployment version that is currently

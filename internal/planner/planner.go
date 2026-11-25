@@ -5,6 +5,7 @@
 package planner
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,6 +34,8 @@ type WorkerResourceApply struct {
 	WRTName      string
 	WRTNamespace string
 	BuildID      string
+	// WorkerGroup is the worker group of the Deployment the copy targets.
+	WorkerGroup string
 	// RenderError is set when rendering spec.template failed. No SSA apply is attempted;
 	// the error is recorded in the per-BuildID status entry and reflected in the Ready condition.
 	RenderError error
@@ -47,12 +51,20 @@ type WorkerResourceApply struct {
 // Plan holds the actions to execute during reconciliation
 type Plan struct {
 	// Which actions to take
-	DeleteDeployments      []*appsv1.Deployment
-	ScaleDeployments       map[*corev1.ObjectReference]uint32
-	UpdateDeployments      []*appsv1.Deployment
-	ShouldCreateDeployment bool
-	VersionConfig          *VersionConfig
-	TestWorkflows          []WorkflowConfig
+	DeleteDeployments []*appsv1.Deployment
+	ScaleDeployments  map[*corev1.ObjectReference]uint32
+	UpdateDeployments []*appsv1.Deployment
+	VersionConfig     *VersionConfig
+	TestWorkflows     []WorkflowConfig
+
+	// CreateDeploymentWorkerGroups lists the groups that need a Deployment for the target version.
+	CreateDeploymentWorkerGroups []string
+	// DeleteWorkerGroupDeployments are target version Deployments of groups no longer in the spec.
+	// Unlike DeleteDeployments, deleting them never deletes the version in Temporal.
+	DeleteWorkerGroupDeployments []*appsv1.Deployment
+	// BlockedReason explains a spec change the controller refuses to apply. The rest of
+	// the plan still runs.
+	BlockedReason string
 
 	// ApplyWorkerResources holds resources to apply via SSA, one per (WRT × Build ID) pair.
 	ApplyWorkerResources []WorkerResourceApply
@@ -70,6 +82,13 @@ type Plan struct {
 	// deleted. The controller sets this (rather than the webhook) because the owner
 	// ref requires the TWD's UID, resolved from spec.temporalWorkerDeploymentRef.
 	EnsureWRTOwnerRefs []WRTOwnerRefPatch
+	// WRTsWithMissingWorkerGroups maps the name of each WRT that lists a group no version has
+	// and the spec does not declare to those groups.
+	WRTsWithMissingWorkerGroups map[string][]string
+	// WRTsWithStaleWorkerGroupNotFound names the WRTs still marked WorkerGroupNotFound whose groups
+	// are all known again.
+	WRTsWithStaleWorkerGroupNotFound []string
+
 	// UnknownVersionStatus is true when a versioned Deployment has no known version
 	// status this cycle. A WRT with VersionStatuses then cannot tell whether it selects
 	// that version, so the plan neither applies nor deletes its copy of the version.
@@ -87,6 +106,13 @@ type WorkerResourceRef struct {
 	Kind       string
 	WRTName    string
 	BuildID    string
+	// WorkerGroup is the worker group of the Deployment the copy targeted.
+	WorkerGroup string
+}
+
+// Copy returns the copy the ref targeted. A ref without a group targeted the default group.
+func (r WorkerResourceRef) Copy() k8s.WorkerResourceCopy {
+	return k8s.WorkerResourceCopy{BuildID: r.BuildID, WorkerGroup: cmp.Or(r.WorkerGroup, temporaliov1alpha1.DefaultWorkerGroupName)}
 }
 
 // WRTOwnerRefPatch holds a WRT pair for a single merge-patch:
@@ -173,7 +199,9 @@ func GeneratePlan(
 	// Add delete/scale operations based on version status
 	plan.DeleteDeployments = getDeleteDeployments(k8sState, status, spec, foundDeploymentInTemporal)
 	plan.ScaleDeployments = getScaleDeployments(l, k8sState, status, spec)
-	plan.ShouldCreateDeployment = shouldCreateDeployment(status, maxVersionsIneligibleForDeletion)
+	plan.CreateDeploymentWorkerGroups, plan.BlockedReason =
+		getCreateDeploymentWorkerGroups(k8sState, status, spec, maxVersionsIneligibleForDeletion)
+	plan.DeleteWorkerGroupDeployments = getDeleteWorkerGroupDeployments(k8sState, status, spec)
 	plan.UpdateDeployments = getUpdateDeployments(k8sState, status, spec, connection)
 
 	// Determine if we need to start any test workflows
@@ -189,13 +217,15 @@ func GeneratePlan(
 	// not exist while that's true
 	sunsetBuildIDs := getSunsetScaleDownBuildIDs(status, spec)
 
+	deletingDeployments := slices.Concat(plan.DeleteDeployments, plan.DeleteWorkerGroupDeployments)
+
 	// Without Temporal state every version reads as NotRegistered, so leave the version
 	// statuses unknown instead of acting on them.
 	var versionStatuses map[string]temporaliov1alpha1.VersionStatus
 	if foundDeploymentInTemporal {
 		versionStatuses = getVersionStatusByBuildID(status, temporalState)
 	}
-	for buildID := range k8sState.Deployments {
+	for _, buildID := range k8sState.BuildIDs() {
 		if _, known := versionStatuses[buildID]; !known {
 			plan.UnknownVersionStatus = true
 			break
@@ -207,22 +237,23 @@ func GeneratePlan(
 		wrts,
 		k8sState,
 		spec.WorkerOptions.TemporalNamespace,
-		plan.DeleteDeployments,
+		deletingDeployments,
 		sunsetBuildIDs,
 		versionStatuses,
 		config.WRTHPAMatchLabelsStripTemporalPrefix,
 	)
-	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs, versionStatuses)
+	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, deletingDeployments, k8sState, sunsetBuildIDs, versionStatuses)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
+	plan.WRTsWithMissingWorkerGroups, plan.WRTsWithStaleWorkerGroupNotFound = getWRTGroupProblems(wrts, k8sState, spec)
 
 	return plan, nil
 }
 
-// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID) pair
-// where the WRT selects the version status of the Build ID. A Build ID missing from
-// versionStatuses has an unknown status, which a WRT with VersionStatuses does not select.
-// Pairs that fail to render are included with RenderError set so the failure is surfaced in
-// the WRT status and Ready condition; they do not block the rest.
+// getWorkerResourceApplies renders one WorkerResourceApply for each (WRT × active Build ID ×
+// worker group) where the WRT selects the version status of the Build ID and the group. A Build
+// ID missing from versionStatuses has an unknown status, which a WRT with VersionStatuses does
+// not select. Copies that fail to render are included with RenderError set so the failure is
+// surfaced in the WRT status and Ready condition; they do not block the rest.
 func getWorkerResourceApplies(
 	l logr.Logger,
 	wrts []temporaliov1alpha1.WorkerResourceTemplate,
@@ -241,6 +272,7 @@ func getWorkerResourceApplies(
 		deletingDeployments[d.Name] = struct{}{}
 	}
 
+	buildIDs := k8sState.BuildIDs()
 	var applies []WorkerResourceApply
 	for i := range wrts {
 		wrt := &wrts[i]
@@ -248,69 +280,77 @@ func getWorkerResourceApplies(
 			l.Info("skipping WorkerResourceTemplate with empty spec.template", "name", wrt.Name)
 			continue
 		}
-		// Build a map of existing status entries for O(1) lookup by BuildID.
-		existingStatus := make(map[string]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
+		// Build a map of existing status entries for O(1) lookup by copy.
+		existingStatus := make(map[k8s.WorkerResourceCopy]temporaliov1alpha1.WorkerResourceTemplateVersionStatus, len(wrt.Status.Versions))
 		for _, v := range wrt.Status.Versions {
-			existingStatus[v.BuildID] = v
+			existingStatus[k8s.WorkerResourceCopyOf(v)] = v
 		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
-		for buildID, deployment := range k8sState.Deployments {
-			if _, deleting := deletingDeployments[deployment.Name]; deleting {
-				continue
-			}
-			if !wrt.Spec.SelectsVersionStatus(versionStatuses[buildID]) {
-				continue
-			}
-			if hasScaleTarget {
-				// The controller is holding this version's replicas at zero, so
-				// getDeleteWorkerResources removes its autoscaler. We don't want
-				// to render this autoscaler again
-				if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+		for _, buildID := range buildIDs {
+			for _, deployment := range k8sState.VersionDeploymentList(buildID) {
+				group := k8s.WorkerGroupName(deployment)
+				if !wrt.Spec.SelectsWorkerGroup(group) {
 					continue
 				}
-			}
-			rendered, renderErr := k8s.RenderWorkerResourceTemplate(
-				wrt,
-				deployment,
-				buildID,
-				temporalNamespace,
-				stripTemporalMetricLabelPrefix,
-			)
-			if renderErr != nil {
-				l.Error(renderErr, "failed to render WorkerResourceTemplate",
-					"wrt", wrt.Name,
-					"buildID", buildID,
+				if _, deleting := deletingDeployments[deployment.Name]; deleting {
+					continue
+				}
+				if !wrt.Spec.SelectsVersionStatus(versionStatuses[buildID]) {
+					continue
+				}
+				if hasScaleTarget {
+					// The controller is holding this version's replicas at zero, so
+					// getDeleteWorkerResources removes its autoscaler. We don't want
+					// to render this autoscaler again
+					if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+						continue
+					}
+				}
+				rendered, renderErr := k8s.RenderWorkerResourceTemplate(
+					wrt,
+					deployment,
+					buildID,
+					temporalNamespace,
+					stripTemporalMetricLabelPrefix,
 				)
-				// Record the failure so execplan surfaces it in the WRT status and
-				// Ready condition instead of silently dropping it.
+				if renderErr != nil {
+					l.Error(renderErr, "failed to render WorkerResourceTemplate",
+						"wrt", wrt.Name,
+						"buildID", buildID,
+					)
+					// Record the failure so execplan surfaces it in the WRT status and
+					// Ready condition instead of silently dropping it.
+					applies = append(applies, WorkerResourceApply{
+						RenderError:  renderErr,
+						WRTName:      wrt.Name,
+						WRTNamespace: wrt.Namespace,
+						BuildID:      buildID,
+						WorkerGroup:  group,
+					})
+					continue
+				}
+
+				renderedHash := k8s.ComputeRenderedObjectHash(rendered)
+
+				// Look up the hash recorded by the last successful apply for this BuildID.
+				// A non-empty LastAppliedHash implies the previous apply succeeded;
+				// on error the controller records an empty hash so the next cycle retries.
+				var lastAppliedHash string
+				if prev, ok := existingStatus[k8s.WorkerResourceCopy{BuildID: buildID, WorkerGroup: group}]; ok {
+					lastAppliedHash = prev.LastAppliedHash
+				}
+
 				applies = append(applies, WorkerResourceApply{
-					RenderError:  renderErr,
-					WRTName:      wrt.Name,
-					WRTNamespace: wrt.Namespace,
-					BuildID:      buildID,
+					Resource:        rendered,
+					WRTName:         wrt.Name,
+					WRTNamespace:    wrt.Namespace,
+					BuildID:         buildID,
+					WorkerGroup:     group,
+					RenderedHash:    renderedHash,
+					LastAppliedHash: lastAppliedHash,
 				})
-				continue
 			}
-
-			renderedHash := k8s.ComputeRenderedObjectHash(rendered)
-
-			// Look up the hash recorded by the last successful apply for this BuildID.
-			// A non-empty LastAppliedHash implies the previous apply succeeded;
-			// on error the controller records an empty hash so the next cycle retries.
-			var lastAppliedHash string
-			if prev, ok := existingStatus[buildID]; ok {
-				lastAppliedHash = prev.LastAppliedHash
-			}
-
-			applies = append(applies, WorkerResourceApply{
-				Resource:        rendered,
-				WRTName:         wrt.Name,
-				WRTNamespace:    wrt.Namespace,
-				BuildID:         buildID,
-				RenderedHash:    renderedHash,
-				LastAppliedHash: lastAppliedHash,
-			})
 		}
 	}
 	return applies
@@ -357,21 +397,24 @@ func getWRTOwnerRefPatches(
 }
 
 // getDeleteWorkerResources returns the rendered WRT resource copies that should be explicitly
-// deleted by the controller, along with the (WRT, build ID) identity the controller needs to
-// prune the matching status entry once a delete is confirmed. Since rendered resources are
+// deleted by the controller, along with the (WRT, build ID, group) identity the controller needs
+// to prune the matching status entry once a delete is confirmed. Since rendered resources are
 // owned by the WRT (not the Deployment), they are not GC'd automatically and must be deleted
 // by the controller. Deletion candidates come from these sources:
 //
-//  1. Versioned Deployments being deleted this cycle (version sunset).
-//  2. Versioned Deployments whose version status the WRT does not select (see
+//  1. Versioned Deployments of a group the WRT selects being deleted this cycle (version
+//     sunset, or a group removed from the spec).
+//  2. Versioned Deployments of a group the WRT selects whose version status it does not select (see
 //     WorkerResourceTemplateSpec.VersionStatuses), in every cycle and whether or not the
 //     WRT has a status entry for them: a copy has no entry when the status write after its
 //     apply failed. The delete is NotFound when there is no copy. A build ID missing from
 //     versionStatuses has an unknown status, and its copy is kept.
 //  3. For autoscaler WRTs, versioned Deployments that the controller holds at zero replicas
 //     (sunsetBuildIDs), also in every cycle and whether or not the WRT has an entry.
-//  4. WRT status entries whose build ID no longer has a versioned Deployment (orphaned
-//     entries). Entries are pruned from WRT status only after a confirmed delete, so an
+//  4. WRT status entries whose copy no longer has a versioned Deployment, or whose group the
+//     WRT no longer selects (orphaned entries). A deselected group is not deleted in every
+//     cycle like an unselected status, since a WRT for one group would then delete a missing
+//     copy for every other group of every version on each reconcile. Entries are pruned from WRT status only after a confirmed delete, so an
 //     entry that outlives its Deployment means the rendered resource's deletion has not
 //     been confirmed yet — e.g. the delete failed after the Deployment was already gone.
 //     Re-deriving the delete from the entry retries it until it succeeds, and clears
@@ -388,11 +431,11 @@ func getDeleteWorkerResources(
 		return nil
 	}
 
-	// Collect the build IDs that are being deleted.
-	var deletingBuildIDs []string
+	// Collect the Deployments being deleted, by build ID and group.
+	deleting := make(map[k8s.WorkerResourceCopy]struct{})
 	for _, d := range deleteDeployments {
 		if bid, ok := d.Labels[k8s.BuildIDLabel]; ok && bid != "" {
-			deletingBuildIDs = append(deletingBuildIDs, bid)
+			deleting[k8s.WorkerResourceCopy{BuildID: bid, WorkerGroup: k8s.WorkerGroupName(d)}] = struct{}{}
 		}
 	}
 
@@ -412,24 +455,36 @@ func getDeleteWorkerResources(
 			continue
 		}
 
-		// Union of builds being sunset this cycle, orphaned status entries, builds whose
-		// version status the WRT does not select and builds pinned to zero (autoscalers only)
-		buildIDs := make([]string, 0, len(deletingBuildIDs)+len(wrt.Status.Versions))
-		buildIDs = append(buildIDs, deletingBuildIDs...)
+		// Union of copies whose Deployment is deleted this cycle, orphaned status entries,
+		// copies of version statuses or groups the WRT does not select and copies of builds
+		// pinned to zero (autoscalers only)
+		copies := make([]k8s.WorkerResourceCopy, 0, len(deleting)+len(wrt.Status.Versions))
+		for c := range deleting {
+			if wrt.Spec.SelectsWorkerGroup(c.WorkerGroup) {
+				copies = append(copies, c)
+			}
+		}
 
 		hasScaleTarget := k8s.HasScaleTarget(wrt.Spec.Template.Raw)
 		if k8sState != nil {
-			for buildID := range k8sState.Deployments {
-				if status, known := versionStatuses[buildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
-					buildIDs = append(buildIDs, buildID)
-					continue
-				}
-				if hasScaleTarget {
-					// Remove the autoscaler as soon as the controller starts holding
-					// replicas at zero. The k8s Deployment outlives it by deleteDelay.
-					// Any other rendered resource is cleaned up with the Deployment
-					if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
-						buildIDs = append(buildIDs, buildID)
+			for _, buildID := range k8sState.BuildIDs() {
+				for group := range k8sState.VersionDeployments(buildID) {
+					// A copy of a group the WRT no longer selects is found through its status entry below.
+					if !wrt.Spec.SelectsWorkerGroup(group) {
+						continue
+					}
+					c := k8s.WorkerResourceCopy{BuildID: buildID, WorkerGroup: group}
+					if status, known := versionStatuses[buildID]; known && !wrt.Spec.SelectsVersionStatus(status) {
+						copies = append(copies, c)
+						continue
+					}
+					if hasScaleTarget {
+						// Remove the autoscaler as soon as the controller starts holding
+						// replicas at zero. The k8s Deployment outlives it by deleteDelay.
+						// Any other rendered resource is cleaned up with the Deployment
+						if _, sunsetting := sunsetBuildIDs[buildID]; sunsetting {
+							copies = append(copies, c)
+						}
 					}
 				}
 			}
@@ -439,64 +494,92 @@ func getDeleteWorkerResources(
 			if v.BuildID == "" {
 				continue
 			}
-			if k8sState != nil {
-				if _, live := k8sState.Deployments[v.BuildID]; live {
-					continue // build still has a Deployment; handled above and by applies
+			c := k8s.WorkerResourceCopyOf(v)
+			if k8sState != nil && wrt.Spec.SelectsWorkerGroup(c.WorkerGroup) {
+				if _, live := k8sState.VersionDeployments(c.BuildID)[c.WorkerGroup]; live {
+					continue // copy still has a Deployment; handled above and by applies
 				}
 			}
-			buildIDs = append(buildIDs, v.BuildID)
+			copies = append(copies, c)
 		}
 		// Sort before Compact: duplicates in the union are usually non-adjacent (a build
 		// sunset this cycle typically still has a status entry), and Compact only collapses
 		// adjacent runs.
-		slices.Sort(buildIDs)
-		buildIDs = slices.Compact(buildIDs)
+		slices.SortFunc(copies, compareWorkerResourceCopies)
+		copies = slices.Compact(copies)
 
-		for _, buildID := range buildIDs {
+		for _, c := range copies {
 			// Compute the resource name deterministically — no status lookup needed.
 			// This ensures cleanup even if the WRT was never successfully applied for this
-			// buildID (e.g. the version was already eligible for deletion when the WRT was
+			// copy (e.g. the version was already eligible for deletion when the WRT was
 			// first created). The Delete call is a no-op if the resource doesn't exist.
-			resourceName := k8s.ComputeWorkerResourceTemplateName(
-				wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, buildID,
+			resourceName := k8s.ComputeWorkerResourceTemplateGroupName(
+				wrt.Spec.EffectiveWorkerDeploymentName(), wrt.Name, c.WorkerGroup, c.BuildID,
 			)
 			refs = append(refs, WorkerResourceRef{
-				Namespace:  wrt.Namespace,
-				Name:       resourceName,
-				APIVersion: templateMeta.APIVersion,
-				Kind:       templateMeta.Kind,
-				WRTName:    wrt.Name,
-				BuildID:    buildID,
+				Namespace:   wrt.Namespace,
+				Name:        resourceName,
+				APIVersion:  templateMeta.APIVersion,
+				Kind:        templateMeta.Kind,
+				WRTName:     wrt.Name,
+				BuildID:     c.BuildID,
+				WorkerGroup: c.WorkerGroup,
 			})
 		}
 	}
 	return refs
 }
 
-// checkAndUpdateDeploymentConnectionSpec determines whether the Deployment for the given buildID is
-// out-of-date with respect to the provided ConnectionSpec. If an update is required, it mutates
-// the existing Deployment in-place and returns a pointer to that Deployment. If no update is needed or
-// the Deployment does not exist, it returns nil.
-func checkAndUpdateDeploymentConnectionSpec(
-	buildID string,
+func compareWorkerResourceCopies(a, b k8s.WorkerResourceCopy) int {
+	return cmp.Or(cmp.Compare(a.BuildID, b.BuildID), cmp.Compare(a.WorkerGroup, b.WorkerGroup))
+}
+
+// getWRTGroupProblems maps each WRT that lists a group no version has and the spec does not
+// declare to those groups, and names the WRTs still marked WorkerGroupNotFound whose groups are
+// all known again.
+func getWRTGroupProblems(
+	wrts []temporaliov1alpha1.WorkerResourceTemplate,
 	k8sState *k8s.DeploymentState,
-	connection temporaliov1alpha1.ConnectionSpec,
-) *appsv1.Deployment {
-	existingDeployment, exists := k8sState.Deployments[buildID]
-	if !exists {
-		return nil
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) (missing map[string][]string, stale []string) {
+	known := make(map[string]bool)
+	for _, group := range spec.WorkerGroupNames() {
+		known[group] = true
 	}
-
-	// If the connection spec hash has changed, update the deployment
-	currentHash := k8s.ComputeConnectionSpecHash(connection)
-	if currentHash != existingDeployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
-
-		// Update the deployment in-place with new connection info
-		updateDeploymentWithConnection(existingDeployment, connection)
-		return existingDeployment // Return the modified deployment
+	for _, buildID := range k8sState.BuildIDs() {
+		for group := range k8sState.VersionDeployments(buildID) {
+			known[group] = true
+		}
 	}
+	for i := range wrts {
+		wrt := &wrts[i]
+		var absent []string
+		for _, group := range wrt.Spec.WorkerGroups {
+			if !known[group] {
+				absent = append(absent, group)
+			}
+		}
+		if len(absent) > 0 {
+			if missing == nil {
+				missing = make(map[string][]string)
+			}
+			missing[wrt.Name] = absent
+		} else if cond := apimeta.FindStatusCondition(wrt.Status.Conditions, temporaliov1alpha1.ConditionReady); cond != nil &&
+			cond.Reason == temporaliov1alpha1.ReasonWRTWorkerGroupNotFound {
+			stale = append(stale, wrt.Name)
+		}
+	}
+	return missing, stale
+}
 
-	return nil
+// updateDeploymentConnectionIfStale updates a deployment in-place when its connection
+// spec hash differs from the provided ConnectionSpec, and reports whether it did.
+func updateDeploymentConnectionIfStale(d *appsv1.Deployment, connection temporaliov1alpha1.ConnectionSpec) bool {
+	if k8s.ComputeConnectionSpecHash(connection) == d.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] {
+		return false
+	}
+	updateDeploymentWithConnection(d, connection)
+	return true
 }
 
 // updateDeploymentWithConnection updates an existing deployment in-place to match a new ConnectionSpec.
@@ -604,26 +687,22 @@ func setEnvVarFrom(envVars []corev1.EnvVar, name string, src *corev1.EnvVarSourc
 	return append(envVars, corev1.EnvVar{Name: name, ValueFrom: src})
 }
 
-// checkAndUpdateDeploymentPodTemplateSpec determines whether the Deployment for the given buildID is
-// out-of-date with respect to the user-provided pod template spec. This enables rolling updates when
-// the build ID is stable (e.g., using spec.workerOptions.buildID) but the pod spec has changed.
-// If an update is required, it rebuilds the deployment spec and returns a pointer to that Deployment.
-// If no update is needed or the Deployment does not exist, it returns nil.
-func checkAndUpdateDeploymentPodTemplateSpec(
-	buildID string,
-	k8sState *k8s.DeploymentState,
+// checkAndUpdateGroupPodTemplateSpec rebuilds a group's Deployment in place when its pod template
+// drifted under a stable unsafeCustomBuildID, and reports whether it did.
+func checkAndUpdateGroupPodTemplateSpec(
+	existingDeployment *appsv1.Deployment,
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 	connection temporaliov1alpha1.ConnectionSpec,
-) *appsv1.Deployment {
-	existingDeployment, exists := k8sState.Deployments[buildID]
-	if !exists {
-		return nil
-	}
-
+) bool {
 	// Only check for drift when UnsafeCustomBuildID is explicitly set by the user.
 	// If buildID is auto-generated, any spec change would generate a new buildID anyway.
 	if spec.WorkerOptions.UnsafeCustomBuildID == "" {
-		return nil
+		return false
+	}
+
+	groupSpec, inSpec := spec.WorkerGroupDeploymentSpec(k8s.WorkerGroupName(existingDeployment))
+	if !inSpec {
+		return false
 	}
 
 	// Get the stored hash from the existing deployment's pod template annotations
@@ -635,35 +714,30 @@ func checkAndUpdateDeploymentPodTemplateSpec(
 	// Backwards compatibility: if no hash annotation exists (legacy deployment),
 	// don't trigger an update - the hash will be added on the next spec change
 	if storedHash == "" {
-		return nil
+		return false
 	}
-
-	// Compute the hash of the current user-provided pod template spec
-	depSpec := spec.DeploymentSpec()
-	currentHash := k8s.ComputePodTemplateSpecHash(depSpec.Template)
 
 	// If hashes match, no drift detected
-	if storedHash == currentHash {
-		return nil
+	if storedHash == k8s.ComputePodTemplateSpecHash(groupSpec.Template) {
+		return false
 	}
 
-	// Pod template has changed - rebuild the pod spec from the TWD spec
+	// Pod template has changed - rebuild the pod spec from the group's spec
 	// This applies all controller modifications (env vars, TLS mounts, etc.)
-	updateDeploymentWithPodTemplateSpec(existingDeployment, spec, connection)
-
-	return existingDeployment
+	updateDeploymentWithPodTemplateSpec(existingDeployment, groupSpec, spec.WorkerOptions.TemporalNamespace, connection)
+	return true
 }
 
 // updateDeploymentWithPodTemplateSpec updates an existing Kubernetes
-// Deployment with a new pod template spec from the WorkerDeploymentSpec. This
+// Deployment with a new pod template spec from its group's DeploymentSpec. This
 // applies all the controller modifications that NewDeploymentWithOwnerRef
 // does.
 func updateDeploymentWithPodTemplateSpec(
 	deployment *appsv1.Deployment,
-	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	wdDepSpec appsv1.DeploymentSpec,
+	temporalNamespace string,
 	connection temporaliov1alpha1.ConnectionSpec,
 ) {
-	wdDepSpec := spec.DeploymentSpec()
 	// Hash the user template, excluding controller-managed fields.
 	podTemplateSpecHash := k8s.ComputePodTemplateSpecHash(wdDepSpec.Template)
 	// DeploymentSpec() shares the template with spec on the legacy spec.template path;
@@ -695,7 +769,7 @@ func updateDeploymentWithPodTemplateSpec(
 	k8s.ApplyControllerPodSpecModifications(
 		&wdDepSpec.Template.Spec,
 		connection,
-		spec.WorkerOptions.TemporalNamespace,
+		temporalNamespace,
 		workerDeploymentName,
 		buildID,
 	)
@@ -731,46 +805,6 @@ func updateDeploymentWithPodTemplateSpec(
 	deployment.Spec.Template.ObjectMeta.Annotations = podAnnotations
 }
 
-// checkAndUpdateDeploymentStrategy updates an owned Deployment when its
-// rolling update strategy differs from the WorkerDeployment spec.
-func checkAndUpdateDeploymentStrategy(
-	buildID string,
-	k8sState *k8s.DeploymentState,
-	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-) *appsv1.Deployment {
-	existingDeployment, exists := k8sState.Deployments[buildID]
-	if !exists {
-		return nil
-	}
-
-	wdDepSpec := spec.DeploymentSpec()
-	desired := wdDepSpec.Strategy
-	actual := existingDeployment.Spec.Strategy
-	if apiequality.Semantic.DeepEqual(desired, actual) {
-		return nil
-	}
-
-	existingDeployment.Spec.Strategy = desired
-	return existingDeployment
-}
-
-// checkAndUpdateDeploymentLabels updates an owned Deployment when its labels
-// differ from spec.deploymentLabels.
-func checkAndUpdateDeploymentLabels(
-	buildID string,
-	k8sState *k8s.DeploymentState,
-	spec *temporaliov1alpha1.WorkerDeploymentSpec,
-) *appsv1.Deployment {
-	existingDeployment, exists := k8sState.Deployments[buildID]
-	if !exists {
-		return nil
-	}
-	if !k8s.ApplyDeploymentLabels(existingDeployment, spec.DeploymentLabels) {
-		return nil
-	}
-	return existingDeployment
-}
-
 func getUpdateDeployments(
 	k8sState *k8s.DeploymentState,
 	status *temporaliov1alpha1.WorkerDeploymentStatus,
@@ -779,31 +813,36 @@ func getUpdateDeployments(
 ) []*appsv1.Deployment {
 	var updateDeployments []*appsv1.Deployment
 	// Track which deployments we've already added to avoid duplicates
-	updatedBuildIDs := make(map[string]bool)
+	updated := make(map[*appsv1.Deployment]bool)
+	add := func(d *appsv1.Deployment) {
+		if !updated[d] {
+			updated[d] = true
+			updateDeployments = append(updateDeployments, d)
+		}
+	}
 
-	// Check target version deployment for pod template spec drift
+	// Check the target version's deployments for pod template spec drift
 	// This enables rolling updates when the build ID is stable but spec changed
-	if status.TargetVersion.BuildID != "" {
-		if deployment := checkAndUpdateDeploymentPodTemplateSpec(status.TargetVersion.BuildID, k8sState, spec, connection); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[status.TargetVersion.BuildID] = true
+	for _, d := range k8sState.VersionDeploymentList(status.TargetVersion.BuildID) {
+		if checkAndUpdateGroupPodTemplateSpec(d, spec, connection) {
+			add(d)
 		}
 	}
 
-	// Check target version deployment if it has an expired connection spec hash
-	// (only if not already updated by pod template check)
-	if status.TargetVersion.BuildID != "" && !updatedBuildIDs[status.TargetVersion.BuildID] {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.TargetVersion.BuildID, k8sState, connection); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[status.TargetVersion.BuildID] = true
-		}
+	// Check the target and current versions' deployments for an expired connection spec
+	// hash (skipping deployments already rebuilt by the pod template check)
+	connectionBuildIDs := []string{status.TargetVersion.BuildID}
+	if status.CurrentVersion != nil {
+		connectionBuildIDs = append(connectionBuildIDs, status.CurrentVersion.BuildID)
 	}
-
-	// Check current version deployment if it has an expired connection spec hash
-	if status.CurrentVersion != nil && status.CurrentVersion.BuildID != "" && !updatedBuildIDs[status.CurrentVersion.BuildID] {
-		if deployment := checkAndUpdateDeploymentConnectionSpec(status.CurrentVersion.BuildID, k8sState, connection); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[status.CurrentVersion.BuildID] = true
+	for _, buildID := range connectionBuildIDs {
+		if buildID == "" {
+			continue
+		}
+		for _, d := range k8sState.VersionDeploymentList(buildID) {
+			if !updated[d] && updateDeploymentConnectionIfStale(d, connection) {
+				add(d)
+			}
 		}
 	}
 
@@ -813,16 +852,13 @@ func getUpdateDeployments(
 	// pod-template / connection checks so a Kubernetes Deployment already
 	// queued for update also picks up strategy changes in the same write.
 	for _, buildID := range ownedBuildIDs(status) {
-		if updatedBuildIDs[buildID] {
-			if deployment, exists := k8sState.Deployments[buildID]; exists {
-				wdDepSpec := spec.DeploymentSpec()
-				deployment.Spec.Strategy = wdDepSpec.Strategy
+		for _, d := range k8sState.VersionDeploymentList(buildID) {
+			groupSpec, inSpec := spec.WorkerGroupDeploymentSpec(k8s.WorkerGroupName(d))
+			if !inSpec || apiequality.Semantic.DeepEqual(groupSpec.Strategy, d.Spec.Strategy) {
+				continue
 			}
-			continue
-		}
-		if deployment := checkAndUpdateDeploymentStrategy(buildID, k8sState, spec); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[buildID] = true
+			d.Spec.Strategy = groupSpec.Strategy
+			add(d)
 		}
 	}
 
@@ -830,15 +866,14 @@ func getUpdateDeployments(
 	// Kubernetes Deployment already queued for update picks up label changes in
 	// the same write.
 	for _, buildID := range ownedBuildIDs(status) {
-		if updatedBuildIDs[buildID] {
-			if deployment, exists := k8sState.Deployments[buildID]; exists {
-				k8s.ApplyDeploymentLabels(deployment, spec.DeploymentLabels)
+		for _, d := range k8sState.VersionDeploymentList(buildID) {
+			group := k8s.WorkerGroupName(d)
+			if !spec.HasWorkerGroup(group) {
+				continue
 			}
-			continue
-		}
-		if deployment := checkAndUpdateDeploymentLabels(buildID, k8sState, spec); deployment != nil {
-			updateDeployments = append(updateDeployments, deployment)
-			updatedBuildIDs[buildID] = true
+			if k8s.ApplyDeploymentLabels(d, spec.WorkerGroupDeploymentLabels(group)) {
+				add(d)
+			}
 		}
 	}
 
@@ -875,13 +910,9 @@ func getDeleteDeployments(
 	var deleteDeployments []*appsv1.Deployment
 
 	for _, version := range status.DeprecatedVersions {
-		if version.Deployment == nil {
-			continue
-		}
-
-		// Look up the deployment using buildID
-		d, exists := k8sState.Deployments[version.BuildID]
-		if !exists {
+		// Every group of a version is deleted together; the default group goes last.
+		deployments := k8sState.VersionDeploymentList(version.BuildID)
+		if len(deployments) == 0 {
 			continue
 		}
 
@@ -891,10 +922,8 @@ func getDeleteDeployments(
 			// Wait for scale-down to finish; execution checks pinned workflows before pruning.
 			if foundDeploymentInTemporal && status.TargetVersion.BuildID != version.BuildID &&
 				(status.CurrentVersion == nil || status.CurrentVersion.BuildID != version.BuildID) &&
-				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
-				d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == 0 &&
-				(d.Status.TerminatingReplicas == nil || *d.Status.TerminatingReplicas == 0) {
-				deleteDeployments = append(deleteDeployments, d)
+				allDeployments(deployments, isFullyScaledDown) {
+				deleteDeployments = append(deleteDeployments, deployments...)
 			}
 		case temporaliov1alpha1.VersionStatusDrained:
 			// Deleting a deployment is only possible when:
@@ -909,9 +938,9 @@ func getDeleteDeployments(
 			//    prune it. See execplan.deleteDeprecatedVersions.
 			if version.DrainedSince != nil &&
 				(time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.DeleteDelay.Duration+spec.SunsetStrategy.ScaledownDelay.Duration) &&
-				d.Spec.Replicas != nil && *d.Spec.Replicas == 0 &&
+				allDeployments(deployments, isScaledToZero) &&
 				version.EligibleForDeletion {
-				deleteDeployments = append(deleteDeployments, d)
+				deleteDeployments = append(deleteDeployments, deployments...)
 			}
 		case temporaliov1alpha1.VersionStatusNotRegistered:
 			// Only delete Deployments of NotRegistered versions if temporalState was not empty
@@ -920,12 +949,31 @@ func getDeleteDeployments(
 				// Only delete if it's not the target version.
 				status.TargetVersion.BuildID != version.BuildID {
 				// Consider: Could call DescribeVersion here to assert NotFound before deleting, in case version summaries have diverged from version state
-				deleteDeployments = append(deleteDeployments, d)
+				deleteDeployments = append(deleteDeployments, deployments...)
 			}
 		}
 	}
 
 	return deleteDeployments
+}
+
+func allDeployments(deployments []*appsv1.Deployment, pred func(*appsv1.Deployment) bool) bool {
+	for _, d := range deployments {
+		if !pred(d) {
+			return false
+		}
+	}
+	return true
+}
+
+func isScaledToZero(d *appsv1.Deployment) bool {
+	return d.Spec.Replicas != nil && *d.Spec.Replicas == 0
+}
+
+func isFullyScaledDown(d *appsv1.Deployment) bool {
+	return isScaledToZero(d) &&
+		d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == 0 &&
+		(d.Status.TerminatingReplicas == nil || *d.Status.TerminatingReplicas == 0)
 }
 
 // getScaleDeployments determines which deployments should be explicitly scaled and to what size.
@@ -938,39 +986,39 @@ func getScaleDeployments(
 	spec *temporaliov1alpha1.WorkerDeploymentSpec,
 ) map[*corev1.ObjectReference]uint32 {
 	scaleDeployments := make(map[*corev1.ObjectReference]uint32)
-	wdDepSpec := spec.DeploymentSpec()
 
 	// Scale the current version if needed
-	if status.CurrentVersion != nil && status.CurrentVersion.Deployment != nil {
-		// If spec.Replicas is non-nil, the controller is managing replicas instead of a scaler resource.
-		// Scale the Current Version per the WorkerDeploymentSpec.Replicas value.
-		if wdDepSpec.Replicas != nil {
-			replicas := *wdDepSpec.Replicas
-			ref := status.CurrentVersion.Deployment
-			if d, exists := k8sState.Deployments[status.CurrentVersion.BuildID]; exists {
-				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-					scaleDeployments[ref] = uint32(replicas)
-				}
+	if status.CurrentVersion != nil {
+		for group, d := range k8sState.VersionDeployments(status.CurrentVersion.BuildID) {
+			ref := groupDeploymentRef(status.CurrentVersion.Deployment, group, d)
+			groupSpec, inSpec := spec.WorkerGroupDeploymentSpec(group)
+			if ref == nil || !inSpec {
+				continue
 			}
+			scaleToSpecReplicas(scaleDeployments, d, ref, groupSpec.Replicas)
 		}
 	}
 
 	// Scale the target version if it exists, and isn't current
-	if (status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID) &&
-		status.TargetVersion.Deployment != nil {
-		if d, exists := k8sState.Deployments[status.TargetVersion.BuildID]; exists {
+	if status.CurrentVersion == nil || status.CurrentVersion.BuildID != status.TargetVersion.BuildID {
+		for group, d := range k8sState.VersionDeployments(status.TargetVersion.BuildID) {
+			ref := groupDeploymentRef(status.TargetVersion.Deployment, group, d)
+			groupSpec, inSpec := spec.WorkerGroupDeploymentSpec(group)
+			if ref == nil || !inSpec {
+				continue
+			}
 
 			// If the Target Version is an already-existing Deployment that was scaled to zero by the controller
 			// due to Sunset Policy, and the TWD has nil replicas because a scaler is managing the replicas, then
 			// no one will scale the Target Version back up, so we need to scale it back to 1 replica, which is what
 			// would happen if the Deployment was being created from scratch with nil replicas.
-			if wdDepSpec.Replicas != nil || (wdDepSpec.Replicas == nil && d.Spec.Replicas != nil && *d.Spec.Replicas == 0) {
+			if groupSpec.Replicas != nil || (d.Spec.Replicas != nil && *d.Spec.Replicas == 0) {
 				replicas := int32(1) // just scale up to 1 if we are in the spec.Replicas == nil && d.Spec.Replicas == 0 case.
-				if wdDepSpec.Replicas != nil {
-					replicas = *wdDepSpec.Replicas
+				if groupSpec.Replicas != nil {
+					replicas = *groupSpec.Replicas
 				}
 				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
-					scaleDeployments[status.TargetVersion.Deployment] = uint32(replicas)
+					scaleDeployments[ref] = uint32(replicas)
 				}
 			}
 		}
@@ -978,76 +1026,122 @@ func getScaleDeployments(
 
 	// Scale other versions based on status
 	for _, version := range status.DeprecatedVersions {
-		if version.Deployment == nil {
-			continue
-		}
-
-		d, exists := k8sState.Deployments[version.BuildID]
-		if !exists {
-			continue
-		}
-
-		switch version.Status {
-		case temporaliov1alpha1.VersionStatusInactive:
-			// Scale down inactive versions that are not the target
-			if status.TargetVersion.BuildID == version.BuildID {
-				// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-				if wdDepSpec.Replicas != nil {
-					replicas := *wdDepSpec.Replicas
-					if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-						scaleDeployments[version.Deployment] = uint32(replicas)
-					}
-				}
-			} else if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target inactive versions with nil replicas or >0 replicas
-				scaleDeployments[version.Deployment] = 0
+		for group, d := range k8sState.VersionDeployments(version.BuildID) {
+			ref := groupDeploymentRef(version.Deployment, group, d)
+			if ref == nil {
+				continue
 			}
-		case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
-			// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
-			// Scale up these deployments
-			if wdDepSpec.Replicas != nil {
-				replicas := *wdDepSpec.Replicas
-				if d.Spec.Replicas != nil && *d.Spec.Replicas != replicas {
-					scaleDeployments[version.Deployment] = uint32(replicas)
+			var replicas, drainingReplicas *int32
+			if groupSpec, inSpec := spec.WorkerGroupDeploymentSpec(group); inSpec {
+				replicas = groupSpec.Replicas
+				if r, ok := spec.WorkerGroupDrainingReplicas(group); ok {
+					drainingReplicas = &r
 				}
 			}
-		case temporaliov1alpha1.VersionStatusDraining:
-			// When drainingDeployment.replicas is set, keep the version at that count.
-			// This also repairs a draining version that was scaled to 0.
-			if replicas, ok := spec.DrainingReplicas(); ok {
-				if d.Spec.Replicas == nil || *d.Spec.Replicas != replicas {
-					scaleDeployments[version.Deployment] = uint32(replicas)
-				}
-			} else if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
-				// A draining version with 0 replicas has no pollers, so it will never finish
-				// draining and will never be retired. We detect and repair this scenario
-				// here. Any other non-zero count still has pollers and will drain on its own.
-				replicas := int32(1)
-				// If the controller manages the replicas we set it to the spec's value. If a
-				// scaler manages them, we explicitly set it to 1 to unblock drainage.
-				if wdDepSpec.Replicas != nil {
-					replicas = *wdDepSpec.Replicas
-				}
-				// The spec's replicas may legitimately be 0, so we guard it.
-				if replicas != 0 {
-					l.Info("scaling draining version back up from 0 replicas",
-						"buildID", version.BuildID,
-						"deployment", version.Deployment.Name,
-						"replicas", replicas,
-					)
-					scaleDeployments[version.Deployment] = uint32(replicas)
-				}
-			}
-		case temporaliov1alpha1.VersionStatusDrained:
-			if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > spec.SunsetStrategy.ScaledownDelay.Duration {
-				// Scale down drained deployments after delay
-				if !(d.Spec.Replicas != nil && *d.Spec.Replicas == 0) { // these are non-target drained versions with nil replicas or >0 replicas
-					scaleDeployments[version.Deployment] = 0
-				}
-			}
+			scaleDeprecatedDeployment(l, scaleDeployments, version, d, ref, status.TargetVersion.BuildID, spec.SunsetStrategy.ScaledownDelay, replicas, drainingReplicas)
 		}
 	}
 
 	return scaleDeployments
+}
+
+// groupDeploymentRef returns the reference used to scale a group's deployment. The
+// default group keeps the reference from status so callers can match on it.
+func groupDeploymentRef(defaultRef *corev1.ObjectReference, group string, d *appsv1.Deployment) *corev1.ObjectReference {
+	if group == temporaliov1alpha1.DefaultWorkerGroupName {
+		return defaultRef
+	}
+	return k8s.NewObjectRef(d)
+}
+
+// scaleDeprecatedDeployment applies the sunset scaling rules to one group's deployment of a
+// deprecated version. specReplicas is nil when a scaler manages the group, and drainingReplicas
+// is nil unless drainingDeployment.replicas applies to it.
+func scaleDeprecatedDeployment(
+	l logr.Logger,
+	scaleDeployments map[*corev1.ObjectReference]uint32,
+	version *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion,
+	d *appsv1.Deployment,
+	ref *corev1.ObjectReference,
+	targetBuildID string,
+	scaledownDelay *metav1.Duration,
+	specReplicas *int32,
+	drainingReplicas *int32,
+) {
+	switch version.Status {
+	case temporaliov1alpha1.VersionStatusInactive:
+		// Scale down inactive versions that are not the target
+		if targetBuildID == version.BuildID {
+			// TODO(carlydf): I'm not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
+			scaleToSpecReplicas(scaleDeployments, d, ref, specReplicas)
+		} else if !isScaledToZero(d) { // these are non-target inactive versions with nil replicas or >0 replicas
+			scaleDeployments[ref] = 0
+		}
+	case temporaliov1alpha1.VersionStatusRamping, temporaliov1alpha1.VersionStatusCurrent:
+		// TODO(carlydf): Also not convinced this case actually happens, because Target and Current Versions are excluded from DeprecatedVersions. Leaving it unchanged since I don't want to add to this PRs scope.
+		scaleToSpecReplicas(scaleDeployments, d, ref, specReplicas)
+	case temporaliov1alpha1.VersionStatusDraining:
+		// When drainingDeployment.replicas is set, keep the version at that count.
+		// This also repairs a draining version that was scaled to 0.
+		if drainingReplicas != nil {
+			if d.Spec.Replicas == nil || *d.Spec.Replicas != *drainingReplicas {
+				scaleDeployments[ref] = uint32(*drainingReplicas)
+			}
+			return
+		}
+		scaleDrainingBackUp(l, scaleDeployments, version, d, ref, specReplicas)
+	case temporaliov1alpha1.VersionStatusDrained:
+		// Scale down drained deployments after delay
+		if version.DrainedSince != nil && time.Since(version.DrainedSince.Time) > scaledownDelay.Duration &&
+			!isScaledToZero(d) { // these are non-target drained versions with nil replicas or >0 replicas
+			scaleDeployments[ref] = 0
+		}
+	default:
+		// NotRegistered and Created versions are left as they are.
+	}
+}
+
+// scaleToSpecReplicas scales a deployment to its group's replicas when the controller manages them.
+func scaleToSpecReplicas(
+	scaleDeployments map[*corev1.ObjectReference]uint32,
+	d *appsv1.Deployment,
+	ref *corev1.ObjectReference,
+	specReplicas *int32,
+) {
+	if specReplicas != nil && d.Spec.Replicas != nil && *d.Spec.Replicas != *specReplicas {
+		scaleDeployments[ref] = uint32(*specReplicas)
+	}
+}
+
+// scaleDrainingBackUp scales a draining deployment up from 0 replicas: with no pollers its
+// version would never finish draining.
+func scaleDrainingBackUp(
+	l logr.Logger,
+	scaleDeployments map[*corev1.ObjectReference]uint32,
+	version *temporaliov1alpha1.DeprecatedWorkerDeploymentVersion,
+	d *appsv1.Deployment,
+	ref *corev1.ObjectReference,
+	specReplicas *int32,
+) {
+	if !isScaledToZero(d) {
+		return
+	}
+	// If the controller manages the replicas we set it to the spec's value. If a
+	// scaler manages them, we explicitly set it to 1 to unblock drainage.
+	replicas := int32(1)
+	if specReplicas != nil {
+		replicas = *specReplicas
+	}
+	// spec.Replicas may legitimately be 0, so we guard it.
+	if replicas == 0 {
+		return
+	}
+	l.Info("scaling draining version back up from 0 replicas",
+		"buildID", version.BuildID,
+		"deployment", ref.Name,
+		"replicas", replicas,
+	)
+	scaleDeployments[ref] = uint32(replicas)
 }
 
 // getSunsetScaleDownBuildIDs returns the build IDs of the versions getScaleDeployments forces
@@ -1068,6 +1162,54 @@ func getSunsetScaleDownBuildIDs(
 		}
 	}
 	return buildIDs
+}
+
+// getCreateDeploymentWorkerGroups returns the groups of the target version that need a Deployment,
+// and why it refused, if it did.
+func getCreateDeploymentWorkerGroups(
+	k8sState *k8s.DeploymentState,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+	maxVersionsIneligibleForDeletion int32,
+) (groups []string, blockedReason string) {
+	existing := k8sState.VersionDeployments(status.TargetVersion.BuildID)
+	if len(existing) == 0 {
+		if !shouldCreateDeployment(status, maxVersionsIneligibleForDeletion) {
+			return nil, ""
+		}
+		return spec.WorkerGroupNames(), ""
+	}
+	// A Deployment's selector is immutable, and group and non-group selectors would overlap.
+	if k8s.HasWorkerGroupLabel(existing) != spec.HasWorkerGroups() {
+		return nil, fmt.Sprintf(
+			"adding or removing spec.workerGroups requires a new unsafeCustomBuildID: build ID %q already has Deployments", status.TargetVersion.BuildID)
+	}
+	for _, group := range spec.WorkerGroupNames() {
+		if _, ok := existing[group]; !ok {
+			groups = append(groups, group)
+		}
+	}
+	return groups, ""
+}
+
+// getDeleteWorkerGroupDeployments returns the target version's Deployments of groups that are
+// no longer in the spec, which only happens under a stable custom build ID.
+func getDeleteWorkerGroupDeployments(
+	k8sState *k8s.DeploymentState,
+	status *temporaliov1alpha1.WorkerDeploymentStatus,
+	spec *temporaliov1alpha1.WorkerDeploymentSpec,
+) []*appsv1.Deployment {
+	existing := k8sState.VersionDeployments(status.TargetVersion.BuildID)
+	if !spec.HasWorkerGroups() || !k8s.HasWorkerGroupLabel(existing) {
+		return nil
+	}
+	var deletes []*appsv1.Deployment
+	for _, d := range k8sState.VersionDeploymentList(status.TargetVersion.BuildID) {
+		if !spec.HasWorkerGroup(k8s.WorkerGroupName(d)) {
+			deletes = append(deletes, d)
+		}
+	}
+	return deletes
 }
 
 // getVersionStatusByBuildID returns the version status of each build ID in status, but takes
@@ -1146,6 +1288,11 @@ func getTestWorkflows(
 		(status.CurrentVersion != nil && status.CurrentVersion.BuildID == status.TargetVersion.BuildID) ||
 		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusNotRegistered ||
 		status.TargetVersion.Status == temporaliov1alpha1.VersionStatusCreated {
+		return nil
+	}
+	// A registered multi-group version may still have groups that are not polling, whose
+	// queues would send the gate's activities to another version.
+	if len(status.TargetVersion.WorkerGroups) > 0 && status.TargetVersion.HealthySince == nil {
 		return nil
 	}
 
