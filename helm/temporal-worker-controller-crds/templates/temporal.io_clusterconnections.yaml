@@ -35,6 +35,27 @@ spec:
             type: object
           spec:
             properties:
+              apiKey:
+                properties:
+                  path:
+                    type: string
+                  secretRef:
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        default: ""
+                        type: string
+                      optional:
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+                x-kubernetes-validations:
+                - message: Only one of secretRef or path may be set
+                  rule: has(self.secretRef) != has(self.path)
               apiKeySecretRef:
                 properties:
                   key:
@@ -77,8 +98,13 @@ spec:
             - hostPort
             type: object
             x-kubernetes-validations:
-            - message: Only one of mutualTLSSecretRef or apiKeySecretRef may be set
-              rule: '!(has(self.mutualTLSSecretRef) && has(self.apiKeySecretRef))'
+            - message: Only one of mutualTLSSecretRef, apiKeySecretRef or apiKey may
+                be set
+              rule: '!(has(self.mutualTLSSecretRef) && (has(self.apiKeySecretRef)
+                || has(self.apiKey)))'
+            - message: Only one of apiKeySecretRef or apiKey may be set
+              rule: (has(self.mutualTLSSecretRef) || (!(has(self.apiKeySecretRef)
+                && has(self.apiKey))))
             - message: tls.caCertSecretRef cannot be combined with mutualTLSSecretRef;
                 bundle the CA into that secret's own ca.crt key instead
               rule: '!(has(self.mutualTLSSecretRef) && has(self.tls) && has(self.tls.caCertSecretRef))'
