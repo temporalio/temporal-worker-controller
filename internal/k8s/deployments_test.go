@@ -922,6 +922,31 @@ func TestComputeConnectionSpecHash(t *testing.T) {
 		assert.NotEqual(t, hash1, hash2, "Empty vs non-empty CA cert secret should produce different hashes")
 	})
 
+	t.Run("service account token audience and expiration change the hash", func(t *testing.T) {
+		base := temporaliov1alpha1.ConnectionSpec{
+			HostPort:            "localhost:7233",
+			ServiceAccountToken: &temporaliov1alpha1.ServiceAccountTokenAuth{Audience: "temporal"},
+		}
+		otherAudience := base
+		otherAudience.ServiceAccountToken = &temporaliov1alpha1.ServiceAccountTokenAuth{Audience: "other"}
+		expiration := int64(7200)
+		otherExpiration := base
+		otherExpiration.ServiceAccountToken = &temporaliov1alpha1.ServiceAccountTokenAuth{
+			Audience:          "temporal",
+			ExpirationSeconds: &expiration,
+		}
+		explicitDefault := base
+		defaultExpiration := temporaliov1alpha1.DefaultServiceAccountTokenExpirationSeconds
+		explicitDefault.ServiceAccountToken = &temporaliov1alpha1.ServiceAccountTokenAuth{
+			Audience:          "temporal",
+			ExpirationSeconds: &defaultExpiration,
+		}
+
+		assert.NotEqual(t, k8s.ComputeConnectionSpecHash(base), k8s.ComputeConnectionSpecHash(otherAudience))
+		assert.NotEqual(t, k8s.ComputeConnectionSpecHash(base), k8s.ComputeConnectionSpecHash(otherExpiration))
+		assert.Equal(t, k8s.ComputeConnectionSpecHash(base), k8s.ComputeConnectionSpecHash(explicitDefault))
+	})
+
 }
 
 func TestApplyControllerPodSpecModifications(t *testing.T) {
@@ -1030,6 +1055,43 @@ func TestApplyControllerPodSpecModifications(t *testing.T) {
 		assert.False(t, hasMount(c, "temporal-tls-ca"))
 		_, ok = hasVolume(podSpec, "temporal-tls-ca")
 		assert.False(t, ok)
+	})
+
+	t.Run("service account token projects a volume and points TEMPORAL_API_KEY_FILE at it", func(t *testing.T) {
+		podSpec := newPodSpec()
+		expiration := int64(1800)
+		connection := temporaliov1alpha1.ConnectionSpec{
+			HostPort: "temporal.internal:7233",
+			ServiceAccountToken: &temporaliov1alpha1.ServiceAccountTokenAuth{
+				Audience:          "temporal",
+				ExpirationSeconds: &expiration,
+			},
+		}
+
+		k8s.ApplyControllerPodSpecModifications(podSpec, connection, "test-namespace", "test-worker", "v1")
+		c := podSpec.Containers[0]
+
+		e, ok := getEnv(c, "TEMPORAL_API_KEY_FILE")
+		require.True(t, ok)
+		assert.Equal(t, "/var/run/secrets/temporal.io/serviceaccount/token", e.Value)
+		_, ok = getEnv(c, "TEMPORAL_API_KEY")
+		assert.False(t, ok)
+
+		e, ok = getEnv(c, "TEMPORAL_TLS")
+		require.True(t, ok)
+		assert.Equal(t, "true", e.Value)
+
+		assert.True(t, hasMount(c, "temporal-sa-token"))
+		vol, ok := hasVolume(podSpec, "temporal-sa-token")
+		require.True(t, ok)
+		require.NotNil(t, vol.Projected)
+		require.Len(t, vol.Projected.Sources, 1)
+		token := vol.Projected.Sources[0].ServiceAccountToken
+		require.NotNil(t, token)
+		assert.Equal(t, "temporal", token.Audience)
+		require.NotNil(t, token.ExpirationSeconds)
+		assert.Equal(t, int64(1800), *token.ExpirationSeconds)
+		assert.Equal(t, "token", token.Path)
 	})
 }
 

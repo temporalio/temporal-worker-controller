@@ -65,6 +65,54 @@ var _ = Describe("Connection CRD CEL validation", func() {
 		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
 	})
 
+	It("accepts a Connection with only serviceAccountToken set", func() {
+		conn := baseConnection("sa-token-only")
+		expiration := int64(3600)
+		conn.Spec.ServiceAccountToken = &ServiceAccountTokenAuth{
+			Audience:          "temporal",
+			ExpirationSeconds: &expiration,
+		}
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
+	It("accepts serviceAccountToken together with tls.caCertSecretRef", func() {
+		conn := baseConnection("sa-token-with-ca")
+		conn.Spec.ServiceAccountToken = &ServiceAccountTokenAuth{Audience: "temporal"}
+		conn.Spec.TLS = &ConnectionTLSConfig{
+			CACertSecretRef: &SecretReference{Name: "ca-secret"},
+		}
+		Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+	})
+
+	It("rejects serviceAccountToken without an audience", func() {
+		conn := baseConnection("sa-token-no-audience")
+		conn.Spec.ServiceAccountToken = &ServiceAccountTokenAuth{}
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("audience"))
+	})
+
+	It("rejects mutualTLSSecretRef and serviceAccountToken set together", func() {
+		conn := baseConnection("mtls-and-sa-token")
+		conn.Spec.MutualTLSSecretRef = &SecretReference{Name: "mtls-secret"}
+		conn.Spec.ServiceAccountToken = &ServiceAccountTokenAuth{Audience: "temporal"}
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Only one of mutualTLSSecretRef or serviceAccountToken may be set"))
+	})
+
+	It("rejects apiKeySecretRef and serviceAccountToken set together", func() {
+		conn := baseConnection("api-key-and-sa-token")
+		conn.Spec.APIKeySecretRef = &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "api-key-secret"},
+			Key:                  "apikey",
+		}
+		conn.Spec.ServiceAccountToken = &ServiceAccountTokenAuth{Audience: "temporal"}
+		err := k8sClient.Create(ctx, conn)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("Only one of apiKeySecretRef or serviceAccountToken may be set"))
+	})
+
 	It("rejects mutualTLSSecretRef and apiKeySecretRef set together", func() {
 		conn := baseConnection("mtls-and-api-key")
 		conn.Spec.MutualTLSSecretRef = &SecretReference{Name: "mtls-secret"}

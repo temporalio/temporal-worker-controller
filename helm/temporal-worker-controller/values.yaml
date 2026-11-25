@@ -61,6 +61,20 @@ serviceAccount:
   # If not set and create is true, a name is generated.
   name:
 
+# serviceAccountToken projects a ServiceAccount token into the manager for
+# Connection spec.serviceAccountToken. Leave audience empty to keep the pod's
+# default token at /var/run/secrets/kubernetes.io/serviceaccount/token.
+# Set audience to the value Temporal's JWT ClaimMapper expects, and use that
+# same audience on the Connection.
+serviceAccountToken:
+  # Empty disables the extra projected volume and the --service-account-token-path arg.
+  audience: ""
+  # Requested token lifetime in seconds. Kubernetes may issue a shorter token.
+  expirationSeconds: 3600 # @schema minimum:600; maximum:31536000
+  # Directory mounted into the manager. The token file inside it is named token.
+  # Used only when audience is set.
+  mountPath: /var/run/secrets/temporal.io/serviceaccount
+
 # For common cases that do not require escalating privileges it is recommended to ensure that
 # all your Pods/Containers are restrictive.
 # More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted

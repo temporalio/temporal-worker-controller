@@ -122,6 +122,9 @@ spec:
         {{- end }}
         {{- end }}
         - "--health-probe-bind-address=:8081"
+        {{- if .Values.serviceAccountToken.audience }}
+        - "--service-account-token-path={{ .Values.serviceAccountToken.mountPath | default "/var/run/secrets/temporal.io/serviceaccount" }}/token"
+        {{- end }}
         ports:
           - containerPort: {{ .Values.webhook.port }}
             name: webhook-server
@@ -135,6 +138,11 @@ spec:
           - mountPath: {{ .Values.webhook.certDir }}
             name: cert
             readOnly: true
+          {{- if .Values.serviceAccountToken.audience }}
+          - name: temporal-sa-token
+            mountPath: {{ .Values.serviceAccountToken.mountPath | default "/var/run/secrets/temporal.io/serviceaccount" }}
+            readOnly: true
+          {{- end }}
         {{- with .Values.extraVolumeMounts }}
           {{- toYaml . | nindent 10 }}
         {{- end }}
@@ -203,6 +211,15 @@ spec:
           secret:
             defaultMode: 420
             secretName: {{ .Values.webhook.certSecretName }}
+        {{- if .Values.serviceAccountToken.audience }}
+        - name: temporal-sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.serviceAccountToken.audience | quote }}
+                  expirationSeconds: {{ .Values.serviceAccountToken.expirationSeconds }}
+                  path: token
+        {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

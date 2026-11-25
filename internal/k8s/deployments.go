@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/distribution/reference"
@@ -62,6 +63,9 @@ const (
 	EnvTemporalTLSClientCertPath   = "TEMPORAL_TLS_CLIENT_CERT_PATH"
 	EnvTemporalTLSServerCACertPath = "TEMPORAL_TLS_SERVER_CA_CERT_PATH"
 	EnvTemporalAPIKey              = "TEMPORAL_API_KEY"
+	// EnvTemporalAPIKeyFile is the path of a bearer token that kubelet rotates.
+	// envconfig does not read it; workers pass the file to NewAPIKeyDynamicCredentials.
+	EnvTemporalAPIKeyFile = "TEMPORAL_API_KEY_FILE"
 
 	// TemporalTLSVolumeName is the mTLS client cert/key secret volume mounted into worker
 	// pods when Connection.mutualTLSSecretRef is set.
@@ -75,6 +79,13 @@ const (
 	TemporalTLSCAVolumeName = "temporal-tls-ca"
 	TemporalTLSCAMountPath  = "/etc/temporal/tls-ca"
 	TemporalTLSCACertPath   = TemporalTLSCAMountPath + "/ca.crt"
+
+	// TemporalSATokenVolumeName is the projected ServiceAccount token volume mounted
+	// into worker pods when Connection.serviceAccountToken is set.
+	TemporalSATokenVolumeName = "temporal-sa-token"
+	TemporalSATokenMountPath  = "/var/run/secrets/temporal.io/serviceaccount"
+	TemporalSATokenFileName   = "token"
+	TemporalSATokenPath       = TemporalSATokenMountPath + "/" + TemporalSATokenFileName
 )
 
 // DeploymentState represents the Kubernetes state of all deployments for a temporal worker deployment
@@ -419,6 +430,15 @@ func ComputeConnectionSpecHash(connection temporaliov1alpha1.ConnectionSpec) str
 	} else if connection.APIKeySecretRef != nil {
 		_, _ = hasher.Write([]byte(connection.APIKeySecretRef.Name))
 	}
+	// Hashed only when this field is the active auth mode, so it cannot collide
+	// with a secret name and an unused field does not roll pods.
+	if connection.AuthMode() == temporaliov1alpha1.AuthModeServiceAccountToken {
+		auth := connection.ServiceAccountToken
+		_, _ = hasher.Write([]byte("\x00sa-token\x00"))
+		_, _ = hasher.Write([]byte(auth.Audience))
+		_, _ = hasher.Write([]byte("\x00"))
+		_, _ = hasher.Write([]byte(strconv.FormatInt(auth.ExpirationSecondsOrDefault(), 10)))
+	}
 
 	return hex.EncodeToString(hasher.Sum(nil))
 }
@@ -477,8 +497,10 @@ func ApplyControllerPodSpecModifications(
 		}
 	}
 
-	// Add TLS config if mTLS is enabled
-	if connection.MutualTLSSecretRef != nil {
+	// Add TLS config if mTLS is enabled. AuthMode picks one credential source when
+	// more than one is set, matching ConnectionSpec.AuthMode.
+	switch connection.AuthMode() {
+	case temporaliov1alpha1.AuthModeTLS:
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
@@ -508,7 +530,7 @@ func ApplyControllerPodSpecModifications(
 				},
 			},
 		})
-	} else if connection.APIKeySecretRef != nil {
+	case temporaliov1alpha1.AuthModeAPIKey:
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
 				corev1.EnvVar{
@@ -520,11 +542,36 @@ func ApplyControllerPodSpecModifications(
 			)
 			podSpec.Containers[i] = container
 		}
+	case temporaliov1alpha1.AuthModeServiceAccountToken:
+		for i, container := range podSpec.Containers {
+			// A CA cert below also sets TEMPORAL_TLS. Skip the duplicate here.
+			if connection.TLSCACertSecretName() == "" {
+				container.Env = append(container.Env, corev1.EnvVar{
+					Name:  EnvTemporalTLS,
+					Value: "true",
+				})
+			}
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  EnvTemporalAPIKeyFile,
+				Value: TemporalSATokenPath,
+			})
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+				Name:      TemporalSATokenVolumeName,
+				MountPath: TemporalSATokenMountPath,
+				ReadOnly:  true,
+			})
+			podSpec.Containers[i] = container
+		}
+		podSpec.Volumes = append(podSpec.Volumes, ServiceAccountTokenVolume(connection.ServiceAccountToken))
+	case temporaliov1alpha1.AuthModeNoCredentials:
+		// No credential env var or volume. Address, namespace, and an optional
+		// private CA are applied around this switch.
 	}
 
-	// Trust a private CA for API-key or no-credentials auth. Mutually exclusive with
-	// MutualTLSSecretRef (enforced by ConnectionSpec's CEL validation) -- mTLS bundles its
-	// own CA into that secret's ca.crt key instead, see ConnectionTLSConfig.CACertSecretRef.
+	// Trust a private CA for API-key, service account token, or no-credentials auth.
+	// Mutually exclusive with MutualTLSSecretRef (enforced by ConnectionSpec's CEL
+	// validation) -- mTLS bundles its own CA into that secret's ca.crt key instead,
+	// see ConnectionTLSConfig.CACertSecretRef.
 	if caCertSecretName := connection.TLSCACertSecretName(); caCertSecretName != "" {
 		for i, container := range podSpec.Containers {
 			container.Env = append(container.Env,
@@ -552,6 +599,73 @@ func ApplyControllerPodSpecModifications(
 			},
 		})
 	}
+}
+
+// ServiceAccountTokenVolume is the projected token kubelet refreshes for worker pods.
+func ServiceAccountTokenVolume(auth *temporaliov1alpha1.ServiceAccountTokenAuth) corev1.Volume {
+	expiration := auth.ExpirationSecondsOrDefault()
+	return corev1.Volume{
+		Name: TemporalSATokenVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{{
+					ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+						Audience:          auth.Audience,
+						ExpirationSeconds: &expiration,
+						Path:              TemporalSATokenFileName,
+					},
+				}},
+			},
+		},
+	}
+}
+
+// EnsureSATokenVolume adds the projected ServiceAccount token volume or replaces it.
+func EnsureSATokenVolume(volumes []corev1.Volume, auth *temporaliov1alpha1.ServiceAccountTokenAuth) []corev1.Volume {
+	desired := ServiceAccountTokenVolume(auth)
+	for i := range volumes {
+		if volumes[i].Name == TemporalSATokenVolumeName {
+			volumes[i].VolumeSource = desired.VolumeSource
+			return volumes
+		}
+	}
+	return append(volumes, desired)
+}
+
+// RemoveSATokenVolume removes the projected ServiceAccount token volume if present.
+func RemoveSATokenVolume(volumes []corev1.Volume) []corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == TemporalSATokenVolumeName {
+			return slices.Delete(volumes, i, i+1)
+		}
+	}
+	return volumes
+}
+
+// EnsureSATokenVolumeMount adds the projected ServiceAccount token mount, or fixes its path.
+func EnsureSATokenVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == TemporalSATokenVolumeName {
+			mounts[i].MountPath = TemporalSATokenMountPath
+			mounts[i].ReadOnly = true
+			return mounts
+		}
+	}
+	return append(mounts, corev1.VolumeMount{
+		Name:      TemporalSATokenVolumeName,
+		MountPath: TemporalSATokenMountPath,
+		ReadOnly:  true,
+	})
+}
+
+// RemoveSATokenVolumeMount removes the projected ServiceAccount token mount if present.
+func RemoveSATokenVolumeMount(mounts []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == TemporalSATokenVolumeName {
+			return slices.Delete(mounts, i, i+1)
+		}
+	}
+	return mounts
 }
 
 // EnsureTLSVolume adds the mTLS client cert/key secret volume or updates its secret name if

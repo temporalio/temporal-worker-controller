@@ -44,8 +44,12 @@ var (
 	WithDisableDeprecatedTWD                       = config.WithDisableDeprecatedTWD
 	WithDisableRecoverPanic                        = config.WithDisableRecoverPanic
 	WithDisableClusterConnections                  = config.WithDisableClusterConnections
+	WithServiceAccountTokenPath                    = config.WithServiceAccountTokenPath
 	WithWRTHPAMatchLabelsStripTemporalPrefix       = config.WithWRTHPAMatchLabelsStripTemporalPrefix
 )
+
+// DefaultServiceAccountTokenPath is the projected token kubelet mounts on the controller pod.
+const DefaultServiceAccountTokenPath = clientpool.DefaultServiceAccountTokenPath
 
 // New returns a Controller wired with the given manager, or an
 // error if the options are misconfigured (e.g. both WithCreateClient and WithDefaultClient).
@@ -60,6 +64,7 @@ func New(mgr ctrl.Manager, opts ...Option) (*Controller, error) {
 		return nil, errors.New("controller.WithCreateClient and controller.WithDefaultClient are mutually exclusive")
 	}
 	pool := clientpool.New(cfg.PoolLogger, mgr.GetClient(), cfg.CustomClientOptions)
+	pool.ServiceAccountTokenPath = cfg.ServiceAccountTokenPath
 	if cfg.CreateClient != nil {
 		pool.CreateClientFn = cfg.CreateClient
 	}

@@ -361,6 +361,26 @@
       },
       "type": "object"
     },
+    "serviceAccountToken": {
+      "description": "serviceAccountToken projects a ServiceAccount token into the manager for\nConnection spec.serviceAccountToken. Leave audience empty to keep the pod's\ndefault token at /var/run/secrets/kubernetes.io/serviceaccount/token.\nSet audience to the value Temporal's JWT ClaimMapper expects, and use that\nsame audience on the Connection.",
+      "properties": {
+        "audience": {
+          "description": "Empty disables the extra projected volume and the --service-account-token-path arg.",
+          "type": "string"
+        },
+        "expirationSeconds": {
+          "description": "Requested token lifetime in seconds. Kubernetes may issue a shorter token.",
+          "maximum": 31536000,
+          "minimum": 600,
+          "type": "integer"
+        },
+        "mountPath": {
+          "description": "Directory mounted into the manager. The token file inside it is named token.\nUsed only when audience is set.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "terminationGracePeriodSeconds": {
       "minimum": 1,
       "type": "integer"

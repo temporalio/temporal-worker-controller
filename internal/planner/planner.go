@@ -500,19 +500,22 @@ func checkAndUpdateDeploymentConnectionSpec(
 }
 
 // updateDeploymentWithConnection updates an existing deployment in-place to match a new ConnectionSpec.
-// It rewrites the controller-managed connection env vars and the mTLS volume/mount, adding and removing them as needed,
-// So switching auth mode (mTLS <-> API key or to/from no-credentials) yields a fully-configured pod.
+// It rewrites the controller-managed connection env vars and volumes, adding and removing them as needed,
+// so switching auth mode (mTLS, API key, service account token, or no credentials) yields a fully-configured pod.
 // It operates on the deployment's own pod template, so each version keeps its own image.
 func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection temporaliov1alpha1.ConnectionSpec) {
 	// Update the connection spec hash annotation
 	deployment.Spec.Template.Annotations[k8s.ConnectionSpecHashAnnotation] = k8s.ComputeConnectionSpecHash(connection)
 
 	tlsServerName := connection.TLSServerName()
-	mtls := connection.MutualTLSSecretRef != nil
-	apiKey := !mtls && connection.APIKeySecretRef != nil
+	authMode := connection.AuthMode()
+	mtls := authMode == temporaliov1alpha1.AuthModeTLS
+	apiKey := authMode == temporaliov1alpha1.AuthModeAPIKey
+	saToken := authMode == temporaliov1alpha1.AuthModeServiceAccountToken
 	// TLSCACertSecretName is mutually exclusive with MutualTLSSecretRef (enforced by
 	// ConnectionSpec's CEL validation) -- mTLS bundles its own CA into that secret's ca.crt
-	// key instead, see ConnectionTLSConfig.CACertSecretRef.
+	// key instead, see ConnectionTLSConfig.CACertSecretRef. API key and service account
+	// token auth can both use it.
 	caCertSecretName := connection.TLSCACertSecretName()
 
 	for i := range deployment.Spec.Template.Spec.Containers {
@@ -526,7 +529,7 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalTLSServerName)
 		}
 
-		if mtls || caCertSecretName != "" {
+		if mtls || caCertSecretName != "" || saToken {
 			container.Env = setEnvVar(container.Env, k8s.EnvTemporalTLS, "true")
 		} else {
 			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalTLS)
@@ -555,6 +558,14 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 		} else {
 			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalAPIKey)
 		}
+
+		if saToken {
+			container.Env = setEnvVar(container.Env, k8s.EnvTemporalAPIKeyFile, k8s.TemporalSATokenPath)
+			container.VolumeMounts = k8s.EnsureSATokenVolumeMount(container.VolumeMounts)
+		} else {
+			container.Env = removeEnvVar(container.Env, k8s.EnvTemporalAPIKeyFile)
+			container.VolumeMounts = k8s.RemoveSATokenVolumeMount(container.VolumeMounts)
+		}
 	}
 
 	if mtls {
@@ -568,6 +579,12 @@ func updateDeploymentWithConnection(deployment *appsv1.Deployment, connection te
 		deployment.Spec.Template.Spec.Volumes = k8s.EnsureTLSCAVolume(deployment.Spec.Template.Spec.Volumes, caCertSecretName)
 	} else {
 		deployment.Spec.Template.Spec.Volumes = k8s.RemoveTLSCAVolume(deployment.Spec.Template.Spec.Volumes)
+	}
+
+	if saToken {
+		deployment.Spec.Template.Spec.Volumes = k8s.EnsureSATokenVolume(deployment.Spec.Template.Spec.Volumes, connection.ServiceAccountToken)
+	} else {
+		deployment.Spec.Template.Spec.Volumes = k8s.RemoveSATokenVolume(deployment.Spec.Template.Spec.Volumes)
 	}
 }
 

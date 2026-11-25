@@ -11,6 +11,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,11 @@ type ClientPoolKey struct {
 	TLSCACertSecretName string            // invalidate cache when TLS.CACertSecretRef changes
 	AuthMode            v1alpha1.AuthMode // invalidate cache when the auth mode changes
 }
+
+// DefaultServiceAccountTokenPath is the projected token kubelet mounts on every pod.
+// Point ServiceAccountTokenPath at a token projected with the Temporal audience when
+// the default token's audience is not accepted by the server.
+const DefaultServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
 // CachedClient is a Temporal SDK client paired with a validity check. The pool calls IsValid on every
 // cache hit; a false result triggers eviction and re-dial. It is not called at creation time —
@@ -71,6 +78,10 @@ type ClientPool struct {
 	// CreateClientFn creates and health-checks a client. Defaults to
 	// DefaultCreateClient; a wrapper overrides it to own construction.
 	CreateClientFn CreateClientFunc
+
+	// ServiceAccountTokenPath is the file re-read on each RPC when a Connection
+	// uses serviceAccountToken. Empty uses DefaultServiceAccountTokenPath.
+	ServiceAccountTokenPath string
 }
 
 type AuthConfigError struct{ Err error }
@@ -287,6 +298,50 @@ func (cp *ClientPool) fetchClientUsingAPIKeySecret(spec v1alpha1.ConnectionSpec,
 	}, nil
 }
 
+func (cp *ClientPool) serviceAccountTokenPath() string {
+	if cp.ServiceAccountTokenPath != "" {
+		return cp.ServiceAccountTokenPath
+	}
+	return DefaultServiceAccountTokenPath
+}
+
+// fetchServiceAccountToken reads the controller's projected token. The credentials
+// callback calls this on every RPC so a kubelet rotation is picked up without re-dialing.
+func (cp *ClientPool) fetchServiceAccountToken(context.Context) (string, error) {
+	path := cp.serviceAccountTokenPath()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read service account token file %q: %w", path, err)
+	}
+	token := strings.TrimSpace(string(b))
+	if token == "" {
+		return "", fmt.Errorf("service account token file %q is empty", path)
+	}
+	return token, nil
+}
+
+func (cp *ClientPool) fetchClientUsingServiceAccountToken(spec v1alpha1.ConnectionSpec, caCert []byte) (clientAuth, error) {
+	// Fail at creation when the file is missing. The callback reads it again per RPC.
+	if _, err := cp.fetchServiceAccountToken(context.Background()); err != nil {
+		return clientAuth{}, err
+	}
+
+	tlsServerName := spec.TLSServerName()
+	tlsCfg := &tls.Config{ServerName: tlsServerName}
+	rootCAs, err := cp.TLSCertPool(caCert)
+	if err != nil {
+		return clientAuth{}, err
+	}
+	tlsCfg.RootCAs = rootCAs
+
+	credentials := sdkclient.NewAPIKeyDynamicCredentials(cp.fetchServiceAccountToken)
+	return clientAuth{
+		mode:        v1alpha1.AuthModeServiceAccountToken,
+		tls:         tlsCfg,
+		credentials: credentials,
+	}, nil
+}
+
 func (cp *ClientPool) fetchClientUsingNoCredentials(spec v1alpha1.ConnectionSpec, caCert []byte) (clientAuth, error) {
 	tlsServerName := spec.TLSServerName()
 	rootCAs, err := cp.TLSCertPool(caCert)
@@ -338,8 +393,8 @@ func (cp *ClientPool) parseClientSecret(
 		}
 	}
 
-	// TLS.CACertSecretRef applies to API_KEY and NO_CREDENTIALS only; AuthModeTLS ignores it (its own
-	// ca.crt covers it), and the two are mutually exclusive by CEL validation.
+	// TLS.CACertSecretRef applies to API_KEY, SERVICE_ACCOUNT_TOKEN, and NO_CREDENTIALS.
+	// AuthModeTLS ignores it (its own ca.crt covers it), and the two are mutually exclusive by CEL validation.
 	var caCert []byte
 	if caCertSecretName := spec.TLSCACertSecretName(); caCertSecretName != "" {
 		var caSecret corev1.Secret
@@ -371,6 +426,9 @@ func (cp *ClientPool) parseClientSecret(
 		}
 		return cp.fetchClientUsingAPIKeySecret(spec, k8sNamespace, caCert)
 
+	case v1alpha1.AuthModeServiceAccountToken:
+		return cp.fetchClientUsingServiceAccountToken(spec, caCert)
+
 	case v1alpha1.AuthModeNoCredentials:
 		return cp.fetchClientUsingNoCredentials(spec, caCert)
 
@@ -379,11 +437,11 @@ func (cp *ClientPool) parseClientSecret(
 	}
 }
 
-// healthCheck probes the client for readiness. Skipped for API key auth (namespace-scoped credentials
-// can't call this system-level RPC); safe because client.Dial already calls GetSystemInfo, a
-// superset of CheckHealth.
+// healthCheck probes the client for readiness. Skipped for bearer-token auth (API keys and
+// service account tokens may be namespace-scoped and can't call this system-level RPC);
+// safe because client.Dial already calls GetSystemInfo, a superset of CheckHealth.
 func (cp *ClientPool) healthCheck(c sdkclient.Client, auth clientAuth) error {
-	if auth.mode == v1alpha1.AuthModeAPIKey {
+	if auth.mode == v1alpha1.AuthModeAPIKey || auth.mode == v1alpha1.AuthModeServiceAccountToken {
 		return nil
 	}
 	if _, err := c.CheckHealth(context.Background(), &sdkclient.CheckHealthRequest{}); err != nil {

@@ -50,6 +50,9 @@ type Config struct {
 	// controller-managed external metric matchLabels in rendered
 	// WorkerResourceTemplates.
 	WRTHPAMatchLabelsStripTemporalPrefix bool
+	// ServiceAccountTokenPath is the file re-read for Connection
+	// spec.serviceAccountToken. Empty uses the pod's default projected token.
+	ServiceAccountTokenPath string
 }
 
 // ConfigFromEnv returns a new Config struct popualated with any options read
@@ -126,6 +129,15 @@ func WithDisableClusterConnections(disable bool) Option {
 func WithDisableRecoverPanic(disable bool) Option {
 	return func(c *Config) {
 		c.DisableRecoverPanic = disable
+	}
+}
+
+// WithServiceAccountTokenPath sets the file the controller re-reads when a
+// Connection uses spec.serviceAccountToken. Empty keeps the default projected
+// ServiceAccount token path.
+func WithServiceAccountTokenPath(path string) Option {
+	return func(c *Config) {
+		c.ServiceAccountTokenPath = path
 	}
 }
 
