@@ -215,7 +215,9 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 
 	// Set the WRT allow list the same way the Helm chart injects it, so the reconciler's
 	// replay of the webhook's spec validation does not deny-all the WRTs these tests create.
-	t.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler,PodDisruptionBudget")
+	// FakeResource is allowed too, so the wrt-apply-failure case still exercises the real
+	// SSA apply-failure branch at the API server rather than failing at validation.
+	t.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler,PodDisruptionBudget,FakeResource")
 
 	// Setup kubebuilder assets for IDE testing
 	if err := setupKubebuilderAssets(); err != nil {

@@ -95,6 +95,9 @@ spec:
         # WorkerResourceTemplate validating webhook. Derived from
         # workerResourceTemplate.allowedResources[*].kinds in values.yaml.
         # An empty value rejects all kinds — at least one must be configured.
+        # The controller also enforces this list at reconcile time, before any
+        # rendered resource is applied, so the restriction holds in deployments
+        # that do not run the webhook.
         {{- $allKinds := list -}}
         {{- range .Values.workerResourceTemplate.allowedResources -}}
           {{- range .kinds -}}

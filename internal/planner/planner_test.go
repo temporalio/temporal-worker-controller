@@ -4102,12 +4102,12 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
 }
 
-// createTestWRT builds a minimal valid WorkerResourceTemplate for use in tests.
-// The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.
 // testAllowedKinds mirrors the ALLOWED_KINDS list the Helm chart injects by default;
 // it covers every kind the planner tests render.
 var testAllowedKinds = []string{"HorizontalPodAutoscaler", "PodDisruptionBudget"}
 
+// createTestWRT builds a minimal valid WorkerResourceTemplate for use in tests.
+// The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.
 func createTestWRT(name, workerDeploymentRefName string) temporaliov1alpha1.WorkerResourceTemplate {
 	hpaSpec := map[string]interface{}{
 		"apiVersion": "autoscaling/v2",
@@ -5826,22 +5826,7 @@ func TestGetUpdateDeployments_DeploymentLabelsReconcile(t *testing.T) {
 // a WRT whose kind is outside the allow list yields a WorkerResourceApply with
 // RenderError set and Resource nil (surfaced as an applyError, never applied).
 func TestGetWorkerResourceApplies_AllowedKindsRejection(t *testing.T) {
-	raw, _ := json.Marshal(map[string]interface{}{
-		"apiVersion": "autoscaling/v2",
-		"kind":       "HorizontalPodAutoscaler",
-		"spec": map[string]interface{}{
-			"scaleTargetRef": map[string]interface{}{},
-			"minReplicas":    float64(1),
-			"maxReplicas":    float64(5),
-		},
-	})
-	wrt := temporaliov1alpha1.WorkerResourceTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-hpa", Namespace: "default"},
-		Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
-			WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
-			Template:            runtime.RawExtension{Raw: raw},
-		},
-	}
+	wrt := createTestWRT("my-hpa", "my-worker")
 	k8sState := &k8s.DeploymentState{
 		Deployments: map[string]*appsv1.Deployment{
 			"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),

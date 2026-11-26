@@ -432,9 +432,9 @@ func wrtTestCases() []testCase {
 		},
 
 		// Apply failure → status entry with non-empty Message and LastAppliedGeneration == 0.
-		// Uses an unknown GVK whose kind is outside the ALLOWED_KINDS list, so the
-		// controller's reconcile-time spec validation rejects it before the SSA apply and the
-		// WRT status must reflect the failure for that Build ID.
+		// Uses an unknown GVK that the API server cannot recognise (FakeResource is in the
+		// test ALLOWED_KINDS list, so it passes reconcile-time validation). The controller's
+		// SSA apply fails and the WRT status must reflect the failure for that Build ID.
 		{
 			name: "wrt-apply-failure",
 			builder: testhelpers.NewTestCase().
