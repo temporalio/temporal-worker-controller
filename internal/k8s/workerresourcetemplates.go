@@ -71,17 +71,30 @@ func ComputeWorkerResourceTemplateName(wdName, wrtName, buildID string) string {
 // WorkerResourceTemplate and versioned Deployment.
 //
 // Processing order:
+//  0. Replay the admission webhook's pure spec validation (allowed kinds + structural
+//     checks) — rejected specs fail here, before any rendering or apply. This covers
+//     deployments without the admission webhook, where an out-of-allow-list WRT can
+//     exist on the cluster; it is surfaced as an applyError exactly like a render failure.
 //  1. Unmarshal spec.template into an Unstructured
 //  2. Substitute per-version metric tokens in string values
 //  3. Auto-inject scaleTargetRef, matchLabels, and KEDA temporal trigger metadata
 //  4. Set metadata (name, namespace, labels, owner reference)
+//
+// An empty allowedKinds list rejects every kind (deny-all), mirroring the webhook's
+// fail-closed semantics.
 func RenderWorkerResourceTemplate(
 	wrt *temporaliov1alpha1.WorkerResourceTemplate,
 	deployment *appsv1.Deployment,
 	buildID string,
 	temporalNamespace string,
 	stripTemporalMetricLabelPrefix bool,
+	allowedKinds []string,
 ) (*unstructured.Unstructured, error) {
+	// Step 0: replay the webhook's pure spec validation before rendering anything.
+	if err := temporaliov1alpha1.ValidateWorkerResourceTemplateSpecForApply(wrt.Spec, allowedKinds); err != nil {
+		return nil, fmt.Errorf("spec validation failed: %w", err)
+	}
+
 	// Step 1: unmarshal the raw template directly into an Unstructured object.
 	obj := &unstructured.Unstructured{}
 	if err := json.Unmarshal(wrt.Spec.Template.Raw, &obj.Object); err != nil {

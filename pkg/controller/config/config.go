@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 
+	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	"github.com/temporalio/temporal-worker-controller/internal/controller/clientpool"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
@@ -50,6 +51,14 @@ type Config struct {
 	// controller-managed external metric matchLabels in rendered
 	// WorkerResourceTemplates.
 	WRTHPAMatchLabelsStripTemporalPrefix bool
+	// AllowedKinds is the list of resource kinds permitted as WorkerResourceTemplate
+	// objects. The reconcile-time WRT apply path replays the admission webhook's pure
+	// spec validation against this list, so out-of-allow-list WRTs are rejected before
+	// any object is applied even when the webhook is not deployed. ConfigFromEnv
+	// populates it from the ALLOWED_KINDS environment variable; WithAllowedKinds
+	// overrides that default. Empty or nil means deny-all, mirroring the webhook's
+	// fail-closed semantics.
+	AllowedKinds []string
 }
 
 // ConfigFromEnv returns a new Config struct popualated with any options read
@@ -58,6 +67,7 @@ func ConfigFromEnv() Config {
 	return Config{
 		PoolLogger: defaultPoolLogger(),
 		MaxDeploymentVersionsIneligibleForDeletion: GetControllerMaxDeploymentVersionsIneligibleForDeletion(),
+		AllowedKinds: temporaliov1alpha1.AllowedKindsFromEnv(),
 	}
 }
 
@@ -135,5 +145,14 @@ func WithDisableRecoverPanic(disable bool) Option {
 func WithWRTHPAMatchLabelsStripTemporalPrefix(strip bool) Option {
 	return func(c *Config) {
 		c.WRTHPAMatchLabelsStripTemporalPrefix = strip
+	}
+}
+
+// WithAllowedKinds sets the list of resource kinds permitted as
+// WorkerResourceTemplate objects; the reconcile-time apply path replays the
+// admission webhook's spec validation against it.
+func WithAllowedKinds(kinds []string) Option {
+	return func(c *Config) {
+		c.AllowedKinds = kinds
 	}
 }

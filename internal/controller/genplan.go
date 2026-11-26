@@ -146,6 +146,7 @@ func (r *WorkerDeploymentReconciler) generatePlan(
 	plannerConfig := &planner.Config{
 		RolloutStrategy:                      rolloutStrategy,
 		WRTHPAMatchLabelsStripTemporalPrefix: r.Config.WRTHPAMatchLabelsStripTemporalPrefix,
+		AllowedKinds:                         r.Config.AllowedKinds,
 	}
 
 	// Fetch all WorkerResourceTemplates that reference this TWD so that the planner

@@ -130,7 +130,7 @@ func makeExecplanWRT(name string, twd *temporaliov1alpha1.WorkerDeployment) *tem
 // returning the rendered object and its hash.
 func renderWRT(t *testing.T, wrt *temporaliov1alpha1.WorkerResourceTemplate, dep *appsv1.Deployment, buildID, temporalNamespace string) (*unstructured.Unstructured, string) {
 	t.Helper()
-	rendered, err := k8s.RenderWorkerResourceTemplate(wrt, dep, buildID, temporalNamespace, false)
+	rendered, err := k8s.RenderWorkerResourceTemplate(wrt, dep, buildID, temporalNamespace, false, []string{"HorizontalPodAutoscaler", "PodDisruptionBudget"})
 	require.NoError(t, err)
 	hash := k8s.ComputeRenderedObjectHash(rendered)
 	require.NotEmpty(t, hash)

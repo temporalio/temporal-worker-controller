@@ -66,6 +66,20 @@ var ControllerOwnedMetricLabelKeys = []string{
 //     Configurable via workerResourceTemplate.allowedResources[*].kinds in values.yaml.
 //     Must be set; when empty or unset, all WorkerResourceTemplate kind submissions are rejected.
 func NewWorkerResourceTemplateValidator(mgr ctrl.Manager) *WorkerResourceTemplateValidator {
+	return &WorkerResourceTemplateValidator{
+		Client:                mgr.GetClient(),
+		RESTMapper:            mgr.GetRESTMapper(),
+		ControllerSAName:      os.Getenv("SERVICE_ACCOUNT_NAME"),
+		ControllerSANamespace: os.Getenv("POD_NAMESPACE"),
+		AllowedKinds:          AllowedKindsFromEnv(),
+	}
+}
+
+// AllowedKindsFromEnv parses the ALLOWED_KINDS environment variable (comma-separated
+// kind names) into a slice. It is shared by the admission webhook and the controller's
+// reconcile-time validation so both paths always see the same list. Returns nil when
+// the variable is unset or empty — callers treat an empty list as deny-all.
+func AllowedKindsFromEnv() []string {
 	var allowedKinds []string
 	if env := os.Getenv("ALLOWED_KINDS"); env != "" {
 		for _, p := range strings.Split(env, ",") {
@@ -74,13 +88,28 @@ func NewWorkerResourceTemplateValidator(mgr ctrl.Manager) *WorkerResourceTemplat
 			}
 		}
 	}
-	return &WorkerResourceTemplateValidator{
-		Client:                mgr.GetClient(),
-		RESTMapper:            mgr.GetRESTMapper(),
-		ControllerSAName:      os.Getenv("SERVICE_ACCOUNT_NAME"),
-		ControllerSANamespace: os.Getenv("POD_NAMESPACE"),
-		AllowedKinds:          allowedKinds,
+	return allowedKinds
+}
+
+// ValidateWorkerResourceTemplateSpecForApply replays the pure (no-API) spec validation
+// that the admission webhook's ValidateCreate runs, for use in the controller's
+// reconcile-time apply path. It exists so deployments without the admission webhook
+// (where WRTs can be created via kubectl) still reject specs whose kind is outside the
+// allow list before any object is applied. The API-dependent checks (RESTMapper scope,
+// SubjectAccessReview) are deliberately NOT replayed — they need admission context.
+// The HPAMatchLabelsStripTemporalPrefix flag is likewise not replayed: validation runs
+// as if the flag were false, so when the webhook is configured to strip the "temporal_"
+// prefix it rejects user-set unprefixed matchLabels keys that this replay accepts.
+// That gap is harmless — auto-injection overwrites those keys at render time — but it
+// makes the replay slightly weaker than ValidateCreate.
+// An empty allowedKinds list rejects every kind, mirroring the webhook's fail-closed
+// semantics.
+func ValidateWorkerResourceTemplateSpecForApply(spec WorkerResourceTemplateSpec, allowedKinds []string) error {
+	_, errs := validateWorkerResourceTemplateSpec(spec, allowedKinds, false)
+	if len(errs) == 0 {
+		return nil
 	}
+	return errs.ToAggregate()
 }
 
 // SetupWebhookWithManager registers the validating webhook with the manager.

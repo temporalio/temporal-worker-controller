@@ -142,6 +142,11 @@ type Config struct {
 	// WRTHPAMatchLabelsStripTemporalPrefix removes the "temporal_" prefix from
 	// controller-managed external metric matchLabels.
 	WRTHPAMatchLabelsStripTemporalPrefix bool
+
+	// AllowedKinds is the list of resource kinds permitted as WorkerResourceTemplate
+	// objects, replayed at render time (the same check the admission webhook runs).
+	// Empty or nil means deny-all, mirroring the webhook's fail-closed semantics.
+	AllowedKinds []string
 }
 
 // GeneratePlan creates a plan for updating the worker deployment
@@ -211,6 +216,7 @@ func GeneratePlan(
 		sunsetBuildIDs,
 		versionStatuses,
 		config.WRTHPAMatchLabelsStripTemporalPrefix,
+		config.AllowedKinds,
 	)
 	plan.DeleteWorkerResources = getDeleteWorkerResources(wrts, plan.DeleteDeployments, k8sState, sunsetBuildIDs, versionStatuses)
 	plan.EnsureWRTOwnerRefs = getWRTOwnerRefPatches(wrts, twdName, twdUID)
@@ -232,6 +238,7 @@ func getWorkerResourceApplies(
 	sunsetBuildIDs map[string]struct{},
 	versionStatuses map[string]temporaliov1alpha1.VersionStatus,
 	stripTemporalMetricLabelPrefix bool,
+	allowedKinds []string,
 ) []WorkerResourceApply {
 	// Build a set of deployment names that are scheduled for deletion so we can
 	// skip rendering WRTs for them. Their rendered resources are deleted explicitly
@@ -276,6 +283,7 @@ func getWorkerResourceApplies(
 				buildID,
 				temporalNamespace,
 				stripTemporalMetricLabelPrefix,
+				allowedKinds,
 			)
 			if renderErr != nil {
 				l.Error(renderErr, "failed to render WorkerResourceTemplate",

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 	"github.com/temporalio/temporal-worker-controller/internal/testhelpers"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	policyv1 "k8s.io/api/policy/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -429,8 +432,9 @@ func wrtTestCases() []testCase {
 		},
 
 		// Apply failure → status entry with non-empty Message and LastAppliedGeneration == 0.
-		// Uses an unknown GVK that the API server cannot recognise. The controller's SSA apply
-		// fails and the WRT status must reflect the failure for that Build ID.
+		// Uses an unknown GVK whose kind is outside the ALLOWED_KINDS list, so the
+		// controller's reconcile-time spec validation rejects it before the SSA apply and the
+		// WRT status must reflect the failure for that Build ID.
 		{
 			name: "wrt-apply-failure",
 			builder: testhelpers.NewTestCase().
@@ -461,6 +465,75 @@ func wrtTestCases() []testCase {
 					}
 
 					waitForWRTStatusNotApplied(t, ctx, env.K8sClient, twd.Namespace, wrtName, buildID, 30*time.Second)
+				}),
+		},
+
+		// Reconcile-time allowed-kinds validation — a WRT whose kind is outside the
+		// ALLOWED_KINDS list is rejected at render time (the same check the admission
+		// webhook runs), so no rendered object is applied and the per-Build-ID status
+		// entry records the rejection with the allow-list message.
+		{
+			name: "wrt-rejected-kind",
+			builder: testhelpers.NewTestCase().
+				WithInput(
+					testhelpers.NewWorkerDeploymentBuilder().
+						WithAllAtOnceStrategy().
+						WithTargetTemplate("v1.0"),
+				).
+				WithExpectedStatus(
+					testhelpers.NewStatusBuilder().
+						WithTargetVersion("v1.0", temporaliov1alpha1.VersionStatusCurrent, -1, true, false).
+						WithCurrentVersion("v1.0", true, false),
+				).
+				WithValidatorFunction(func(t *testing.T, ctx context.Context, tc testhelpers.TestCase, env testhelpers.TestEnv) {
+					twd := tc.GetTWD()
+					buildID := k8s.ComputeBuildID(twd)
+					wrtName := "rejected-kind"
+
+					// Real apiVersion + real kind, but a kind outside the allow list.
+					wrt := makeWRTWithRaw(wrtName, twd.Namespace, twd.Name, []byte(`{
+						"apiVersion": "apps/v1",
+						"kind": "Deployment",
+						"spec": {
+							"replicas": 1,
+							"selector": {},
+							"template": {"spec": {"containers": [{"name": "c", "image": "nginx"}]}}
+						}
+					}`))
+					if err := env.K8sClient.Create(ctx, wrt); err != nil {
+						t.Fatalf("failed to create WRT: %v", err)
+					}
+
+					// The status entry must record the rejection with the allow-list
+					// message and LastAppliedGeneration == 0.
+					eventually(t, 30*time.Second, time.Second, func() error {
+						var stored temporaliov1alpha1.WorkerResourceTemplate
+						if err := env.K8sClient.Get(ctx, types.NamespacedName{Name: wrtName, Namespace: twd.Namespace}, &stored); err != nil {
+							return err
+						}
+						for _, v := range stored.Status.Versions {
+							if v.BuildID == buildID {
+								if v.ApplyError != "" && strings.Contains(v.ApplyError, "not in the allowed list") && v.LastAppliedGeneration == 0 {
+									t.Logf("WRT status correctly records the allow-list rejection for build ID %q, message: %s", buildID, v.ApplyError)
+									return nil
+								}
+								return fmt.Errorf("WRT status for build ID %q: lastAppliedGeneration=%d message=%q (want allow-list rejection with gen=0)", buildID, v.LastAppliedGeneration, v.ApplyError)
+							}
+						}
+						return fmt.Errorf("WRT status has no entry for build ID %q (current: %+v)", buildID, stored.Status.Versions)
+					})
+
+					// No rendered object may exist for the rejected WRT.
+					resourceName := k8s.ComputeWorkerResourceTemplateName(twd.Name, wrtName, buildID)
+					rendered := &unstructured.Unstructured{}
+					rendered.SetAPIVersion("apps/v1")
+					rendered.SetKind("Deployment")
+					err := env.K8sClient.Get(ctx, types.NamespacedName{Name: resourceName, Namespace: twd.Namespace}, rendered)
+					if err == nil {
+						t.Fatalf("rendered Deployment %q exists although the WRT kind was rejected by the allow list", resourceName)
+					} else if !apierrors.IsNotFound(err) {
+						t.Fatalf("unexpected error checking for rendered Deployment %q: %v", resourceName, err)
+					}
 				}),
 		},
 
