@@ -12,6 +12,7 @@ import (
 	temporaliov1alpha1 "github.com/temporalio/temporal-worker-controller/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -515,7 +516,7 @@ func TestRenderWorkerResourceTemplate(t *testing.T) {
 	}
 	buildID := "abc123"
 
-	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", false)
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", false, []string{"HorizontalPodAutoscaler"})
 	require.NoError(t, err)
 
 	// Check metadata — name follows the hash-suffix formula
@@ -587,7 +588,7 @@ func TestRenderWorkerResourceTemplate_StripsTemporalMetricLabelPrefix(t *testing
 		ObjectMeta: metav1.ObjectMeta{Name: "my-worker-abc123", Namespace: "default"},
 	}
 
-	obj, err := RenderWorkerResourceTemplate(wrt, deployment, "abc123", "my-temporal-ns", true)
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, "abc123", "my-temporal-ns", true, []string{"HorizontalPodAutoscaler"})
 	require.NoError(t, err)
 
 	ml := obj.Object["spec"].(map[string]interface{})["metrics"].([]interface{})[0].(map[string]interface{})["external"].(map[string]interface{})["metric"].(map[string]interface{})["selector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
@@ -653,7 +654,7 @@ func TestRenderWorkerResourceTemplate_MetricTemplateVars(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "my-worker-abc123", Namespace: "default"},
 	}
 
-	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", false)
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", false, []string{"ScaledObject"})
 	require.NoError(t, err)
 
 	annotations := obj.GetAnnotations()
@@ -711,7 +712,7 @@ func TestRenderWorkerResourceTemplate_MetricTemplateVarsStripPrefix(t *testing.T
 		ObjectMeta: metav1.ObjectMeta{Name: "my-worker-abc123", Namespace: "default"},
 	}
 
-	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", true)
+	obj, err := RenderWorkerResourceTemplate(wrt, deployment, buildID, "my-temporal-ns", true, []string{"ScaledObject"})
 	require.NoError(t, err)
 
 	promMD := obj.Object["spec"].(map[string]interface{})["triggers"].([]interface{})[0].(map[string]interface{})["metadata"].(map[string]interface{})
@@ -888,4 +889,58 @@ func TestHasScaleTarget(t *testing.T) {
 		}`)
 		assert.False(t, HasScaleTarget(raw))
 	})
+}
+
+// TestRenderWorkerResourceTemplate_RejectsKindOutsideAllowList verifies that the
+// reconcile-time replay of the webhook's spec validation runs before any rendering:
+// an out-of-allow-list kind (or an empty allow list) errors without producing an
+// object, while an in-list spec renders exactly as before.
+func TestRenderWorkerResourceTemplate_RejectsKindOutsideAllowList(t *testing.T) {
+	hpaObject := func() map[string]interface{} {
+		return map[string]interface{}{
+			"apiVersion": "autoscaling/v2",
+			"kind":       "HorizontalPodAutoscaler",
+			"spec": map[string]interface{}{
+				"scaleTargetRef": map[string]interface{}{},
+				"minReplicas":    float64(2),
+				"maxReplicas":    float64(10),
+			},
+		}
+	}
+	renderWRT := func(t *testing.T, embeddedObj map[string]interface{}, allowedKinds []string) (*unstructured.Unstructured, error) {
+		t.Helper()
+		rawBytes, err := json.Marshal(embeddedObj)
+		require.NoError(t, err)
+		wrt := &temporaliov1alpha1.WorkerResourceTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-wrt", Namespace: "default"},
+			Spec: temporaliov1alpha1.WorkerResourceTemplateSpec{
+				WorkerDeploymentRef: &temporaliov1alpha1.WorkerDeploymentReference{Name: "my-worker"},
+				Template:            runtime.RawExtension{Raw: rawBytes},
+			},
+		}
+		deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "my-worker-abc123", Namespace: "default"}}
+		return RenderWorkerResourceTemplate(wrt, deployment, "abc123", "my-temporal-ns", false, allowedKinds)
+	}
+
+	deploymentKind := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"spec":       map[string]interface{}{},
+	}
+
+	obj, err := renderWRT(t, deploymentKind, []string{"HorizontalPodAutoscaler"})
+	require.Error(t, err)
+	assert.Nil(t, obj)
+	assert.Contains(t, err.Error(), "spec validation failed")
+	assert.Contains(t, err.Error(), "not in the allowed list")
+
+	obj, err = renderWRT(t, hpaObject(), nil)
+	require.Error(t, err, "empty allow list must reject every kind (deny-all)")
+	assert.Nil(t, obj)
+	assert.Contains(t, err.Error(), "not in the allowed list")
+
+	obj, err = renderWRT(t, hpaObject(), []string{"HorizontalPodAutoscaler"})
+	require.NoError(t, err)
+	require.NotNil(t, obj)
+	assert.Equal(t, "HorizontalPodAutoscaler", obj.GetKind())
 }

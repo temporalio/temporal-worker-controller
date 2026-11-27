@@ -13,7 +13,7 @@ This is also the recommended mechanism for metric-based or backlog-based autosca
 ## How it works
 
 1. You create a `WorkerResourceTemplate` that references a `WorkerDeployment` and contains the resource spec in `spec.template`.
-2. The validating webhook checks that you have permission to manage that resource type yourself (SubjectAccessReview), and that the resource kind is on the allowed list (see below).
+2. The validating webhook checks that you have permission to manage that resource type yourself (SubjectAccessReview), and that the resource kind is on the allowed list (see below). The controller also replays the allowed-kinds check on each reconcile, so an out-of-list kind is rejected before anything is applied even in deployments that do not run the webhook.
 3. On each reconcile loop, the controller renders one copy of `spec.template` per worker version with a running Deployment, injects fields (see below), and applies it via Server-Side Apply. If you set `spec.versionStatuses`, only versions with a listed status get a copy (see [Selecting versions by status](#selecting-versions-by-status)).
 4. Each per-version copy is deleted by the controller when its corresponding Kubernetes Deployment is deleted per the sunset policy, or when its version changes to a status that `spec.versionStatuses` does not list.
 5. `WorkerResourceTemplate.status.versions` is updated with the applied/failed status for each version.
@@ -159,7 +159,7 @@ Use `kubectl get <kind>` after a reconcile to see the created resources and thei
 
 ## Allowed resource kinds and RBAC
 
-`workerResourceTemplate.allowedResources` in Helm values serves two purposes at once: it defines which resource kinds the webhook will accept, and it drives the RBAC rules granted to the controller's `ClusterRole`. Only kinds listed here can be embedded in a `WorkerResourceTemplate`.
+`workerResourceTemplate.allowedResources` in Helm values serves two purposes at once: it defines which resource kinds the webhook will accept, and it drives the RBAC rules granted to the controller's `ClusterRole`. Only kinds listed here can be embedded in a `WorkerResourceTemplate`. The controller also enforces the same list at reconcile time, so the restriction holds even in deployments without the webhook.
 
 The default allows HPAs:
 
@@ -185,7 +185,7 @@ workerResourceTemplate:
 ```
 
 Each entry has three fields:
-- `kinds` — kind names the webhook accepts (case-insensitive)
+- `kinds` — kind names the webhook accepts (case-insensitive); the controller enforces the same list at reconcile time, before any resource is applied
 - `apiGroups` — API groups used to generate the controller's RBAC rules
 - `resources` — resource names used to generate the controller's RBAC rules
 

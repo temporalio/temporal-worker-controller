@@ -170,6 +170,7 @@ func main() {
 		controller.WithDisableDeprecatedTWD(!deprecatedCRDWatches.TemporalWorkerDeployments),
 		controller.WithDisableClusterConnections(namespaceScoped),
 		controller.WithWRTHPAMatchLabelsStripTemporalPrefix(wrtHPAMatchLabelsStripTemporalPrefix),
+		controller.WithAllowedKinds(temporaliov1alpha1.AllowedKindsFromEnv()),
 	)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerDeployment")

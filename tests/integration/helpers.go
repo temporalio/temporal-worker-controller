@@ -213,6 +213,12 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	// set max versions value for testing
 	t.Setenv(config.MaxDeploymentVersionsIneligibleForDeletionEnvKey, fmt.Sprintf("%d", testMaxVersionsIneligibleForDeletion))
 
+	// Set the WRT allow list the same way the Helm chart injects it, so the reconciler's
+	// replay of the webhook's spec validation does not deny-all the WRTs these tests create.
+	// FakeResource is allowed too, so the wrt-apply-failure case still exercises the real
+	// SSA apply-failure branch at the API server rather than failing at validation.
+	t.Setenv("ALLOWED_KINDS", "HorizontalPodAutoscaler,PodDisruptionBudget,FakeResource")
+
 	// Setup kubebuilder assets for IDE testing
 	if err := setupKubebuilderAssets(); err != nil {
 		t.Logf("Warning: Could not setup kubebuilder assets automatically: %v", err)
@@ -273,6 +279,7 @@ func setupTestEnvironment(t *testing.T) (*rest.Config, client.Client, manager.Ma
 	reconciler.Config.DisableRecoverPanic = true
 	reconciler.Config.MaxDeploymentVersionsIneligibleForDeletion = config.GetControllerMaxDeploymentVersionsIneligibleForDeletion()
 	reconciler.Config.WRTHPAMatchLabelsStripTemporalPrefix = config.GetWRTHPAMatchLabelsStripTemporalPrefix()
+	reconciler.Config.AllowedKinds = temporaliov1alpha1.AllowedKindsFromEnv()
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {
 		t.Fatalf("failed to set up controller: %v", err)

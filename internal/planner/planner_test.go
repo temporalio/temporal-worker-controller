@@ -4033,7 +4033,7 @@ func TestGetWorkerResourceApplies(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil, nil, false)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, tc.k8sState, "test-temporal-ns", tc.deleteDeployments, nil, nil, false, testAllowedKinds)
 			assert.Equal(t, tc.expectCount, len(applies), "unexpected number of worker resource applies")
 		})
 	}
@@ -4050,7 +4050,7 @@ func TestGetWorkerResourceApplies_RenderError(t *testing.T) {
 		createTestWRT("my-hpa", "my-worker"),
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil, nil, false)
+	applies := getWorkerResourceApplies(logr.Discard(), wrts, k8sState, "test-temporal-ns", nil, nil, nil, false, testAllowedKinds)
 	require.Len(t, applies, 2)
 
 	var errEntry, okEntry *WorkerResourceApply
@@ -4082,7 +4082,7 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 		},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false, testAllowedKinds)
 	require.Len(t, applies, 1)
 
 	apply := applies[0]
@@ -4101,6 +4101,10 @@ func TestGetWorkerResourceApplies_ApplyContents(t *testing.T) {
 	// Resource name must be deterministic
 	assert.Equal(t, k8s.ComputeWorkerResourceTemplateName("my-worker", "my-hpa", "build-abc"), apply.Resource.GetName())
 }
+
+// testAllowedKinds mirrors the ALLOWED_KINDS list the Helm chart injects by default;
+// it covers every kind the planner tests render.
+var testAllowedKinds = []string{"HorizontalPodAutoscaler", "PodDisruptionBudget"}
 
 // createTestWRT builds a minimal valid WorkerResourceTemplate for use in tests.
 // The embedded object is a stub HPA with scaleTargetRef opted in for auto-injection.
@@ -4175,7 +4179,7 @@ func TestGetWorkerResourceApplies_MatchLabelsInjection(t *testing.T) {
 		Deployments: map[string]*appsv1.Deployment{"build-abc": deployment},
 	}
 
-	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false)
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false, testAllowedKinds)
 	require.Len(t, applies, 1)
 
 	spec, ok := applies[0].Resource.Object["spec"].(map[string]interface{})
@@ -4235,6 +4239,7 @@ func TestGetWorkerResourceApplies_StripsTemporalMetricLabelPrefix(t *testing.T) 
 		nil,
 		nil,
 		true,
+		testAllowedKinds,
 	)
 
 	require.Len(t, applies, 1)
@@ -4932,7 +4937,7 @@ func TestGetWorkerResourceApplies_SunsetBuildIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, nil, false)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, nil, false, testAllowedKinds)
 			assert.ElementsMatch(t, tc.expectKeys, applyKeys(applies))
 		})
 	}
@@ -5306,7 +5311,7 @@ func TestGetWorkerResourceApplies_VersionStatuses(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, versionStatuses, false)
+			applies := getWorkerResourceApplies(logr.Discard(), tc.wrts, k8sState, "test-temporal-ns", nil, tc.sunsetBuildIDs, versionStatuses, false, testAllowedKinds)
 			assert.ElementsMatch(t, tc.expectKeys, applyKeys(applies))
 		})
 	}
@@ -5815,4 +5820,29 @@ func TestGetUpdateDeployments_DeploymentLabelsReconcile(t *testing.T) {
 		require.NotNil(t, d.Spec.Strategy.RollingUpdate, d.Name)
 		assert.Equal(t, maxSurge, *d.Spec.Strategy.RollingUpdate.MaxSurge, d.Name)
 	}
+}
+
+// TestGetWorkerResourceApplies_AllowedKindsRejection mirrors the render-failure path:
+// a WRT whose kind is outside the allow list yields a WorkerResourceApply with
+// RenderError set and Resource nil (surfaced as an applyError, never applied).
+func TestGetWorkerResourceApplies_AllowedKindsRejection(t *testing.T) {
+	wrt := createTestWRT("my-hpa", "my-worker")
+	k8sState := &k8s.DeploymentState{
+		Deployments: map[string]*appsv1.Deployment{
+			"build-a": createDeploymentWithUID("worker-build-a", "uid-a"),
+		},
+	}
+
+	// Allow list that does NOT include HorizontalPodAutoscaler: rejection, no resource.
+	applies := getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false, []string{"PodDisruptionBudget"})
+	require.Len(t, applies, 1)
+	require.Error(t, applies[0].RenderError)
+	assert.Nil(t, applies[0].Resource)
+	assert.Contains(t, applies[0].RenderError.Error(), "not in the allowed list")
+
+	// Same WRT with the kind allowed: a normal apply entry.
+	applies = getWorkerResourceApplies(logr.Discard(), []temporaliov1alpha1.WorkerResourceTemplate{wrt}, k8sState, "test-temporal-ns", nil, nil, nil, false, testAllowedKinds)
+	require.Len(t, applies, 1)
+	assert.NoError(t, applies[0].RenderError)
+	assert.NotNil(t, applies[0].Resource)
 }

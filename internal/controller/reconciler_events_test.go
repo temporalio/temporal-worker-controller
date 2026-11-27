@@ -94,6 +94,7 @@ func newTestReconcilerWithInterceptors(objs []client.Object, funcs interceptor.F
 	}
 	r.Config.DisableRecoverPanic = true
 	r.Config.MaxDeploymentVersionsIneligibleForDeletion = 75
+	r.Config.AllowedKinds = []string{"HorizontalPodAutoscaler", "PodDisruptionBudget"}
 
 	return r, recorder
 }

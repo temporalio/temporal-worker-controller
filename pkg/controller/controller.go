@@ -45,6 +45,7 @@ var (
 	WithDisableRecoverPanic                        = config.WithDisableRecoverPanic
 	WithDisableClusterConnections                  = config.WithDisableClusterConnections
 	WithWRTHPAMatchLabelsStripTemporalPrefix       = config.WithWRTHPAMatchLabelsStripTemporalPrefix
+	WithAllowedKinds                               = config.WithAllowedKinds
 )
 
 // New returns a Controller wired with the given manager, or an
