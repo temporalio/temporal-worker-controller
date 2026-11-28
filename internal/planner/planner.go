@@ -1295,16 +1295,22 @@ func isRollbackScenario(
 		return false
 	}
 
-	// The target version was last current more than an hour ago, making it too old to trust immediate rollback
-	if time.Since(*targetVersionInfo.LastCurrentTime) > defaults.RollbackMaxVersionAge {
-		l.Info("Skipping rollback: the version's last current time exceeds the max rollback version age",
-			"targetBuildID", status.TargetVersion.BuildID,
-			"lastCurrentTime", targetVersionInfo.LastCurrentTime,
-			"maxVersionAge", defaults.RollbackMaxVersionAge)
+	// Rollback detection is disabled with a zero window
+	window := rollbackWindow(config.RolloutStrategy)
+	if window <= 0 {
 		return false
 	}
 
-	// The target version was current in the last 1h, so rollback immediately
+	// The target version was last current outside the rollback window, making it too old to trust immediate rollback
+	if time.Since(*targetVersionInfo.LastCurrentTime) > window {
+		l.Info("Skipping rollback: the version's last current time is outside the rollback window",
+			"targetBuildID", status.TargetVersion.BuildID,
+			"lastCurrentTime", targetVersionInfo.LastCurrentTime,
+			"rollbackWindow", window)
+		return false
+	}
+
+	// The target version was current within the rollback window, so rollback immediately
 	l.Info("Detected rollback scenario using LastCurrentTime. "+
 		"Warning: Auto-upgrade workflows that upgraded from a previous version to the current version may fail during this rollback, "+
 		"as they may not handle downgrades properly. Monitor workflow executions for failures.",
@@ -1312,6 +1318,15 @@ func isRollbackScenario(
 		"lastCurrentTime", targetVersionInfo.LastCurrentTime)
 
 	return true
+}
+
+// rollbackWindow returns how recently a version must have been current to be eligible for rollback.
+// WorkerDeploymentSpec.Default fills the field, so the fallback only guards against an unset value.
+func rollbackWindow(s temporaliov1alpha1.RolloutStrategy) time.Duration {
+	if s.RollbackWindow != nil {
+		return s.RollbackWindow.Duration
+	}
+	return defaults.RollbackWindow
 }
 
 // handleProgressiveRollout handles the progressive rollout strategy logic

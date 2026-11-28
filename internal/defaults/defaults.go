@@ -9,7 +9,7 @@ import "time"
 const (
 	ScaledownDelay                   = 1 * time.Hour
 	DeleteDelay                      = 24 * time.Hour
-	RollbackMaxVersionAge            = 1 * time.Hour
+	RollbackWindow                   = 1 * time.Hour
 	ServerMaxVersions                = 100
 	MaxVersionsIneligibleForDeletion = int32(ServerMaxVersions * 0.75)
 

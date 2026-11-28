@@ -321,6 +321,24 @@ func TestWorkerDeployment_Default(t *testing.T) {
 				assert.Equal(t, 24*time.Hour, obj.Spec.SunsetStrategy.DeleteDelay.Duration)
 			},
 		},
+		"sets default rollback window": {
+			obj: testhelpers.MakeWDWithName("default-rollback-window", ""),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment) {
+				require.NotNil(t, obj.Spec.RolloutStrategy.RollbackWindow)
+				assert.Equal(t, time.Hour, obj.Spec.RolloutStrategy.RollbackWindow.Duration)
+			},
+		},
+		"keeps an explicit rollback window": {
+			obj: func() *temporaliov1alpha1.WorkerDeployment {
+				wd := testhelpers.MakeWDWithName("explicit-rollback-window", "")
+				wd.Spec.RolloutStrategy.RollbackWindow = &metav1.Duration{Duration: 0}
+				return wd
+			}(),
+			expected: func(t *testing.T, obj *temporaliov1alpha1.WorkerDeployment) {
+				require.NotNil(t, obj.Spec.RolloutStrategy.RollbackWindow)
+				assert.Equal(t, time.Duration(0), obj.Spec.RolloutStrategy.RollbackWindow.Duration)
+			},
+		},
 	}
 
 	for name, tc := range tests {

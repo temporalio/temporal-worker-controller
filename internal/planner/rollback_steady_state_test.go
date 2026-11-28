@@ -23,7 +23,7 @@ func TestGetVersionConfigDiff_NoRollbackWhenTargetIsAlreadyCurrent(t *testing.T)
 		},
 		{
 			name:         "beyond rollback window",
-			currentSince: defaults.RollbackMaxVersionAge + 30*time.Minute,
+			currentSince: defaults.RollbackWindow + 30*time.Minute,
 		},
 	}
 

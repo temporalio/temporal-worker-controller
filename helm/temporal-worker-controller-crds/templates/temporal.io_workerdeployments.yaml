@@ -4003,6 +4003,12 @@ spec:
                     required:
                     - workflowType
                     type: object
+                  rollbackWindow:
+                    default: 1h
+                    type: string
+                    x-kubernetes-validations:
+                    - message: rollbackWindow must not be negative
+                      rule: duration(self) >= duration('0s')
                   steps:
                     items:
                       properties:

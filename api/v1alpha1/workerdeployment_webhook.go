@@ -54,6 +54,10 @@ func (s *WorkerDeploymentSpec) Default(ctx context.Context) error {
 		s.SunsetStrategy.DeleteDelay = &v1.Duration{Duration: defaults.DeleteDelay}
 	}
 
+	if s.RolloutStrategy.RollbackWindow == nil {
+		s.RolloutStrategy.RollbackWindow = &v1.Duration{Duration: defaults.RollbackWindow}
+	}
+
 	return nil
 }
 

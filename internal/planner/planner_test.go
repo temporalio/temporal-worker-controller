@@ -4504,6 +4504,7 @@ func TestGetWRTOwnerRefPatches(t *testing.T) {
 func TestIsRollbackScenario(t *testing.T) {
 	recentLastCurrentTime := time.Now().Add(-5 * time.Minute)
 	oldLastCurrentTime := time.Now().Add(-2 * time.Hour)
+	futureLastCurrentTime := time.Now().Add(5 * time.Second)
 
 	defaultConfig := &Config{
 		RolloutStrategy: temporaliov1alpha1.RolloutStrategy{Strategy: temporaliov1alpha1.UpdateAllAtOnce},
@@ -4629,6 +4630,81 @@ func TestIsRollbackScenario(t *testing.T) {
 			config: &Config{
 				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
 					Strategy: temporaliov1alpha1.UpdateManual,
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "rollback detected when version age is within a custom RollbackWindow",
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &oldLastCurrentTime,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy:       temporaliov1alpha1.UpdateAllAtOnce,
+					RollbackWindow: &metav1.Duration{Duration: 7 * 24 * time.Hour},
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name: "rollout when version age exceeds a custom RollbackWindow",
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &recentLastCurrentTime,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy:       temporaliov1alpha1.UpdateAllAtOnce,
+					RollbackWindow: &metav1.Duration{Duration: time.Minute},
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "rollout when RollbackWindow is zero, even if the server clock is ahead",
+			status: &temporaliov1alpha1.WorkerDeploymentStatus{
+				TargetVersion: temporaliov1alpha1.TargetWorkerDeploymentVersion{
+					BaseWorkerDeploymentVersion: temporaliov1alpha1.BaseWorkerDeploymentVersion{
+						BuildID: "build-v1",
+					},
+				},
+			},
+			temporalState: &temporal.TemporalWorkerState{
+				Versions: map[string]*temporal.VersionInfo{
+					"build-v1": {
+						BuildID:         "build-v1",
+						LastCurrentTime: &futureLastCurrentTime,
+					},
+				},
+			},
+			config: &Config{
+				RolloutStrategy: temporaliov1alpha1.RolloutStrategy{
+					Strategy:       temporaliov1alpha1.UpdateAllAtOnce,
+					RollbackWindow: &metav1.Duration{Duration: 0},
 				},
 			},
 			expectedResult: false,
