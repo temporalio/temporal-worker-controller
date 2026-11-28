@@ -114,6 +114,7 @@ Defines how new versions are promoted:
   - `workflowType`: The workflow name/type to execute for validation
   - `input`: Inline JSON object passed as the first workflow argument
   - `inputFrom`: Reference to a `ConfigMap` or `Secret` key whose contents are JSON; passed as the first workflow argument
+- **rollbackWindow**: How recently a version must have last become current for a return to it to be treated as a rollback, which routes all traffic to it at once without following the steps or waiting for the gate. Defaults to `1h`; `0s` disables rollback detection. See [Rollback Strategy](configuration.md#rollback-strategy)
 
 Notes on gate inputs:
 - Exactly one of `input` or `inputFrom` may be set.

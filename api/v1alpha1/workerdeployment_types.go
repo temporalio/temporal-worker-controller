@@ -601,6 +601,15 @@ type RolloutStrategy struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=20
 	Steps []RolloutStep `json:"steps,omitempty" protobuf:"bytes,3,rep,name=steps"`
+
+	// RollbackWindow specifies how recently a version must have last become current for a return to it
+	// to be treated as a rollback. A rollback routes all traffic to that version at once, regardless of
+	// the configured steps, without waiting for the gate. Set to 0s to disable rollback detection.
+	// Defaults to 1 hour.
+	// +optional
+	// +kubebuilder:default="1h"
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('0s')",message="rollbackWindow must not be negative"
+	RollbackWindow *metav1.Duration `json:"rollbackWindow,omitempty"`
 }
 
 // SunsetStrategy defines strategy to apply when sunsetting k8s deployments of drained versions.

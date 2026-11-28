@@ -123,6 +123,26 @@ var _ = Describe("WorkerDeployment CRD CEL validation", func() {
 		Expect(err.Error()).To(ContainSubstring("pause duration must be at least 30s"))
 	})
 
+	It("defaults rollbackWindow to 1h", func() {
+		twd := baseTWD("default-rollback-window")
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
+		Expect(twd.Spec.RolloutStrategy.RollbackWindow).To(Equal(&metav1.Duration{Duration: time.Hour}))
+	})
+
+	It("accepts a zero rollbackWindow", func() {
+		twd := baseTWD("zero-rollback-window")
+		twd.Spec.RolloutStrategy.RollbackWindow = &metav1.Duration{Duration: 0}
+		Expect(k8sClient.Create(ctx, twd)).To(Succeed())
+	})
+
+	It("rejects a negative rollbackWindow", func() {
+		twd := baseTWD("negative-rollback-window")
+		twd.Spec.RolloutStrategy.RollbackWindow = &metav1.Duration{Duration: -time.Minute}
+		err := k8sClient.Create(ctx, twd)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("rollbackWindow must not be negative"))
+	})
+
 	It("rejects gate.inputFrom with both configMapKeyRef and secretKeyRef set", func() {
 		twd := baseTWD("bad-gate-inputfrom")
 		twd.Spec.RolloutStrategy = RolloutStrategy{

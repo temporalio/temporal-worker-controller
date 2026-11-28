@@ -115,9 +115,18 @@ rollout:
 
 ## Rollback Strategy
 
-The controller automatically detects rollbacks: if the target version was previously the current version within the last hour, it immediately routes 100% of traffic back to that version (AllAtOnce), regardless of the configured rollout strategy. This means setting your target version back to a prior build ID is enough to trigger a rollback — no special action or configuration required.
+The controller automatically detects rollbacks: if the target version last became the current version within the rollback window (1 hour by default), it immediately routes 100% of traffic back to that version (AllAtOnce), regardless of the configured rollout strategy. A rollback does not wait for the gate workflow to succeed. This means setting your target version back to a prior build ID is enough to trigger a rollback — no special action or configuration required.
 
-Rollback behavior is not configurable: it always uses the AllAtOnce strategy with a fixed 1-hour eligibility window, so there is no `rollback` field in the spec.
+The window is set with `rollout.rollbackWindow`. It is measured from the time the version last became current, not from the time it was replaced, so it has to cover both how long the previous version stayed current and how long the rollout of the new version takes. Raise it when your rollouts span days or weeks. Set it to `0s` to disable rollback detection, so every change of the target version goes through the configured rollout strategy:
+
+```yaml
+rollout:
+  strategy: Progressive
+  rollbackWindow: 720h  # Treat a return to any version that became current in the last 30 days as a rollback
+  steps:
+    - rampPercentage: 10
+      pauseDuration: 24h
+```
 
 > **Note:** Rollback is suppressed when the rollout strategy is `Manual`, since manual mode implies full user control.
 
